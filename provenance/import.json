@@ -1,0 +1,1230 @@
+{
+  "destination_repository": "cristianku/sunnypilot.speedlimits",
+  "files": [
+    {
+      "adapted": false,
+      "destination": "conftest.py",
+      "source_blob_sha": "d1301bc11115e92645a8c6fd4c7e005c7aae34a4",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "conftest.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "c7fc6a5bf5bfbb73489db2252122137759cd41a10c9f8393474bfeeeaf8bddab"
+    },
+    {
+      "adaptation": "Update new repository identity; preserve Python package/CLI names.",
+      "adapted": true,
+      "destination": "pyproject.toml",
+      "source_blob_sha": "e01c5946be46eb39255dee19ad7d49142a64c5f1",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "pyproject.toml",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "96faa406b9326f8c74f6b2fe3ff49f557d76bae4cefb9c9f954c896b5dcfeb03"
+    },
+    {
+      "adapted": false,
+      "destination": ".gitignore",
+      "source_blob_sha": "4dfe15fc404d402b8a4b59259769bda9bab38756",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": ".gitignore",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "d5eb8d0eea35a29850973ac29efc54fce60918888e2791a56f54d8b37ebf0d89"
+    },
+    {
+      "adapted": false,
+      "destination": "schemas/annotation.schema.json",
+      "source_blob_sha": "1887ce1df1efc46aa0e79f60e989347985a9459e",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "schemas/annotation.schema.json",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "4b7f6f0b13d9aa1453ced27afb114244cf84a9706508871a8f3cb5c1f2f772a8"
+    },
+    {
+      "adapted": false,
+      "destination": "docs/T2_REAL_ROUTE_VALIDATION.md",
+      "source_blob_sha": "45687b00b52b7bb5486c71175b544d512a95e255",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "docs/T2_REAL_ROUTE_VALIDATION.md",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "57fa3aac897970740881e1282d4c5bb2d3f4e53377acff7f4749cef413b4185f"
+    },
+    {
+      "adapted": false,
+      "destination": "scripts/setup_v100_training_env.sh",
+      "source_blob_sha": "5bce9187bd9f1c7213060e3ef8c5f9068d7fdc3f",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "scripts/setup_v100_training_env.sh",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "a8883e8eabd19cb68bd897e5d1d8aaa38e8ca75c037873b25b4d4ead9df38768"
+    },
+    {
+      "adapted": false,
+      "destination": "requirements/log-reader.txt",
+      "source_blob_sha": "4fd07b69575ef71a0e17492660d6b311466c3668",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "requirements/log-reader.txt",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "37eb88a64022ee99a1e580304ae20072019e351bef262dba508424194a645115"
+    },
+    {
+      "adapted": false,
+      "destination": "docs/proxmox-gpu-container.md",
+      "source_blob_sha": "736e88831f865e9c3edcbfeefb54a4a7e5f06bcc",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "docs/proxmox-gpu-container.md",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "732ccad3a71e3a0dcbd096e7fcc285ce72538289db44e2ceeac9fa4397e86347"
+    },
+    {
+      "adapted": false,
+      "destination": "docs/NN_VISION_SPEED_LIMIT_REMAINING_WORK.md",
+      "source_blob_sha": "30cf9d1638eb7d5e5969a66d5e37fcd36eb457c9",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "docs/NN_VISION_SPEED_LIMIT_REMAINING_WORK.md",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "09ea7c109842f73c8f04b5e4fff38886dd1ce073c899f514d83ac692e200e638"
+    },
+    {
+      "adapted": false,
+      "destination": "docs/DATASET.md",
+      "source_blob_sha": "dd71548955129ff6e5567fa83d7a2356a66251dc",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "docs/DATASET.md",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "90ce75a980a6eba99bd16ceccd22aae85605afa8c8c930f09efa3e678b9a467c"
+    },
+    {
+      "adapted": false,
+      "destination": "requirements/cpu.lock",
+      "source_blob_sha": "d9135b1d324b159ec10b5d40ac86f799ce0805c4",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "requirements/cpu.lock",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "ae122e44ffbe2246d0d57e1212cd63b71a1451b4032a7feff3c6ea34b81a9218"
+    },
+    {
+      "adaptation": "Run the recovered runtime source tests in an isolated import path.",
+      "adapted": true,
+      "destination": ".github/workflows/tests.yml",
+      "source_blob_sha": "e0898dafe2c6837f697e474a5a2c5056343f2c63",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": ".github/workflows/tests.yml",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "3c777d078d635c7fb2be151cf75c03530b5dab3dd719655f864d927268b98552"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/bundle_runtime.py",
+      "source_blob_sha": "3f937779d2a572c2d7520bb865d2e676abb4e2d6",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/bundle_runtime.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "783c11e9cd1ebedc060dcf5e92afa187912b74f6ab8f8a9196f441ddd53ce405"
+    },
+    {
+      "adaptation": "Update new repository identity; preserve Python package/CLI names.",
+      "adapted": true,
+      "destination": "src/nnslr_tools/core_snapshot.py",
+      "source_blob_sha": "79ae834de737a8a18dbd9ac76803cbbee53258f4",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/core_snapshot.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "7713a8d96a69620af45db96b424c01d7cf5d10772318ad3ff7ccbe6dc292906d"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/fixtures/malformed_detection_overflow.json",
+      "source_blob_sha": "75eab8c956df4508eabf4e15ab1a9d501c3b1aac",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/fixtures/malformed_detection_overflow.json",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "5fef3fff41bfafb1fea9f2044d9e5fac36d9c4589a6cb60a1efe8802475db471"
+    },
+    {
+      "adapted": false,
+      "destination": "docs/plan.md",
+      "source_blob_sha": "01da02d34ba2f25948da3cf488054581b29867f5",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "docs/plan.md",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "6136e12f36318b023211883adda6e677375f3ebbe962fab6444d7e44571a38a0"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/candidates.py",
+      "source_blob_sha": "df88f672f2834f160a93e36b0bf6ab9515768ce7",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/candidates.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "02370e652a52d01ac6df7e5c440bf52211a1d8df1e39a00872b51a5682611219"
+    },
+    {
+      "adapted": false,
+      "destination": "docs/vision-speed-limit/audit.md",
+      "source_blob_sha": "fba326c50a7d385c8b3ddbbfe2ccf500754a7df7",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "docs/vision-speed-limit/audit.md",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "7882b50857d9782f56fd882c68dc1cd08b3c72f0f47f836c1859fec0320a274b"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/_road_text_worker.py",
+      "source_blob_sha": "68847213295480f9adcff7dd6ba7e71aa3429d67",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/_road_text_worker.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "ea832969752e2346c2584218f3cc5ff59d34b4413ef87afe7080c9e2df0d57ba"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/fixtures/malformed_invalid_box_degenerate.json",
+      "source_blob_sha": "bf99fc35e58cc5200926f05cb0ed7c14c53b21c2",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/fixtures/malformed_invalid_box_degenerate.json",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "b78a6e66a54c9ff175cc9554452af74b760b4e04e91fc4e5b53c858f38fbc731"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/__init__.py",
+      "source_blob_sha": "cbcb61e661a3744d5bf8c395fca31ad44ecca310",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/__init__.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "2419e0c507223bda826089a14568684e242b3cfa27a1a28907dedc2c7a84cd97"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/alignment.py",
+      "source_blob_sha": "0566b7e107547aea174c757a625cf08ef991d9aa",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/alignment.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "0518c8ffb76f0e78c65488a0d8ec7c613bf6c6b8a9e638d18890d8484c33a561"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/fixtures/malformed_invalid_box_out_of_bounds.json",
+      "source_blob_sha": "a9b30a1a91e1c53db8d2a555400ff43bc8144c4c",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/fixtures/malformed_invalid_box_out_of_bounds.json",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "1d0807d60b148fbae7b6e4009142f9d3ad4bdecc9f008e1f6f55ea4a9bd52354"
+    },
+    {
+      "adapted": false,
+      "destination": "requirements/preannotate.txt",
+      "source_blob_sha": "c627ecd697fd8013f27834ef3d216db83cd319a3",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "requirements/preannotate.txt",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "829d4057f24f91c2fa3e524b1dd3f2d74172946241a0275e8a2fc745de3bdf3d"
+    },
+    {
+      "adapted": false,
+      "destination": "scripts/run_v100_baseline.sh",
+      "source_blob_sha": "f5c543136d842235106aafefc8f9abda625ac479",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "scripts/run_v100_baseline.sh",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "1235e14253df7ea45c34c50870ff8ff9fc32d5cce26dfa6f8fee59d63509ba9f"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/comma_log.py",
+      "source_blob_sha": "8a19c8e0b81b443495384934ceaf34b6e15374c5",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/comma_log.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "5a596552f7686014e14a715978ab4c3f70417394e6958f0c8cc45ee805a7b45f"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/fixtures/malformed_invalid_negative_latency.json",
+      "source_blob_sha": "27bca124b3ecaa5181fad5794db43cb451c8b0f8",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/fixtures/malformed_invalid_negative_latency.json",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "6cceee61b4fa39d9d66d12c4f8427d78ce978b3dbe540354694c63f7280317d6"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/extract.py",
+      "source_blob_sha": "f60dadcf0a3161794d29ddc191bea5792462b581",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/extract.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "77b28cffb484149f0af58d0d91d35654e88000c0baf4ee4ba2ab418c4a1fb6d1"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/fixtures/malformed_invalid_score_range.json",
+      "source_blob_sha": "83b313231918647d5c77b0763546f52f1834f722",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/fixtures/malformed_invalid_score_range.json",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "274275309ed16f8b501fbc9f2af326ed81a2e7339e462e9e572f33e041ffafa0"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/fixtures/malformed_stale_evidence.json",
+      "source_blob_sha": "5404d70ca3fb54eff25d8ec8bb9880f292a04d2b",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/fixtures/malformed_stale_evidence.json",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "247d9f101566ae94089fd2c9cb5c4fff25ba4fcc7853ec515d0f0c2589d747c1"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/fixtures/t2/encode_index.json",
+      "source_blob_sha": "65f56d92e6efe3e30ac123be03579be0fa43c9a1",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/fixtures/t2/encode_index.json",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "2486982b52abf38030a758e2f7fc3735440e406b0ed4a5c90c6f4e4d8222505a"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/fixtures/valid_batch.json",
+      "source_blob_sha": "4ce31d7c8a33a5444c8c8a578d8c8f9125963f44",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/fixtures/valid_batch.json",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "e31cc742c558d4a5582ccd4220f6bb940651b32c7e679baffc08669b4fbdf50d"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/fixtures/malformed_duplicate_frame.json",
+      "source_blob_sha": "5404d70ca3fb54eff25d8ec8bb9880f292a04d2b",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/fixtures/malformed_duplicate_frame.json",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "247d9f101566ae94089fd2c9cb5c4fff25ba4fcc7853ec515d0f0c2589d747c1"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/exporting.py",
+      "source_blob_sha": "5d074cd90156a7f21831a66a3cbacdaf0ae3d876",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/exporting.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "8619fa3568bb3e3a030509407f4b0e09eb3e2c80b2eb633840bd1ecd79c9d60a"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/model_review_audit.py",
+      "source_blob_sha": "4d05ef453efd28b3abbae306420d935b433a4a8d",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/model_review_audit.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "88d3c05c1c3558e7c3096ad9316da4328fe815b71322e979a4f5c695c7fa1a40"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/media.py",
+      "source_blob_sha": "6c299ee081598f1e1166290e311571d134a690da",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/media.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "f2642e106a56b1e058e7e2dc3d5c0732cb230b2bcb6ec30e4bed6d49e67ba2fa"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/fixtures/malformed_invalid_capture_timestamp_negative.json",
+      "source_blob_sha": "febcd0ce6aa7172b29794583d6610034630d8029",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/fixtures/malformed_invalid_capture_timestamp_negative.json",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "e356bc0535a9ded576e9fae5ddcfc3caf8e281387f9744bc5e019b9dd154c6c7"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/fixtures/malformed_invalid_native_dimensions.json",
+      "source_blob_sha": "44a60ddd08cf32262a774eb9c50b2651049a0a9b",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/fixtures/malformed_invalid_native_dimensions.json",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "4a2a826e76284638d851d6d9f64d603529e299f823dcda6d70bd5d169ad93f68"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/fixtures/malformed_invalid_session_mismatch.json",
+      "source_blob_sha": "c06567054c318af3e79838052c7b2dfa3318d09e",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/fixtures/malformed_invalid_session_mismatch.json",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "3c5b52bf9692fce4051f70ad050443c0dc650f7d1b8fb6854849c6c87e6fae8d"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/fixtures/malformed_invalid_schema_version.json",
+      "source_blob_sha": "ae70802b1cd03a78ad44a5e034b43ed5e3fc6bb3",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/fixtures/malformed_invalid_schema_version.json",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "e407f26e085171b487366ce3104a67d13d69221d117026c26cfafaa7e109e3f9"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/replay.py",
+      "source_blob_sha": "f6d7c8f7357794adb6b1659fe57c654d8dfc4654",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/replay.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "d3456024f06b3cda34a2c0a5fa9fc5439440209b8ce5cc7701439d5d9fc326dc"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/evaluation.py",
+      "source_blob_sha": "1ef8977db7ccd4a78ce6e6551b2b28967fdd6a8c",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/evaluation.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "73500f3bc7eb83c29886e67666e32abe2df0436436eced47724e99a8a3a9d472"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/hard_examples.py",
+      "source_blob_sha": "6a19a3b7ba70fc628219aac01e80ad3880aa98d9",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/hard_examples.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "f4aab3b51a139c1a5e0fdcd75e6cd9e89068d6f2fc519b928e0f17009d1fce2c"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/splits.py",
+      "source_blob_sha": "0450fc0389daccc8c72058e4cf6792b67de81f60",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/splits.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "4a65a79d354fc5ca376b8585c34be0f8a7abeb2d6a47a892d5b9c53912ba79a5"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/fixtures/t2/route_manifest.json",
+      "source_blob_sha": "80a7c43423a9426e13e420dc98054247a866ae9c",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/fixtures/t2/route_manifest.json",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "77ec0a64427f37c4f985bb4dbd2f91957071c16e99d2e51ae62ebd5a8d82ff48"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/review.py",
+      "source_blob_sha": "d164ffdab288bb511f7ab0279e4850a5c26ff60b",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/review.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "c878307176d751b4dd5c4de9b0593d56e9d92344f44c74ed04e7f353ea10f8ef"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/road_text.py",
+      "source_blob_sha": "1b5640aa385a00b384013839e9b43fe157b53de4",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/road_text.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "dd60a8c6f3a8acddb62320edaada69f7e6e008345db60f9a332c6cbc1e63fb1e"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/fixtures/t2/video_frames.json",
+      "source_blob_sha": "58be1407f7540409ff95a73f2b4d287d6a0a98d5",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/fixtures/t2/video_frames.json",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "0df73e14984b40477a52a121d30038de1af3f192c879002aa65d4017441fade8"
+    },
+    {
+      "adapted": false,
+      "destination": "src/speed_vision_core/advisory.py",
+      "source_blob_sha": "c52061717854025136182164f38803f1044c340c",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/speed_vision_core/advisory.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "f3ac2650ea615485fafa700c7f1cfb41b82aeabcb1e904a325075dc7661696b1"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/route_io.py",
+      "source_blob_sha": "1ea3814569825124b7f773376ff10ee288b0397d",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/route_io.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "fcd3d6594425a3db99bed83a1cd461cf70e17a20c26f523ae04f8094dd8e14d8"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/training.py",
+      "source_blob_sha": "3b80394c538629e0a68e1a974161fa6b416dad24",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/training.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "7e39f7711682170e9ce1938447fb6f8ded93a0ce034bc8925e5870efda0591dc"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/review.html",
+      "source_blob_sha": "6042e258516cb993ac4800611bd0bb01d3c26990",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/review.html",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "448d7786521d8be259204cfa97991a24dc04af2457e32cfe7092ed9f46f825ce"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/preannotate.py",
+      "source_blob_sha": "c0fdab960e4863e253caf4922478fbeca8b719cd",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/preannotate.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "eb28afaafd0fd050a4e46d5293fce7a0647f94891698b2996419fc490dc78ab0"
+    },
+    {
+      "adapted": false,
+      "destination": "docs/vision-speed-limit/decisions.md",
+      "source_blob_sha": "7badb1bca25efc29818f79c96e4dc593424dbb7a",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "docs/vision-speed-limit/decisions.md",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "267571ccd564b24fc29fd1c067899396a8267b2d8090704a5ebbb62c1e5457d8"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/manifest.py",
+      "source_blob_sha": "c996ef3522bc49025e91068ead50f9ffbd2adf26",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/manifest.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "bbe05bd423606e3977ef4b22d49290762a3c4466c147d6e408b6bd0813d175de"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/fixtures/malformed_invalid_value_zero.json",
+      "source_blob_sha": "a68b39b1a0ff3e1abbda46c5b65c15e6143fa58b",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/fixtures/malformed_invalid_value_zero.json",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "61221ac408afbfdb6861383bba3422c48d6ef2c6ce37a46e7124191dfe543072"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/sync.py",
+      "source_blob_sha": "c21424302b57592b62a80c6335833d8e1b649463",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/sync.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "b3e3eac30b965c890e34abbc1835e640646415ffd8992f835a56521705547c0f"
+    },
+    {
+      "adapted": false,
+      "destination": "tests/cli/test_entrypoints.py",
+      "source_blob_sha": "c21c81d4c4f98807c02b1de40c0e971f8a085565",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "tests/cli/test_entrypoints.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "4d33eed1009b88ce2b766fc7337bb41a82b0054799dcc4f5c0b73e66b93436b5"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/bundle.py",
+      "source_blob_sha": "59249d9ea232b162fcabd878444578d37e67be5d",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/bundle.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "c99026836030a7eebee135578077268fdc6f8d26c3719f26b29f726cb0607630"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/fixtures/malformed_invalid_capture_timestamp_future.json",
+      "source_blob_sha": "5404d70ca3fb54eff25d8ec8bb9880f292a04d2b",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/fixtures/malformed_invalid_capture_timestamp_future.json",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "247d9f101566ae94089fd2c9cb5c4fff25ba4fcc7853ec515d0f0c2589d747c1"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/annotations.py",
+      "source_blob_sha": "c765dc88b029c975a19860bd7d6c038d0ce13473",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/annotations.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "b23242a7ad5c8c79de81bdbc97a35389db3dbc1c8ddb7465f4367be37edfa338"
+    },
+    {
+      "adapted": false,
+      "destination": "tests/dataset/test_bundle.py",
+      "source_blob_sha": "d2f9faead3cf09b4cf383470252c80309d94f2f4",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "tests/dataset/test_bundle.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "b37fa275f055a2b3a26b68255ac5dacc72eba4f4a28838acc177a8e3899358bd"
+    },
+    {
+      "adapted": false,
+      "destination": "src/speed_vision_core/__init__.py",
+      "source_blob_sha": "4c9654e2110ecb5d9060fa0d3280eaa96b5e4cd9",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/speed_vision_core/__init__.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "6f20ac54b1d19a765e4026f286347c86960a2ce715e58837786370eeb0bfce46"
+    },
+    {
+      "adapted": false,
+      "destination": "src/speed_vision_core/types.py",
+      "source_blob_sha": "5eeffdfb3843cdadd2668e440ca11c93caf3fd03",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/speed_vision_core/types.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "52cd5951c26af2ba9823e9515d2eae25070e221fd09ec95f225380932819de7b"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/model_review.py",
+      "source_blob_sha": "5b0a2504525d00811364ac13eecda7de029971ed",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/model_review.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "f618a51d6c4f98618ce9adf068aa1e68552db15048adb55cb560e2228f2a344f"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/_preannotate_worker.py",
+      "source_blob_sha": "21047fb3ffc30fef59dad383797517f64813ba6e",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/_preannotate_worker.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "2becbef7bec4665fd31047aadfc22f5c063991a3e635e75ceb05da7de8cd5473"
+    },
+    {
+      "adapted": false,
+      "destination": "src/speed_vision_core/py.typed",
+      "source_blob_sha": "e8923ea50c70208b5afde6686ec596261222a9f2",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/speed_vision_core/py.typed",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "d0216d067840cf1cd1ad2fc500a645e545a60a86bba224712f4f86bc79e173d8"
+    },
+    {
+      "adapted": false,
+      "destination": "tests/core/test_state.py",
+      "source_blob_sha": "46f4682e422845a5b2c4ed0237b491552174fcf6",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "tests/core/test_state.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "90b2c7f28a01fdfd20409e79a5c9de360399f6eb8ebeb787f2fc74805c5a5f30"
+    },
+    {
+      "adapted": false,
+      "destination": "tests/cli/test_import_isolation.py",
+      "source_blob_sha": "beaa41f5e575566154360bfb4fb1ac5a98376c94",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "tests/cli/test_import_isolation.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "8bad52fa357253285f196a77e642259e464dc57f72774c47c8a7f0233f32155d"
+    },
+    {
+      "adapted": false,
+      "destination": "tests/dataset/test_evaluation.py",
+      "source_blob_sha": "92d8cf81b418a9af8dc11a2902a62adb6983addc",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "tests/dataset/test_evaluation.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "ac28b13dbface1da36bd7726289b489c35ea8348c7c54768f66e85cd856d2f7d"
+    },
+    {
+      "adapted": false,
+      "destination": "tests/cli/test_extract_route.py",
+      "source_blob_sha": "33622cafd1e100be858a973817e37e505ecbade9",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "tests/cli/test_extract_route.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "2b52d1f5148572c23b89d252dd7f284e95563e49a4febbef81d3c45a9723fe94"
+    },
+    {
+      "adapted": false,
+      "destination": "tests/dataset/test_splits.py",
+      "source_blob_sha": "3527adfea4dfe83ee4f3b49bd3f4df01a67913ab",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "tests/dataset/test_splits.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "83fbd3fe8d70d05a6e075ba860749ca133bbcdd6a33d925b23bd886fe32aa41f"
+    },
+    {
+      "adapted": false,
+      "destination": "tests/core/test_state_serialization.py",
+      "source_blob_sha": "e1b4ef6d031be1b97c0a63743a28825b8cf60143",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "tests/core/test_state_serialization.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "8eddd8e60f723bcc0d5ab67acca6f74c3acb7f8bdf9a7cf8fb8d2b05809cf7c9"
+    },
+    {
+      "adapted": false,
+      "destination": "tests/dataset/test_training.py",
+      "source_blob_sha": "366596fc377a3cb33b8afa92f5e6adddb24a12f2",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "tests/dataset/test_training.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "b266b266800de5f4b125f2cb605c2c49164385bb5aabe8d7ababe0ec19b05231"
+    },
+    {
+      "adapted": false,
+      "destination": "tests/dataset/test_replay.py",
+      "source_blob_sha": "3c3e739c822d55af0a5924029192aacba3ba2f48",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "tests/dataset/test_replay.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "5f2854c3d835e5a07306e583d36c969aa1a567284eabed82fd1681dfd6dd6c80"
+    },
+    {
+      "adapted": false,
+      "destination": "tests/dataset/test_hard_examples.py",
+      "source_blob_sha": "478f6faf4822478b1435eceaf01b3c92d8f0578c",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "tests/dataset/test_hard_examples.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "718a9f8493fa667ae183539ac9156e9b881bcde7b4074fb1d67ec8e459cca4a5"
+    },
+    {
+      "adapted": false,
+      "destination": "src/speed_vision_core/temporal.py",
+      "source_blob_sha": "5d2d40790d7e03a118390df958a19611f83f1eb2",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/speed_vision_core/temporal.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "533d0f320bc0d5efa3b35f09595244f4369cbb38de7e0502a5994d6f46c27f0c"
+    },
+    {
+      "adapted": false,
+      "destination": "tests/preannotation/test_review_browser.py",
+      "source_blob_sha": "ee23dd2854a7e26a6a6c693ff88490f21c987bcb",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "tests/preannotation/test_review_browser.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "5a4e2770db3758b08c99ce5b15d60041f2b35ce8bb65b2fa0890f048f5b4aa05"
+    },
+    {
+      "adapted": false,
+      "destination": "tests/dataset/test_model_review.py",
+      "source_blob_sha": "7134c9174b55ffeaa9713ce7efb981f3c95abb32",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "tests/dataset/test_model_review.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "a39b2e5fa0e6dc3927b471557292fd593fac2a207d4d5d35930c04850951e59d"
+    },
+    {
+      "adapted": false,
+      "destination": "tests/t2/test_candidates.py",
+      "source_blob_sha": "0c4d761db9235a769f4a701442f52d063593b9ce",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "tests/t2/test_candidates.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "b4c6da18f05df6bb45bcd02a79c8c2184a352e8107664f442feb93fd76065a29"
+    },
+    {
+      "adaptation": "Update new repository identity; preserve Python package/CLI names.",
+      "adapted": true,
+      "destination": "tests/core/test_core_snapshot.py",
+      "source_blob_sha": "d3ae54d4c23d20c72f10f271bed5a1cc7168f332",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "tests/core/test_core_snapshot.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "5f2d24541b01d9687ee73aedfc569049ad467a23377f6d5fece5a1c25e20e5b7"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/fixtures/malformed_invalid_value_consistency.json",
+      "source_blob_sha": "cef4a1a39acf7d4d68b597b533298c6e229ddef3",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/fixtures/malformed_invalid_value_consistency.json",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "49732563b2afe18a2e28c45bf429c43e0a1c9b5161805004d8fd2cec004ab733"
+    },
+    {
+      "adapted": false,
+      "destination": "src/speed_vision_core/state.py",
+      "source_blob_sha": "92a04b6498b28fd17bd9bcc44a1f71af9be4264c",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/speed_vision_core/state.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "c952dd44135c9cfc6514466fd9be529cf1c2c235d6792f42f62afff2263a33d3"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/cli.py",
+      "source_blob_sha": "e029f31c03fc65533da89c1c960f4dfa86e7ab3d",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/cli.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "0dc5afdc6da3e6e5a62323358d7c0918cd3a4c8a5b27e679ef830b828d49fcb2"
+    },
+    {
+      "adapted": false,
+      "destination": "tests/t2/test_route_io.py",
+      "source_blob_sha": "916ba5699c956aa33b9e8e176bc9bc2ee2ba59d2",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "tests/t2/test_route_io.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "d589514d53c85b73382ec784ccd537f2284983c5f65e7d2f846ebbe00190f4eb"
+    },
+    {
+      "adapted": false,
+      "destination": "tests/t2/test_alignment.py",
+      "source_blob_sha": "8baa61e009adf83abddd4944aa9b3177c97ab6b2",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "tests/t2/test_alignment.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "e3a7f2397f359ca8b503f7f82b01bce24ea9fcbc58edfcf031067cea87f127a8"
+    },
+    {
+      "adapted": false,
+      "destination": "tests/dataset/test_exporting.py",
+      "source_blob_sha": "b8c1234ab1790a53b51c583160328eeeb4789df1",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "tests/dataset/test_exporting.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "6fe7a52b9af4953885041d12a1407625740a27fda6a46deb6f6260e79ac35eb2"
+    },
+    {
+      "adapted": false,
+      "destination": "tests/dataset/test_annotations.py",
+      "source_blob_sha": "ac825c0006d1f623e3822040ff82c46ceb425563",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "tests/dataset/test_annotations.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "7fe4461bbe30652c4890ebd5b6031a09a4ffd69a79fc89d9658aed03f52a190a"
+    },
+    {
+      "adapted": false,
+      "destination": "tests/preannotation/test_model_review_runner.py",
+      "source_blob_sha": "edb34e60abe000145c8a371d379bb03b54bc7988",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "tests/preannotation/test_model_review_runner.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "3f7d394b5b6650770b21b2033574574ab3c636b6e5d4c656c818ba62b6b5c2a0"
+    },
+    {
+      "adapted": false,
+      "destination": "tests/t2/test_comma_log.py",
+      "source_blob_sha": "12ea26722866331eb0b3c64cf25f5f3c90d74f4a",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "tests/t2/test_comma_log.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "f5216cc42a6ebedac03526fd878c940c763c421efe68ca47251d15917e3d7e27"
+    },
+    {
+      "adapted": false,
+      "destination": "tests/core/test_temporal.py",
+      "source_blob_sha": "c2c792094044e9dc65c8eabec6b0ba218e4fd4b9",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "tests/core/test_temporal.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "948a54b674273ad815b57993c66447933c48563b64449c2e70f5951bf0c7fb36"
+    },
+    {
+      "adapted": false,
+      "destination": "tests/preannotation/test_preannotate.py",
+      "source_blob_sha": "6fe1135d91eaa257892655ebacc9f900facef832",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "tests/preannotation/test_preannotate.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "df6c441f2e86f98fc1ce7f3c3fac6fc310d50feb0072697ceebeecb16cc2f2f1"
+    },
+    {
+      "adapted": false,
+      "destination": "tests/core/test_advisory.py",
+      "source_blob_sha": "3fbf9ea31f338ef7723e6dca56cf9b9e85ea836e",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "tests/core/test_advisory.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "0f65e47f8ccfc02ba299ad8dc20483cfcf641bc951e1c552ee02de099f65fd60"
+    },
+    {
+      "adapted": false,
+      "destination": "tests/t2/test_media.py",
+      "source_blob_sha": "ed109c2012175a682dad1490876417348f2a462c",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "tests/t2/test_media.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "a73a0eb35c2c1c21be1be989d52b23710b50909b3be72d36ff5923f5324e88ec"
+    },
+    {
+      "adapted": false,
+      "destination": "tests/t2/test_schema_reader.py",
+      "source_blob_sha": "32f6489d60cb5d9a71995e092333de343b37e29c",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "tests/t2/test_schema_reader.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "447cb72e398356f45e2eea57f643762d0a136f31006e0d7391558e6d773e24b8"
+    },
+    {
+      "adapted": false,
+      "destination": "tests/preannotation/test_model_review_audit.py",
+      "source_blob_sha": "f306d668b695f77767719c80b37a05d17402fc56",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "tests/preannotation/test_model_review_audit.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "3fa71ecd11b7d743c1a7e78737d23d166bde5bb61ed891332d7ee31467e1e8d7"
+    },
+    {
+      "adapted": false,
+      "destination": "src/nnslr_tools/fixtures/malformed_invalid_value_domain.json",
+      "source_blob_sha": "b510112f1aeb5784cf0580fcc653800ea15267c9",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "src/nnslr_tools/fixtures/malformed_invalid_value_domain.json",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "56063202492d97924bf63c29e405875b3363d828b7ad2bb9c6c3d0cd658cee32"
+    },
+    {
+      "adapted": false,
+      "destination": "tests/core/test_contracts.py",
+      "source_blob_sha": "fa1adc3e53349f0ba24c3dafbdcc2ace868e127d",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "tests/core/test_contracts.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "2f1518f0dcc791787516988e15e9bd3494118006b239774c7c889ff4afb1a435"
+    },
+    {
+      "adapted": false,
+      "destination": "tests/t2/test_sync.py",
+      "source_blob_sha": "e55a5eeccdfc53eb536333d99d2c66272fb61a82",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "tests/t2/test_sync.py",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "54bca32aceb0e63086170024e0cae968ac6fb1b39cf2e30718be4a6ba1dfcf7b"
+    },
+    {
+      "adapted": false,
+      "destination": "integrations/sunnypilot/snapshot/openpilot/selfdrive/ui/sunnypilot/onroad/speed_vision.py",
+      "source_blob_sha": "0d9ccc3a79f906dd8fa2a1eed9703dabb8ff19fb",
+      "source_commit": "975fdde8ce767f4e1fc7129a92b3e13589857cbf",
+      "source_path": "openpilot/selfdrive/ui/sunnypilot/onroad/speed_vision.py",
+      "source_repository": "cristianku/sunnypilot",
+      "source_sha256": "1a35084c29c5fec95a6bf1930dc023547ae5451c3b75811dacf7e9b8f74668f3"
+    },
+    {
+      "adapted": false,
+      "destination": "integrations/sunnypilot/snapshot/openpilot/sunnypilot/speed_vision/__init__.py",
+      "source_blob_sha": "f3866509a1c153540106c5fb8f2609f866cbbcc1",
+      "source_commit": "975fdde8ce767f4e1fc7129a92b3e13589857cbf",
+      "source_path": "openpilot/sunnypilot/speed_vision/__init__.py",
+      "source_repository": "cristianku/sunnypilot",
+      "source_sha256": "1bdb3dfe03fcaf89a8fc1d34775a5e4d874d966d87206da587038de279a03aa1"
+    },
+    {
+      "adapted": false,
+      "destination": "integrations/sunnypilot/snapshot/openpilot/sunnypilot/speed_vision/_vendor/__init__.py",
+      "source_blob_sha": "00404c543fd491c4be5865a1ecb9fcc9b778319f",
+      "source_commit": "975fdde8ce767f4e1fc7129a92b3e13589857cbf",
+      "source_path": "openpilot/sunnypilot/speed_vision/_vendor/__init__.py",
+      "source_repository": "cristianku/sunnypilot",
+      "source_sha256": "58eab71f987ec156508665deda98145bece1d21bd934a39b45e5fd99a7dce99d"
+    },
+    {
+      "adapted": false,
+      "destination": "integrations/sunnypilot/snapshot/openpilot/sunnypilot/speed_vision/_vendor/speed_vision_core.snapshot.json",
+      "source_blob_sha": "0b5aca4a0897238fbbdd5881c388905ecda3c6f4",
+      "source_commit": "975fdde8ce767f4e1fc7129a92b3e13589857cbf",
+      "source_path": "openpilot/sunnypilot/speed_vision/_vendor/speed_vision_core.snapshot.json",
+      "source_repository": "cristianku/sunnypilot",
+      "source_sha256": "9c808f6f116a96bc984a257c80a67916eca7a0170a9524a8ca3366a0d9856315"
+    },
+    {
+      "adapted": false,
+      "destination": "integrations/sunnypilot/snapshot/openpilot/sunnypilot/speed_vision/_vendor/speed_vision_core/__init__.py",
+      "source_blob_sha": "5f82c370af4b71f5c1d19e20e56b08bcd5474819",
+      "source_commit": "975fdde8ce767f4e1fc7129a92b3e13589857cbf",
+      "source_path": "openpilot/sunnypilot/speed_vision/_vendor/speed_vision_core/__init__.py",
+      "source_repository": "cristianku/sunnypilot",
+      "source_sha256": "61519237a4b110d9ff7a7f0cf7d0272a27159f32097cddf0791da4ae83cd49ee"
+    },
+    {
+      "adapted": false,
+      "destination": "integrations/sunnypilot/snapshot/openpilot/sunnypilot/speed_vision/_vendor/speed_vision_core/py.typed",
+      "source_blob_sha": "e8923ea50c70208b5afde6686ec596261222a9f2",
+      "source_commit": "975fdde8ce767f4e1fc7129a92b3e13589857cbf",
+      "source_path": "openpilot/sunnypilot/speed_vision/_vendor/speed_vision_core/py.typed",
+      "source_repository": "cristianku/sunnypilot",
+      "source_sha256": "d0216d067840cf1cd1ad2fc500a645e545a60a86bba224712f4f86bc79e173d8"
+    },
+    {
+      "adapted": false,
+      "destination": "integrations/sunnypilot/snapshot/openpilot/sunnypilot/speed_vision/_vendor/speed_vision_core/types.py",
+      "source_blob_sha": "9299f52004335d3d447c59f8547e6e2100f4d763",
+      "source_commit": "975fdde8ce767f4e1fc7129a92b3e13589857cbf",
+      "source_path": "openpilot/sunnypilot/speed_vision/_vendor/speed_vision_core/types.py",
+      "source_repository": "cristianku/sunnypilot",
+      "source_sha256": "2f18403e84c87f53a356d86b781c0620190e21be0f768685682bd90e572bcebf"
+    },
+    {
+      "adapted": false,
+      "destination": "integrations/sunnypilot/snapshot/openpilot/sunnypilot/speed_vision/adapters.py",
+      "source_blob_sha": "ae4ef9f1035bbd4234bf54869cfd933fae5334aa",
+      "source_commit": "975fdde8ce767f4e1fc7129a92b3e13589857cbf",
+      "source_path": "openpilot/sunnypilot/speed_vision/adapters.py",
+      "source_repository": "cristianku/sunnypilot",
+      "source_sha256": "6eda77d7366da227eaeaeb37c6f93fb6ea8b96c969f9556514a726330b14aa2b"
+    },
+    {
+      "adapted": false,
+      "destination": "integrations/sunnypilot/snapshot/openpilot/sunnypilot/speed_vision/artifacts.lock.json",
+      "source_blob_sha": "0bab95f365ce7ffcab79732f4e7418df08cd6c36",
+      "source_commit": "975fdde8ce767f4e1fc7129a92b3e13589857cbf",
+      "source_path": "openpilot/sunnypilot/speed_vision/artifacts.lock.json",
+      "source_repository": "cristianku/sunnypilot",
+      "source_sha256": "afa220a9ac27859afafc9b1b84f3f3f00a97e65c34d98400d29ed2fd16f68944"
+    },
+    {
+      "adapted": false,
+      "destination": "integrations/sunnypilot/snapshot/openpilot/sunnypilot/speed_vision/diagnostics.py",
+      "source_blob_sha": "319b5bf689566a46321efcaa0f3d0090fbc11eb4",
+      "source_commit": "975fdde8ce767f4e1fc7129a92b3e13589857cbf",
+      "source_path": "openpilot/sunnypilot/speed_vision/diagnostics.py",
+      "source_repository": "cristianku/sunnypilot",
+      "source_sha256": "4e4ffe191c2973e94219197393adafa56e74797759792b0ca5aea4cc1c66ae1f"
+    },
+    {
+      "adapted": false,
+      "destination": "integrations/sunnypilot/snapshot/openpilot/sunnypilot/speed_vision/lifecycle.py",
+      "source_blob_sha": "8d2d20c494c8387948e7b91ef174e86f34e9090e",
+      "source_commit": "975fdde8ce767f4e1fc7129a92b3e13589857cbf",
+      "source_path": "openpilot/sunnypilot/speed_vision/lifecycle.py",
+      "source_repository": "cristianku/sunnypilot",
+      "source_sha256": "95b8223d21b02c6dbc70c1c52e5c00c9c85212474a08b0adcbe9a35338de893e"
+    },
+    {
+      "adapted": false,
+      "destination": "integrations/sunnypilot/snapshot/openpilot/sunnypilot/speed_vision/publisher.py",
+      "source_blob_sha": "f3c70753c5589b3071a9a66840e9351e925e7bf9",
+      "source_commit": "975fdde8ce767f4e1fc7129a92b3e13589857cbf",
+      "source_path": "openpilot/sunnypilot/speed_vision/publisher.py",
+      "source_repository": "cristianku/sunnypilot",
+      "source_sha256": "38589b31fdbd67aafa2b8b523ee37cb95fc8044d3fea30d76f409d1c55e9173c"
+    },
+    {
+      "adapted": false,
+      "destination": "integrations/sunnypilot/snapshot/openpilot/sunnypilot/speed_vision/runner.py",
+      "source_blob_sha": "a4c434142234390e97c835f12a30b5c56e3adc45",
+      "source_commit": "975fdde8ce767f4e1fc7129a92b3e13589857cbf",
+      "source_path": "openpilot/sunnypilot/speed_vision/runner.py",
+      "source_repository": "cristianku/sunnypilot",
+      "source_sha256": "cb989778780c755bc5ec2166e6fda0470651b05cb69b286c32644cca41a22881"
+    },
+    {
+      "adapted": false,
+      "destination": "integrations/sunnypilot/snapshot/openpilot/sunnypilot/speed_vision/speedvisiond.py",
+      "source_blob_sha": "8fd4b8de78c66eed5dbff3912ec1976618351551",
+      "source_commit": "975fdde8ce767f4e1fc7129a92b3e13589857cbf",
+      "source_path": "openpilot/sunnypilot/speed_vision/speedvisiond.py",
+      "source_repository": "cristianku/sunnypilot",
+      "source_sha256": "ffa3ca6140b8f12133d4753a0f823607b58846a55d658ef1eef2d29a3972fe9d"
+    },
+    {
+      "adapted": false,
+      "destination": "integrations/sunnypilot/snapshot/openpilot/sunnypilot/speed_vision/tests/test_lifecycle.py",
+      "source_blob_sha": "d535481e60b7e6c82736461167ab860bd12d8beb",
+      "source_commit": "975fdde8ce767f4e1fc7129a92b3e13589857cbf",
+      "source_path": "openpilot/sunnypilot/speed_vision/tests/test_lifecycle.py",
+      "source_repository": "cristianku/sunnypilot",
+      "source_sha256": "716a932bd6578dc1da6691703bb85af9e6ac5c9ba5b4e85c20ee199ab291b6b3"
+    },
+    {
+      "adapted": false,
+      "destination": "integrations/sunnypilot/snapshot/openpilot/sunnypilot/speed_vision/tests/test_faults.py",
+      "source_blob_sha": "36b20ac1867f301bed5812bdf768c1d2679421f0",
+      "source_commit": "975fdde8ce767f4e1fc7129a92b3e13589857cbf",
+      "source_path": "openpilot/sunnypilot/speed_vision/tests/test_faults.py",
+      "source_repository": "cristianku/sunnypilot",
+      "source_sha256": "32257efb6b9ec2fc8d4e1339f8036defb51024e60d9b6aee96b771e8705661e4"
+    },
+    {
+      "adapted": false,
+      "destination": "integrations/sunnypilot/snapshot/openpilot/sunnypilot/speed_vision/tests/test_runner_contract.py",
+      "source_blob_sha": "dedb1090ac6592841c64175e8bde7836d724442f",
+      "source_commit": "975fdde8ce767f4e1fc7129a92b3e13589857cbf",
+      "source_path": "openpilot/sunnypilot/speed_vision/tests/test_runner_contract.py",
+      "source_repository": "cristianku/sunnypilot",
+      "source_sha256": "12181ff078a96bc651cb5b86e5712f51f188e879a08dda7c029248e198c6283e"
+    },
+    {
+      "adapted": false,
+      "destination": "integrations/sunnypilot/snapshot/openpilot/sunnypilot/speed_vision/tests/test_control_isolation.py",
+      "source_blob_sha": "e0409e7d08f79b1645e1094b9e65d8b676e4097b",
+      "source_commit": "975fdde8ce767f4e1fc7129a92b3e13589857cbf",
+      "source_path": "openpilot/sunnypilot/speed_vision/tests/test_control_isolation.py",
+      "source_repository": "cristianku/sunnypilot",
+      "source_sha256": "d6316cd54a56aff03b0fa8f2c3abf6ffcbeefa7b51faf4275beee958b813e86f"
+    },
+    {
+      "adapted": false,
+      "destination": "integrations/sunnypilot/snapshot/openpilot/sunnypilot/speed_vision/tests/test_frame_adapter.py",
+      "source_blob_sha": "1a9644cebc2065374b8254913859ba75c4cc5227",
+      "source_commit": "975fdde8ce767f4e1fc7129a92b3e13589857cbf",
+      "source_path": "openpilot/sunnypilot/speed_vision/tests/test_frame_adapter.py",
+      "source_repository": "cristianku/sunnypilot",
+      "source_sha256": "7fe5ed206d65ff4de122d48f1fee093d198f8de46ee543e5623fdb19ba7060f7"
+    },
+    {
+      "adapted": false,
+      "destination": "integrations/sunnypilot/snapshot/openpilot/cereal/log.capnp",
+      "source_blob_sha": "17bf014c88fbab92e4f4f163dad0ef951239d868",
+      "source_commit": "975fdde8ce767f4e1fc7129a92b3e13589857cbf",
+      "source_path": "openpilot/cereal/log.capnp",
+      "source_repository": "cristianku/sunnypilot",
+      "source_sha256": "e3a1c3b4985f49a2da20f65f831dacb9872f2083809286f3fc5a86e5f204cd6c"
+    },
+    {
+      "adapted": false,
+      "destination": "integrations/sunnypilot/snapshot/openpilot/selfdrive/ui/sunnypilot/onroad/hud_renderer.py",
+      "source_blob_sha": "2214ca4f16e4592bea07a09e1844d24cdb0371fb",
+      "source_commit": "975fdde8ce767f4e1fc7129a92b3e13589857cbf",
+      "source_path": "openpilot/selfdrive/ui/sunnypilot/onroad/hud_renderer.py",
+      "source_repository": "cristianku/sunnypilot",
+      "source_sha256": "8f71a0030dedac4defc90e4ae88dca1eca06e9ad75aff5dc929058a38a4edcc0"
+    },
+    {
+      "adapted": false,
+      "destination": "integrations/sunnypilot/snapshot/openpilot/sunnypilot/speed_vision/tests/test_core_snapshot.py",
+      "source_blob_sha": "3dcee089ceacea6c17352379070fe49d86dc6d2d",
+      "source_commit": "975fdde8ce767f4e1fc7129a92b3e13589857cbf",
+      "source_path": "openpilot/sunnypilot/speed_vision/tests/test_core_snapshot.py",
+      "source_repository": "cristianku/sunnypilot",
+      "source_sha256": "2f2d67581a186c0b380c07d10200dd5219e6682fea34e4bb2a926cb56e82b217"
+    },
+    {
+      "adapted": false,
+      "destination": "integrations/sunnypilot/snapshot/openpilot/common/params_keys.h",
+      "source_blob_sha": "6407a7dc606c2067aa0bdf6fd41d9e8fbfd5c09f",
+      "source_commit": "975fdde8ce767f4e1fc7129a92b3e13589857cbf",
+      "source_path": "openpilot/common/params_keys.h",
+      "source_repository": "cristianku/sunnypilot",
+      "source_sha256": "0ad85451f9a507aab7a0329da67ca7c28147ac4478eb6ae4445112d4d0f9576a"
+    },
+    {
+      "adapted": false,
+      "destination": "integrations/sunnypilot/snapshot/openpilot/sunnypilot/speed_vision/tests/fixtures/valid_batch.json",
+      "source_blob_sha": "4ce31d7c8a33a5444c8c8a578d8c8f9125963f44",
+      "source_commit": "975fdde8ce767f4e1fc7129a92b3e13589857cbf",
+      "source_path": "openpilot/sunnypilot/speed_vision/tests/fixtures/valid_batch.json",
+      "source_repository": "cristianku/sunnypilot",
+      "source_sha256": "e31cc742c558d4a5582ccd4220f6bb940651b32c7e679baffc08669b4fbdf50d"
+    },
+    {
+      "adapted": false,
+      "destination": "integrations/sunnypilot/snapshot/.github/workflows/nnslr-source.yml",
+      "source_blob_sha": "7cb1b5cecf6a8f483c78c8ae816323d086e9749a",
+      "source_commit": "975fdde8ce767f4e1fc7129a92b3e13589857cbf",
+      "source_path": ".github/workflows/nnslr-source.yml",
+      "source_repository": "cristianku/sunnypilot",
+      "source_sha256": "a032f971cae1eaeb7edc32b4b1c570743428ab4ae52be3a3ee59bfb60158d995"
+    },
+    {
+      "adapted": false,
+      "destination": "integrations/sunnypilot/snapshot/openpilot/sunnypilot/speed_vision/tests/test_diagnostics.py",
+      "source_blob_sha": "a70fb63ac3f23c63aa6246dd236cfeb84178fa7c",
+      "source_commit": "975fdde8ce767f4e1fc7129a92b3e13589857cbf",
+      "source_path": "openpilot/sunnypilot/speed_vision/tests/test_diagnostics.py",
+      "source_repository": "cristianku/sunnypilot",
+      "source_sha256": "50d244fcec85a4cb833c6239be6bbb499c363055090d1b5dd1cf0ef2ad8512f2"
+    },
+    {
+      "adapted": false,
+      "destination": "integrations/sunnypilot/snapshot/openpilot/sunnypilot/speed_vision/tests/test_ui_isolation.py",
+      "source_blob_sha": "c2d0585c8a2102fbce5fbb87612f0759eb72155f",
+      "source_commit": "975fdde8ce767f4e1fc7129a92b3e13589857cbf",
+      "source_path": "openpilot/sunnypilot/speed_vision/tests/test_ui_isolation.py",
+      "source_repository": "cristianku/sunnypilot",
+      "source_sha256": "4b6d0bbe15ff5e53cd91de21f154dd4857a17afcff3227ca2056171fd2d77a8f"
+    },
+    {
+      "adapted": false,
+      "destination": "integrations/sunnypilot/snapshot/openpilot/selfdrive/ui/sunnypilot/ui_state.py",
+      "source_blob_sha": "7e1cf632e576d563a3b5d9d105c81d530b018eb6",
+      "source_commit": "975fdde8ce767f4e1fc7129a92b3e13589857cbf",
+      "source_path": "openpilot/selfdrive/ui/sunnypilot/ui_state.py",
+      "source_repository": "cristianku/sunnypilot",
+      "source_sha256": "ed2bddfd842cadccd3a962d2b0d87f3cb7fffc588fa683caabc577e8851c288b"
+    },
+    {
+      "adapted": false,
+      "destination": "integrations/sunnypilot/snapshot/openpilot/cereal/custom.capnp",
+      "source_blob_sha": "91dfa9549e9db53bbedf75a7fbe0244b3c0a58d4",
+      "source_commit": "975fdde8ce767f4e1fc7129a92b3e13589857cbf",
+      "source_path": "openpilot/cereal/custom.capnp",
+      "source_repository": "cristianku/sunnypilot",
+      "source_sha256": "6b4a87f8312b7d98c7c2fbe9c34b351df8183a12527794d8ebdf4e8caa0dd8a3"
+    },
+    {
+      "adapted": false,
+      "destination": "integrations/sunnypilot/snapshot/openpilot/cereal/services.py",
+      "source_blob_sha": "837649aab2e380587686fe610c9326e60bca6202",
+      "source_commit": "975fdde8ce767f4e1fc7129a92b3e13589857cbf",
+      "source_path": "openpilot/cereal/services.py",
+      "source_repository": "cristianku/sunnypilot",
+      "source_sha256": "e8650ce033cd249f7b6151060d1aea3c042bb39ca0441d966a91a8e2cdade5f5"
+    },
+    {
+      "adapted": false,
+      "destination": "integrations/sunnypilot/snapshot/openpilot/system/manager/process_config.py",
+      "source_blob_sha": "5c75920e71dbe3b3615de397a0691e5c252e0bbd",
+      "source_commit": "975fdde8ce767f4e1fc7129a92b3e13589857cbf",
+      "source_path": "openpilot/system/manager/process_config.py",
+      "source_repository": "cristianku/sunnypilot",
+      "source_sha256": "58aaf05d3b9f5706f5a8c5e6478f4c27a2748cd94025c29d7edfdfbc669138c8"
+    },
+    {
+      "adapted": false,
+      "destination": "integrations/sunnypilot/snapshot/openpilot/sunnypilot/speed_vision/tests/test_schema_roundtrip.py",
+      "source_blob_sha": "4850eaf56f4850f13b825b975f5870d6d758c840",
+      "source_commit": "975fdde8ce767f4e1fc7129a92b3e13589857cbf",
+      "source_path": "openpilot/sunnypilot/speed_vision/tests/test_schema_roundtrip.py",
+      "source_repository": "cristianku/sunnypilot",
+      "source_sha256": "40370906c6e7cd5a33da8957ac26d5454c1a79665d1d4eba6f5a6268f423259b"
+    },
+    {
+      "adapted": false,
+      "destination": "docs/upstream-training-guide.md",
+      "source_blob_sha": "688e9f3b6ee5aea6db12cde9218225545c54d520",
+      "source_commit": "82a603f4bfdd2dd661e557af509b9addde3c9c18",
+      "source_path": "README.md",
+      "source_repository": "cristianku/openpilot-nnslr-tools",
+      "source_sha256": "9fe76ad7c9fe599324cb63adbc8f8dc6b871652a9a73affda4522fa8ded75cdf"
+    },
+    {
+      "adapted": false,
+      "destination": "integrations/sunnypilot/snapshot/openpilot/sunnypilot/selfdrive/controls/lib/speed_limit/speed_limit_assist.py",
+      "purpose": "Unchanged source context required by the recovered isolation tests.",
+      "source_blob_sha": "40c8c6fdf477b8ee18ac35faf2863f342b9fd0a9",
+      "source_commit": "975fdde8ce767f4e1fc7129a92b3e13589857cbf",
+      "source_path": "openpilot/sunnypilot/selfdrive/controls/lib/speed_limit/speed_limit_assist.py",
+      "source_repository": "cristianku/sunnypilot",
+      "source_sha256": "556e0ac55c1d045f37f99593cd895f42df701e03fd4aa724a301ef60c47f3da4"
+    },
+    {
+      "adapted": false,
+      "destination": "integrations/sunnypilot/snapshot/openpilot/selfdrive/ui/sunnypilot/onroad/speed_limit.py",
+      "purpose": "Unchanged source context required by the recovered isolation tests.",
+      "source_blob_sha": "fa8143eb3200c2932d51700da23d8bcc4308fc4f",
+      "source_commit": "975fdde8ce767f4e1fc7129a92b3e13589857cbf",
+      "source_path": "openpilot/selfdrive/ui/sunnypilot/onroad/speed_limit.py",
+      "source_repository": "cristianku/sunnypilot",
+      "source_sha256": "abb06c1ee00b44990bbbe0693786d144579a37d6362cd50d84b0da129a2c4a97"
+    },
+    {
+      "adapted": false,
+      "destination": "integrations/sunnypilot/snapshot/openpilot/sunnypilot/selfdrive/controls/lib/speed_limit/speed_limit_resolver.py",
+      "purpose": "Unchanged source context required by the recovered isolation tests.",
+      "source_blob_sha": "a226e0d120f20a116acbb62215d9679ee73d075f",
+      "source_commit": "975fdde8ce767f4e1fc7129a92b3e13589857cbf",
+      "source_path": "openpilot/sunnypilot/selfdrive/controls/lib/speed_limit/speed_limit_resolver.py",
+      "source_repository": "cristianku/sunnypilot",
+      "source_sha256": "e63c6014ecafb6cd23697018c0d0b3d142d8bce49ae16f9ca7e57cd2964b6894"
+    }
+  ],
+  "import_date": "2026-10-21",
+  "runtime_merge_base": "a5f44653d7f43ad57fef2f546f3916ec4cbf3c56",
+  "schema_version": 1
+}

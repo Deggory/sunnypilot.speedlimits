@@ -1,0 +1,1372 @@
+# [nnslr-t1] - START
+"""``nnslr`` command-line interface (T1).
+
+Implemented subcommands (T1):
+
+- ``version``       — print package/core versions.
+- ``env``           — machine-readable environment report. Distinguishes
+  *available*, *untested* and *failed* for GPU support; never runs a GPU
+  workload implicitly (plan §12.4 ``check_environment`` contract).
+- ``validate-batch``— validate an ObservationBatch JSON document against the
+  §7 contract; deterministic, stable reason codes; nonzero exit on rejection.
+- ``selftest``      — run the bundled synthetic fixtures through
+  :func:`speed_vision_core.types.validate_batch` and the serialization
+  round-trip; the CPU/synthetic quickstart for a clean clone.
+
+Local extraction/alignment (T2) and reviewed annotation import/validation/splits
+(T3) are implemented below. Training (T4), evaluation (T5–T6) and export/bundle
+(T7–T8) remain explicitly unimplemented.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import platform
+import sys
+from pathlib import Path
+from typing import Any
+
+# Importing this module must not drag in torch/CUDA/openpilot (test-guarded).
+import speed_vision_core
+from speed_vision_core import types
+from speed_vision_core.types import (
+    MAX_DETECTIONS_PER_BATCH,
+    ReasonCode,
+    SUPPORTED_SCHEMA_VERSION,
+    NnslerContractError,
+)
+
+from nnslr_tools import __version__
+from nnslr_tools.alignment import align_comma_segment, comma_aligned_frame_from_dict
+from nnslr_tools.candidates import find_speed_candidates, project_candidates_to_video
+from nnslr_tools.comma_log import (
+    CommaLogError,
+    encode_events,
+    map_speed_events,
+    read_log_metadata,
+)
+from nnslr_tools.media import MediaToolError, extract_frames, make_clip, probe_frame_timestamps, probe_video
+# [frame-provenance] - START
+from nnslr_tools.media import extracted_frame_rows
+from nnslr_tools.manifest import sha256_of
+# [frame-provenance] - END
+# [route-extract] - START
+from nnslr_tools.manifest import NnslerManifestError, RouteManifest, normalize_relpath, parse_route_id
+from nnslr_tools.route_io import build_route_manifest, discover_segment_dirs
+# [route-extract] - END
+# [nnslr-sync] - START
+# [route-extract] - START
+from nnslr_tools.sync import DEFAULT_DATA_ROOT, sync_route
+# [route-extract] - END
+# [nnslr-sync] - END
+
+
+# ---------------------------------------------------------------------------
+# Environment report
+# ---------------------------------------------------------------------------
+
+def collect_env_report() -> dict[str, Any]:
+    """Machine-readable environment facts. No GPU probe without an explicit
+    flag; the report marks GPU as *untested* by default."""
+    data_root = os.environ.get("NNSLR_DATA_ROOT", "").strip()
+    data_root_path = Path(data_root) if data_root else None
+    report: dict[str, Any] = {
+        "nnslr_tools": __version__,
+        "speed_vision_core": speed_vision_core.__version__,
+        "python": platform.python_version(),
+        "platform": platform.platform(),
+        "nnsler_data_root": {
+            "configured": bool(data_root),
+            "path": data_root or None,
+            "exists": bool(data_root_path and data_root_path.is_dir()),
+            "note": (
+                "NNSLR_DATA_ROOT is read from the environment, never "
+                "hardcoded (decision D4)."
+                if data_root
+                # [nnslr-sync] - START
+                else "NNSLR_DATA_ROOT is not set; sync-routes defaults to "
+                "/srv/nnslr-data. Other data-root commands need --data-root."
+                # [nnslr-sync] - END
+            ),
+        },
+        "cpu": {
+            "available": True,
+            "status": "available",
+        },
+        "gpu": {
+            "status": "untested",
+            "available": None,
+            "note": (
+                "GPU support is only established by an explicitly authorized "
+                "forward/backward/export probe (plan §12.4 check_environment "
+                "--gpu-smoke). This report does not probe."
+            ),
+        },
+        "openpilot_dependent": False,
+    }
+    return report
+
+
+# ---------------------------------------------------------------------------
+# validate-batch
+# ---------------------------------------------------------------------------
+
+def _parse_frame_key(key: str) -> types.FrameIdentity:
+    """Parse ``session:stream:frame_id`` into a :class:`FrameIdentity`.
+
+    The session id must not contain ``:``; the stream is one of the
+    :class:`StreamId` members; the frame id is the trailing integer."""
+    session_id, stream, frame_id = key.split(":", 2)
+    return types.FrameIdentity(session_id, types.StreamId(stream), int(frame_id))
+
+
+def validate_batch_from_payload(
+    payload: dict[str, Any],
+    now_mono_ns: int,
+    expected_session_id: str,
+    recent_frame_keys: frozenset[str] | None = None,
+) -> types.ValidationResult:
+    """Deserialize a batch payload and run the §7.4 validation contract.
+
+    ``recent_frame_keys`` are frame keys (``session:stream:frame_id``) of frames
+    already accepted in the session; a batch matching one is rejected with
+    ``DUPLICATE_FRAME``."""
+    batch = types.batch_from_dict(payload)
+    recent = (
+        frozenset(_parse_frame_key(k) for k in recent_frame_keys)
+        if recent_frame_keys is not None
+        else None
+    )
+    return types.validate_batch(
+        batch,
+        now_mono_ns=now_mono_ns,
+        expected_session_id=expected_session_id,
+        recent_frame_ids=recent,
+    )
+
+
+def _cmd_validate_batch(args: argparse.Namespace) -> int:
+    path = Path(args.batch)
+    if not path.is_file():
+        print(f"error: batch file not found: {path}", file=sys.stderr)
+        return 2
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    now = int(args.now_mono_ns)
+    session = args.expected_session_id
+    try:
+        result = validate_batch_from_payload(payload, now_mono_ns=now, expected_session_id=session)
+    except NnslerContractError as exc:
+        print(
+            json.dumps(
+                {
+                    "accepted": False,
+                    "batch_identity": None,
+                    "reason_codes": [exc.reason_code],
+                    "rejected_indices": [],
+                    "error": exc.message,
+                },
+                indent=2,
+            )
+        )
+        return 1
+    out = types.validation_result_to_dict(result)
+    print(json.dumps(out, indent=2))
+    return 0 if result.accepted else 1
+
+
+# ---------------------------------------------------------------------------
+# selftest (synthetic quickstart)
+# ---------------------------------------------------------------------------
+
+def _fixture_dir() -> Path:
+    """Locate the synthetic fixture directory.
+
+    Preferred order: a ``nnslr_tools/fixtures`` directory shipped with the
+    installed package, then the repository checkout's ``tests/fixtures``
+    (where the canonical fixtures live).
+    """
+    import importlib.resources as resources
+
+    try:
+        pkg_fixtures = resources.files("nnslr_tools").joinpath("fixtures")
+        if pkg_fixtures.is_dir() and any(pkg_fixtures.iterdir()):
+            return Path(str(pkg_fixtures))
+    except FileNotFoundError:
+        pass
+    return Path(__file__).resolve().parent.parent.parent / "tests" / "fixtures"
+
+
+def _selftest() -> int:
+    """Run the bundled synthetic fixtures end-to-end on CPU.
+
+    Returns 0 only if every fixture produced its documented reason code and
+    the serialization round-trip preserved absence/unknown.
+
+    Time is injected, never read. Most fixtures use ``now = capture + 10 ms``;
+    the fixtures that test the freshness/duplicate rules override ``now`` or
+    provide ``recent_frame_keys`` explicitly (see ``_NOW_OVERRIDES`` and
+    ``_RECENT_KEYS``).
+    """
+    # Most fixtures use a small positive offset (fresh capture). A few test the
+    # freshness rules and need a specific offset relative to the capture:
+    #   stale  -> now = capture + 5 s  (age 5 s > 0.35 s window)
+    #   future -> now = capture - 1 s  (capture is in the future of "now")
+    _NOW_OFFSETS_NS = {
+        "malformed_stale_evidence.json": 5_000_000_000,
+        "malformed_invalid_capture_timestamp_future.json": -1_000_000_000,
+    }
+    _DEFAULT_NOW_OFFSET_NS = 10_000_000  # +10 ms, well inside the 0.35 s window
+
+    # Fixture whose rejection depends on the recent-frame set, not on the
+    # payload alone: the frame identity is already present.
+    _RECENT_KEYS = {
+        "malformed_duplicate_frame.json": "selftest:narrow_road:2",
+    }
+
+    failures: list[str] = []
+    passed: list[str] = []
+
+    def check(name: str, ok: bool, detail: str = "") -> None:
+        (passed if ok else failures).append(name + (f" — {detail}" if detail and not ok else ""))
+
+    fixtures_dir = _fixture_dir()
+    if not fixtures_dir.is_dir():
+        print(f"selftest FAILED: fixture directory not found: {fixtures_dir}")
+        return 1
+
+    # 1) validate-batch on the valid fixture.
+    with (fixtures_dir / "valid_batch.json").open() as f:
+        payload = json.load(f)
+    now = int(payload["frame"]["capture_mono_ns"]) + _DEFAULT_NOW_OFFSET_NS  # +10 ms
+    result = validate_batch_from_payload(payload, now_mono_ns=now, expected_session_id="selftest")
+    check("valid_batch accepted", result.accepted, str(result.reason_codes))
+
+    # 2) every malformed fixture must be rejected with its documented code.
+    malformed = sorted(p.name for p in fixtures_dir.iterdir() if p.name.startswith("malformed_"))
+    for name in malformed:
+        with (fixtures_dir / name).open() as f:
+            payload = json.load(f)
+        expected_code = name[len("malformed_") : -len(".json")]
+        capture = int(payload["frame"]["capture_mono_ns"])
+        offset = _NOW_OFFSETS_NS.get(name, _DEFAULT_NOW_OFFSET_NS)
+        recent_keys = (
+            frozenset({_RECENT_KEYS[name]}) if name in _RECENT_KEYS else None
+        )
+        try:
+            result = validate_batch_from_payload(
+                payload,
+                now_mono_ns=capture + offset,
+                expected_session_id="selftest",
+                recent_frame_keys=recent_keys,
+            )
+        except NnslerContractError as exc:
+            check(f"{name} rejected", exc.reason_code == expected_code, f"got {exc.reason_code}")
+            continue
+        codes = set(result.reason_codes)
+        check(
+            f"{name} rejected with {expected_code}",
+            (not result.accepted) and expected_code in codes,
+            f"accepted={result.accepted} codes={sorted(codes)}",
+        )
+
+    # 3) serialization round-trip preserves absence and never reinterprets zero.
+    with (fixtures_dir / "valid_batch.json").open() as f:
+        payload = json.load(f)
+    batch = types.batch_from_dict(payload)
+    again = types.batch_to_dict(batch)
+    check(
+        "round-trip stable",
+        json.dumps(again, sort_keys=True) == json.dumps(payload, sort_keys=True),
+    )
+    zero_payload = json.loads(json.dumps(payload))
+    det = zero_payload["detections"][0]
+    det["value_state"] = types.ValueState.UNKNOWN.value
+    det["value_kph"] = 0  # zero with has_value=false must be rejected
+    try:
+        types.batch_from_dict(zero_payload)
+        check("zero-not-limit rejected", False, "construction accepted zero as value")
+    except NnslerContractError as exc:
+        check(
+            "zero-not-limit rejected",
+            exc.reason_code == ReasonCode.INVALID_VALUE_CONSISTENCY,
+            exc.reason_code,
+        )
+
+    print(f"nnslr selftest: nnslr_tools {__version__}")
+    for line in passed:
+        print(f"  PASS  {line}")
+    for line in failures:
+        print(f"  FAIL  {line}")
+    if failures:
+        print(f"selftest FAILED: {len(failures)} of {len(passed) + len(failures)}")
+        return 1
+    print(f"selftest OK: {len(passed)} checks")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# T2 local comma file processing (never device access)
+# ---------------------------------------------------------------------------
+
+_STREAM_TO_ENCODE_SERVICE = {
+    "narrow_road": "narrowRoadEncodeIdx",
+    "wide_road": "wideRoadEncodeIdx",
+    "q_narrow_road": "qNarrowRoadEncodeIdx",
+}
+
+
+def _write_jsonl(path: Path | None, rows: list[dict[str, Any]]) -> None:
+    text = "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows)
+    if path is None:
+        sys.stdout.write(text)
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+    if not path.is_file():
+        raise FileNotFoundError(path)
+    rows: list[dict[str, Any]] = []
+    for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        item = json.loads(line)
+        if not isinstance(item, dict):
+            raise ValueError(f"{path}:{line_no}: expected JSON object")
+        rows.append(item)
+    return rows
+
+
+def _resolve_data_root(explicit: str | None) -> Path:
+    raw = (explicit or os.environ.get("NNSLR_DATA_ROOT", "")).strip()
+    if not raw:
+        raise ValueError("NNSLR_DATA_ROOT is not set; use --data-root or export it")
+    root = Path(raw).expanduser().resolve()
+    if not root.is_dir():
+        raise ValueError(f"data root is not a directory: {root}")
+    return root
+
+
+def _cmd_route_manifest(args: argparse.Namespace) -> int:
+    root = _resolve_data_root(args.data_root)
+    manifest = build_route_manifest(root, Path(args.route))
+    text = manifest.to_jsonl()
+    output = Path(args.output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(text, encoding="utf-8")
+    print(json.dumps({
+        "output": str(output),
+        "declared_segments": list(manifest.declared_segments),
+        **manifest.gap_report(),
+        "file_count": len(manifest.files),
+    }, indent=2, sort_keys=True))
+    return 0
+
+
+def _cmd_inspect_manifest(args: argparse.Namespace) -> int:
+    path = Path(args.manifest)
+    if not path.is_file():
+        raise FileNotFoundError(path)
+    manifest = RouteManifest.from_jsonl(path.read_text(encoding="utf-8"))
+    print(json.dumps({
+        "schema_version": manifest.schema_version,
+        "declared_segments": list(manifest.declared_segments),
+        "file_count": len(manifest.files),
+        **manifest.gap_report(),
+    }, indent=2, sort_keys=True))
+    return 0
+
+
+def _cmd_video_probe(args: argparse.Namespace) -> int:
+    result = probe_video(Path(args.video), ffprobe=args.ffprobe)
+    print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+    return 0
+
+
+def _cmd_extract_frames(args: argparse.Namespace) -> int:
+    # [route-extract] - START
+    if args.route:
+        return _cmd_extract_route(args)
+    if not args.output:
+        raise ValueError("--output is required with --video")
+    # [route-extract] - END
+    frames = extract_frames(
+        Path(args.video),
+        Path(args.output),
+        fps=None if args.all_frames else args.fps,
+        start_s=args.start,
+        end_s=args.end,
+        ffmpeg=args.ffmpeg,
+        ffprobe=args.ffprobe,
+        alignment=Path(args.alignment) if args.alignment else None,
+        overwrite=args.overwrite,
+    )
+    rows = extracted_frame_rows(frames, alignment=Path(args.alignment) if args.alignment else None)
+    if args.manifest:
+        _write_jsonl(Path(args.manifest), rows)
+    print(json.dumps({
+        "frame_count": len(rows),
+        "output": str(Path(args.output)),
+        "manifest": args.manifest,
+        "timing": "capture_aligned" if rows and all(r["alignment_status"] == "exact" for r in rows) else "media_only",
+        "capture_time_established": bool(rows) and all(r["alignment_status"] == "exact" for r in rows),
+    }, indent=2, sort_keys=True))
+    return 0
+
+
+# [route-extract] - START
+def _cmd_extract_route(args: argparse.Namespace) -> int:
+    """Apply the existing video extraction to every locally available segment."""
+    parse_route_id(args.route)
+    root = Path(args.data_root or os.environ.get("NNSLR_DATA_ROOT") or DEFAULT_DATA_ROOT).expanduser().resolve()
+    route_rel = Path("raw/routes") / args.route
+    normalize_relpath(root, route_rel)
+    segments = discover_segment_dirs(root / route_rel)
+    output = Path(args.output).expanduser() if args.output else root / "derived/frames" / args.route
+    if not args.output:
+        normalize_relpath(root, output.relative_to(root))
+
+    # Preflight the complete route so a missing camera or existing output in a
+    # later segment does not leave earlier segments unnecessarily processed.
+    plans = []
+    for identity, directory in segments:
+        if identity.route_id != args.route:
+            raise ValueError(f"unexpected route inside {root / route_rel}: {identity.route_id}")
+        video = directory / "fcamera.hevc"
+        normalize_relpath(root, video.relative_to(root))
+        if not video.is_file():
+            raise MediaToolError("video_not_found", str(video))
+        segment_output = output / str(identity.segment_index)
+        if not args.output:
+            normalize_relpath(root, segment_output.relative_to(root))
+        if not args.overwrite and next(segment_output.glob("frame_*.png"), None) is not None:
+            raise MediaToolError("output_not_empty", str(segment_output))
+        # [dataset-review] - START
+        alignment_base = Path(args.alignment) if args.alignment else root / "derived/alignment" / args.route
+        alignment_path = alignment_base / f"{identity.segment_index}.jsonl"
+        if args.alignment and not alignment_path.is_file():
+            raise ValueError(f"alignment missing: {alignment_path}")
+        plans.append((identity.segment_index, video, segment_output,
+                      alignment_path if alignment_path.is_file() else None))
+        # [dataset-review] - END
+
+    all_rows = []
+    summaries = []
+    for index, video, segment_output, alignment_path in plans:
+        print(f"Extracting segment {index}: {video}", file=sys.stderr, flush=True)
+        frames = extract_frames(
+            video, segment_output, fps=None if args.all_frames else args.fps,
+            start_s=args.start, end_s=args.end, ffmpeg=args.ffmpeg, ffprobe=args.ffprobe, overwrite=args.overwrite,
+            alignment=alignment_path, route_id=args.route, segment_index=index,
+        )
+        rows = extracted_frame_rows(frames, route_id=args.route, segment_index=index,
+                                    alignment=alignment_path)
+        manifest = segment_output / "frames.jsonl"
+        _write_jsonl(manifest, rows)
+        all_rows.extend(rows)
+        summaries.append({"segment_index": index, "frame_count": len(rows),
+                          "output": str(segment_output), "manifest": str(manifest)})
+    if args.manifest:
+        _write_jsonl(Path(args.manifest), all_rows)
+    print(json.dumps({
+        "route": args.route, "frame_count": len(all_rows), "output": str(output),
+        "segments": summaries, "manifest": args.manifest,
+        "timing": "capture_aligned" if all_rows and all(r["alignment_status"] == "exact" for r in all_rows) else "media_only",
+        "capture_time_established": bool(all_rows) and all(r["alignment_status"] == "exact" for r in all_rows),
+    }, indent=2, sort_keys=True))
+    return 0
+# [route-extract] - END
+
+
+def _cmd_log_metadata(args: argparse.Namespace) -> int:
+    events = read_log_metadata(
+        Path(args.log),
+        openpilot_root=Path(args.openpilot_root) if args.openpilot_root else None,
+        python_executable=args.openpilot_python,
+        opendbc_root=Path(args.opendbc_root) if args.opendbc_root else None,
+    )
+    rows = [event.to_dict() for event in events]
+    _write_jsonl(Path(args.output) if args.output else None, rows)
+    return 0
+
+
+def _cmd_align_route(args: argparse.Namespace) -> int:
+    stream = args.stream
+    try:
+        service = _STREAM_TO_ENCODE_SERVICE[stream]
+    except KeyError as exc:
+        raise ValueError(f"unsupported stream {stream!r}") from exc
+
+    frames = probe_frame_timestamps(Path(args.video), ffprobe=args.ffprobe)
+    events = read_log_metadata(
+        Path(args.log),
+        openpilot_root=Path(args.openpilot_root) if args.openpilot_root else None,
+        python_executable=args.openpilot_python,
+        opendbc_root=Path(args.opendbc_root) if args.opendbc_root else None,
+    )
+    indexes = encode_events(events, service=service, segment_num=args.segment_num)
+    aligned, report = align_comma_segment(frames, indexes, segment_num=args.segment_num)
+
+    rows: list[dict[str, Any]] = [{
+        "kind": "alignment_report",
+        "stream": stream,
+        "video": str(Path(args.video)),
+        "log": str(Path(args.log)),
+        # [frame-provenance] - START
+        "source_video_sha256": sha256_of(Path(args.video)),
+        "source_log_sha256": sha256_of(Path(args.log)),
+        # [frame-provenance] - END
+        "segment_num": args.segment_num,
+        **report.to_dict(),
+    }]
+    rows.extend({"kind": "frame", **frame.to_dict()} for frame in aligned)
+    _write_jsonl(Path(args.output), rows)
+
+    print(json.dumps({
+        "output": str(Path(args.output)),
+        "stream": stream,
+        "segment_num": args.segment_num,
+        **report.to_dict(),
+    }, indent=2, sort_keys=True))
+    return 0 if report.unresolved == 0 else 1
+
+
+def _cmd_alignment_report(args: argparse.Namespace) -> int:
+    rows = _read_jsonl(Path(args.alignment))
+    header = next((row for row in rows if row.get("kind") == "alignment_report"), None)
+    if header is None:
+        raise ValueError("alignment JSONL has no alignment_report record")
+    print(json.dumps(header, indent=2, sort_keys=True))
+    return 0
+
+
+def _cmd_find_candidates(args: argparse.Namespace) -> int:
+    events = read_log_metadata(
+        Path(args.log),
+        openpilot_root=Path(args.openpilot_root) if args.openpilot_root else None,
+        python_executable=args.openpilot_python,
+        opendbc_root=Path(args.opendbc_root) if args.opendbc_root else None,
+    )
+    candidates = find_speed_candidates(map_speed_events(events))
+
+    if args.alignment:
+        rows = _read_jsonl(Path(args.alignment))
+        aligned = [
+            comma_aligned_frame_from_dict(row)
+            for row in rows
+            if row.get("kind") == "frame"
+        ]
+        candidates = project_candidates_to_video(
+            candidates,
+            aligned,
+            max_error_ns=args.max_projection_error_ns,
+        )
+
+    _write_jsonl(
+        Path(args.output) if args.output else None,
+        [{"kind": "candidate", **candidate.to_dict()} for candidate in candidates],
+    )
+    return 0
+
+
+def _cmd_make_clips(args: argparse.Namespace) -> int:
+    rows = _read_jsonl(Path(args.candidates))
+    output_dir = Path(args.output)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    made: list[dict[str, Any]] = []
+    skipped = 0
+    for row in rows:
+        if row.get("kind") != "candidate":
+            continue
+        center = row.get("video_time_s")
+        if not isinstance(center, (int, float)) or isinstance(center, bool):
+            skipped += 1
+            continue
+        start = max(0.0, float(center) - args.before)
+        end = float(center) + args.after
+        candidate_id = str(row.get("candidate_id", f"candidate-{len(made)}"))
+        safe_id = "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in candidate_id)
+        out = output_dir / f"{safe_id}.mp4"
+        make_clip(
+            Path(args.video),
+            out,
+            start_s=start,
+            end_s=end,
+            ffmpeg=args.ffmpeg,
+            reencode=args.reencode,
+        )
+        made.append({
+            "kind": "clip",
+            "candidate_id": candidate_id,
+            "clip_path": str(out),
+            "start_s": start,
+            "end_s": end,
+            "source_video": str(Path(args.video)),
+            "candidate_reason": row.get("candidate_reason"),
+            "source_log_mono_time": row.get("log_mono_time"),
+        })
+
+    if args.manifest:
+        _write_jsonl(Path(args.manifest), made)
+    print(json.dumps({
+        "clips_created": len(made),
+        "candidates_without_video_time": skipped,
+        "output": str(output_dir),
+        "manifest": args.manifest,
+    }, indent=2, sort_keys=True))
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# [nnslr-sync] - START
+def _cmd_sync_routes(args: argparse.Namespace) -> int:
+    try:
+        report = sync_route(
+            route=args.route, host=args.host, segments=args.segments,
+            camera=args.camera, data_root=args.data_root, dry_run=args.dry_run,
+        )
+    except OSError as exc:
+        print(f"error: sync-routes: {exc}", file=sys.stderr)
+        return 2
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0 if report["ok"] else 1
+# [nnslr-sync] - END
+
+
+# [training-baseline] - START
+def _cmd_train(args: argparse.Namespace) -> int:
+    from nnslr_tools.preannotate import resolve_data_root
+    from nnslr_tools.training import (
+        DetectorTrainConfig,
+        TrainConfig,
+        prepare_detector_training,
+        prepare_reader_training,
+        train_detector,
+        train_reader,
+    )
+
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    kind = args.dataset_kind
+    default_dataset = (
+        root / "datasets" / "training_candidate_dataset" / "objects.jsonl"
+        if kind == "training-candidate"
+        else root / "annotations" / "objects.jsonl"
+    )
+    dataset = Path(args.dataset) if args.dataset else default_dataset
+    splits = Path(args.splits) if args.splits else root / "splits" / "latest.json"
+
+    if args.task == "detector":
+        plan = prepare_detector_training(dataset, splits, root, dataset_kind=kind)
+    else:
+        plan = prepare_reader_training(dataset, splits, root, dataset_kind=kind)
+
+    if args.dry_run:
+        summary = dict(plan)
+        detail_key = "frames" if args.task == "detector" else "records"
+        summary["record_count"] = len(plan[detail_key])
+        summary.pop(detail_key, None)
+        print(json.dumps(summary, indent=2, sort_keys=True))
+        return 0 if plan["trainable"] else 1
+
+    if not args.output:
+        raise ValueError("--output is required for a real training run")
+
+    if args.task == "detector":
+        config = DetectorTrainConfig(
+            epochs=args.epochs,
+            batch_size=args.batch_size if args.batch_size is not None else 8,
+            learning_rate=args.learning_rate if args.learning_rate is not None else 1e-4,
+            weight_decay=args.weight_decay,
+            num_workers=args.num_workers,
+            seed=args.seed,
+            device=args.device,
+            pretrained_backbone=args.pretrained,
+            amp=not args.no_amp,
+        )
+        result = train_detector(plan, root, Path(args.output), config)
+    else:
+        config = TrainConfig(
+            epochs=args.epochs,
+            batch_size=args.batch_size if args.batch_size is not None else 64,
+            learning_rate=args.learning_rate if args.learning_rate is not None else 3e-4,
+            weight_decay=args.weight_decay,
+            input_size=args.input_size,
+            num_workers=args.num_workers,
+            seed=args.seed,
+            device=args.device,
+            pretrained=args.pretrained,
+            amp=not args.no_amp,
+        )
+        result = train_reader(plan, root, Path(args.output), config)
+
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+# [training-baseline] - END
+
+
+# [evaluation-baseline] - START
+def _cmd_evaluate(args: argparse.Namespace) -> int:
+    from nnslr_tools.preannotate import resolve_data_root
+    from nnslr_tools.training import prepare_detector_training, prepare_reader_training
+
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    kind = args.dataset_kind
+    default_dataset = (
+        root / "datasets" / "training_candidate_dataset" / "objects.jsonl"
+        if kind == "training-candidate"
+        else root / "annotations" / "objects.jsonl"
+    )
+    dataset = Path(args.dataset) if args.dataset else default_dataset
+    splits = Path(args.splits) if args.splits else root / "splits" / "latest.json"
+
+    if args.task == "detector":
+        plan = prepare_detector_training(dataset, splits, root, dataset_kind=kind)
+        selected = [r for r in plan["frames"] if r["split"] == args.partition]
+    else:
+        plan = prepare_reader_training(dataset, splits, root, dataset_kind=kind)
+        selected = [r for r in plan["records"] if r["split"] == args.partition]
+
+    if args.dry_run:
+        report = {
+            "task": args.task,
+            "partition": args.partition,
+            "dataset_kind": kind,
+            "dataset_sha256": plan["dataset_sha256"],
+            "split_sha256": plan["split_sha256"],
+            "sample_count": len(selected),
+            "checkpoint_required_for_execution": True,
+        }
+        print(json.dumps(report, indent=2, sort_keys=True))
+        return 0 if selected else 1
+
+    if not args.checkpoint:
+        raise ValueError("--checkpoint is required unless --dry-run")
+
+    from nnslr_tools.evaluation import evaluate_detector, evaluate_reader, write_evaluation
+
+    if args.task == "detector":
+        report = evaluate_detector(
+            plan,
+            Path(args.checkpoint),
+            root,
+            partition=args.partition,
+            device_name=args.device,
+            score_threshold=args.score_threshold,
+            iou_threshold=args.iou_threshold,
+        )
+    else:
+        report = evaluate_reader(
+            plan,
+            Path(args.checkpoint),
+            root,
+            partition=args.partition,
+            device_name=args.device,
+            batch_size=args.batch_size if args.batch_size is not None else 64,
+            num_workers=args.num_workers,
+        )
+    write_evaluation(report, Path(args.output) if args.output else None)
+    print(json.dumps(report, indent=2, sort_keys=True, allow_nan=False))
+    return 0
+# [evaluation-baseline] - END
+
+
+# [hard-example-mining] - START
+def _cmd_mine_hard_examples(args: argparse.Namespace) -> int:
+    from nnslr_tools.hard_examples import mine_file
+
+    report = mine_file(Path(args.evaluation), Path(args.output))
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0
+# [hard-example-mining] - END
+
+
+# [onnx-export] - START
+def _cmd_export_onnx(args: argparse.Namespace) -> int:
+    from nnslr_tools.exporting import export_detector_onnx, export_reader_onnx
+
+    if args.task == "detector":
+        report = export_detector_onnx(
+            Path(args.checkpoint),
+            Path(args.output),
+            verify=not args.no_verify,
+            input_width=args.detector_input_width,
+            input_height=args.detector_input_height,
+        )
+    else:
+        report = export_reader_onnx(
+            Path(args.checkpoint),
+            Path(args.output),
+            verify=not args.no_verify,
+        )
+    print(json.dumps(report, indent=2, sort_keys=True, allow_nan=False))
+    return 0
+# [onnx-export] - END
+
+
+# [offline-replay] - START
+def _cmd_replay(args: argparse.Namespace) -> int:
+    from nnslr_tools.preannotate import resolve_data_root
+    from nnslr_tools.replay import load_route_frames, replay_bundle_route, replay_route
+
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    frames, manifests = load_route_frames(root, args.route)
+
+    if args.bundle and (args.detector_checkpoint or args.reader_checkpoint):
+        raise ValueError("--bundle cannot be combined with checkpoint arguments")
+
+    if args.dry_run:
+        report = {
+            "valid": True,
+            "route_id": args.route,
+            "frame_count": len(frames),
+            "manifests": manifests,
+            "gpu_required": False,
+            "checkpoints_required_for_execution": not bool(args.bundle),
+            "bundle": args.bundle,
+        }
+        if args.bundle:
+            from nnslr_tools.bundle_runtime import reference_runtime_info
+            report["bundle_runtime"] = reference_runtime_info(Path(args.bundle))
+        print(json.dumps(report, indent=2, sort_keys=True))
+        return 0 if frames else 1
+
+    if not args.output:
+        raise ValueError("--output is required unless --dry-run")
+
+    if args.bundle:
+        report = replay_bundle_route(
+            root,
+            args.route,
+            Path(args.bundle),
+            Path(args.output),
+            detector_threshold=args.detector_threshold,
+            reader_threshold=args.reader_threshold,
+            max_detections=args.max_detections,
+        )
+    else:
+        if not args.detector_checkpoint or not args.reader_checkpoint:
+            raise ValueError(
+                "--detector-checkpoint and --reader-checkpoint are required "
+                "when --bundle is not used"
+            )
+        report = replay_route(
+            root,
+            args.route,
+            Path(args.detector_checkpoint),
+            Path(args.reader_checkpoint),
+            Path(args.output),
+            device_name=args.device,
+            detector_threshold=args.detector_threshold,
+            reader_threshold=args.reader_threshold,
+            max_detections=args.max_detections,
+        )
+    print(json.dumps(report, indent=2, sort_keys=True, allow_nan=False))
+    return 0
+# [offline-replay] - END
+
+
+# [model-bundle] - START
+def _cmd_package_model(args: argparse.Namespace) -> int:
+    from nnslr_tools.bundle import package_model
+
+    report = package_model(
+        Path(args.detector_onnx),
+        Path(args.detector_contract),
+        Path(args.reader_onnx),
+        Path(args.reader_contract),
+        Path(args.output),
+    )
+    print(json.dumps(report, indent=2, sort_keys=True, allow_nan=False))
+    return 0
+
+
+def _cmd_verify_bundle(args: argparse.Namespace) -> int:
+    from nnslr_tools.bundle import verify_bundle
+
+    report = verify_bundle(Path(args.bundle))
+    print(json.dumps(report, indent=2, sort_keys=True, allow_nan=False))
+    return 0
+# [model-bundle] - END
+
+
+# [core-export] - START
+def _cmd_export_core(args: argparse.Namespace) -> int:
+    from nnslr_tools.core_snapshot import export_core_snapshot, verify_core_snapshot
+
+    repo_root = Path(__file__).resolve().parents[2]
+    manifest, manifest_path = export_core_snapshot(repo_root, Path(args.output))
+    verify_core_snapshot(Path(args.output), manifest_path)
+    print(json.dumps({
+        "valid": True,
+        "output": str(Path(args.output)),
+        "manifest": str(manifest_path),
+        **manifest.to_dict(),
+    }, indent=2, sort_keys=True))
+    return 0
+# [core-export] - END
+
+
+# ---------------------------------------------------------------------------
+# Argument parsing
+# ---------------------------------------------------------------------------
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="nnslr",
+        description=(
+            "NNSLR — NN Vision Speed Limit tooling. Advisory-only project: "
+            "never part of the vehicle control path. T1 ships the domain "
+            "contracts, a validation command and the synthetic quickstart."
+        ),
+    )
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p_ver = sub.add_parser("version", help="print package versions")
+    p_ver.set_defaults(func=lambda a: _cmd_version(a))
+
+    p_env = sub.add_parser(
+        "env", help="machine-readable environment report (GPU probe only with --gpu-smoke)"
+    )
+    p_env.add_argument(
+        "--gpu-smoke",
+        action="store_true",
+        help="explicitly run a CUDA FP16 forward/backward smoke test; allocates GPU memory",
+    )
+    p_env.add_argument(
+        "--gpu-device",
+        type=int,
+        default=0,
+        help="CUDA device index for --gpu-smoke (default: 0)",
+    )
+    p_env.set_defaults(func=lambda a: _cmd_env(a))
+
+    p_check = sub.add_parser(
+        "check-environment",
+        help="alias of env; GPU probe only with --gpu-smoke",
+    )
+    p_check.add_argument(
+        "--gpu-smoke",
+        action="store_true",
+        help="explicitly run a CUDA FP16 forward/backward smoke test; allocates GPU memory",
+    )
+    p_check.add_argument(
+        "--gpu-device",
+        type=int,
+        default=0,
+        help="CUDA device index for --gpu-smoke (default: 0)",
+    )
+    p_check.set_defaults(func=lambda a: _cmd_env(a))
+
+    p_val = sub.add_parser(
+        "validate-batch",
+        help="validate an ObservationBatch JSON file against the §7 contract",
+    )
+    p_val.add_argument("batch", help="path to the batch JSON file")
+    p_val.add_argument(
+        "--now-mono-ns",
+        type=int,
+        required=True,
+        help="current session-monotonic time in ns (injected, never read live)",
+    )
+    p_val.add_argument(
+        "--expected-session-id",
+        required=True,
+        help="session the batch must belong to",
+    )
+    p_val.set_defaults(func=_cmd_validate_batch)
+
+    p_self = sub.add_parser("selftest", help="run the bundled synthetic fixtures (CPU quickstart)")
+    p_self.set_defaults(func=lambda a: _selftest())
+
+    # [nnslr-sync] - START
+    p_sync = sub.add_parser("sync-routes", help="copy one comma route via SSH/rsync (front camera + full log)")
+    p_sync.add_argument("--route", required=True, help="route ID to copy (always explicit)")
+    p_sync.add_argument("--host", help="SSH alias, hostname, IPv4 or user@host (default: NNSLR_COMMA_HOST or comma)")
+    p_sync.add_argument("--segments", default="all", help="all (default), 0-3, or 0,2,4-6")
+    p_sync.add_argument("--camera", choices=("narrow", "wide", "both"), default="narrow",
+                        help="narrow=fcamera (default), wide=ecamera, both=both road cameras")
+    p_sync.add_argument("--data-root", help="destination root (default: NNSLR_DATA_ROOT or /srv/nnslr-data)")
+    p_sync.add_argument("--dry-run", action="store_true", help="inventory via SSH and print the plan without copying or writing files")
+    p_sync.set_defaults(func=_cmd_sync_routes)
+    # [nnslr-sync] - END
+
+    p_route = sub.add_parser("route-manifest", help="inventory LOCAL route segments and preserve gaps")
+    p_route.add_argument("route", help="route directory under the data root, or one local segment directory")
+    p_route.add_argument("--data-root")
+    p_route.add_argument("--output", required=True)
+    p_route.set_defaults(func=_cmd_route_manifest)
+
+    p_inspect = sub.add_parser("inspect-manifest", help="summarize a route manifest JSONL")
+    p_inspect.add_argument("manifest")
+    p_inspect.set_defaults(func=_cmd_inspect_manifest)
+
+    p_probe = sub.add_parser("video-probe", help="probe a LOCAL camera video with ffprobe")
+    p_probe.add_argument("video")
+    p_probe.add_argument("--ffprobe")
+    p_probe.set_defaults(func=_cmd_video_probe)
+
+    p_extract = sub.add_parser("extract-frames", help="extract LOCAL video frames with ffmpeg")
+    # [route-extract] - START
+    extract_source = p_extract.add_mutually_exclusive_group(required=True)
+    extract_source.add_argument("--video", help="one local video; requires --output")
+    extract_source.add_argument("--route", help="automatically extract fcamera.hevc from every local segment of this route")
+    p_extract.add_argument("--data-root", help="with --route: NNSLR_DATA_ROOT or /srv/nnslr-data by default")
+    p_extract.add_argument("--output", help="with --route: defaults to <data-root>/derived/frames/<route>; required with --video")
+    # [route-extract] - END
+    p_extract.add_argument("--fps", type=float, default=1.0, help="sampling FPS (default: 1 for broad discovery)")
+    p_extract.add_argument("--all-frames", action="store_true", help="decode every frame instead of sampling")
+    p_extract.add_argument("--start", type=float)
+    p_extract.add_argument("--end", type=float)
+    p_extract.add_argument("--ffmpeg")
+    # [frame-provenance] - START
+    p_extract.add_argument("--ffprobe")
+    p_extract.add_argument("--alignment", help="verified alignment JSONL; with --route, directory containing <segment>.jsonl")
+    # [frame-provenance] - END
+    # [route-extract] - START
+    p_extract.add_argument("--manifest", help="optional combined frame JSONL; --route also writes frames.jsonl in each segment directory")
+    # [route-extract] - END
+    p_extract.add_argument("--overwrite", action="store_true")
+    p_extract.set_defaults(func=_cmd_extract_frames)
+
+    p_log = sub.add_parser("log-metadata", help="read LOCAL qlog/rlog camera/map metadata")
+    p_log.add_argument("log")
+    p_log.add_argument("--openpilot-root")
+    p_log.add_argument("--openpilot-python")
+    # [schema-reader] - START
+    p_log.add_argument("--opendbc-root", help="compatible car.capnp checkout (default: NNSLR_OPENDBC_ROOT or embedded opendbc)")
+    # [schema-reader] - END
+    p_log.add_argument("--output")
+    p_log.set_defaults(func=_cmd_log_metadata)
+
+    p_align = sub.add_parser("align-route", help="align LOCAL video presentation order to EncodeIndex")
+    p_align.add_argument("--video", required=True)
+    p_align.add_argument("--log", required=True)
+    p_align.add_argument("--stream", required=True, choices=sorted(_STREAM_TO_ENCODE_SERVICE))
+    p_align.add_argument("--segment-num", required=True, type=int)
+    p_align.add_argument("--output", required=True)
+    p_align.add_argument("--openpilot-root")
+    p_align.add_argument("--openpilot-python")
+    # [schema-reader] - START
+    p_align.add_argument("--opendbc-root", help="compatible car.capnp checkout (default: NNSLR_OPENDBC_ROOT or embedded opendbc)")
+    # [schema-reader] - END
+    p_align.add_argument("--ffprobe")
+    p_align.set_defaults(func=_cmd_align_route)
+
+    p_report = sub.add_parser("alignment-report", help="print the report header from alignment JSONL")
+    p_report.add_argument("alignment")
+    p_report.set_defaults(func=_cmd_alignment_report)
+
+    p_candidates = sub.add_parser("find-candidates", help="find map transitions as search hints, never ground truth")
+    p_candidates.add_argument("log")
+    p_candidates.add_argument("--openpilot-root")
+    p_candidates.add_argument("--openpilot-python")
+    # [schema-reader] - START
+    p_candidates.add_argument("--opendbc-root", help="compatible car.capnp checkout (default: NNSLR_OPENDBC_ROOT or embedded opendbc)")
+    # [schema-reader] - END
+    p_candidates.add_argument("--alignment")
+    p_candidates.add_argument("--output")
+    p_candidates.add_argument("--max-projection-error-ns", type=int, default=250_000_000)
+    p_candidates.set_defaults(func=_cmd_find_candidates)
+
+    p_clips = sub.add_parser("make-clips", help="make LOCAL review clips around projected candidates")
+    p_clips.add_argument("--video", required=True)
+    p_clips.add_argument("--candidates", required=True)
+    p_clips.add_argument("--output", required=True)
+    p_clips.add_argument("--manifest")
+    p_clips.add_argument("--before", type=float, default=30.0)
+    p_clips.add_argument("--after", type=float, default=30.0)
+    p_clips.add_argument("--ffmpeg")
+    p_clips.add_argument("--reencode", action="store_true")
+    p_clips.set_defaults(func=_cmd_make_clips)
+
+    # [preannotation] - START
+    p_pre = sub.add_parser("preannotate", help="propose sign boxes/values on all extracted route frames (CPU)")
+    p_pre.add_argument("--route", required=True)
+    p_pre.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or /srv/nnslr-data")
+    p_pre.add_argument("--confidence", type=float, default=.25)
+    p_pre.set_defaults(func=_cmd_preannotate)
+    p_review = sub.add_parser("review", help="open the latest route annotation report through a local HTTP server")
+    p_review.add_argument("--route", required=True)
+    p_review.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or /srv/nnslr-data")
+    p_review.add_argument("--host", default="127.0.0.1", help="listen address; default: local only")
+    p_review.add_argument("--port", type=int, default=8765)
+    p_review.set_defaults(func=_cmd_review)
+    # [preannotation] - END
+
+    # [reviewed-dataset] - START
+    p_import = sub.add_parser("import-annotations", help="import explicitly reviewed annotations into the canonical dataset")
+    p_import.add_argument("inputs", nargs="*", help="review JSONL files; default: <data-root>/annotations/inbox/*.jsonl")
+    p_import.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or /srv/nnslr-data")
+    # [model-review] - START
+    p_import.add_argument("--output", help="default: gold <data-root>/annotations/objects.jsonl; training-candidate <data-root>/datasets/training_candidate_dataset/objects.jsonl")
+    # [model-review] - END
+    p_import.set_defaults(func=_cmd_dataset)
+    p_validate = sub.add_parser("validate-dataset", help="validate reviewed labels, images, hashes and capture provenance")
+    # [model-review] - START
+    p_validate.add_argument("dataset", nargs="?", help="default: gold <data-root>/annotations/objects.jsonl; training-candidate <data-root>/datasets/training_candidate_dataset/objects.jsonl")
+    # [model-review] - END
+    p_validate.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or /srv/nnslr-data")
+    p_validate.add_argument("--splits", help="also check a frozen split for leakage and dataset identity")
+    p_validate.set_defaults(func=_cmd_dataset)
+    p_splits = sub.add_parser("build-splits", help="freeze deterministic route/site-connected dataset partitions")
+    # [model-review] - START
+    p_splits.add_argument("dataset", nargs="?", help="default: gold <data-root>/annotations/objects.jsonl; training-candidate <data-root>/datasets/training_candidate_dataset/objects.jsonl")
+    # [model-review] - END
+    p_splits.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or /srv/nnslr-data")
+    p_splits.add_argument("--seed", type=int, default=0)
+    p_splits.add_argument("--output", help="default: <data-root>/splits/<sha256>.json (immutable)")
+    p_splits.set_defaults(func=_cmd_dataset)
+    # [reviewed-dataset] - END
+    # [model-review] - START
+    for _parser in (p_import, p_validate, p_splits):
+        _parser.add_argument("--dataset-kind", choices=("gold", "training-candidate"), default="gold",
+                             help="gold: human review only; training-candidate: human + model review (default: gold)")
+    # [model-review] - END
+    # [training-baseline] - START
+    p_train = sub.add_parser(
+        "train",
+        help="train reader or detector baselines; use --dry-run for a CPU-only plan",
+    )
+    p_train.add_argument("dataset", nargs="?", help="canonical dataset JSONL; defaults from --dataset-kind")
+    p_train.add_argument("--task", choices=("reader", "detector"), default="reader",
+                         help="baseline task to train (default: reader)")
+    p_train.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or /srv/nnslr-data")
+    p_train.add_argument("--splits", help="frozen split JSON; default: <data-root>/splits/latest.json")
+    p_train.add_argument("--dataset-kind", choices=("gold", "training-candidate"), default="gold")
+    p_train.add_argument("--dry-run", action="store_true", help="validate and print the exact plan without importing torch or touching a GPU")
+    p_train.add_argument("--output", help="new output directory; required unless --dry-run")
+    p_train.add_argument("--device", choices=("cuda", "cpu"), default="cuda")
+    p_train.add_argument("--epochs", type=int, default=20)
+    p_train.add_argument("--batch-size", type=int, default=None,
+                         help="default: reader 64, detector 8")
+    p_train.add_argument("--learning-rate", type=float, default=None,
+                         help="default: reader 3e-4, detector 1e-4")
+    p_train.add_argument("--weight-decay", type=float, default=1e-4)
+    p_train.add_argument("--input-size", type=int, default=160)
+    p_train.add_argument("--num-workers", type=int, default=4)
+    p_train.add_argument("--seed", type=int, default=0)
+    p_train.add_argument("--pretrained", action="store_true",
+                         help="allow torchvision ImageNet weights for the reader/backbone if not cached")
+    p_train.add_argument("--no-amp", action="store_true", help="disable CUDA automatic mixed precision")
+    p_train.set_defaults(func=_cmd_train)
+    # [training-baseline] - END
+
+    # [evaluation-baseline] - START
+    p_eval = sub.add_parser(
+        "evaluate",
+        help="evaluate reader or detector checkpoints on a frozen dataset partition",
+    )
+    p_eval.add_argument("dataset", nargs="?", help="canonical dataset JSONL; defaults from --dataset-kind")
+    p_eval.add_argument("--task", choices=("reader", "detector"), default="reader")
+    p_eval.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or /srv/nnslr-data")
+    p_eval.add_argument("--splits", help="frozen split JSON; default: <data-root>/splits/latest.json")
+    p_eval.add_argument("--dataset-kind", choices=("gold", "training-candidate"), default="gold")
+    p_eval.add_argument(
+        "--partition",
+        choices=("train", "validation", "test", "route-held-out", "hard-negative"),
+        default="test",
+    )
+    p_eval.add_argument("--checkpoint", help="reader-best.pt or detector-best.pt; required unless --dry-run")
+    p_eval.add_argument("--device", choices=("cuda", "cpu"), default="cuda")
+    p_eval.add_argument("--batch-size", type=int, default=None, help="reader evaluation batch size (default: 64)")
+    p_eval.add_argument("--num-workers", type=int, default=4)
+    p_eval.add_argument("--score-threshold", type=float, default=.25, help="detector score threshold")
+    p_eval.add_argument("--iou-threshold", type=float, default=.5, help="detector IoU match threshold")
+    p_eval.add_argument("--dry-run", action="store_true", help="validate the evaluation population without importing torch")
+    p_eval.add_argument("--output", help="optional JSON report path")
+    p_eval.set_defaults(func=_cmd_evaluate)
+    # [evaluation-baseline] - END
+
+    # [hard-example-mining] - START
+    p_mine = sub.add_parser(
+        "mine-hard-examples",
+        help="extract reader/detector errors from an evaluation JSON report",
+    )
+    p_mine.add_argument("evaluation", help="JSON report produced by nnslr evaluate --output")
+    p_mine.add_argument("--output", required=True, help="output JSONL manifest of hard examples")
+    p_mine.set_defaults(func=_cmd_mine_hard_examples)
+    # [hard-example-mining] - END
+
+    # [onnx-export] - START
+    p_export = sub.add_parser(
+        "export-onnx",
+        help="export a trained reader/detector checkpoint to a verified ONNX reference artifact",
+    )
+    p_export.add_argument("--task", choices=("reader", "detector"), default="reader")
+    p_export.add_argument("--checkpoint", required=True, help="reader-best.pt or detector-best.pt checkpoint")
+    p_export.add_argument("--output", required=True, help="target .onnx path")
+    p_export.add_argument("--detector-input-width", type=int, default=1344,
+                          help="detector native input width (default: narrow road 1344)")
+    p_export.add_argument("--detector-input-height", type=int, default=760,
+                          help="detector native input height (default: narrow road 760)")
+    p_export.add_argument("--no-verify", action="store_true", help="skip ONNX Runtime numerical parity verification")
+    p_export.set_defaults(func=_cmd_export_onnx)
+    # [onnx-export] - END
+
+    # [offline-replay] - START
+    p_replay = sub.add_parser(
+        "replay",
+        help="run offline detector -> reader perception over extracted route frames",
+    )
+    p_replay.add_argument("--route", required=True, help="local extracted route ID")
+    p_replay.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or /srv/nnslr-data")
+    p_replay.add_argument("--bundle", help="verified packaged ONNX bundle; uses CPU reference runtime")
+    p_replay.add_argument("--detector-checkpoint", help="detector-best.pt")
+    p_replay.add_argument("--reader-checkpoint", help="reader-best.pt")
+    p_replay.add_argument("--output", help="output JSONL; required unless --dry-run")
+    p_replay.add_argument("--device", choices=("cuda", "cpu"), default="cuda")
+    p_replay.add_argument("--detector-threshold", type=float, default=.25)
+    p_replay.add_argument("--reader-threshold", type=float, default=0.0)
+    p_replay.add_argument("--max-detections", type=int, default=20)
+    p_replay.add_argument("--dry-run", action="store_true", help="validate frame manifests only; no torch/GPU")
+    p_replay.set_defaults(func=_cmd_replay)
+    # [offline-replay] - END
+
+    # [model-bundle] - START
+    p_package = sub.add_parser(
+        "package-model",
+        help="package verified detector+reader ONNX artifacts into an immutable bundle",
+    )
+    p_package.add_argument("--detector-onnx", required=True)
+    p_package.add_argument("--detector-contract", required=True)
+    p_package.add_argument("--reader-onnx", required=True)
+    p_package.add_argument("--reader-contract", required=True)
+    p_package.add_argument("--output", required=True, help="new bundle directory")
+    p_package.set_defaults(func=_cmd_package_model)
+
+    p_verify = sub.add_parser(
+        "verify-bundle",
+        help="verify bundle membership, hashes, provenance and advisory capability",
+    )
+    p_verify.add_argument("bundle", help="bundle directory")
+    p_verify.set_defaults(func=_cmd_verify_bundle)
+    # [model-bundle] - END
+
+    # [core-export] - START
+    p_core = sub.add_parser(
+        "export-core",
+        help="export and verify the portable stdlib-only speed_vision_core snapshot",
+    )
+    p_core.add_argument("--output", required=True, help="new destination directory for speed_vision_core")
+    p_core.set_defaults(func=_cmd_export_core)
+    # [core-export] - END
+
+    return parser
+
+
+# [reviewed-dataset] - START
+def _cmd_dataset(args: argparse.Namespace) -> int:
+    from nnslr_tools.annotations import import_reviews, load_jsonl, validate_dataset
+    from nnslr_tools.preannotate import resolve_data_root
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    # [model-review] - START
+    kind = args.dataset_kind
+    default_dataset = (root / "datasets" / "training_candidate_dataset" / "objects.jsonl"
+                       if kind == "training-candidate" else root / "annotations" / "objects.jsonl")
+    # [model-review] - END
+    try:
+        if hasattr(args, "inputs"):
+            inputs = [Path(p) for p in args.inputs] if args.inputs else sorted((root / "annotations/inbox").glob("*.jsonl"))
+            # [model-review] - START
+            output = Path(args.output) if args.output else default_dataset
+            report = import_reviews(inputs, root, output, dataset_kind=kind)
+            # [model-review] - END
+        else:
+            # [model-review] - START
+            dataset = Path(args.dataset) if args.dataset else default_dataset
+            # [model-review] - END
+            rows = load_jsonl(dataset)
+            if hasattr(args, "seed"):
+                from nnslr_tools.splits import build_splits
+                # [model-review] - START
+                report = build_splits(rows, root, seed=args.seed, output=Path(args.output) if args.output else None,
+                                      dataset_kind=kind)
+                # [model-review] - END
+            else:
+                # [model-review] - START
+                report = validate_dataset(rows, root, dataset_kind=kind)
+                # [model-review] - END
+                if args.splits and report["valid"]:
+                    from nnslr_tools.splits import validate_splits
+                    report["errors"].extend(validate_splits(rows, json.loads(Path(args.splits).read_text()), report["dataset_sha256"], dataset_kind=kind))
+                    report["valid"] = not report["errors"]
+    except (ValueError, OSError) as exc:
+        report = {"valid": False, "errors": [{"reason": getattr(exc, "reason", "dataset_io_error"), "detail": str(exc)}]}
+    print(json.dumps(report, indent=2, sort_keys=True, allow_nan=False))
+    return 0 if report["valid"] else 1
+# [reviewed-dataset] - END
+
+
+# [preannotation] - START
+def _cmd_preannotate(args: argparse.Namespace) -> int:
+    from nnslr_tools.preannotate import run_preannotation
+    result = run_preannotation(args.route, data_root=Path(args.data_root) if args.data_root else None,
+                               confidence=args.confidence)
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+def _cmd_review(args: argparse.Namespace) -> int:
+    from nnslr_tools.review import serve_review
+    serve_review(args.route, data_root=Path(args.data_root) if args.data_root else None,
+                 host=args.host, port=args.port)
+    return 0
+# [preannotation] - END
+
+
+def _cmd_version(args: argparse.Namespace) -> int:
+    print(f"nnslr_tools {__version__}")
+    print("speed_vision_core 0.1.0")
+    print(f"python {platform.python_version()}")
+    print(f"schema_version {SUPPORTED_SCHEMA_VERSION}")
+    print(f"max_detections_per_batch {MAX_DETECTIONS_PER_BATCH}")
+    return 0
+
+
+def _cmd_env(args: argparse.Namespace) -> int:
+    report = collect_env_report()
+    if getattr(args, "gpu_smoke", False):
+        from nnslr_tools.training import gpu_smoke
+        try:
+            report["gpu"] = {"available": True, **gpu_smoke(args.gpu_device)}
+        except ValueError as exc:
+            report["gpu"] = {
+                "status": "failed",
+                "available": False,
+                "error": str(exc),
+            }
+    print(json.dumps(report, indent=2))
+    return 1 if report["gpu"]["status"] == "failed" else 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        return int(args.func(args))
+    except NnslerContractError as exc:
+        print(f"error: {exc.reason_code}: {exc.message}", file=sys.stderr)
+        return 1
+    except json.JSONDecodeError as exc:
+        print(f"error: invalid JSON: {exc}", file=sys.stderr)
+        return 2
+    except (MediaToolError, CommaLogError, NnslerManifestError) as exc:
+        detail = getattr(exc, "detail", "")
+        stderr = getattr(exc, "stderr", "")
+        print(f"error: {exc}", file=sys.stderr)
+        if detail and detail not in str(exc):
+            print(detail, file=sys.stderr)
+        if stderr:
+            print(stderr, file=sys.stderr)
+        return 2
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+# [nnslr-t1] - END

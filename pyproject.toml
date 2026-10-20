@@ -1,0 +1,63 @@
+# [nnslr-t1] - START
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nnslr-tools"
+version = "0.1.0"
+description = "NN Vision Speed Limit (NNSLR) — standalone training, evaluation and pure reference core for a Swiss speed-sign recognizer. Advisory only; never in the control path."
+readme = "README.md"
+requires-python = ">=3.11"
+# T1 is dependency-free on purpose: the pure core and the CLI must import and
+# run without CUDA, PyTorch, tinygrad, openpilot or cereal.
+dependencies = []
+license = { text = "MIT" }
+authors = [{ name = "Cristian" }]
+keywords = ["openpilot", "sunnypilot", "speed-limit", "vision", "advisory"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Image Recognition",
+]
+
+[project.optional-dependencies]
+# The CPU test profile stays empty at T1 (stdlib-only tests). GPU/training
+# profiles are added by their owning tasks (T4+) and must never be required
+# by core/data/cli tests.
+cpu-test = []
+# [schema-reader] - START
+# Only the isolated log-reading interpreter needs these optional dependencies.
+log-reader = ["pycapnp>=2.0,<3", "zstandard>=0.22,<1"]
+# [preannotation] - START
+preannotate = ["onnxruntime>=1.20,<2", "Pillow>=11,<13", "numpy>=1.26,<3", "rapidocr==3.4.0"]
+# [preannotation] - END
+# [schema-reader] - END
+
+[project.scripts]
+nnslr = "nnslr_tools.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/cristianku/sunnypilot.speedlimits"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# The synthetic fixtures are package data: `nnslr selftest` must work from an
+# editable and a wheel install alike, not only from a full repo checkout.
+# [nnslr-t2] - START
+# T1 fixtures (top level) are iterated by `nnslr selftest`; T2 fixtures
+# (fixtures/t2/) are iterated by the manifest/align command and the T2 tests.
+# [nnslr-t2] - END
+[tool.setuptools.package-data]
+"nnslr_tools" = ["fixtures/*.json", "fixtures/t2/*.json", "review.html"]
+"speed_vision_core" = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = [
+  "gpu: real GPU workload tests (never run in the default CPU profile)",
+]
+# [nnslr-t1] - END
