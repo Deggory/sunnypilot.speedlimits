@@ -26,3 +26,17 @@ jobs:
           python -m pytest -q
           --confcutdir=integrations/sunnypilot/snapshot
           integrations/sunnypilot/snapshot/openpilot/sunnypilot/speed_vision/tests
+
+  checkpoint-tools:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install CPU-only CLI
+        run: python -m pip install -e . pytest
+      - name: Check syntax without a GPU
+        run: python -m compileall -q src/nnslr_tools scripts/publish_training_weights.py
+      - name: Test stable checkpoint helpers
+        run: python -m pytest -q tests/test_training_checkpoints.py
