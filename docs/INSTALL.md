@@ -46,7 +46,7 @@ uv pip install --python .venv/bin/python -e . pytest
 uv pip install --python .venv/bin/python -e ".[preannotate]"
 ```
 
-Adds `onnxruntime`, `Pillow`, `numpy` and `rapidocr==3.4.0` (CPU). `nnslr preannotate` downloads its models on the first run and checks their SHA-256; they are cached in `<data root>/models/preannotation/<sha256>/model.onnx`:
+Adds `onnxruntime`, `Pillow`, `numpy` and `rapidocr==3.4.0` (CPU). On a machine with an NVIDIA GPU (the V100 LXC) use the extra `preannotate-gpu` instead: `onnxruntime-gpu[cuda,cudnn]` below 1.27 with cuDNN 9.10.2.21 (CUDA 12: the CUDA 13 builds and the newer cuDNN no longer support the V100) instead of `onnxruntime`, and the detector, the road-surface model and the OCR run on the GPU (CPU fallback; `NNSLR_PREANNOTATE_DEVICE=cpu` forces the CPU). The two extras install the same `onnxruntime` module, so remove the other one first (`uv pip uninstall --python .venv/bin/python onnxruntime`); `helpers/update.sh` does this by itself when it finds an NVIDIA GPU. Each model uses `NNSLR_PREANNOTATE_THREADS` CPU threads (`helpers/1_prepare.sh`: cores / routes in parallel; default half of the cores). `nnslr preannotate` downloads its models on the first run and checks their SHA-256; they are cached in `<data root>/models/preannotation/<sha256>/model.onnx`:
 
 | Model | Source | License |
 | --- | --- | --- |

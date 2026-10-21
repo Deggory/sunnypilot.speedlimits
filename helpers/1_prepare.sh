@@ -104,6 +104,16 @@ while [ $# -gt 0 ]; do
 done
 
 [[ "$jobs" =~ ^[1-9][0-9]*$ ]] || die "--jobs vuole un numero da 1 in su"
+# Every pre-annotation uses its share of the cores: all of them across the routes prepared
+# together (nnslr_tools.onnx_device). The routes of --jobs inherit the value of the first call.
+if [ -z "${NNSLR_PREANNOTATE_THREADS:-}" ]; then
+  cores="$(nproc 2>/dev/null || echo 4)"
+  threads=$((cores / jobs))
+  if [ "$threads" -lt 2 ]; then
+    threads=2
+  fi
+  export NNSLR_PREANNOTATE_THREADS="$threads"
+fi
 [ -x "$NN" ] || die "manca $NN: crea l'ambiente come in docs/INSTALL.md (python -m venv .venv, pip install -e '.[preannotate]')"
 mkdir -p "$LOG_DIR"
 

@@ -20,12 +20,9 @@ class RoadTextDetector:
         for name, checksum in OCR_ASSETS.items():
             if sha256_of(assets/name) != checksum:
                 raise ValueError(f'OCR model checksum mismatch: {name}')
-        providers = onnx_device.providers(ort)
-        self.surface = ort.InferenceSession(str(model_path), sess_options=onnx_device.session_options(ort),
-                                           providers=providers)
-        use_cuda = False
-        if onnx_device.CUDA in providers:
-            use_cuda = True
+        self.surface = onnx_device.create_session(ort, model_path)
+        # The OCR goes on the GPU only when the GPU already worked for the surface model.
+        use_cuda = onnx_device.on_gpu(self.surface)
         self.ocr = rapidocr.RapidOCR(params={
             'Global.use_cls': False, 'Global.log_level': 'error',
             'EngineConfig.onnxruntime.intra_op_num_threads': onnx_device.threads(),

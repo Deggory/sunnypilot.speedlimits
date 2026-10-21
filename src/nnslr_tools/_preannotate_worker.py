@@ -29,9 +29,9 @@ def run(request):
 
     if sha256_of(Path(request['model_path'])) != MODEL_SHA256:
         raise ValueError('model checksum mismatch in worker')
-    session=ort.InferenceSession(request['model_path'],sess_options=onnx_device.session_options(ort),
-                                 providers=onnx_device.providers(ort))
-    # The provider really in use: CUDA can still fall back to the CPU (e.g. a missing library).
+    # First model of the worker: its probe decides GPU or CPU also for the road models and the OCR.
+    session=onnx_device.create_session(ort,request['model_path'],probe_shape=(1,3,640,640))
+    # The provider really in use: the GPU can fall back to the CPU.
     provider=session.get_providers()[0]
     print(f"Preannotation on {provider}, {onnx_device.threads()} CPU threads",file=sys.stderr,flush=True)
     if session.get_inputs()[0].shape != [1,3,640,640] or session.get_outputs()[0].shape != [1,86,8400]:

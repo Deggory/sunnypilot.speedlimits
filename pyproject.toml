@@ -32,6 +32,14 @@ cpu-test = []
 log-reader = ["pycapnp>=2.0,<3", "zstandard>=0.22,<1"]
 # [preannotation] - START
 preannotate = ["onnxruntime>=1.20,<2", "Pillow>=11,<13", "numpy>=1.26,<3", "rapidocr==3.4.0"]
+# The same on a machine with an NVIDIA GPU (the V100 LXC): the models run on the GPU
+# (nnslr_tools.onnx_device). [cuda,cudnn] brings the CUDA/cuDNN libraries as nvidia-* wheels.
+# Never together with "preannotate": both install the "onnxruntime" module (helpers/update.sh
+# removes the other one). Below 1.27: from 1.27 onnxruntime-gpu is built for CUDA 13, which no
+# longer supports Volta GPUs like the V100 (cuBLAS "architectural feature absent"). cuDNN pinned
+# to the one of torch cu126 in openpilot.distill: 9.27 has no V100 kernels ("no kernel image").
+preannotate-gpu = ["onnxruntime-gpu[cuda,cudnn]>=1.21,<1.27", "nvidia-cudnn-cu12==9.10.2.21",
+                   "Pillow>=11,<13", "numpy>=1.26,<3", "rapidocr==3.4.0"]
 # [preannotation] - END
 # [schema-reader] - END
 # Training-run tracking for the V100 environment (scripts/setup_v100_training_env.sh
