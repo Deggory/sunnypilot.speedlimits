@@ -9,7 +9,7 @@
 <p>Proposte di cartelli da un modello addestrato in Vietnam e numeri sull’asfalto da OCR verificato con segmentazione della strada. Modelli non validati sulle strade svizzere.
 Conferma solo ciò che riesci a vedere. Il numero proposto non è il limite applicabile alla vettura.</p>
 <!-- [reviewed-dataset] - START -->
-<label>Revisore <input id="reviewer" autocomplete="name" placeholder="Nome o pseudonimo"></label>
+<label>Revisore <input id="reviewer" autocomplete="name" maxlength="100" placeholder="Nome o pseudonimo"></label>
 <!-- [reviewed-dataset] - END -->
 <div class="toolbar"><button id="prev">← Precedente</button><span id="position"></span><button id="next">Successivo →</button><label style="margin:0"><input type="checkbox" id="only"> Solo frame con proposte</label><button id="export">Scarica revisioni JSONL</button></div>
 <p id="status"></p><p><span id="pending" class="failed"></span> <button id="retry" hidden>Riprova a salvare</button></p><p id="serverWarning" class="warning" role="alert"></p><p id="storageWarning" class="warning" role="alert"></p><p id="storageNote" class="note">Le modifiche sono salvate in questo browser. Esporta il JSONL per conservarle fuori dal browser; il file originale delle proposte resta invariato. Un frame senza riquadri non è automaticamente un esempio negativo: va controllato e confermato.</p>

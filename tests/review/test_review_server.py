@@ -82,6 +82,58 @@ def test_token_required_wrong_token_refused_and_cookie_accepted(tokened):
     assert status == 200, data
 
 
+def test_cookies_of_other_web_apps_do_not_hide_the_review_cookie(tokened):
+    server, root, rows = tokened
+    # Cookies of other apps on the same host come first and are not all valid for SimpleCookie.
+    foreign = 'prefs={"theme":"dark"}; abc; path=x; Secure; =empty; other=a b\\c'
+    status, response, data = server.request('GET', '/', headers={
+        'Cookie': f'{foreign}; {server.app.cookie_name}={TOKEN}'})
+    assert status == 200
+    status, response, data = server.post_frame(ROUTE, '0/0', page_body(rows[0]), headers={
+        'Cookie': f'{foreign}; {server.app.cookie_name}={TOKEN}; later=1'})
+    assert status == 200, data
+    status, response, data = server.request('GET', '/', headers={
+        'Cookie': f'{foreign}; {server.app.cookie_name}=wrong-token-000000000000'})
+    assert status == 403
+    status, response, data = server.request('GET', '/', headers={'Cookie': f'{foreign}; nnslr_review={TOKEN}'})
+    assert status == 403
+
+
+def test_idle_connections_are_closed_and_their_number_is_bounded(report, monkeypatch):
+    import socket
+    import time
+    from nnslr_tools import review
+    root, rows = report
+    monkeypatch.setattr(review, 'REQUEST_TIMEOUT_SECONDS', 1.0)
+    monkeypatch.setattr(review, 'MAX_CONNECTIONS', 2)
+    server = RunningServer(root, token=TOKEN, require_token=True)
+    idle = []
+    try:
+        for number in range(3):
+            connection = socket.create_connection(('127.0.0.1', server.port), timeout=5)
+            idle.append(connection)
+        # The third connection finds no free slot and is closed at once, without a token check.
+        started = time.monotonic()
+        assert idle[2].recv(1) == b''
+        assert time.monotonic() - started < 0.9
+        # The first two send nothing and are closed by the server timeout.
+        assert idle[0].recv(1) == b''
+        assert idle[1].recv(1) == b''
+        status = None
+        deadline = time.monotonic() + 5
+        while status != 403 and time.monotonic() < deadline:
+            try:
+                status = server.request('GET', '/')[0]
+            except (ConnectionError, OSError):
+                time.sleep(0.05)
+        assert status == 403
+        assert server.request('GET', '/', headers=cookie_header(server))[0] == 200
+    finally:
+        for connection in idle:
+            connection.close()
+        server.close()
+
+
 def test_token_redirect_never_leaves_the_server(tokened):
     server, root, rows = tokened
     for path in [f'//evil.example/?token={TOKEN}', f'/\\evil.example/?token={TOKEN}']:
@@ -169,6 +221,43 @@ def test_missing_reviewer_and_bad_body_are_rejected(loopback):
     status, response, data = server.post_frame(ROUTE, '0/9', page_body(rows[0]))
     assert status == 404 and json_of(data)['error'] == 'unknown_frame'
     assert ReviewStore(db_path(root)).reviews(ROUTE, RUN_ID) == []
+
+
+def test_too_many_boxes_are_rejected_before_validation(loopback):
+    server, root, rows = loopback
+    body = page_body(rows[1], manual_box=[3, 3, 12, 14])
+    box = body['detections'][0]
+    detections = []
+    for number in range(101):
+        item = dict(box)
+        item['detection_id'] = f'manual-{number}'
+        detections.append(item)
+    body['detections'] = detections
+    status, response, data = server.post_frame(ROUTE, '0/1', body)
+    assert status == 400
+    problem = json_of(data)
+    assert problem['error'] == 'too_many_boxes' and '100' in problem['message']
+    assert ReviewStore(db_path(root)).review(ROUTE, RUN_ID, '0/1') is None
+
+
+def test_reviewer_with_control_characters_or_too_long_is_rejected(loopback, capsys):
+    from nnslr_tools.review import terminal_text
+    server, root, rows = loopback
+    for reviewer in ['\x1b[2J\x1b[31mPWNED\x1b[0m', 'Cristian\nSalvato: falso', 'x' * 101, 'a‮b']:
+        status, response, data = server.post_frame(ROUTE, '0/0', page_body(rows[0], reviewer=reviewer))
+        assert status == 400, reviewer
+        assert json_of(data)['error'] == 'invalid_reviewer' and 'revisore' in json_of(data)['message']
+    assert ReviewStore(db_path(root)).review(ROUTE, RUN_ID, '0/0') is None
+    status, response, data = server.post_frame(ROUTE, '0/0', page_body(rows[0], reviewer='  Zoë Rossi  '))
+    assert status == 200, data
+    assert json_of(data)['review']['reviewer'] == 'Zoë Rossi'
+    status, response, data = server.post_frame(ROUTE, '0/0', {'run_id': RUN_ID, 'reviewer': '\x1b[0m',
+                                                              'confirmed': False, 'base_revision': 1})
+    assert status == 400 and json_of(data)['error'] == 'invalid_reviewer'
+    assert ReviewStore(db_path(root)).review(ROUTE, RUN_ID, '0/0')['confirmed'] is True
+    assert '\x1b' not in capsys.readouterr().out
+    assert terminal_text('a\x1b[2Jb\nc') == 'a?[2Jb?c'
+    assert terminal_text('y' * 150) == 'y' * 100 + '…'
 
 
 def test_stale_report_and_concurrent_edit_conflicts(loopback):

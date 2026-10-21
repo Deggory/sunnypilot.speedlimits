@@ -93,6 +93,63 @@ def test_from_db_default_output_is_idempotent_and_reports_late_changes(tmp_path,
     assert sorted(values, key=str) == sorted([(0, 30), (1, None)], key=str)
 
 
+def frame_records(path, output_index):
+    records = []
+    for record in canonical(path):
+        if record['output_index'] == output_index:
+            records.append(record)
+    return records
+
+
+def import_change_and_import_again(tmp_path, capsys, rows, index, first_body, second_body):
+    """Import frame <index>, save it again changed plus the new frame 2, import again."""
+    store = ReviewStore(db_path(tmp_path))
+    save(tmp_path, store, rows[index], first_body)
+    code, out = invoke(capsys, 'import-annotations', '--from-db', '--data-root', str(tmp_path))
+    assert code == 0, out.out + out.err
+    dataset = tmp_path / 'annotations/objects.jsonl'
+    before = frame_records(dataset, index)
+    save(tmp_path, store, rows[index], second_body)
+    save(tmp_path, store, rows[2], page_body(rows[2]))
+    code, out = invoke(capsys, 'import-annotations', '--from-db', '--data-root', str(tmp_path))
+    assert code == 0, out.out + out.err
+    report = json.loads(out.out)
+    # The new frame is imported, the changed one is listed and keeps its old rows.
+    assert report['imported_frame_count'] == 1
+    assert [c['frame_key'] for c in report['changed_after_import']] == [f'0/{index}']
+    assert frame_records(dataset, index) == before
+    assert len(frame_records(dataset, 2)) == 1
+    return before
+
+
+def test_empty_frame_imported_then_box_added_is_changed_not_new(tmp_path, capsys):
+    rows = make_report(tmp_path)
+    first = page_body(rows[1])
+    second = page_body(rows[1], manual_box=[3, 3, 12, 14])
+    before = import_change_and_import_again(tmp_path, capsys, rows, 1, first, second)
+    assert len(before) == 1 and before[0]['sign_family'] == 'not_a_sign' and before[0]['bbox_xyxy'] is None
+
+
+def test_manual_box_drawn_again_is_changed_not_added(tmp_path, capsys):
+    rows = make_report(tmp_path)
+    first = page_body(rows[1], manual_box=[3, 3, 12, 14])
+    second = page_body(rows[1], manual_box=[4, 4, 13, 15])
+    second['detections'][0]['detection_id'] = 'manual-2'
+    before = import_change_and_import_again(tmp_path, capsys, rows, 1, first, second)
+    assert len(before) == 1 and before[0]['bbox_xyxy'] == [3, 3, 12, 14]
+
+
+def test_manual_box_deleted_is_changed_not_imported(tmp_path, capsys):
+    rows = make_report(tmp_path)
+    first = page_body(rows[0], manual_box=[3, 3, 12, 14])
+    second = page_body(rows[0])
+    before = import_change_and_import_again(tmp_path, capsys, rows, 0, first, second)
+    boxes = []
+    for record in before:
+        boxes.append(record['bbox_xyxy'])
+    assert sorted(boxes) == [[1, 2, 15, 20], [3, 3, 12, 14]]
+
+
 def test_from_db_skips_withdrawn_and_filters_by_route(tmp_path, capsys):
     rows = make_report(tmp_path)
     other_rows = make_report(tmp_path, route=OTHER_ROUTE, count=2)

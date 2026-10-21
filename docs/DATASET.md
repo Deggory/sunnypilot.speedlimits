@@ -223,7 +223,10 @@ Import the confirmed frames into the canonical dataset on the LXC:
 
 Validation, the source archive under `annotations/imports/` and the output file
 are the same as for a JSONL import. Only the confirmed frames of each route's
-current report are taken. Frames already in the dataset with the same labels are
-skipped, so the command can be repeated after every review session; a frame
-changed after its import is not applied (the dataset is append-only) and is
-listed under `changed_after_import`.
+current report are taken. Frames already in the dataset with the same boxes and
+labels are skipped, so the command can be repeated after every review session.
+The comparison is per frame: a frame already in the dataset that was changed
+after its import (a box added, deleted, drawn again or relabelled) is not
+applied, because the dataset is append-only, and is listed under
+`changed_after_import`; the other frames are imported normally. A save carries
+at most 100 boxes, and the reviewer name at most 100 printable characters.

@@ -21,6 +21,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from nnslr_tools.annotations import (
+    LABEL_KEYS,
+    frame_identity,
     import_review_sources,
     jsonl_bytes,
     load_jsonl,
@@ -29,16 +31,22 @@ from nnslr_tools.annotations import (
     validate_dataset,
 )
 from nnslr_tools.manifest import parse_route_id
+from speed_vision_core.types import MAX_VALUE_KPH, MIN_VALUE_KPH
 
 SCHEMA_VERSION = 1
 DB_RELATIVE_PATH = Path('annotations') / 'review.sqlite'
 
-# Fields the reviewer can change on a box. Everything else on a proposal (score,
-# model label, class, evidence) comes from the read-only report on the server.
-EDITABLE_DETECTION_KEYS = (
-    'bbox_xyxy', 'family', 'value_kph', 'applicability', 'supplementary_panel',
-    'visibility', 'occlusion', 'temporary', 'variable_display', 'notes',
-)
+# Fields the reviewer can change on a box: the label fields of the import plus
+# the notes. Everything else on a proposal (score, model label, class, evidence)
+# comes from the read-only report on the server.
+EDITABLE_DETECTION_KEYS = LABEL_KEYS + ('notes',)
+
+# Every box of a saved frame is checked against the original image (hash and
+# PNG decode), so the number of boxes in one request is bounded.
+MAX_DETECTIONS_PER_FRAME = 100
+
+# The reviewer name is stored with every save and printed on the server terminal.
+MAX_REVIEWER_LENGTH = 100
 
 # The annotation id only depends on frame and box identity, never on this hash,
 # so a placeholder is enough to find which reviewed frames are already imported.
@@ -97,7 +105,7 @@ REASON_MESSAGES = {
     'invalid_dimensions': 'Dimensioni del fotogramma non valide.',
     'invalid_group': 'Sito fisico e incontro devono essere vuoti oppure un identificativo (non “unknown”).',
     'capture_time_inconsistency': 'Dati temporali del fotogramma incoerenti.',
-    'illegal_speed': 'Il valore deve essere un numero intero tra 5 e 250 km/h.',
+    'illegal_speed': f'Il valore deve essere un numero intero tra {MIN_VALUE_KPH} e {MAX_VALUE_KPH} km/h.',
     'value_family_mismatch': 'Questo tipo di cartello non può avere un valore in km/h.',
     'value_state_inconsistency': 'Valore in km/h incoerente con il tipo scelto.',
     'invalid_bbox': 'Riquadro non valido: deve stare dentro l’immagine e avere larghezza e altezza.',
@@ -484,6 +492,22 @@ def validate_reviewed_frame(frame: dict, root: Path) -> None:
         raise ReviewRejected(400, error['reason'], italian_message(error['reason'], error.get('detail', '')))
 
 
+def _check_reviewer_text(reviewer) -> None:
+    """Refuse a reviewer name that is too long or has control or invisible characters.
+
+    A missing name is left to the import checks (missing_provenance).
+    """
+    if not isinstance(reviewer, str):
+        return
+    name = reviewer.strip()
+    if len(name) > MAX_REVIEWER_LENGTH:
+        raise ReviewRejected(400, 'invalid_reviewer',
+                             f'Il nome del revisore può avere al massimo {MAX_REVIEWER_LENGTH} caratteri.')
+    if not name.isprintable():
+        raise ReviewRejected(400, 'invalid_reviewer',
+                             'Il nome del revisore contiene caratteri non ammessi (di controllo o invisibili).')
+
+
 def save_frame_review(store: ReviewStore, root: Path, *, route_id: str, run_id: str, report_row: dict,
                       body, client: str) -> dict:
     """Handle one POST of the page: confirm (validated, stored) or withdraw a frame."""
@@ -499,6 +523,7 @@ def save_frame_review(store: ReviewStore, root: Path, *, route_id: str, run_id: 
     if base_revision is not None:
         if type(base_revision) is not int or base_revision < 0:
             raise ReviewRejected(400, 'invalid_schema', italian_message('invalid_schema', 'base_revision'))
+    _check_reviewer_text(body.get('reviewer'))
     frame_key = report_row['frame_key']
     if not confirmed:
         reviewer = body.get('reviewer')
@@ -508,6 +533,9 @@ def save_frame_review(store: ReviewStore, root: Path, *, route_id: str, run_id: 
                                      reviewer=reviewer.strip(), client=client, base_revision=base_revision)
     if not isinstance(body.get('detections'), list):
         raise ReviewRejected(400, 'invalid_schema', italian_message('invalid_schema', 'detections must be a list'))
+    if len(body['detections']) > MAX_DETECTIONS_PER_FRAME:
+        raise ReviewRejected(400, 'too_many_boxes',
+                             f'Troppi riquadri nel fotogramma (massimo {MAX_DETECTIONS_PER_FRAME}).')
     frame = build_reviewed_frame(report_row, body, utc_now())
     validate_reviewed_frame(frame, root)
     return store.save_review(route_id=route_id, run_id=run_id, frame_key=frame_key,
@@ -529,22 +557,42 @@ def _comparable(row: dict) -> dict:
     return result
 
 
-def _import_state(rows: list[dict], existing: dict) -> str:
-    """'new', 'imported' (same labels already in the dataset) or 'changed'."""
-    present = 0
-    differs = False
-    for row in rows:
-        old = existing.get(row['annotation_id'])
-        if old is None:
+def _existing_frames(output: Path) -> dict:
+    """Rows already in the dataset, grouped by frame: frame identity -> {annotation_id: row}."""
+    frames = {}
+    if not output.exists():
+        return frames
+    for row in load_jsonl(output):
+        try:
+            identity = frame_identity(row)
+            if identity not in frames:
+                frames[identity] = {}
+        except (KeyError, TypeError):
+            # Not a canonical row: the validation of the import reports it.
             continue
-        present = present + 1
-        if _comparable(old) != _comparable(row):
-            differs = True
-    if present == 0:
+        frames[identity][row.get('annotation_id')] = row
+    return frames
+
+
+def _import_state(rows: list[dict], existing_frames: dict) -> str:
+    """'new' (frame not in the dataset), 'imported' (same boxes and labels) or 'changed'.
+
+    The frame decides, not the single box: a frame already in the dataset with
+    a box added, removed or drawn again is 'changed', never 'new'.
+    """
+    identity = frame_identity(rows[0])
+    old_rows = existing_frames.get(identity)
+    if old_rows is None:
         return 'new'
-    if present == len(rows) and not differs:
-        return 'imported'
-    return 'changed'
+    new_ids = set()
+    for row in rows:
+        new_ids.add(row['annotation_id'])
+    if new_ids != set(old_rows):
+        return 'changed'
+    for row in rows:
+        if _comparable(old_rows[row['annotation_id']]) != _comparable(row):
+            return 'changed'
+    return 'imported'
 
 
 def import_from_db(root: Path, output: Path, *, route: str | None = None, dataset_kind: str = 'gold',
@@ -553,9 +601,11 @@ def import_from_db(root: Path, output: Path, *, route: str | None = None, datase
 
     The frames become the same JSONL lines the page export writes and go through
     import_review_sources, so validation, archive and output files are those of
-    a JSONL import. Frames whose labels are already in the dataset are skipped,
-    so running it again imports only what is new. A frame changed after its
-    import is not applied (the canonical dataset is append-only) and is listed.
+    a JSONL import. Frames already in the dataset with the same boxes and labels
+    are skipped, so running it again imports only what is new. A frame already
+    in the dataset whose boxes or labels changed after the import (box added,
+    removed, drawn again or relabelled) is not applied, because the canonical
+    dataset is append-only, and is listed under changed_after_import.
     """
     from nnslr_tools.preannotate import PreannotationError
     from nnslr_tools.review import latest_report
@@ -582,10 +632,7 @@ def import_from_db(root: Path, output: Path, *, route: str | None = None, datase
             warnings.append(f'{route_id}: {older} confirmed frames belong to older pre-annotation runs '
                             f'and were not imported')
     require(bool(selected), 'empty_dataset', 'no confirmed reviews in the review database')
-    existing = {}
-    if output.exists():
-        for row in load_jsonl(output):
-            existing[row.get('annotation_id')] = row
+    existing = _existing_frames(output)
     new_frames = []
     already_imported = 0
     changed = []

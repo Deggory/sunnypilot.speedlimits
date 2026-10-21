@@ -38,6 +38,10 @@ FIELDS = set(ENUMS) | {
     "temporary", "variable_display", "proposal_source", "proposal_score", "reviewer", "review_timestamp", "notes",
     "source_video_sha256", "source_log_sha256", "provenance", "site_group", "encounter_id",
 }
+# Label fields of a reviewed box: a box whose labels all equal the proposal is
+# "accepted", otherwise "corrected". The review server copies the same fields.
+LABEL_KEYS = ('bbox_xyxy', 'family', 'value_kph', 'applicability', 'supplementary_panel', 'visibility', 'occlusion',
+              'temporary', 'variable_display')
 
 
 class DatasetError(ValueError):
@@ -271,8 +275,7 @@ def _canonical(frame: dict, detection: dict | None, original: dict | None, sourc
     family = {'road_marking_candidate': 'road_marking'}.get(family, family)
     value = d.get('value_kph')
     value_state = 'read' if value is not None else 'not_applicable' if negative or family == 'not_a_sign' else 'unreadable' if family == 'unreadable' else 'unknown'
-    label_keys = ('bbox_xyxy', 'family', 'value_kph', 'applicability', 'supplementary_panel', 'visibility', 'occlusion', 'temporary', 'variable_display')
-    unchanged = original is not None and all(d.get(k) == original.get(k) for k in label_keys)
+    unchanged = original is not None and all(d.get(k) == original.get(k) for k in LABEL_KEYS)
     object_id = 'negative-frame' if negative else d.get('detection_id')
     require(isinstance(object_id, str) and bool(object_id), 'missing_provenance', 'detection_id')
     frame_key = {k: frame.get(k) for k in ('route_id','segment_index','camera_stream','output_index','decoded_frame_index')}
@@ -311,7 +314,6 @@ def reviewed_frame_annotations(frame: dict, source_hash: str, *, dataset_kind: s
     Used by import-annotations for every reviewed-frame line and by the review
     server before it stores a confirmed frame, so both apply the same rules.
     """
-    # [model-review] - START
     if dataset_kind == 'gold':
         require(frame.get('kind') == 'reviewed_frame' and frame.get('review_state') == 'reviewed'
                 and frame.get('label_basis') == 'human_review', 'unreviewed_proposal', name)
@@ -325,7 +327,6 @@ def reviewed_frame_annotations(frame: dict, source_hash: str, *, dataset_kind: s
             confidence = frame.get('confidence')
             require(type(confidence) in (int, float) and not isinstance(confidence, bool)
                     and math.isfinite(confidence) and 0 <= confidence <= 1, 'invalid_confidence', str(confidence))
-    # [model-review] - END
     require(isinstance(frame.get('route_id'), str) and isinstance(frame.get('camera_stream'), str)
             and _integer(frame.get('segment_index')) and _integer(frame.get('output_index')),
             'invalid_identity', 'reviewed frame')
