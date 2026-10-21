@@ -47,11 +47,14 @@ def test_loopback_needs_no_token_and_index_lists_routes_with_counts(loopback, tm
     routes = json_of(data)['routes']
     first = next(r for r in routes if r['route_id'] == ROUTE)
     assert first == {'route_id': ROUTE, 'run_id': RUN_ID, 'frame_count': 3, 'frames_with_proposals': 2,
-                     'confirmed_count': 0, 'url': '/route/' + ROUTE + '/'}
+                     'confirmed_count': 0, 'suspicious_count': 0, 'hint_frames': 0,
+                     'url': '/route/' + ROUTE + '/'}
     status, response, data = server.post_frame(ROUTE, '0/0', page_body(rows[0]))
     assert status == 200, data
     routes = json_of(server.request('GET', '/api/routes')[2])['routes']
-    assert next(r for r in routes if r['route_id'] == ROUTE)['confirmed_count'] == 1
+    first = next(r for r in routes if r['route_id'] == ROUTE)
+    # Frame 0/1 has nothing while its confirmed neighbour 0/0 has a speed sign (rule d).
+    assert first['confirmed_count'] == 1 and first['suspicious_count'] == 1
 
 
 def test_token_required_wrong_token_refused_and_cookie_accepted(tokened):
