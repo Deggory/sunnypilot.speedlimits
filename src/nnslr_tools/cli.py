@@ -704,6 +704,8 @@ def _cmd_train(args: argparse.Namespace) -> int:
 
     if not args.output:
         raise ValueError("--output is required for a real training run")
+    if args.mode == "continue" and not args.hf_repo:
+        raise ValueError("continue requires --hf-repo or NNSLR_HF_REPO")
 
     if args.task == "detector":
         config = DetectorTrainConfig(
@@ -717,7 +719,8 @@ def _cmd_train(args: argparse.Namespace) -> int:
             pretrained_backbone=args.pretrained,
             amp=not args.no_amp,
         )
-        result = train_detector(plan, root, Path(args.output), config)
+        result = train_detector(plan, root, Path(args.output), config,
+                                mode=args.mode, hf_repo=args.hf_repo, hf_revision=args.hf_revision)
     else:
         config = TrainConfig(
             epochs=args.epochs,
@@ -731,7 +734,8 @@ def _cmd_train(args: argparse.Namespace) -> int:
             pretrained=args.pretrained,
             amp=not args.no_amp,
         )
-        result = train_reader(plan, root, Path(args.output), config)
+        result = train_reader(plan, root, Path(args.output), config,
+                              mode=args.mode, hf_repo=args.hf_repo, hf_revision=args.hf_revision)
 
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
@@ -1186,6 +1190,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_train.add_argument("dataset", nargs="?", help="canonical dataset JSONL; defaults from --dataset-kind")
     p_train.add_argument("--task", choices=("reader", "detector"), default="reader",
                          help="baseline task to train (default: reader)")
+    p_train.add_argument("--mode", choices=("fresh", "continue", "resume"), default="fresh",
+                         help="fresh: new weights; continue: HF stable weights; resume: interrupted local run")
+    p_train.add_argument("--hf-repo", default=os.environ.get("NNSLR_HF_REPO", "cristianku/sunnypilot-speedlimits-models"),
+                         help="Hugging Face training-weight repository (continue only)")
+    p_train.add_argument("--hf-revision", default="main",
+                         help="Hugging Face revision for training/stable.json")
     p_train.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_train.add_argument("--splits", help="frozen split JSON; default: <data-root>/splits/latest.json")
     p_train.add_argument("--dataset-kind", choices=("gold", "training-candidate"), default="gold")
