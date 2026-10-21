@@ -807,7 +807,6 @@ def train_detector(
                 tracker.log(epoch_metrics, step=global_step)
             save_training_state(epoch_number, "in_progress")
 
-        save_training_state(config.epochs, "completed")
         gpu = None
         if device.type == "cuda":
             gpu = {
@@ -844,6 +843,7 @@ def train_detector(
             "best_validation_loss": best_validation_loss,
             "checkpoint": str(best_path),
         })
+        save_training_state(config.epochs, "completed")
     except BaseException:
         tracker.finish(exit_code=1)
         raise
@@ -1145,7 +1145,6 @@ def train_reader(
                 tracker.log(epoch_metrics, step=global_step)
             save_training_state(epoch_number, "in_progress")
 
-        save_training_state(config.epochs, "completed")
         gpu = None
         if device.type == "cuda":
             gpu = {
@@ -1182,6 +1181,7 @@ def train_reader(
             "best_validation_accuracy": best_accuracy,
             "checkpoint": str(best_path),
         })
+        save_training_state(config.epochs, "completed")
     except BaseException:
         tracker.finish(exit_code=1)
         raise
