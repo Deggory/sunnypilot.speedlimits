@@ -113,6 +113,17 @@ ffmpeg -version | head -n 1
 .venv/bin/python -m pytest -q
 ```
 
+## 5. Always-on review site and daily use
+
+Install the review site (with its control panel) as the systemd service `nnslr-review`, then use the helpers; both are described step by step in [GUIDA.md](GUIDA.md):
+
+```sh
+scripts/install_review_service.sh --dry-run
+scripts/install_review_service.sh
+```
+
+The access token ends up in the `.env` of the clone (`NNSLR_REVIEW_TOKEN=...`, mode 600, ignored by git). Later updates: `helpers/update.sh`.
+
 ## Reference machine
 
 The maintainer's setup, for comparison: Debian 13 LXC on Proxmox with one Tesla V100 32 GB (NVIDIA driver 580.178.04), `ffmpeg` 7.1.5, `zstd` 1.5.7, `jq` 1.7, `uv`, and a `.venv` on Python 3.13 with the `preannotate` extra and `pytest`.

@@ -8,8 +8,12 @@
 #   sudo scripts/install_review_service.sh --uninstall stop and remove the service (token file kept)
 #
 # The token is printed only at the end of an install, in the addresses to open.
-# NNSLR_REVIEW_ENV_FILE and NNSLR_REVIEW_UNIT_FILE override the two system
-# paths (used by the tests).
+# It is also kept in the .env of this clone (NNSLR_REVIEW_TOKEN=..., permissions 600,
+# ignored by git), the one place to look it up, shared with helpers/2_review.sh: the
+# first install takes the token already there, otherwise it creates one and writes it
+# in both files. Full procedure: docs/GUIDA.md.
+# NNSLR_REVIEW_ENV_FILE, NNSLR_REVIEW_UNIT_FILE and NNSLR_REVIEW_REPO_ENV override the
+# three paths (used by the tests).
 set -euo pipefail
 
 SERVICE_NAME="nnslr-review"
@@ -17,6 +21,7 @@ PORT=8765
 ENV_FILE="${NNSLR_REVIEW_ENV_FILE:-/etc/nnslr-review.env}"
 UNIT_FILE="${NNSLR_REVIEW_UNIT_FILE:-/etc/systemd/system/${SERVICE_NAME}.service}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+REPO_ENV="${NNSLR_REVIEW_REPO_ENV:-$REPO/.env}"
 TEMPLATE="$REPO/deploy/nnslr-review.service"
 NNSLR="$REPO/.venv/bin/nnslr"
 PYTHON="$REPO/.venv/bin/python"
@@ -35,6 +40,7 @@ Installa il server di revisione web (nnslr review) come servizio systemd
 
 File usati:
   token     $ENV_FILE (creato solo se manca, permessi 600)
+            e copia in $REPO_ENV (NNSLR_REVIEW_TOKEN=..., permessi 600, fuori da git)
   servizio  $UNIT_FILE
   clone     $REPO
 USAGE
@@ -91,13 +97,34 @@ PY
 }
 
 read_token() {
+  local file="${1:-$ENV_FILE}"
   local line
+  [ -f "$file" ] || return 0
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in
       NNSLR_REVIEW_TOKEN=*) printf '%s\n' "${line#NNSLR_REVIEW_TOKEN=}"; return 0 ;;
     esac
-  done < "$ENV_FILE"
+  done < "$file"
   return 0
+}
+
+# Writes the token in the .env of the clone, replacing an older NNSLR_REVIEW_TOKEN line
+# and keeping every other line.
+save_repo_token() {
+  local token="$1"
+  local temporary="$REPO_ENV.tmp"
+  (
+    umask 077
+    if [ -f "$REPO_ENV" ]; then
+      grep -v '^NNSLR_REVIEW_TOKEN=' "$REPO_ENV" > "$temporary" || true
+    else
+      say '# Segreti locali di questo clone: il file e'"'"' in .gitignore, non va mai in git.' > "$temporary"
+      say '# Token di accesso al sito di revisione (servizio nnslr-review e helpers/2_review.sh).' >> "$temporary"
+    fi
+    say "NNSLR_REVIEW_TOKEN=$token" >> "$temporary"
+    mv "$temporary" "$REPO_ENV"
+  )
+  chmod 600 "$REPO_ENV"
 }
 
 valid_token() {
@@ -174,9 +201,12 @@ install_service() {
   if [ "$DRY_RUN" -eq 1 ]; then
     if [ -e "$ENV_FILE" ]; then
       say "[prova] il file del token $ENV_FILE esiste già: lo lascerei com'è (permessi 600)."
+    elif valid_token "$(read_token "$REPO_ENV")"; then
+      say "[prova] creerei $ENV_FILE con il token già presente in $REPO_ENV (permessi 600)."
     else
       say "[prova] creerei $ENV_FILE con un token casuale di 32 caratteri (permessi 600)."
     fi
+    say "[prova] terrei lo stesso token anche in $REPO_ENV (riga NNSLR_REVIEW_TOKEN=, permessi 600, fuori da git)."
     say "[prova] scriverei $UNIT_FILE con questo contenuto:"
     render_unit
     say "[prova] poi: systemctl daemon-reload; systemctl enable --now $SERVICE_NAME.service"
@@ -192,13 +222,23 @@ install_service() {
     chmod 600 "$ENV_FILE"
     say "File del token già presente: $ENV_FILE (lasciato com'è)."
   else
-    write_env_file "$(new_token)"
+    # The first install keeps the token already in the .env of the clone (helpers/2_review.sh).
+    local first
+    first="$(read_token "$REPO_ENV")"
+    if ! valid_token "$first"; then
+      first="$(new_token)"
+    fi
+    write_env_file "$first"
     say "Creato il file del token: $ENV_FILE (permessi 600)."
   fi
   local token
   token="$(read_token)"
   if ! valid_token "$token"; then
     fail "in $ENV_FILE manca NNSLR_REVIEW_TOKEN valido (almeno 16 caratteri tra lettere, cifre, - e _): correggilo, oppure cancella il file e rilancia."
+  fi
+  if [ "$(read_token "$REPO_ENV")" != "$token" ]; then
+    save_repo_token "$token"
+    say "Token salvato anche in $REPO_ENV (permessi 600, fuori da git)."
   fi
 
   local was_active=0
@@ -237,7 +277,7 @@ install_service() {
     say "  http://$address:$PORT/?token=$token"
   done < <(lan_ips)
   say "Dopo la prima visita il token resta in un cookie e sparisce dalla barra degli indirizzi."
-  say "Per rileggere il token: sudo grep NNSLR_REVIEW_TOKEN $ENV_FILE"
+  say "Per rileggere il token: grep NNSLR_REVIEW_TOKEN $REPO_ENV   (oppure helpers/2_review.sh ristampa il link)"
 }
 
 if [ "$MODE" = "uninstall" ]; then

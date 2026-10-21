@@ -41,6 +41,8 @@ Private videos, logs, datasets, checkpoints and model weights stay outside Git. 
 
 ## Easy path: three helpers
 
+**Step-by-step guide (Italian), including the always-on review site, its token and updates: [docs/GUIDA.md](docs/GUIDA.md).**
+
 For the usual work you only need these, from the repository root. They take no arguments, skip what is already done and end by printing the next command; `--help` on each one explains the options.
 
 | Step | Command | What it does |
@@ -49,6 +51,9 @@ For the usual work you only need these, from the repository root. They take no a
 | 2 | `helpers/2_review.sh` | Starts the review site in the background and prints the link to open from the PC (LAN, with a fixed access token kept in `data/review.token`). Here you confirm the signs: the only manual step. `--stop` turns it off, `--local` serves only on 127.0.0.1 (ssh tunnel). **Opens port 8765 on the LAN.** |
 | 3 | `helpers/3_train.sh` | Imports the confirmed frames, validates the dataset, freezes the split, creates `.venv-gpu` the first time and runs `scripts/run_v100_baseline.sh`. `--dataset-only` stops before the GPU; `--continue` and `--resume=<run>` as in the baseline script. It stops when the GPU is busy (`--force` to share it). **Uses the GPU, installs packages the first time.** |
 | – | `helpers/status.sh` | Read-only: every route (segments, frames, reviewed frames, objects in the dataset), what is running, GPU, disk and the next command. |
+| – | `helpers/update.sh` | `git pull --ff-only`, updates `.venv` when `pyproject.toml` changed, re-runs `scripts/install_review_service.sh` and restarts the review site. |
+
+The access token of the review site is kept in the `.env` of the clone (`NNSLR_REVIEW_TOKEN=...`, mode 600, ignored by git); `scripts/install_review_service.sh` installs the always-on systemd service `nnslr-review` with the same token (`KillMode=process`: a restart never stops a job started from the panel).
 
 The review site also has a **Pannello** page (`/pannello`, link in its top bar): the state of every route, GPU/disk/CPU, what is running (also from a terminal, and the `openpilot.distill` training), and buttons that start steps 1 and 3 in the background with their log live in the page. Only those fixed actions can run, one per kind at a time, behind the same token and same-origin checks as the reviews; their logs are in `data/logs/panel/`. `NNSLR_PANEL_ACTIONS=0` makes the panel read-only (e.g. on a review service other people use).
 

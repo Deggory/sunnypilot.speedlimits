@@ -27,6 +27,10 @@ Environment=PYTHONUNBUFFERED=1
 ExecStart=__NNSLR_REPO__/.venv/bin/nnslr review --host 0.0.0.0 --port 8765
 Restart=on-failure
 RestartSec=5
+# Stop/restart only the web server: a preparation or a training started from the panel
+# (/pannello) keeps running, and the panel finds it again after the restart. With the
+# default (control-group) "systemctl restart" after a git pull would kill a training.
+KillMode=process
 NoNewPrivileges=yes
 PrivateTmp=yes
 

@@ -11,8 +11,9 @@
 #   helpers/2_review.sh --foreground   (resta attaccato al terminale, Ctrl+C per spegnere)
 #
 # By default it listens on the LAN (0.0.0.0) and every request needs the access token: the
-# link printed here already has it. The token is created once in data/review.token (not in
-# git), so the link stays the same after a restart and can be bookmarked.
+# link printed here already has it. The token is created once in the .env of this clone
+# (NNSLR_REVIEW_TOKEN=..., permissions 600, ignored by git), the same one the service uses,
+# so the link stays the same after a restart and can be bookmarked. Guide: docs/GUIDA.md.
 # When the systemd service nnslr-review (scripts/install_review_service.sh) is active it does
 # not start a second server: it prints the link of the service.
 # -h, --help: this help.
@@ -26,7 +27,7 @@ DATA_ROOT="${NNSLR_DATA_ROOT:-$ROOT/data}"
 NN="$ROOT/.venv/bin/nnslr"
 PY="$ROOT/.venv/bin/python"
 PORT="${NNSLR_REVIEW_PORT:-8765}"
-TOKEN_FILE="$DATA_ROOT/review.token"
+REPO_ENV="${NNSLR_REVIEW_REPO_ENV:-$ROOT/.env}"
 LOG="$DATA_ROOT/logs/review.log"
 PID_FILE="$DATA_ROOT/logs/review.pid"
 SERVICE_ENV="/etc/nnslr-review.env"
@@ -56,18 +57,33 @@ port_busy() {
   (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null
 }
 
-# The access token, created once (only this user can read it).
+# The access token: the NNSLR_REVIEW_TOKEN line of the .env of the clone, created once
+# (permissions 600) and appended to the other lines of that file when it already exists.
 token() {
-  if [ ! -s "$TOKEN_FILE" ]; then
-    mkdir -p "$(dirname "$TOKEN_FILE")"
-    (umask 077 && "$PY" -c 'import secrets; print(secrets.token_urlsafe(24))' > "$TOKEN_FILE")
+  local value=""
+  if [ -f "$REPO_ENV" ]; then
+    value="$(sed -n 's/^NNSLR_REVIEW_TOKEN=//p' "$REPO_ENV" | tail -1)"
   fi
-  cat "$TOKEN_FILE"
+  if [ -z "$value" ]; then
+    value="$("$PY" -c 'import secrets; print(secrets.token_urlsafe(24))')"
+    (
+      umask 077
+      if [ ! -f "$REPO_ENV" ]; then
+        echo "# Segreti locali di questo clone: il file e' in .gitignore, non va mai in git." > "$REPO_ENV"
+        echo "# Token di accesso al sito di revisione (servizio nnslr-review e helpers/2_review.sh)." >> "$REPO_ENV"
+      fi
+      echo "NNSLR_REVIEW_TOKEN=$value" >> "$REPO_ENV"
+    )
+    chmod 600 "$REPO_ENV"
+    echo "Token creato e salvato in $REPO_ENV" >&2
+  fi
+  echo "$value"
 }
 
 print_lan_link() {
   echo "Apri dal PC:  http://$(server_ip):$PORT/?token=$1"
-  echo "(il link resta lo stesso anche dopo un riavvio: salvalo nei preferiti)"
+  echo "Pannello:     http://$(server_ip):$PORT/pannello  (dopo la prima apertura del link sopra)"
+  echo "(il link resta lo stesso anche dopo un riavvio; il token e' in $REPO_ENV)"
 }
 
 print_local_link() {
