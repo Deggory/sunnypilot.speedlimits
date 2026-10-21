@@ -69,6 +69,7 @@ background:var(--surface-2);border:1px solid var(--line)}
 .step .sub{color:var(--muted);font-size:13.5px}
 .step .buttons{display:flex;flex-wrap:wrap;gap:8px;margin-top:auto}
 #update-buttons{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+#prep{margin-top:10px}
 .goal{display:flex;gap:6px}
 .goal span{flex:1;height:8px;border-radius:4px;background:var(--surface-2);border:1px solid var(--line)}
 .goal span.on{background:var(--ok);border-color:var(--ok)}
@@ -179,7 +180,9 @@ border-radius:5px;padding:1px 5px}
         <div class="bar" aria-hidden="true"><span id="disk-bar" style="width:0"></span></div><div class="sub" id="disk-sub"></div></div>
       <div class="card metric"><h2>CPU</h2><div class="value" id="cpu-value">–</div>
         <div class="bar" aria-hidden="true"><span id="cpu-bar" style="width:0"></span></div><div class="sub" id="cpu-sub"></div></div>
-      <div class="card metric"><h2>In corso</h2><div class="pills" id="activities"></div></div>
+      <div class="card metric"><h2>In corso</h2><div class="pills" id="activities"></div>
+        <div id="prep" hidden><div class="bar" aria-hidden="true"><span id="prep-bar" style="width:0"></span></div>
+          <div class="sub" id="prep-sub"></div></div></div>
     </div>
   </section>
 
@@ -363,7 +366,24 @@ border-radius:5px;padding:1px 5px}
     const activities = byId('activities');
     activities.replaceChildren();
     if (!status.activities.length) activities.appendChild(node('span', 'reason', 'Niente'));
-    for (const item of status.activities) activities.appendChild(pill(item.label, 'run'));
+    const prep = status.preparation;
+    for (const item of status.activities) {
+      let label = item.label;
+      if (item.label === 'preparazione' && prep && prep.percent !== null) label = label + ' ' + prep.percent + '%';
+      activities.appendChild(pill(label, 'run'));
+    }
+    byId('prep').hidden = !prep;
+    if (prep) {
+      const bar = byId('prep-bar');
+      bar.parentElement.hidden = prep.percent === null;
+      if (prep.percent !== null) setBar('prep-bar', prep.percent, '');
+      const sub = byId('prep-sub');
+      sub.replaceChildren();
+      if (prep.percent !== null) sub.appendChild(node('div', '', prep.routes_done + ' / ' + prep.routes_total + ' route pronte'));
+      for (const work of prep.working) {
+        sub.appendChild(node('div', '', work.route.slice(0, 8) + ' · ' + work.phase + ' ' + work.done + '/' + work.total + ' ' + work.unit));
+      }
+    }
   }
 
   function renderRoutes() {

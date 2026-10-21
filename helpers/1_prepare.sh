@@ -41,6 +41,20 @@ todo() {
   (cd "$ROOT" && "$PY" -m helpers.route_status --todo="$1")
 }
 
+# The routes of this run, for the progress shown by the panel (/pannello).
+write_batch() {
+  local list=""
+  local route
+  for route in "$@"; do
+    if [ -n "$list" ]; then
+      list="$list, "
+    fi
+    list="$list\"$route\""
+  done
+  printf '{"started": "%s", "routes": [%s]}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$list" > "$LOG_DIR/batch.json.tmp"
+  mv "$LOG_DIR/batch.json.tmp" "$LOG_DIR/batch.json"
+}
+
 # Extract (when needed) and pre-annotate one route; all its output goes to its log.
 # Re-extracting is safe here: only routes without a report get this far.
 # < /dev/null: ffmpeg reads commands from stdin and would eat the terminal (or the caller's script).
@@ -114,8 +128,10 @@ if [ "${#routes[@]}" -eq 0 ]; then
   mapfile -t routes < <( (todo extract; todo preannotate) | sed '/^$/d' | sort -u)
 fi
 if [ "${#routes[@]}" -eq 0 ]; then
+  rm -f "$LOG_DIR/batch.json"
   echo "Niente da preparare: nessuna route nuova."
 else
+  write_batch "${routes[@]}"
   echo "== b+c. ${#routes[@]} route da preparare, $jobs alla volta (log in $LOG_DIR/)"
   failed=0
   if [ "$jobs" -eq 1 ]; then

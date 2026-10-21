@@ -13,6 +13,7 @@ survives a restart of the server.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import re
 import shutil
@@ -26,6 +27,8 @@ REPO = Path(__file__).resolve().parents[2]
 ACTIONS_ENV = 'NNSLR_PANEL_ACTIONS'
 PREPARE_JOBS_ENV = 'NNSLR_PANEL_PREPARE_JOBS'
 LOG_CHUNK_BYTES = 64 * 1024
+# Written by helpers/1_prepare.sh when it starts: the routes of that run, for the progress.
+BATCH_FILE = 'logs/prepare/batch.json'
 HISTORY = 12
 JOB_ID = re.compile(r'[0-9]{8}-[0-9]{6}-[a-z_]+')
 FINISHED = re.compile(r'== finito con codice (\d+)\s*$')
@@ -182,11 +185,13 @@ class Panel:
         system = self.system()
         payload = {'available': self.available(), 'actions_enabled': self.actions_enabled and self.available(),
                    'routes': [], 'next_step': '', 'next_action': None, 'reviewed_routes': 0, 'min_routes': 5,
-                   'activities': activities, 'jobs': self.jobs(activities), 'system': system, 'actions': {}}
+                   'activities': activities, 'jobs': self.jobs(activities), 'system': system, 'actions': {},
+                   'preparation': None}
         if payload['available']:
             module = self._route_status()
             rows = module.route_rows(self.root, module.videos_dir())
             payload['routes'] = rows
+            payload['preparation'] = self.preparation(rows, activities)
             payload['next_step'] = module.next_step(rows)
             payload['min_routes'] = module.MIN_REVIEWED_ROUTES
             payload['reviewed_routes'] = sum(1 for row in rows if row['confirmed'])
@@ -223,6 +228,111 @@ class Panel:
                 reason = 'la GPU è occupata da un altro processo'
             states[name] = {'label': action['label'], 'allowed': not reason, 'reason': reason}
         return states
+
+    # -- progress of the preparation -----------------------------------------------------------
+    def preparation(self, rows: list[dict], activities: list[dict]) -> dict | None:
+        """How far the running preparation is, from what it already wrote; None when none runs.
+
+        A route counts half for the extraction (segments with frames.jsonl out of the linked ones)
+        and half for the pre-annotation (frames already in the report being written out of the
+        extracted ones). The overall percent is over the routes that helpers/1_prepare.sh listed in
+        BATCH_FILE when it started; without that file (a run of an older 1_prepare.sh) only the
+        routes being worked on are shown.
+        """
+        running = False
+        for item in activities:
+            if item['group'] == 'prepare':
+                running = True
+        if not running:
+            return None
+        by_route = {}
+        for row in rows:
+            by_route[row['route']] = row
+        result = {'percent': None, 'routes_done': 0, 'routes_total': 0, 'working': []}
+        batch = self._batch_routes()
+        if batch is not None:
+            total = 0
+            for route in batch:
+                row = by_route.get(route)
+                if row is None:
+                    continue
+                progress = self._route_progress(row)
+                total = total + progress['percent']
+                result['routes_total'] = result['routes_total'] + 1
+                if progress['percent'] == 100:
+                    result['routes_done'] = result['routes_done'] + 1
+            if result['routes_total']:
+                result['percent'] = total // result['routes_total']
+        for route in sorted(self._working_routes()):
+            row = by_route.get(route)
+            if row is not None:
+                result['working'].append(self._route_progress(row))
+        return result
+
+    def _route_progress(self, row: dict) -> dict:
+        route = row['route']
+        if row['run_id'] is not None:
+            return {'route': route, 'phase': 'pronta', 'done': row['report_frames'],
+                    'total': row['report_frames'], 'unit': 'frame', 'percent': 100}
+        if row['linked'] == 0:
+            return {'route': route, 'phase': 'da collegare', 'done': 0, 'total': 0, 'unit': 'segmenti', 'percent': 0}
+        if row['extracted'] < row['linked']:
+            return {'route': route, 'phase': 'frame', 'done': row['extracted'], 'total': row['linked'],
+                    'unit': 'segmenti', 'percent': 50 * row['extracted'] // row['linked']}
+        done = self._preannotated_frames(route)
+        total = row['frames']
+        percent = 50
+        if total:
+            percent = 50 + 50 * min(done, total) // total
+        # The report counts only once it is moved in place (run_id above).
+        if percent > 99:
+            percent = 99
+        return {'route': route, 'phase': 'cartelli', 'done': done, 'total': total, 'unit': 'frame', 'percent': percent}
+
+    def _batch_routes(self) -> list[str] | None:
+        try:
+            routes = json.loads((self.root / BATCH_FILE).read_text()).get('routes')
+        except (OSError, ValueError, AttributeError):
+            return None
+        if not isinstance(routes, list):
+            return None
+        result = []
+        for route in routes:
+            if isinstance(route, str):
+                result.append(route)
+        return result
+
+    def _preannotated_frames(self, route: str) -> int:
+        """Frames in the report the pre-annotation is writing (the newest .pending-<run id>)."""
+        base = self.root / 'derived/preannotations' / route
+        if not base.is_dir():
+            return 0
+        pending = sorted(base.glob('.pending-*'))
+        if not pending:
+            return 0
+        return _line_count(pending[-1] / 'preannotations.jsonl')
+
+    def _working_routes(self) -> set[str]:
+        """Routes an nnslr extract-frames or nnslr preannotate is working on right now."""
+        found = set()
+        proc = Path('/proc')
+        if not proc.is_dir():
+            return found
+        for entry in proc.iterdir():
+            if not entry.name.isdigit():
+                continue
+            try:
+                arguments = (entry / 'cmdline').read_bytes().decode('utf-8', 'replace').split('\0')
+            except OSError:
+                continue
+            if 'extract-frames' not in arguments and 'preannotate' not in arguments:
+                continue
+            if '--route' not in arguments:
+                continue
+            position = arguments.index('--route')
+            if position + 1 < len(arguments):
+                found.add(arguments[position + 1])
+        return found
 
     # -- actions -------------------------------------------------------------------------------
     def start(self, action: str) -> dict:
@@ -304,6 +414,18 @@ def _conflicting_group(group: str, running: set[str]) -> str | None:
     elif 'update' in running:
         return 'update'
     return None
+
+
+def _line_count(path: Path) -> int:
+    count = 0
+    try:
+        with path.open('rb') as handle:
+            for line in handle:
+                if line.strip():
+                    count = count + 1
+    except OSError:
+        return 0
+    return count
 
 
 def _exit_code(path: Path) -> int | None:

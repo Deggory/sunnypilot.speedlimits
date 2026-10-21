@@ -139,6 +139,45 @@ def test_update_needs_its_helper(root, checkout):
     assert missing.value.status == 403
 
 
+def make_route(root, route, segments, extracted, frames_per_segment=4):
+    for index in range(segments):
+        (root / 'raw/routes' / route / str(index)).mkdir(parents=True)
+        (root / 'raw/routes' / route / str(index) / 'fcamera.hevc').write_bytes(b'video')
+    for index in range(extracted):
+        manifest = root / 'derived/frames' / route / str(index) / 'frames.jsonl'
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text('{}\n' * frames_per_segment)
+
+
+def test_preparation_progress_from_what_is_on_disk(root, checkout, monkeypatch, tmp_path):
+    monkeypatch.setenv('COMMA_VIDEOS_DIR', str(tmp_path / 'no-videos'))
+    extracting = '0000011f--77d17f9ee3'
+    annotating = '00000122--2a20602737'
+    make_route(root, extracting, segments=4, extracted=1)
+    make_route(root, annotating, segments=2, extracted=2)
+    pending = root / 'derived/preannotations' / annotating / '.pending-20261021T200000Z-abcd1234'
+    pending.mkdir(parents=True)
+    (pending / 'preannotations.jsonl').write_text('{}\n' * 4)
+    panel = Panel(root, repo=checkout)
+    rows = panel.status()['routes']
+    assert panel.status()['preparation'] is None  # nothing running
+    running = [{'group': 'prepare', 'label': 'preparazione', 'pid': 1}]
+
+    # A run of an older 1_prepare.sh: no batch file, no overall percent.
+    assert panel.preparation(rows, running) == {'percent': None, 'routes_done': 0, 'routes_total': 0, 'working': []}
+
+    (root / 'logs/prepare').mkdir(parents=True)
+    (root / 'logs/prepare/batch.json').write_text(
+        '{"started": "2026-10-21T20:00:00Z", "routes": ["%s", "%s", "%s"]}' % (ROUTE, extracting, annotating))
+    progress = panel.preparation(rows, running)
+    # ROUTE has its report: 100. extracting: 1/4 segments = 12. annotating: 4/8 frames = 75.
+    assert (progress['percent'], progress['routes_done'], progress['routes_total']) == ((100 + 12 + 75) // 3, 1, 3)
+    assert panel._route_progress(next(r for r in rows if r['route'] == extracting)) == {
+        'route': extracting, 'phase': 'frame', 'done': 1, 'total': 4, 'unit': 'segmenti', 'percent': 12}
+    assert panel._route_progress(next(r for r in rows if r['route'] == annotating)) == {
+        'route': annotating, 'phase': 'cartelli', 'done': 4, 'total': 8, 'unit': 'frame', 'percent': 75}
+
+
 def test_read_only_panel_and_unknown_actions(root, checkout):
     panel = Panel(root, repo=checkout, actions_enabled=False)
     with pytest.raises(PanelError) as disabled:

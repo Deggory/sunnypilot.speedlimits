@@ -51,6 +51,7 @@ Il pannello mostra:
 - il **prossimo passo**, con il pulsante giusto;
 - i tre passi con i numeri (route nuove, frame revisionati, route revisionate su 5) e i pulsanti **Prepara le route nuove**, **Importa le revisioni**, **Allena da zero**, **Allena dai pesi stable**. Un pulsante spento ha sotto il motivo (per esempio "servono 5 route revisionate, ora 1" o "la GPU è occupata");
 - GPU, disco, CPU e cosa sta girando, anche lanciato da terminale e anche il training di `openpilot.distill`;
+- durante una preparazione, la **percentuale** e le route pronte sul totale del giro, più la route su cui sta lavorando (segmenti estratti, frame con i cartelli proposti). Ogni route vale metà per l'estrazione e metà per i cartelli. Il totale lo scrive `helpers/1_prepare.sh` in `data/logs/prepare/batch.json` quando parte: una preparazione partita prima dell'aggiornamento mostra solo le route in lavorazione;
 - la tabella delle route con lo stato;
 - le azioni lanciate dal pannello, con il loro stato (in corso, finita, fallita, interrotta), il pulsante **Log** (il log scorre dal vivo in basso nella pagina) e **Ferma**.
 
