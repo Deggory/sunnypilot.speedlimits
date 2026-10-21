@@ -1,18 +1,18 @@
-# systemd unit of the NNSLR review web server ("nnslr review").
+# systemd unit of the speed limits web site ("nnslr review": review pages and control panel).
 #
 # Do not copy this file by hand: scripts/install_review_service.sh fills in
 # the two placeholders (the path of the clone and the token file,
-# /etc/nnslr-review.env) and installs the result as
-# /etc/systemd/system/nnslr-review.service.
+# /etc/speedlimits-web.env) and installs the result as
+# /etc/systemd/system/speedlimits-web.service.
 #
 # User=root is acceptable on the dedicated LXC. To run the server as another
 # account: create it, give it the clone and the data root
 # (chown -R <user>: <repo>/data), set User= and Group= below, run the install
 # script again and make the token file readable by that account only
-# (chown <user>: /etc/nnslr-review.env).
+# (chown <user>: /etc/speedlimits-web.env).
 
 [Unit]
-Description=NNSLR review web server (revisione cartelli)
+Description=Speed limits web: revisione dei cartelli e pannello
 Documentation=file://__NNSLR_REPO__/docs/INSTALL.md
 After=network-online.target
 Wants=network-online.target
