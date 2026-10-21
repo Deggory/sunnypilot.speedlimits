@@ -59,9 +59,9 @@ In **Azioni dal pannello** c'è anche **Aggiorna il codice**: lancia `helpers/up
 
 Il pannello lancia solo queste cinque azioni fisse, mai un comando qualsiasi, e una sola per tipo alla volta (preparazione da una parte, import/training dall'altra), contando anche quelle partite da terminale. È protetto come il resto del sito: token sulla LAN, e i pulsanti accettano solo richieste dalla pagina stessa. I log delle azioni sono in `data/logs/panel/`; l'ultima riga di ognuno è il codice di uscita.
 
-`NNSLR_PANEL_ACTIONS=0` (nell'ambiente del server, per il servizio in `/etc/nnslr-review.env`) lascia il pannello in sola lettura, per esempio se il sito lo usano altre persone per revisionare.
+`NNSLR_PANEL_ACTIONS=0` (nell'ambiente del server, per il servizio in `/etc/speedlimits-web.env`) lascia il pannello in sola lettura, per esempio se il sito lo usano altre persone per revisionare.
 
-## 3. Il sito sempre acceso: il servizio `nnslr-review`
+## 3. Il sito sempre acceso: il servizio `speedlimits-web`
 
 Per avere sito e pannello sempre accesi, anche dopo un riavvio del server, si installa il servizio systemd una volta sola (da root):
 
@@ -72,7 +72,7 @@ scripts/install_review_service.sh --dry-run       # mostra cosa farebbe, non cam
 scripts/install_review_service.sh                 # installa, avvia e stampa il link
 ```
 
-Il servizio ascolta su `0.0.0.0:8765`, riparte da solo se cade e a ogni boot. Rilanciare l'installazione non fa danni: riscrive il servizio solo se `deploy/nnslr-review.service` è cambiato e non tocca il token.
+Il servizio ascolta su `0.0.0.0:8765`, riparte da solo se cade e a ogni boot. Rilanciare l'installazione non fa danni: riscrive il servizio solo se `deploy/speedlimits-web.service` è cambiato e non tocca il token.
 
 ### Il token per entrare dal browser
 
@@ -84,11 +84,11 @@ grep NNSLR_REVIEW_TOKEN ~/sunnypilot.speedlimits/.env
 
 - `.env` è in `.gitignore`: non finisce mai in git né su GitHub. Ha permessi 600 (lo legge solo root).
 - Lo crea la prima volta chi serve per primo: `helpers/2_review.sh` o `scripts/install_review_service.sh`. L'installazione del servizio usa il token già presente in `.env`; se non c'è, ne crea uno e lo scrive in `.env`.
-- Il servizio systemd lo legge da una sua copia, `/etc/nnslr-review.env` (permessi 600); ogni installazione rimette in `.env` lo stesso valore.
+- Il servizio systemd lo legge da una sua copia, `/etc/speedlimits-web.env` (permessi 600); ogni installazione rimette in `.env` lo stesso valore.
 - Il **link già pronto** (`http://<IP del server>:8765/?token=...`) lo stampano l'installazione, `helpers/2_review.sh` e `helpers/update.sh`.
 - Dopo la **prima apertura** del link il browser tiene il token in un cookie: da lì in poi basta `http://<IP del server>:8765/` (e `/pannello`).
 
-Il link contiene il token: non condividerlo. Per cambiarlo: scrivi il nuovo valore (almeno 16 caratteri tra lettere, cifre, `-` e `_`) in `/etc/nnslr-review.env`, poi `scripts/install_review_service.sh` (lo copia in `.env`) e `systemctl restart nnslr-review`.
+Il link contiene il token: non condividerlo. Per cambiarlo: scrivi il nuovo valore (almeno 16 caratteri tra lettere, cifre, `-` e `_`) in `/etc/speedlimits-web.env`, poi `scripts/install_review_service.sh` (lo copia in `.env`) e `systemctl restart speedlimits-web`.
 
 ### Aggiornare il codice
 
@@ -104,9 +104,9 @@ Il servizio ha `KillMode=process`: un riavvio ferma solo il sito, non una prepar
 ### Controllare e fermare
 
 ```sh
-systemctl status nnslr-review                     # acceso? da quanto?
-journalctl -u nnslr-review -n 50                  # ultime righe del server (anche "Pannello: avviata ...")
-systemctl stop nnslr-review                       # spegne (riparte al prossimo boot)
+systemctl status speedlimits-web                     # acceso? da quanto?
+journalctl -u speedlimits-web -n 50                  # ultime righe del server (anche "Pannello: avviata ...")
+systemctl stop speedlimits-web                       # spegne (riparte al prossimo boot)
 scripts/install_review_service.sh --uninstall     # toglie il servizio (il token resta)
 ```
 
@@ -125,8 +125,8 @@ scripts/install_review_service.sh --uninstall     # toglie il servizio (il token
 | Log degli helper | `data/logs/` (`prepare/<route>.log`, `train-<run>.log`, `review.log`) |
 | Log delle azioni del pannello | `data/logs/panel/` |
 | Token di accesso al sito (il posto dove cercarlo) | `.env` del repository, riga `NNSLR_REVIEW_TOKEN=` |
-| Copia del token letta dal servizio | `/etc/nnslr-review.env` |
-| Definizione del servizio | `deploy/nnslr-review.service` → installato in `/etc/systemd/system/nnslr-review.service` |
+| Copia del token letta dal servizio | `/etc/speedlimits-web.env` |
+| Definizione del servizio | `deploy/speedlimits-web.service` → installato in `/etc/systemd/system/speedlimits-web.service` |
 
 `data/` e `.env` non sono in git.
 
@@ -140,7 +140,7 @@ scripts/install_review_service.sh --uninstall     # toglie il servizio (il token
 | `helpers/3_train.sh` | revisioni → dataset → modello | scrive il dataset, installa `.venv-gpu` la prima volta, GPU |
 | `helpers/update.sh` | aggiorna il codice e riavvia il sito | `git pull`, `.venv`, riavvio del servizio |
 | `helpers/fetch_comma_segments.sh` | scarica i giri nuovi dal comma | rete, cartella condivisa dei video |
-| `scripts/install_review_service.sh` | installa/aggiorna/toglie il servizio `nnslr-review` | systemd, `/etc/nnslr-review.env`, `.env` |
+| `scripts/install_review_service.sh` | installa/aggiorna/toglie il servizio `speedlimits-web` | systemd, `/etc/speedlimits-web.env`, `.env` |
 | `scripts/setup_v100_training_env.sh` | crea `.venv-gpu` (lo lancia anche `helpers/3_train.sh`) | installa pacchetti |
 | `scripts/run_v100_baseline.sh` | training completo (lo lancia `helpers/3_train.sh`) | GPU |
 | `scripts/publish_model.sh` | pubblica un bundle su Hugging Face | upload pubblico |

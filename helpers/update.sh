@@ -2,8 +2,9 @@
 # Update this clone from GitHub and put the new code to work, always the same way:
 #   a. git pull --ff-only of the current branch (stops on local changes or a diverged branch)
 #   b. when pyproject.toml changed: updates the .venv (pip install -e ".[preannotate]")
-#   c. with the systemd service nnslr-review installed: scripts/install_review_service.sh
-#      (rewrites the unit only when deploy/nnslr-review.service changed) and a restart
+#   c. with the systemd service speedlimits-web installed (or still its old name,
+#      nnslr-review): scripts/install_review_service.sh (rewrites the unit only when
+#      deploy/speedlimits-web.service changed, replaces the old service) and a restart
 #      of the service; without it, restarts the site started by helpers/2_review.sh, if on
 # A preparation or a training started from the panel keeps running: the service stops
 # only the web server (KillMode=process). Full procedure: docs/GUIDA.md.
@@ -16,7 +17,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SERVICE="nnslr-review"
+SERVICE="speedlimits-web"
+OLD_SERVICE="nnslr-review"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
@@ -51,7 +53,15 @@ if [ "$before" != "$after" ] && git diff --name-only "$before" "$after" | grep -
     || die "aggiornamento di .venv fallito: rilancia a mano $ROOT/.venv/bin/python -m pip install -e '.[preannotate]'"
 fi
 
+installed=0
 if systemctl list-unit-files "$SERVICE.service" 2>/dev/null | grep -q "^$SERVICE.service"; then
+  installed=1
+fi
+if systemctl list-unit-files "$OLD_SERVICE.service" 2>/dev/null | grep -q "^$OLD_SERVICE.service"; then
+  installed=1
+fi
+
+if [ "$installed" -eq 1 ]; then
   echo "== c. servizio $SERVICE"
   bash "$ROOT/scripts/install_review_service.sh" < /dev/null | grep -v -e '^Apri nel browser' -e '^  http' || true
   systemctl restart "$SERVICE"

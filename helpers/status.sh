@@ -33,7 +33,7 @@ if pgrep -f "nnslr (extract-frames|preannotate)" > /dev/null; then
   echo "  preparazione: $(pgrep -af "nnslr (extract-frames|preannotate)" | sed 's/.*nnslr //' | head -3 | paste -sd ';' -)"
   running=1
 fi
-if pgrep -f "nnslr review" > /dev/null || systemctl is-active --quiet nnslr-review 2>/dev/null; then
+if pgrep -f "nnslr review" > /dev/null || systemctl is-active --quiet speedlimits-web 2>/dev/null; then
   echo "  sito di revisione acceso (helpers/2_review.sh ristampa il link)"
   running=1
 fi

@@ -14,7 +14,7 @@
 # link printed here already has it. The token is created once in the .env of this clone
 # (NNSLR_REVIEW_TOKEN=..., permissions 600, ignored by git), the same one the service uses,
 # so the link stays the same after a restart and can be bookmarked. Guide: docs/GUIDA.md.
-# When the systemd service nnslr-review (scripts/install_review_service.sh) is active it does
+# When the systemd service speedlimits-web (scripts/install_review_service.sh) is active it does
 # not start a second server: it prints the link of the service.
 # -h, --help: this help.
 # Env: NNSLR_REVIEW_PORT (default 8765), NNSLR_DATA_ROOT (default data/)
@@ -30,7 +30,7 @@ PORT="${NNSLR_REVIEW_PORT:-8765}"
 REPO_ENV="${NNSLR_REVIEW_REPO_ENV:-$ROOT/.env}"
 LOG="$DATA_ROOT/logs/review.log"
 PID_FILE="$DATA_ROOT/logs/review.pid"
-SERVICE_ENV="/etc/nnslr-review.env"
+SERVICE_ENV="/etc/speedlimits-web.env"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
@@ -70,7 +70,7 @@ token() {
       umask 077
       if [ ! -f "$REPO_ENV" ]; then
         echo "# Segreti locali di questo clone: il file e' in .gitignore, non va mai in git." > "$REPO_ENV"
-        echo "# Token di accesso al sito di revisione (servizio nnslr-review e helpers/2_review.sh)." >> "$REPO_ENV"
+        echo "# Token di accesso al sito di revisione (servizio speedlimits-web e helpers/2_review.sh)." >> "$REPO_ENV"
       fi
       echo "NNSLR_REVIEW_TOKEN=$value" >> "$REPO_ENV"
     )
@@ -121,16 +121,16 @@ if [ "$stop" -eq 1 ]; then
     echo "Revisione spenta (pid $pid)."
   else
     echo "Nessuna revisione avviata da questo script."
-    if systemctl is-active --quiet nnslr-review 2>/dev/null; then
-      echo "C'e' il servizio nnslr-review: si spegne con  systemctl stop nnslr-review"
+    if systemctl is-active --quiet speedlimits-web 2>/dev/null; then
+      echo "C'e' il servizio speedlimits-web: si spegne con  systemctl stop speedlimits-web"
     fi
   fi
   exit 0
 fi
 
 # Already on: the systemd service, or a server started earlier by this script.
-if systemctl is-active --quiet nnslr-review 2>/dev/null; then
-  echo "La revisione gira gia' come servizio nnslr-review (porta 8765)."
+if systemctl is-active --quiet speedlimits-web 2>/dev/null; then
+  echo "La revisione gira gia' come servizio speedlimits-web (porta 8765)."
   if [ -r "$SERVICE_ENV" ]; then
     PORT=8765
     print_lan_link "$(sed -n 's/^NNSLR_REVIEW_TOKEN=//p' "$SERVICE_ENV")"

@@ -413,7 +413,7 @@ def make_handler(app: ReviewApp):
     from nnslr_tools.review_db import ReviewRejected, db_path, public_review, save_frame_review
 
     class Handler(BaseHTTPRequestHandler):
-        server_version = 'nnslr-review'
+        server_version = 'speedlimits-web'
         sys_version = ''
         # Socket timeout: a client that stops sending is disconnected, even before the token check.
         timeout = REQUEST_TIMEOUT_SECONDS
@@ -837,7 +837,7 @@ def serve_review(route: str | None = None, *, data_root: Path | None=None, host:
         if route is not None:
             print(f'Elenco di tutte le route: {_base_urls(host, port)[0]}/{suffix}', flush=True)
         if app.require_token and token_from_env:
-            print(f'Il token è quello di {TOKEN_ENV} (per il servizio: /etc/nnslr-review.env) '
+            print(f'Il token è quello di {TOKEN_ENV} (per il servizio: /etc/speedlimits-web.env) '
                   'e non viene stampato.', flush=True)
         elif app.require_token:
             print(f'Il token resta valido finché il server è acceso (fissalo con {TOKEN_ENV}).', flush=True)
