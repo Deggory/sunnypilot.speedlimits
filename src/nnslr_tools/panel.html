@@ -68,6 +68,7 @@ background:var(--surface-2);border:1px solid var(--line)}
 .step .big{font-size:28px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.1}
 .step .sub{color:var(--muted);font-size:13.5px}
 .step .buttons{display:flex;flex-wrap:wrap;gap:8px;margin-top:auto}
+#update-buttons{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
 .goal{display:flex;gap:6px}
 .goal span{flex:1;height:8px;border-radius:4px;background:var(--surface-2);border:1px solid var(--line)}
 .goal span.on{background:var(--ok);border-color:var(--ok)}
@@ -194,6 +195,7 @@ border-radius:5px;padding:1px 5px}
 
   <section class="card" aria-labelledby="jobs-title">
     <h2 id="jobs-title">Azioni dal pannello</h2>
+    <div class="buttons" id="update-buttons"></div>
     <ul class="jobs" id="jobs"></ul>
     <p class="empty" id="jobs-empty" hidden>Nessuna azione ancora: i pulsanti qui sopra le avviano in background.</p>
   </section>
@@ -400,6 +402,7 @@ border-radius:5px;padding:1px 5px}
   }
 
   function renderJobs() {
+    byId('update-buttons').replaceChildren(actionButton('update', false));
     const list = byId('jobs');
     list.replaceChildren();
     byId('jobs-empty').hidden = status.jobs.length > 0;
@@ -457,7 +460,9 @@ border-radius:5px;padding:1px 5px}
 
   async function run(name) {
     const label = status.actions[name].label;
-    if (name !== 'prepare' && name !== 'dataset'
+    if (name === 'update') {
+      if (!window.confirm(label + ': git pull e riavvio del sito (qualche secondo). Avvio?')) return;
+    } else if (name !== 'prepare' && name !== 'dataset'
         && !window.confirm(label + ': il training usa la GPU per ore. Avvio?')) return;
     try {
       const job = await api('/api/panel/run/' + name, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'});

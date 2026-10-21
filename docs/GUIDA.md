@@ -54,7 +54,9 @@ Il pannello mostra:
 - la tabella delle route con lo stato;
 - le azioni lanciate dal pannello, con il loro stato (in corso, finita, fallita, interrotta), il pulsante **Log** (il log scorre dal vivo in basso nella pagina) e **Ferma**.
 
-Il pannello lancia solo quelle quattro azioni fisse, mai un comando qualsiasi, e una sola per tipo alla volta (preparazione da una parte, import/training dall'altra), contando anche quelle partite da terminale. È protetto come il resto del sito: token sulla LAN, e i pulsanti accettano solo richieste dalla pagina stessa. I log delle azioni sono in `data/logs/panel/`; l'ultima riga di ognuno è il codice di uscita.
+In **Azioni dal pannello** c'è anche **Aggiorna il codice**: lancia `helpers/update.sh --no-link` (sezione 3), cioè `git pull` e riavvio del sito, senza bisogno della ssh. Parte solo se non ci sono preparazioni o training in corso, e finché gira non ne parte nessuno: il pull cambierebbe gli script sotto i piedi a quelli in corso. Durante il riavvio la pagina resta qualche secondo "non raggiungibile", poi riprende da sola.
+
+Il pannello lancia solo queste cinque azioni fisse, mai un comando qualsiasi, e una sola per tipo alla volta (preparazione da una parte, import/training dall'altra), contando anche quelle partite da terminale. È protetto come il resto del sito: token sulla LAN, e i pulsanti accettano solo richieste dalla pagina stessa. I log delle azioni sono in `data/logs/panel/`; l'ultima riga di ognuno è il codice di uscita.
 
 `NNSLR_PANEL_ACTIONS=0` (nell'ambiente del server, per il servizio in `/etc/nnslr-review.env`) lascia il pannello in sola lettura, per esempio se il sito lo usano altre persone per revisionare.
 
@@ -94,7 +96,7 @@ cd ~/sunnypilot.speedlimits
 helpers/update.sh
 ```
 
-`helpers/update.sh` fa `git pull --ff-only` (si ferma se ci sono modifiche locali), aggiorna `.venv` se è cambiato `pyproject.toml`, rilancia `scripts/install_review_service.sh` (riscrive il servizio solo se è cambiato) e riavvia il servizio; senza servizio riavvia il sito acceso da `helpers/2_review.sh`. Alla fine stampa il link.
+`helpers/update.sh` fa `git pull --ff-only` (si ferma se ci sono modifiche locali), aggiorna `.venv` se è cambiato `pyproject.toml`, rilancia `scripts/install_review_service.sh` (riscrive il servizio solo se è cambiato) e riavvia il servizio; senza servizio riavvia il sito acceso da `helpers/2_review.sh`. Alla fine stampa il link (non con `--no-link`, che è come lo lancia il pulsante **Aggiorna il codice** del pannello).
 
 Il servizio ha `KillMode=process`: un riavvio ferma solo il sito, non una preparazione o un training partiti dal pannello. Dopo il riavvio il pannello li ritrova come "in corso".
 
@@ -151,5 +153,5 @@ scripts/install_review_service.sh --uninstall     # toglie il servizio (il token
 | `la porta 8765 e' gia' occupata` | C'è già un sito acceso (il servizio o un altro `nnslr review`): `helpers/2_review.sh` ristampa il link, `helpers/2_review.sh --stop` spegne quello acceso a mano. |
 | `Accesso negato: apri l'indirizzo con il token` | Apri il link con `?token=...` (sezione 3). |
 | `su ... non ci sono ancora pesi stable` | `--continue` vuole un modello già pubblicato come stable: allena prima da zero. |
-| Una route resta "da collegare" | Nella cartella condivisa manca `fcamera.hevc` per quei segmenti, oppure `link-videos` ha trovato un conflitto: vedi `data/logs/prepare/link-videos.json`. |
+| Una route resta "da collegare" | `link-videos` ha trovato un conflitto: vedi `data/logs/prepare/link-videos.json`. I segmenti con solo il log e senza `fcamera.hevc` (il fetch scarica solo il log dei primi e ultimi due) non sono un errore: non vengono collegati e sono elencati in `log_only`. |
 | Estrazione o pre-annotazione fallita | Il motivo è in `data/logs/prepare/<route>.log`. |

@@ -8,7 +8,9 @@
 # A preparation or a training started from the panel keeps running: the service stops
 # only the web server (KillMode=process). Full procedure: docs/GUIDA.md.
 #
-# Usage: helpers/update.sh
+# Usage: helpers/update.sh [--no-link]
+# --no-link: do not print the link with the token at the end (the panel uses it, so the
+#            token never lands in its log).
 # -h, --help: this help.
 
 set -euo pipefail
@@ -21,6 +23,11 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
   sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'
   exit 0
+fi
+print_link=1
+if [ "${1:-}" = "--no-link" ]; then
+  print_link=0
+  shift
 fi
 [ $# -eq 0 ] || die "opzione non valida: $1 (vedi --help)"
 
@@ -64,5 +71,6 @@ else
 fi
 
 # The site is on (service or helpers/2_review.sh): 2_review.sh only prints its link.
+[ "$print_link" -eq 1 ] || exit 0
 echo
 "$ROOT/helpers/2_review.sh" 2>/dev/null | grep -e '^Apri' -e '^Pannello' || true

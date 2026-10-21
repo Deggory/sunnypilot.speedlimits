@@ -71,22 +71,109 @@ def test_all_routes_are_linked_and_missing_files_reported(shared, capfd):
         f"{OTHER}--1", f"{OTHER}--3", f"{OTHER}--4", f"{ROUTE}--0", f"{ROUTE}--2", f"{ROUTE}--10",
     ]
     assert report["missing_files"] == [
-        {"route": OTHER, "segment": 3, "name": "fcamera.hevc"},
         {"route": OTHER, "segment": 4, "name": "rlog"},
     ]
+    assert report["log_only"] == [f"{OTHER}--3"]
+    assert report["removed"] == []
     assert report["ignored"] == ["boot"]
-    assert report["counts"] == {"created": 15}
+    assert report["counts"] == {"created": 13}
     for index in (0, 2, 10):
         for name in ("fcamera.hevc", "ecamera.hevc", "rlog.zst"):
             link = root / "raw/routes" / ROUTE / str(index) / name
             assert link.is_symlink()
             assert os.readlink(link) == str(videos / f"{ROUTE}--{index}" / name)
             assert link.read_bytes() == f"{ROUTE}--{index}:{name}".encode()
-    # The files that exist in incomplete segments are still linked.
-    assert (root / "raw/routes" / OTHER / "3/ecamera.hevc").is_symlink()
+    # A segment with video but no full log still gets its files linked.
     assert (root / "raw/routes" / OTHER / "4/fcamera.hevc").is_symlink()
-    assert not (root / "raw/routes" / OTHER / "3/fcamera.hevc").exists()
+    # A segment without video is not linked at all: extract-frames would stop on it.
+    assert not (root / "raw/routes" / OTHER / "3").exists()
     assert snapshot(videos) == before  # the shared folder is only read
+
+
+def make_log_only_trip(videos: Path) -> None:
+    # As the automatic fetch leaves it: the trimmed first/last segments have only the log.
+    make_segment(videos, f"{ROUTE}--0", ("rlog.zst",))
+    make_segment(videos, f"{ROUTE}--1", ("fcamera.hevc", "ecamera.hevc", "rlog.zst"))
+    make_segment(videos, f"{ROUTE}--2", ("rlog.zst",))
+
+
+def test_log_only_segments_are_not_an_error(tmp_path, capfd, monkeypatch):
+    videos = tmp_path / "comma-videos"
+    root = tmp_path / "data"
+    make_log_only_trip(videos)
+    monkeypatch.setenv("COMMA_VIDEOS_DIR", str(videos))
+    monkeypatch.setenv("NNSLR_DATA_ROOT", str(root))
+    code, out, err = run(capfd)
+    assert code == 0, err
+    report = json.loads(out)
+    assert report["ok"] is True
+    assert report["missing_files"] == []
+    assert report["log_only"] == [f"{ROUTE}--0", f"{ROUTE}--2"]
+    assert report["counts"] == {"created": 3}
+    assert sorted(p.name for p in (root / "raw/routes" / ROUTE).iterdir()) == ["1"]
+
+
+def test_links_of_an_earlier_run_for_log_only_segments_are_removed(tmp_path, capfd, monkeypatch):
+    videos = tmp_path / "comma-videos"
+    root = tmp_path / "data"
+    make_log_only_trip(videos)
+    monkeypatch.setenv("COMMA_VIDEOS_DIR", str(videos))
+    monkeypatch.setenv("NNSLR_DATA_ROOT", str(root))
+    # What the older link-videos left: a segment folder with only the link to the log.
+    for index in (0, 2):
+        old = root / "raw/routes" / ROUTE / str(index)
+        old.mkdir(parents=True)
+        (old / "rlog.zst").symlink_to(videos / f"{ROUTE}--{index}" / "rlog.zst")
+
+    code, out, err = run(capfd, "--dry-run")
+    assert code == 0, err
+    report = json.loads(out)
+    assert [(row["segment"], row["status"]) for row in report["removed"]] == [(0, "would_remove"), (2, "would_remove")]
+    assert (root / "raw/routes" / ROUTE / "0/rlog.zst").is_symlink()
+
+    code, out, err = run(capfd)
+    assert code == 0, err
+    report = json.loads(out)
+    assert [(row["segment"], row["status"]) for row in report["removed"]] == [(0, "removed"), (2, "removed")]
+    assert sorted(p.name for p in (root / "raw/routes" / ROUTE).iterdir()) == ["1"]
+    assert (videos / f"{ROUTE}--0/rlog.zst").is_file()  # the shared file is untouched
+    code, out, err = run(capfd)
+    assert code == 0, err
+    assert json.loads(out)["removed"] == []
+
+
+def test_log_only_segment_folder_with_other_files_is_left_and_reported(tmp_path, capfd, monkeypatch):
+    videos = tmp_path / "comma-videos"
+    root = tmp_path / "data"
+    make_log_only_trip(videos)
+    monkeypatch.setenv("COMMA_VIDEOS_DIR", str(videos))
+    monkeypatch.setenv("NNSLR_DATA_ROOT", str(root))
+    old = root / "raw/routes" / ROUTE / "0"
+    old.mkdir(parents=True)
+    (old / "rlog.zst").write_bytes(b"an old local copy")
+    code, out, err = run(capfd)
+    assert code == 1, err
+    report = json.loads(out)
+    assert report["missing_files"] == [{"route": ROUTE, "segment": 0, "name": "fcamera.hevc"}]
+    assert report["removed"] == []
+    assert (old / "rlog.zst").read_bytes() == b"an old local copy"
+
+
+def test_old_local_video_keeps_a_segment_without_shared_video(tmp_path, capfd, monkeypatch):
+    videos = tmp_path / "comma-videos"
+    root = tmp_path / "data"
+    make_log_only_trip(videos)
+    monkeypatch.setenv("COMMA_VIDEOS_DIR", str(videos))
+    monkeypatch.setenv("NNSLR_DATA_ROOT", str(root))
+    old = root / "raw/routes" / ROUTE / "0"
+    old.mkdir(parents=True)
+    (old / "fcamera.hevc").write_bytes(b"an old local video")
+    code, out, err = run(capfd)
+    assert code == 0, err
+    report = json.loads(out)
+    assert report["log_only"] == [f"{ROUTE}--2"]
+    assert (old / "fcamera.hevc").read_bytes() == b"an old local video"
+    assert (old / "rlog.zst").is_symlink()
 
 
 def test_one_route_only(shared, capfd):

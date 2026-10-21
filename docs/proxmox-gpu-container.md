@@ -178,8 +178,12 @@ nnslr link-videos --route <route>    # one route only
 
 `link-videos` links `fcamera.hevc`, `ecamera.hevc`, the full log and the other
 raw comma files it finds; it never writes into `~/comma-videos`. A segment
-without `fcamera.hevc` or without a full log is listed in `missing_files`
-(exit code 1); its other files are still linked. Existing links are kept; a
+with only the log and no `fcamera.hevc` (the automatic fetch keeps just the log
+of the first/last segments it trims) is not linked and is listed in
+`log_only`, not an error; links an earlier run made for it are removed
+(`removed`), since `extract-frames` stops on a segment folder without video. A
+segment with `fcamera.hevc` but without a full log is listed in
+`missing_files` (exit code 1); its other files are still linked. Existing links are kept; a
 link to a file that no longer exists (e.g. after moving `~/comma-videos`) is
 pointed to the shared copy (`relinked`); an old regular file in
 `data/raw/routes` that is identical to the shared copy is replaced by a link, a

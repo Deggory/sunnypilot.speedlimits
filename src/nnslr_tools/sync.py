@@ -308,6 +308,29 @@ def _plan_link(link: Path, shared: Path) -> tuple[str, str | None]:
     return "would_replace_duplicate", None
 
 
+def _plan_log_only_cleanup(report: dict[str, Any], route_id: str, index: int,
+                           segment_dir: Path, shared_dir: Path) -> None:
+    """Plan the removal of the links an earlier run made for a log-only segment.
+
+    Only a folder that holds nothing but links into shared_dir is removed. Anything
+    else (an old copy, a link elsewhere) is left alone and reported in
+    missing_files, because without fcamera.hevc it would stop extract-frames.
+    """
+    if not segment_dir.is_dir():
+        return
+    links = []
+    for entry in sorted(segment_dir.iterdir()):
+        own_link = False
+        if entry.is_symlink() and os.readlink(entry) == str(shared_dir / entry.name):
+            own_link = True
+        if not own_link:
+            report["missing_files"].append({"route": route_id, "segment": index, "name": "fcamera.hevc"})
+            return
+        links.append(str(entry))
+    report["removed"].append({"route": route_id, "segment": index, "path": str(segment_dir),
+                              "links": links, "status": "would_remove"})
+
+
 def sync_route(
     *, route: str, host: str | None = None, segments: str = "all",
     camera: str = "narrow", data_root: str | Path | None = None,
@@ -417,9 +440,13 @@ def link_videos(
 
     No network access, and nothing is ever written into the shared folder.
     Every route in the shared folder is linked, or only `route`. A segment
-    without fcamera.hevc or without a full log is reported in missing_files;
-    its other files are still linked. Dry-run writes nothing but already
-    reports the conflicts the real run would hit.
+    with only logs and no fcamera.hevc (the fetch keeps just the log of the
+    segments it trims) is not linked and is listed in log_only, not an error;
+    links an earlier run made for it are removed, because extract-frames
+    stops on a segment folder without video. A segment with fcamera.hevc but
+    without a full log is reported in missing_files; its other files are
+    still linked. Dry-run writes nothing but already reports the conflicts
+    the real run would hit.
     """
     if route is not None:
         parse_route_id(route)
@@ -453,8 +480,8 @@ def link_videos(
 
     report: dict[str, Any] = {
         "videos_dir": str(videos), "data_root": str(root), "route": route, "dry_run": dry_run,
-        "segments": [], "files": [], "missing_files": [], "ignored": ignored, "counts": {}, "ok": True,
-        "warning": _videos_dir_warning(videos),
+        "segments": [], "files": [], "missing_files": [], "log_only": [], "removed": [],
+        "ignored": ignored, "counts": {}, "ok": True, "warning": _videos_dir_warning(videos),
     }
     # Plan and check every link before writing anything.
     for route_id, index, directory in found:
@@ -464,16 +491,19 @@ def link_videos(
             shared = directory / name
             if shared.is_file() and not shared.is_symlink():
                 present.append(name)
-        if "fcamera.hevc" not in present:
-            report["missing_files"].append({"route": route_id, "segment": index, "name": "fcamera.hevc"})
+        segment_dir = root / "raw" / "routes" / route_id / str(index)
+        _check_destination(root, segment_dir)
+        if "fcamera.hevc" not in present and not (segment_dir / "fcamera.hevc").is_file():
+            report["log_only"].append(directory.name)
+            _plan_log_only_cleanup(report, route_id, index, segment_dir, directory)
+            continue
+        # (An old copy of the video in raw/routes keeps the segment usable: its logs are linked.)
         has_full_log = False
         for name in _LOG_NAMES:
             if name in present:
                 has_full_log = True
         if not has_full_log:
             report["missing_files"].append({"route": route_id, "segment": index, "name": "rlog"})
-        segment_dir = root / "raw" / "routes" / route_id / str(index)
-        _check_destination(root, segment_dir)
         for name in present:
             destination = segment_dir / name
             shared = directory / name
@@ -503,11 +533,23 @@ def link_videos(
                 row["error"] = error
             elif "error" in row:
                 del row["error"]
+        for row in report["removed"]:
+            try:
+                for link in row["links"]:
+                    Path(link).unlink()
+                Path(row["path"]).rmdir()
+                row["status"] = "removed"
+            except OSError as exc:
+                row["status"] = "failed"
+                row["error"] = str(exc)
 
     if report["missing_files"]:
         report["ok"] = False
     for row in report["files"]:
         if row["status"] == "failed" or row["status"] == "conflict":
+            report["ok"] = False
+    for row in report["removed"]:
+        if row["status"] == "failed":
             report["ok"] = False
 
     for row in report["files"]:

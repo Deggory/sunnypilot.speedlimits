@@ -17,6 +17,7 @@ from review_helpers import ROUTE, TOKEN, RunningServer, json_of, make_report
 REPO = Path(__file__).resolve().parents[2]
 FAKE_PREPARE = '#!/usr/bin/env bash\necho "prepare $*"\necho "data root $NNSLR_DATA_ROOT"\nsleep "${FAKE_SLEEP:-0}"\n'
 FAKE_TRAIN = '#!/usr/bin/env bash\necho "train $*"\nexit 3\n'
+FAKE_UPDATE = '#!/usr/bin/env bash\necho "update $*"\nsleep "${FAKE_UPDATE_SLEEP:-0}"\n'
 
 
 @pytest.fixture
@@ -24,7 +25,7 @@ def checkout(tmp_path):
     repo = tmp_path / 'repo'
     (repo / 'helpers').mkdir(parents=True)
     shutil.copy(REPO / 'helpers/route_status.py', repo / 'helpers/route_status.py')
-    for name, text in (('1_prepare.sh', FAKE_PREPARE), ('3_train.sh', FAKE_TRAIN)):
+    for name, text in (('1_prepare.sh', FAKE_PREPARE), ('3_train.sh', FAKE_TRAIN), ('update.sh', FAKE_UPDATE)):
         script = repo / 'helpers' / name
         script.write_text(text)
         script.chmod(0o755)
@@ -97,6 +98,45 @@ def test_one_action_per_kind_and_stop(root, checkout, monkeypatch):
     with pytest.raises(PanelError) as unknown:
         panel.stop('20260101-000000-prepare')
     assert unknown.value.status == 404
+
+
+def test_update_runs_without_printing_the_token_link(root, checkout):
+    panel = Panel(root, repo=checkout)
+    assert panel.status()['actions']['update'] == {'label': 'Aggiorna il codice', 'allowed': True, 'reason': ''}
+    done = finished(panel, panel.start('update')['id'])
+    assert (done['state'], done['code']) == ('ok', 0)
+    assert 'update --no-link' in full_log(panel, done['id'])
+
+
+def test_update_never_runs_together_with_a_preparation_or_a_training(root, checkout, monkeypatch):
+    monkeypatch.setenv('FAKE_SLEEP', '30')
+    panel = Panel(root, repo=checkout)
+    job = panel.start('prepare')
+    with pytest.raises(PanelError) as busy:
+        panel.start('update')
+    assert busy.value.status == 409
+    assert panel.status()['actions']['update']['reason'] == "c'è già una preparazione in corso"
+    panel.stop(job['id'])
+    finished(panel, job['id'])
+
+    monkeypatch.setenv('FAKE_UPDATE_SLEEP', '30')
+    update = panel.start('update')
+    for action in ('prepare', 'dataset'):
+        with pytest.raises(PanelError) as busy:
+            panel.start(action)
+        assert busy.value.status == 409
+    assert panel.status()['actions']['prepare']['reason'] == "c'è già un aggiornamento del codice in corso"
+    panel.stop(update['id'])
+    finished(panel, update['id'])
+
+
+def test_update_needs_its_helper(root, checkout):
+    (checkout / 'helpers/update.sh').unlink()
+    panel = Panel(root, repo=checkout)
+    assert panel.status()['actions']['update']['reason'] == 'manca helpers/update.sh in questa installazione'
+    with pytest.raises(PanelError) as missing:
+        panel.start('update')
+    assert missing.value.status == 403
 
 
 def test_read_only_panel_and_unknown_actions(root, checkout):

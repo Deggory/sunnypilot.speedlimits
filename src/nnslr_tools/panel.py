@@ -1,6 +1,7 @@
 # [control-panel] - START
 """Control panel of the review site: the state of every route, the machine, and buttons that run
-the easy helpers (helpers/1_prepare.sh, helpers/3_train.sh) in the background with a live log.
+the easy helpers (helpers/1_prepare.sh, helpers/3_train.sh, helpers/update.sh) in the background
+with a live log.
 
 Only the fixed actions of ACTIONS can run, never a command taken from a request. They are the
 helpers of the checkout this package runs from (editable install); without them (wheel
@@ -38,6 +39,9 @@ ACTIONS = {
     'train': {'label': 'Allena da zero', 'group': 'train', 'command': ['helpers/3_train.sh']},
     'train_continue': {'label': 'Allena dai pesi stable', 'group': 'train',
                        'command': ['helpers/3_train.sh', '--continue']},
+    # git pull + restart of this server (KillMode=process: the action itself survives the restart).
+    # --no-link: the link with the token must not land in the log.
+    'update': {'label': 'Aggiorna il codice', 'group': 'update', 'command': ['helpers/update.sh', '--no-link']},
 }
 # The same work started from a terminal: (group, label, fragment of the command line).
 ACTIVITIES = (
@@ -46,10 +50,12 @@ ACTIVITIES = (
     ('prepare', 'pre-annotazione', 'nnslr preannotate'),
     ('train', 'dataset e training', 'helpers/3_train.sh'),
     ('train', 'training su GPU', 'run_v100_baseline.sh'),
+    ('update', 'aggiornamento del codice', 'helpers/update.sh'),
     # Shown only: the driving model of openpilot.distill shares the GPU (the training refuses a busy GPU).
     ('other', 'training openpilot.distill', 'supervised.train'),
 )
-GROUP_NAMES = {'prepare': 'una preparazione', 'train': 'un import o un training'}
+GROUP_NAMES = {'prepare': 'una preparazione', 'train': 'un import o un training',
+               'update': 'un aggiornamento del codice'}
 
 
 class PanelError(Exception):
@@ -197,10 +203,15 @@ class Panel:
         states = {}
         for name, action in ACTIONS.items():
             reason = ''
+            conflict = _conflicting_group(action['group'], running)
             if not payload['actions_enabled']:
                 reason = 'pannello in sola lettura'
-            elif action['group'] in running:
-                reason = 'c\'è già ' + GROUP_NAMES[action['group']] + ' in corso'
+            elif conflict is not None:
+                reason = 'c\'è già ' + GROUP_NAMES[conflict] + ' in corso'
+            elif name == 'update' and not (self.repo / 'helpers/update.sh').is_file():
+                reason = 'manca helpers/update.sh in questa installazione'
+            elif name == 'update':
+                pass
             elif name == 'prepare' and not to_prepare:
                 reason = 'nessuna route nuova da preparare'
             elif name != 'prepare' and not confirmed:
@@ -220,9 +231,12 @@ class Panel:
         if not self.actions_enabled or not self.available():
             raise PanelError(403, 'actions_disabled', 'Il pannello è in sola lettura su questo server.')
         group = ACTIONS[action]['group']
+        if action == 'update' and not (self.repo / 'helpers/update.sh').is_file():
+            raise PanelError(403, 'actions_disabled', 'Manca helpers/update.sh in questa installazione.')
         with self._lock:
-            if group in self._running_groups(self.activities()):
-                raise PanelError(409, 'busy', 'C\'è già ' + GROUP_NAMES[group] + ' in corso: aspetta che finisca.')
+            conflict = _conflicting_group(group, self._running_groups(self.activities()))
+            if conflict is not None:
+                raise PanelError(409, 'busy', 'C\'è già ' + GROUP_NAMES[conflict] + ' in corso: aspetta che finisca.')
             self.logs.mkdir(parents=True, exist_ok=True)
             job_id = datetime.now().strftime('%Y%m%d-%H%M%S') + '-' + action
             path = self.logs / (job_id + '.log')
@@ -273,6 +287,23 @@ class Panel:
             source.seek(offset)
             data = source.read(LOG_CHUNK_BYTES)
         return {'id': job_id, 'text': data.decode('utf-8', 'replace'), 'offset': offset + len(data), 'size': size}
+
+
+def _conflicting_group(group: str, running: set[str]) -> str | None:
+    """The running group that keeps an action of `group` from starting, or None.
+
+    One action per group at a time. The update rewrites the helpers under a running bash and
+    restarts this server, so it never runs together with a preparation or a training.
+    """
+    if group in running:
+        return group
+    if group == 'update':
+        for other in ('prepare', 'train'):
+            if other in running:
+                return other
+    elif 'update' in running:
+        return 'update'
+    return None
 
 
 def _exit_code(path: Path) -> int | None:
