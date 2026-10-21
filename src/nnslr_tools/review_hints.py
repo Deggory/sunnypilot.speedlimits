@@ -438,7 +438,9 @@ def suspicious_frames(rows: list[dict], hints_by_frame: dict, confirmed: dict, *
                             words.append(box_words(box))
                         reasons.append({'rule': 'd', 'text': 'nel fotogramma ' + side + ' c’è un cartello confermato ('
                                         + _join_words(_unique(words)) + '), qui niente'})
-                        continue
+                    # A reviewed neighbour takes precedence over unreviewed hints,
+                    # even when its confirmed box list is intentionally empty.
+                    continue
                 neighbour_sure = strong_hints(hints_by_frame.get(neighbour['key'], []))
                 if neighbour_sure:
                     words = []
