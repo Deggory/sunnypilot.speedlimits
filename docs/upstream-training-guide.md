@@ -568,6 +568,39 @@ hard-example mining, ONNX parity export, immutable bundle packaging and final
 bundle verification. It never kills competing GPU processes and never deploys
 anything to Sunnypilot or a comma device.
 
+### wandb
+
+Training logs to [wandb](https://wandb.ai), the same way openpilot.distill
+does. `scripts/setup_v100_training_env.sh` installs it (the `training` extra of
+`pyproject.toml`); the core, the CLI and the CPU tests never import it.
+
+Log in once on the training host; the key is saved in `~/.netrc`:
+
+```sh
+.venv-gpu/bin/wandb login
+```
+
+- **Project:** `sunnypilot.speedlimits`, or `WANDB_PROJECT=<name>`.
+- **Grouping:** detector and reader of one pipeline run share the wandb group
+  `<run id>` (`job_type` `detector` / `reader`, run names
+  `<run id>-detector` / `<run id>-reader`). `run_v100_baseline.sh` exports
+  `NNSLR_RUN_ID`; a manual `nnslr train --output <data-root>/runs/<run id>/<task>`
+  takes the run id from the folder, any other `--output` folder is its own run id.
+- **Files:** `<output>/wandb/` next to the checkpoint and `result.json`.
+- **Logged:** per step the training loss (detector: plus its
+  `bbox_regression` / `classification` parts; reader: plus batch accuracy),
+  learning rate and step time; per epoch the epoch loss, validation loss (reader:
+  plus train/validation accuracy) and the best value so far. On the first epoch,
+  every 5 epochs and on the last one: a few validation frames with predicted
+  (score >= 0.25) and reviewed boxes, and the first validation crops with
+  `true <label> / pred <label>` in the caption.
+- **Offline fallback:** with no `WANDB_MODE`, no `WANDB_API_KEY` and no
+  `api.wandb.ai` in `~/.netrc` the run goes offline (one message, training is
+  never blocked). Upload it later with
+  `wandb sync <output>/wandb/offline-run-*`.
+- **Off:** `WANDB_MODE=disabled` turns wandb off completely. If wandb is not
+  installed, training prints one warning and runs without it.
+
 ## Offline evaluation and hard-example mining (T5/T6)
 
 Inspect the frozen evaluation population without importing PyTorch:

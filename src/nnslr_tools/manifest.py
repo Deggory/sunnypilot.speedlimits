@@ -29,6 +29,9 @@ What lives here:
 Nothing here reads ``NNSLR_DATA_ROOT`` implicitly: the data root is always an
 explicit argument, so the module stays importable and testable in any
 environment. The CLI is the only layer that resolves the environment variable.
+The one exception is ``COMMA_VIDEOS_DIR``: :func:`normalize_relpath` reads it
+only for a symlink under ``raw/routes/``, to accept links into the shared
+folder of raw comma files.
 """
 from __future__ import annotations
 
@@ -203,6 +206,38 @@ def _strict_optional_str(value: Any, field: str) -> str | None:
     return _strict_str(value, field)
 
 
+def _shared_video_relpath(root: Path, target: Path) -> str | None:
+    """Relpath of a raw/routes symlink that points into the shared videos folder.
+
+    Returns None when ``target`` is not such a symlink, so the ordinary check
+    applies. A raw/routes symlink that points outside both the data root and
+    the shared videos folder is rejected here with a clear message.
+    """
+    parts = target.parts
+    if len(parts) < 3 or parts[0] != "raw" or parts[1] != "routes":
+        return None
+    if ".." in parts:
+        return None
+    link = root / target
+    if not link.is_symlink():
+        return None
+    # A symlinked folder above the file could redirect the whole segment.
+    if link.parent.resolve() != link.parent:
+        return None
+    # sync imports this module, so it is imported here and not at the top.
+    from nnslr_tools.sync import resolve_videos_dir
+    videos = resolve_videos_dir()
+    resolved = link.resolve()
+    if resolved != videos and resolved.is_relative_to(videos):
+        return target.as_posix()
+    if resolved.is_relative_to(root):
+        return None
+    raise NnslerManifestError(
+        "path_traversal",
+        f"{target} -> {resolved}: outside the data root and outside COMMA_VIDEOS_DIR ({videos})",
+    )
+
+
 def normalize_relpath(data_root: Path, target: Path) -> str:
     """Return ``target`` as a POSIX relpath under ``data_root``.
 
@@ -210,12 +245,21 @@ def normalize_relpath(data_root: Path, target: Path) -> str:
     and ``..`` traversal that escapes the data root. A path that equals the
     data root or is a proper ancestor of it is also rejected, because a raw
     file must be *inside* the root.
+
+    One exception, for reading only: a raw comma file under ``raw/routes/``
+    may be a symlink into the shared videos folder (``COMMA_VIDEOS_DIR``, see
+    :mod:`nnslr_tools.sync`). Only the file itself may be the link; the folders
+    above it must be real folders inside the data root. Its relpath inside the
+    data root is returned.
     """
     if _REMOTE_SCHEME_RE.match(str(target)):
         raise NnslerManifestError("remote_path", str(target))
     if target.is_absolute():
         raise NnslerManifestError("absolute_path", str(target))
     root = data_root.resolve()
+    shared_relpath = _shared_video_relpath(root, target)
+    if shared_relpath is not None:
+        return shared_relpath
     resolved = (root / target).resolve()
     try:
         rel = resolved.relative_to(root)

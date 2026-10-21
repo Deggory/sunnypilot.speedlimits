@@ -50,6 +50,7 @@ def source(tmp_path, monkeypatch):
     monkeypatch.setenv("TEST_REMOTE", str(remote))
     monkeypatch.setenv("TEST_SSH_CALLS", str(commands))
     monkeypatch.setenv("NNSLR_DATA_ROOT", str(tmp_path / "data with spaces"))
+    monkeypatch.setenv("COMMA_VIDEOS_DIR", str(tmp_path / "comma videos"))
     monkeypatch.delenv("NNSLR_COMMA_HOST", raising=False)
     return remote, Path(os.environ["NNSLR_DATA_ROOT"]), commands
 

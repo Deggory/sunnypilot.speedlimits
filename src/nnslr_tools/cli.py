@@ -58,7 +58,7 @@ from nnslr_tools.route_io import build_route_manifest, discover_segment_dirs
 # [route-extract] - END
 # [nnslr-sync] - START
 # [route-extract] - START
-from nnslr_tools.sync import DEFAULT_DATA_ROOT, sync_route
+from nnslr_tools.sync import DEFAULT_DATA_ROOT, DEFAULT_VIDEOS_DIR, link_videos, resolve_videos_dir, sync_route
 # [route-extract] - END
 # [nnslr-sync] - END
 
@@ -72,6 +72,8 @@ def collect_env_report() -> dict[str, Any]:
     flag; the report marks GPU as *untested* by default."""
     data_root = os.environ.get("NNSLR_DATA_ROOT", "").strip()
     data_root_path = Path(data_root) if data_root else None
+    videos_env = os.environ.get("COMMA_VIDEOS_DIR", "").strip()
+    videos_dir = resolve_videos_dir()
     report: dict[str, Any] = {
         "nnslr_tools": __version__,
         "speed_vision_core": speed_vision_core.__version__,
@@ -88,6 +90,18 @@ def collect_env_report() -> dict[str, Any]:
                 # [nnslr-sync] - START
                 else f"NNSLR_DATA_ROOT is not set; data root defaults to {DEFAULT_DATA_ROOT}."
                 # [nnslr-sync] - END
+            ),
+        },
+        "comma_videos_dir": {
+            "configured": bool(videos_env),
+            "path": str(videos_dir),
+            "exists": videos_dir.is_dir(),
+            "note": (
+                "COMMA_VIDEOS_DIR is read from the environment. Raw comma files are stored "
+                "there once; <data root>/raw/routes only holds symlinks to them."
+                if videos_env
+                else f"COMMA_VIDEOS_DIR is not set; raw comma files default to {DEFAULT_VIDEOS_DIR}. "
+                "<data root>/raw/routes only holds symlinks to them."
             ),
         },
         "cpu": {
@@ -625,10 +639,24 @@ def _cmd_sync_routes(args: argparse.Namespace) -> int:
     try:
         report = sync_route(
             route=args.route, host=args.host, segments=args.segments,
-            camera=args.camera, data_root=args.data_root, dry_run=args.dry_run,
+            camera=args.camera, data_root=args.data_root, videos_dir=args.videos_dir,
+            dry_run=args.dry_run,
         )
     except OSError as exc:
         print(f"error: sync-routes: {exc}", file=sys.stderr)
+        return 2
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0 if report["ok"] else 1
+
+
+def _cmd_link_videos(args: argparse.Namespace) -> int:
+    try:
+        report = link_videos(
+            route=args.route, videos_dir=args.videos_dir,
+            data_root=args.data_root, dry_run=args.dry_run,
+        )
+    except OSError as exc:
+        print(f"error: link-videos: {exc}", file=sys.stderr)
         return 2
     print(json.dumps(report, indent=2, sort_keys=True))
     return 0 if report["ok"] else 1
@@ -981,15 +1009,29 @@ def build_parser() -> argparse.ArgumentParser:
     p_self.set_defaults(func=lambda a: _selftest())
 
     # [nnslr-sync] - START
-    p_sync = sub.add_parser("sync-routes", help="copy one comma route via SSH/rsync (front camera + full log)")
+    p_sync = sub.add_parser(
+        "sync-routes",
+        help="copy one comma route via SSH/rsync (front camera + full log) into the shared videos folder and link it into raw/routes",
+    )
     p_sync.add_argument("--route", required=True, help="route ID to copy (always explicit)")
     p_sync.add_argument("--host", help="SSH alias, hostname, IPv4 or user@host (default: NNSLR_COMMA_HOST or comma)")
     p_sync.add_argument("--segments", default="all", help="all (default), 0-3, or 0,2,4-6")
     p_sync.add_argument("--camera", choices=("narrow", "wide", "both"), default="narrow",
                         help="narrow=fcamera (default), wide=ecamera, both=both road cameras")
-    p_sync.add_argument("--data-root", help="destination root (default: NNSLR_DATA_ROOT or <repo>/data)")
+    p_sync.add_argument("--data-root", help="root of the raw/routes symlinks (default: NNSLR_DATA_ROOT or <repo>/data)")
+    p_sync.add_argument("--videos-dir", help="shared folder of the raw comma files (default: COMMA_VIDEOS_DIR or <repo>/../comma-videos)")
     p_sync.add_argument("--dry-run", action="store_true", help="inventory via SSH and print the plan without copying or writing files")
     p_sync.set_defaults(func=_cmd_sync_routes)
+
+    p_link = sub.add_parser(
+        "link-videos",
+        help="link segments already in the shared videos folder into raw/routes (no network)",
+    )
+    p_link.add_argument("--route", help="link only this route ID (default: every route in the shared folder)")
+    p_link.add_argument("--videos-dir", help="shared folder of the raw comma files (default: COMMA_VIDEOS_DIR or <repo>/../comma-videos)")
+    p_link.add_argument("--data-root", help="root of the raw/routes symlinks (default: NNSLR_DATA_ROOT or <repo>/data)")
+    p_link.add_argument("--dry-run", action="store_true", help="print the plan without creating links")
+    p_link.set_defaults(func=_cmd_link_videos)
     # [nnslr-sync] - END
 
     p_route = sub.add_parser("route-manifest", help="inventory LOCAL route segments and preserve gaps")

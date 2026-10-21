@@ -1,7 +1,8 @@
 """Reader-baseline training for NNSLR.
 
 This module is isolated from the core/data CLI import surface. PyTorch,
-torchvision and Pillow are imported only after an explicit training request.
+torchvision and Pillow are imported only after an explicit training request,
+and so is the optional wandb tracking (nnslr_tools.tracking).
 prepare_reader_training is stdlib-only and can validate the exact dataset/split
 that would be consumed by a GPU run.
 
@@ -16,8 +17,10 @@ import hashlib
 import json
 from pathlib import Path
 import random
+import time
 from typing import Any
 
+from nnslr_tools import tracking
 from nnslr_tools.annotations import load_jsonl, validate_dataset
 from nnslr_tools.splits import validate_splits
 
@@ -25,6 +28,9 @@ TRAINING_SCHEMA_VERSION = 1
 ELIGIBLE_REVIEW_STATES = frozenset({"accepted", "corrected"})
 TRAIN_SPLIT = "train"
 VALIDATION_SPLIT = "validation"
+# ImageNet normalization of the reader crops (also undone for the wandb crops).
+READER_NORMALIZE_MEAN = (.485, .456, .406)
+READER_NORMALIZE_STD = (.229, .224, .225)
 
 
 def _sha256(path: Path) -> str:
@@ -356,6 +362,21 @@ def prepare_detector_training(
     }
 
 
+def _tracking_config(plan: dict[str, Any], config: Any, architecture: str) -> dict[str, Any]:
+    """Hyperparameters plus dataset identity for the wandb run config."""
+    values = dict(config.__dict__)
+    values["task"] = plan["task"]
+    values["architecture"] = architecture
+    values["dataset_kind"] = plan["dataset_kind"]
+    values["dataset_sha256"] = plan["dataset_sha256"]
+    values["split_sha256"] = plan["split_sha256"]
+    values["classes"] = list(plan["classes"])
+    values["counts_by_split"] = dict(plan["counts_by_split"])
+    if "boxes_by_split" in plan:
+        values["boxes_by_split"] = dict(plan["boxes_by_split"])
+    return values
+
+
 @dataclass(frozen=True)
 class TrainConfig:
     epochs: int = 20
@@ -530,6 +551,7 @@ def train_detector(
 
     train_frames = [r for r in plan["frames"] if r["split"] == TRAIN_SPLIT]
     val_frames = [r for r in plan["frames"] if r["split"] == VALIDATION_SPLIT]
+    val_dataset = DetectionDataset(val_frames)
     generator = torch.Generator().manual_seed(config.seed)
     train_loader = DataLoader(
         DetectionDataset(train_frames),
@@ -541,7 +563,7 @@ def train_detector(
         generator=generator,
     )
     val_loader = DataLoader(
-        DetectionDataset(val_frames),
+        val_dataset,
         batch_size=config.batch_size,
         shuffle=False,
         num_workers=config.num_workers,
@@ -593,88 +615,170 @@ def train_detector(
                 seen += len(images)
         return total / max(seen, 1)
 
+    def detector_samples() -> list[Any]:
+        # The first validation frames with reviewed boxes (fixed order, so the
+        # same frames every time), with predicted and reviewed boxes.
+        chosen = []
+        for index in range(len(val_frames)):
+            if len(val_frames[index]["boxes"]) > 0:
+                chosen.append(index)
+            if len(chosen) >= tracking.DETECTOR_IMAGE_SAMPLES:
+                break
+        samples = []
+        model.eval()
+        with torch.no_grad():
+            for index in chosen:
+                frame = val_frames[index]
+                tensor, _ = val_dataset[index]
+                prediction = model([tensor.to(device)])[0]
+                height = int(tensor.shape[1])
+                width = int(tensor.shape[2])
+                predicted = tracking.detector_box_data(
+                    prediction["boxes"].detach().float().cpu().tolist(),
+                    width,
+                    height,
+                    scores=prediction["scores"].detach().float().cpu().tolist(),
+                )
+                reviewed = tracking.detector_box_data(frame["boxes"], width, height)
+                boxes = {
+                    "predictions": {"box_data": predicted, "class_labels": tracking.DETECTOR_CLASS_LABELS},
+                    "ground_truth": {"box_data": reviewed, "class_labels": tracking.DETECTOR_CLASS_LABELS},
+                }
+                image = TF.to_pil_image(tensor)
+                image.thumbnail((tracking.IMAGE_MAX_SIDE, tracking.IMAGE_MAX_SIDE))
+                caption = (
+                    f"{frame['image_path']}: {len(reviewed)} reviewed, {len(predicted)} predicted "
+                    f"(score >= {tracking.DETECTOR_IMAGE_MIN_SCORE})"
+                )
+                samples.append(tracker.image(image, caption, boxes=boxes))
+        model.train()
+        return samples
+
     history = []
     best_validation_loss = float("inf")
     best_path = output_dir / "detector-best.pt"
+    global_step = 0
 
-    for epoch in range(config.epochs):
-        model.train()
-        train_total = 0.0
-        train_seen = 0
-        for images, targets in train_loader:
-            images = [img.to(device, non_blocking=True) for img in images]
-            targets = move_targets(targets)
-            optimizer.zero_grad(set_to_none=True)
-            with torch.cuda.amp.autocast(enabled=use_amp):
-                losses = model(images, targets)
-                loss = sum(losses.values())
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
-            train_total += float(loss.detach()) * len(images)
-            train_seen += len(images)
-
-        val_loss = validation_loss()
-        epoch_result = {
-            "epoch": epoch + 1,
-            "train_loss": train_total / max(train_seen, 1),
-            "validation_loss": val_loss,
-        }
-        history.append(epoch_result)
-
-        if val_loss < best_validation_loss:
-            best_validation_loss = val_loss
-            torch.save({
-                "format_version": 1,
-                "architecture": "ssdlite320_mobilenet_v3_large",
-                "task": "detector",
-                "classes": ["background", "speed_sign"],
-                "state_dict": model.state_dict(),
-                "dataset_sha256": plan["dataset_sha256"],
-                "split_sha256": plan["split_sha256"],
-                "epoch": epoch + 1,
-                "validation_loss": best_validation_loss,
-                "initialization": "imagenet1k_v1" if config.pretrained_backbone else "random",
-                "initialization_source": (
-                    "torchvision.models.MobileNet_V3_Large_Weights.IMAGENET1K_V1"
-                    if config.pretrained_backbone else "random"
-                ),
-                "torch_version": torch.__version__,
-                "torchvision_version": torchvision.__version__,
-            }, best_path)
-
-    gpu = None
-    if device.type == "cuda":
-        gpu = {
-            "name": torch.cuda.get_device_name(device),
-            "capability": list(torch.cuda.get_device_capability(device)),
-            "total_memory_bytes": int(torch.cuda.get_device_properties(device).total_memory),
-        }
-
-    result = {
-        "task": "detector",
-        "architecture": "ssdlite320_mobilenet_v3_large",
-        "classes": ["background", "speed_sign"],
-        "best_validation_loss": best_validation_loss,
-        "checkpoint": str(best_path),
-        "training_plan": str(plan_path),
-        "device": str(device),
-        "gpu": gpu,
-        "torch_version": torch.__version__,
-        "torchvision_version": torchvision.__version__,
-        "initialization": "imagenet1k_v1" if config.pretrained_backbone else "random",
-        "initialization_source": (
-            "torchvision.models.MobileNet_V3_Large_Weights.IMAGENET1K_V1"
-            if config.pretrained_backbone else "random"
-        ),
-        "config": config.__dict__,
-        "history": history,
-        "limitations": plan["limitations"],
-    }
-    (output_dir / "result.json").write_text(
-        json.dumps(result, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
+    tracker = tracking.start_training_run(
+        "detector",
+        output_dir,
+        _tracking_config(plan, config, "ssdlite320_mobilenet_v3_large"),
     )
+    try:
+        for epoch in range(config.epochs):
+            epoch_number = epoch + 1
+            epoch_start = time.perf_counter()
+            model.train()
+            train_total = 0.0
+            train_seen = 0
+            # The step time includes the wait for the batch, like distill's step_time.
+            step_start = time.perf_counter()
+            for images, targets in train_loader:
+                images = [img.to(device, non_blocking=True) for img in images]
+                targets = move_targets(targets)
+                optimizer.zero_grad(set_to_none=True)
+                with torch.cuda.amp.autocast(enabled=use_amp):
+                    losses = model(images, targets)
+                    loss = sum(losses.values())
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
+                step_loss = float(loss.detach())
+                train_total += step_loss * len(images)
+                train_seen += len(images)
+                global_step += 1
+                step_end = time.perf_counter()
+
+                if tracker.enabled:
+                    step_metrics = {"train/loss": step_loss}
+                    for name in losses:
+                        step_metrics["train/loss_" + name] = float(losses[name].detach())
+                    step_metrics["train/learning_rate"] = optimizer.param_groups[0]["lr"]
+                    step_metrics["train/step_time"] = step_end - step_start
+                    tracker.log(step_metrics, step=global_step)
+                step_start = step_end
+
+            val_loss = validation_loss()
+            epoch_result = {
+                "epoch": epoch_number,
+                "train_loss": train_total / max(train_seen, 1),
+                "validation_loss": val_loss,
+            }
+            history.append(epoch_result)
+
+            if val_loss < best_validation_loss:
+                best_validation_loss = val_loss
+                torch.save({
+                    "format_version": 1,
+                    "architecture": "ssdlite320_mobilenet_v3_large",
+                    "task": "detector",
+                    "classes": ["background", "speed_sign"],
+                    "state_dict": model.state_dict(),
+                    "dataset_sha256": plan["dataset_sha256"],
+                    "split_sha256": plan["split_sha256"],
+                    "epoch": epoch_number,
+                    "validation_loss": best_validation_loss,
+                    "initialization": "imagenet1k_v1" if config.pretrained_backbone else "random",
+                    "initialization_source": (
+                        "torchvision.models.MobileNet_V3_Large_Weights.IMAGENET1K_V1"
+                        if config.pretrained_backbone else "random"
+                    ),
+                    "torch_version": torch.__version__,
+                    "torchvision_version": torchvision.__version__,
+                }, best_path)
+
+            if tracker.enabled:
+                epoch_metrics = {
+                    "epoch": epoch_number,
+                    "train/epoch_loss": epoch_result["train_loss"],
+                    "validation/loss": val_loss,
+                    "validation/best_loss": best_validation_loss,
+                }
+                if tracker.should_log_images(epoch_number, config.epochs):
+                    epoch_metrics["validation/detections"] = detector_samples()
+                epoch_metrics["epoch_time"] = time.perf_counter() - epoch_start
+                tracker.log(epoch_metrics, step=global_step)
+
+        gpu = None
+        if device.type == "cuda":
+            gpu = {
+                "name": torch.cuda.get_device_name(device),
+                "capability": list(torch.cuda.get_device_capability(device)),
+                "total_memory_bytes": int(torch.cuda.get_device_properties(device).total_memory),
+            }
+
+        result = {
+            "task": "detector",
+            "architecture": "ssdlite320_mobilenet_v3_large",
+            "classes": ["background", "speed_sign"],
+            "best_validation_loss": best_validation_loss,
+            "checkpoint": str(best_path),
+            "training_plan": str(plan_path),
+            "device": str(device),
+            "gpu": gpu,
+            "torch_version": torch.__version__,
+            "torchvision_version": torchvision.__version__,
+            "initialization": "imagenet1k_v1" if config.pretrained_backbone else "random",
+            "initialization_source": (
+                "torchvision.models.MobileNet_V3_Large_Weights.IMAGENET1K_V1"
+                if config.pretrained_backbone else "random"
+            ),
+            "config": config.__dict__,
+            "history": history,
+            "limitations": plan["limitations"],
+        }
+        (output_dir / "result.json").write_text(
+            json.dumps(result, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        tracker.set_summary({
+            "best_validation_loss": best_validation_loss,
+            "checkpoint": str(best_path),
+        })
+    except BaseException:
+        tracker.finish(exit_code=1)
+        raise
+    tracker.finish(exit_code=0)
     return result
 
 
@@ -718,7 +822,7 @@ def train_reader(
                 ])
             pipeline.extend([
                 transforms.ToTensor(),
-                transforms.Normalize(mean=(.485, .456, .406), std=(.229, .224, .225)),
+                transforms.Normalize(mean=READER_NORMALIZE_MEAN, std=READER_NORMALIZE_STD),
             ])
             self.transform = transforms.Compose(pipeline)
 
@@ -773,105 +877,173 @@ def train_reader(
     plan_path = output_dir / "training-plan.json"
     plan_path.write_text(json.dumps(plan, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
+    def reader_samples(inputs, targets, logits) -> list[Any]:
+        # The first crops of the first validation batch (no shuffling, so the
+        # same crops every time) with the reviewed and the predicted label.
+        to_image = transforms.ToPILImage()
+        mean = torch.tensor(READER_NORMALIZE_MEAN).view(3, 1, 1)
+        std = torch.tensor(READER_NORMALIZE_STD).view(3, 1, 1)
+        expected = targets.detach().cpu().tolist()
+        predicted = logits.detach().argmax(1).cpu().tolist()
+        count = min(tracking.READER_IMAGE_SAMPLES, len(expected))
+        samples = []
+        for index in range(count):
+            pixels = inputs[index].detach().float().cpu() * std + mean
+            image = to_image(pixels.clamp(0.0, 1.0))
+            caption = f"true {classes[expected[index]]} / pred {classes[predicted[index]]}"
+            samples.append(tracker.image(image, caption))
+        return samples
+
     history = []
     best_accuracy = -1.0
     best_path = output_dir / "reader-best.pt"
+    global_step = 0
 
-    for epoch in range(config.epochs):
-        model.train()
-        train_loss = 0.0
-        train_seen = 0
-        train_correct = 0
-        for inputs, targets in train_loader:
-            inputs = inputs.to(device, non_blocking=True)
-            targets = targets.to(device, non_blocking=True)
-            optimizer.zero_grad(set_to_none=True)
-            with torch.cuda.amp.autocast(enabled=use_amp):
-                logits = model(inputs)
-                loss = criterion(logits, targets)
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
-            train_loss += float(loss.detach()) * targets.numel()
-            train_seen += targets.numel()
-            train_correct += int((logits.argmax(1) == targets).sum())
-
-        model.eval()
-        val_loss = 0.0
-        val_seen = 0
-        val_correct = 0
-        with torch.no_grad():
-            for inputs, targets in val_loader:
+    tracker = tracking.start_training_run(
+        "reader",
+        output_dir,
+        _tracking_config(plan, config, "mobilenet_v3_small"),
+    )
+    try:
+        for epoch in range(config.epochs):
+            epoch_number = epoch + 1
+            epoch_start = time.perf_counter()
+            model.train()
+            train_loss = 0.0
+            train_seen = 0
+            train_correct = 0
+            # The step time includes the wait for the batch, like distill's step_time.
+            step_start = time.perf_counter()
+            for inputs, targets in train_loader:
                 inputs = inputs.to(device, non_blocking=True)
                 targets = targets.to(device, non_blocking=True)
+                optimizer.zero_grad(set_to_none=True)
                 with torch.cuda.amp.autocast(enabled=use_amp):
                     logits = model(inputs)
                     loss = criterion(logits, targets)
-                val_loss += float(loss.detach()) * targets.numel()
-                val_seen += targets.numel()
-                val_correct += int((logits.argmax(1) == targets).sum())
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
+                step_loss = float(loss.detach())
+                step_seen = targets.numel()
+                step_correct = int((logits.argmax(1) == targets).sum())
+                train_loss += step_loss * step_seen
+                train_seen += step_seen
+                train_correct += step_correct
+                global_step += 1
+                step_end = time.perf_counter()
 
-        epoch_result = {
-            "epoch": epoch + 1,
-            "train_loss": train_loss / max(train_seen, 1),
-            "train_accuracy": train_correct / max(train_seen, 1),
-            "validation_loss": val_loss / max(val_seen, 1),
-            "validation_accuracy": val_correct / max(val_seen, 1),
+                if tracker.enabled:
+                    tracker.log({
+                        "train/loss": step_loss,
+                        "train/accuracy": step_correct / max(step_seen, 1),
+                        "train/learning_rate": optimizer.param_groups[0]["lr"],
+                        "train/step_time": step_end - step_start,
+                    }, step=global_step)
+                step_start = step_end
+
+            want_images = tracker.should_log_images(epoch_number, config.epochs)
+            sample_crops = []
+            model.eval()
+            val_loss = 0.0
+            val_seen = 0
+            val_correct = 0
+            with torch.no_grad():
+                for inputs, targets in val_loader:
+                    inputs = inputs.to(device, non_blocking=True)
+                    targets = targets.to(device, non_blocking=True)
+                    with torch.cuda.amp.autocast(enabled=use_amp):
+                        logits = model(inputs)
+                        loss = criterion(logits, targets)
+                    val_loss += float(loss.detach()) * targets.numel()
+                    val_seen += targets.numel()
+                    val_correct += int((logits.argmax(1) == targets).sum())
+                    if want_images and len(sample_crops) == 0:
+                        sample_crops = reader_samples(inputs, targets, logits)
+
+            epoch_result = {
+                "epoch": epoch_number,
+                "train_loss": train_loss / max(train_seen, 1),
+                "train_accuracy": train_correct / max(train_seen, 1),
+                "validation_loss": val_loss / max(val_seen, 1),
+                "validation_accuracy": val_correct / max(val_seen, 1),
+            }
+            history.append(epoch_result)
+
+            if epoch_result["validation_accuracy"] > best_accuracy:
+                best_accuracy = epoch_result["validation_accuracy"]
+                torch.save({
+                    "format_version": 1,
+                    "architecture": "mobilenet_v3_small",
+                    "task": "reader",
+                    "classes": classes,
+                    "input_size": config.input_size,
+                    "state_dict": model.state_dict(),
+                    "dataset_sha256": plan["dataset_sha256"],
+                    "split_sha256": plan["split_sha256"],
+                    "epoch": epoch_number,
+                    "validation_accuracy": best_accuracy,
+                    "initialization": "imagenet1k_v1" if config.pretrained else "random",
+                    "initialization_source": (
+                        "torchvision.models.MobileNet_V3_Small_Weights.IMAGENET1K_V1"
+                        if config.pretrained else "random"
+                    ),
+                    "torch_version": torch.__version__,
+                    "torchvision_version": torchvision.__version__,
+                }, best_path)
+
+            if tracker.enabled:
+                epoch_metrics = {
+                    "epoch": epoch_number,
+                    "train/epoch_loss": epoch_result["train_loss"],
+                    "train/epoch_accuracy": epoch_result["train_accuracy"],
+                    "validation/loss": epoch_result["validation_loss"],
+                    "validation/accuracy": epoch_result["validation_accuracy"],
+                    "validation/best_accuracy": best_accuracy,
+                    "epoch_time": time.perf_counter() - epoch_start,
+                }
+                if len(sample_crops) > 0:
+                    epoch_metrics["validation/crops"] = sample_crops
+                tracker.log(epoch_metrics, step=global_step)
+
+        gpu = None
+        if device.type == "cuda":
+            gpu = {
+                "name": torch.cuda.get_device_name(device),
+                "capability": list(torch.cuda.get_device_capability(device)),
+                "total_memory_bytes": int(torch.cuda.get_device_properties(device).total_memory),
+            }
+
+        result = {
+            "task": "reader",
+            "architecture": "mobilenet_v3_small",
+            "classes": classes,
+            "best_validation_accuracy": best_accuracy,
+            "checkpoint": str(best_path),
+            "training_plan": str(plan_path),
+            "device": str(device),
+            "gpu": gpu,
+            "torch_version": torch.__version__,
+            "torchvision_version": torchvision.__version__,
+            "initialization": "imagenet1k_v1" if config.pretrained else "random",
+            "initialization_source": (
+                "torchvision.models.MobileNet_V3_Small_Weights.IMAGENET1K_V1"
+                if config.pretrained else "random"
+            ),
+            "config": config.__dict__,
+            "history": history,
+            "limitations": plan["limitations"],
         }
-        history.append(epoch_result)
-
-        if epoch_result["validation_accuracy"] > best_accuracy:
-            best_accuracy = epoch_result["validation_accuracy"]
-            torch.save({
-                "format_version": 1,
-                "architecture": "mobilenet_v3_small",
-                "task": "reader",
-                "classes": classes,
-                "input_size": config.input_size,
-                "state_dict": model.state_dict(),
-                "dataset_sha256": plan["dataset_sha256"],
-                "split_sha256": plan["split_sha256"],
-                "epoch": epoch + 1,
-                "validation_accuracy": best_accuracy,
-                "initialization": "imagenet1k_v1" if config.pretrained else "random",
-                "initialization_source": (
-                    "torchvision.models.MobileNet_V3_Small_Weights.IMAGENET1K_V1"
-                    if config.pretrained else "random"
-                ),
-                "torch_version": torch.__version__,
-                "torchvision_version": torchvision.__version__,
-            }, best_path)
-
-    gpu = None
-    if device.type == "cuda":
-        gpu = {
-            "name": torch.cuda.get_device_name(device),
-            "capability": list(torch.cuda.get_device_capability(device)),
-            "total_memory_bytes": int(torch.cuda.get_device_properties(device).total_memory),
-        }
-
-    result = {
-        "task": "reader",
-        "architecture": "mobilenet_v3_small",
-        "classes": classes,
-        "best_validation_accuracy": best_accuracy,
-        "checkpoint": str(best_path),
-        "training_plan": str(plan_path),
-        "device": str(device),
-        "gpu": gpu,
-        "torch_version": torch.__version__,
-        "torchvision_version": torchvision.__version__,
-        "initialization": "imagenet1k_v1" if config.pretrained else "random",
-        "initialization_source": (
-            "torchvision.models.MobileNet_V3_Small_Weights.IMAGENET1K_V1"
-            if config.pretrained else "random"
-        ),
-        "config": config.__dict__,
-        "history": history,
-        "limitations": plan["limitations"],
-    }
-    (output_dir / "result.json").write_text(
-        json.dumps(result, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+        (output_dir / "result.json").write_text(
+            json.dumps(result, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        tracker.set_summary({
+            "best_validation_accuracy": best_accuracy,
+            "checkpoint": str(best_path),
+        })
+    except BaseException:
+        tracker.finish(exit_code=1)
+        raise
+    tracker.finish(exit_code=0)
     return result

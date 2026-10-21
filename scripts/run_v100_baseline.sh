@@ -69,6 +69,17 @@ mkdir -p "$EVAL_DIR" "$EXPORT_DIR"
 
 export NNSLR_DATA_ROOT="$DATA_ROOT"
 export CUDA_VISIBLE_DEVICES="$GPU_INDEX"
+# The wandb group of the detector and reader runs (nnslr_tools.tracking).
+export NNSLR_RUN_ID="$RUN_ID"
+
+# wandb: "wandb login" saves the key in ~/.netrc; without it, offline.
+# WANDB_MODE=disabled turns wandb off completely.
+if [ -z "${WANDB_MODE:-}" ] && [ -z "${WANDB_API_KEY:-}" ]; then
+  if ! grep -q "api.wandb.ai" "$HOME/.netrc" 2>/dev/null; then
+    export WANDB_MODE=offline
+    echo "wandb: non loggato, vado offline (i numeri restano nel terminale e in $RUN_ROOT/<task>/wandb)."
+  fi
+fi
 
 NN="$VENV/bin/nnslr"
 
@@ -77,6 +88,7 @@ echo "run:          $RUN_ID"
 echo "data root:    $DATA_ROOT"
 echo "dataset kind: $DATASET_KIND"
 echo "physical GPU: $GPU_INDEX"
+echo "wandb:        progetto ${WANDB_PROJECT:-sunnypilot.speedlimits}, gruppo $RUN_ID, modo ${WANDB_MODE:-online}"
 echo
 
 echo "== 1/10 Validate exact training populations (CPU-only) =="

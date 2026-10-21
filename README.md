@@ -38,6 +38,27 @@ The existing `nnslr` command and Python package names are retained for compatibi
 
 Private videos, logs, datasets, checkpoints and model weights stay outside Git. Use the configured data root and publish reviewed model artifacts separately when available.
 
+## Publishing on Hugging Face
+
+`scripts/publish_model.sh` publishes one model bundle (the `bundle/` folder that `scripts/run_v100_baseline.sh` writes in `data/runs/<run id>/`) to [cristianku/sunnypilot-speedlimits-models](https://huggingface.co/cristianku/sunnypilot-speedlimits-models). Only the model artifacts are uploaded: the detector and reader ONNX files with their contracts, `config.json`, `classes.json`, `model_card.json`, `capability.json` and `sha256sums.json`, plus the catalog `speed_models.json` with size, sha256 and download URL of every file. Videos, logs, datasets and checkpoints are never uploaded.
+
+Once per machine, with a Hugging Face token that can write the repository (`huggingface_hub` is not a dependency of this repo; `uvx` from [uv](https://docs.astral.sh/uv/) runs it on demand):
+
+```sh
+uvx --from huggingface_hub hf auth login
+uvx --from huggingface_hub hf repo create cristianku/sunnypilot-speedlimits-models
+```
+
+Then try a dry run first, and publish:
+
+```sh
+scripts/publish_model.sh --no-upload        # newest data/runs/*/bundle: verify, stage, catalog; nothing is uploaded
+scripts/publish_model.sh                    # the same, then one Hugging Face commit
+scripts/publish_model.sh data/runs/baseline-001/bundle --name=baseline-001
+```
+
+The bundle is checked with `nnslr verify-bundle` first, and a bundle that fails is not published. Files are staged in `<data root>/publish/<name>/`; publishing the same name again replaces its catalog entry. `HF_REPO` selects another repository and `scripts/publish_model.sh --help` lists every option.
+
 ## Speed Limit Assist integration
 
 The planned operational adapter will supply a validated vision limit to sunnypilot's existing speed-limit selection flow. Recognition alone does not establish that a sign belongs to our road or is already applicable.
