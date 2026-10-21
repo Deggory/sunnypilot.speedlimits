@@ -576,7 +576,7 @@ def train_detector(
         collate_fn=collate,
     )
 
-    backbone_weights = BackboneWeights.IMAGENET1K_V1 if config.pretrained_backbone else None
+    backbone_weights = BackboneWeights.IMAGENET1K_V1 if config.pretrained_backbone and mode == "fresh" else None
     model = ssdlite320_mobilenet_v3_large(
         weights=None,
         weights_backbone=backbone_weights,
@@ -594,14 +594,11 @@ def train_detector(
 
     output_dir = Path(output_dir)
     checkpoint_path = output_dir / "training-state.pt"
-    if mode == "resume":
-        if not checkpoint_path.is_file():
-            raise ValueError(f"no resumable training checkpoint: {checkpoint_path}")
-    else:
-        output_dir.mkdir(parents=True, exist_ok=False)
+    if mode not in ("fresh", "continue", "resume"):
+        raise ValueError(f"invalid training mode: {mode}")
+    if mode == "resume" and not checkpoint_path.is_file():
+        raise ValueError(f"no resumable training checkpoint: {checkpoint_path}")
     plan_path = output_dir / "training-plan.json"
-    if mode != "resume":
-        plan_path.write_text(json.dumps(plan, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     def move_targets(targets):
         return [{k: v.to(device, non_blocking=True) for k, v in target.items()} for target in targets]
@@ -724,6 +721,8 @@ def train_detector(
         }, checkpoint_path)
 
     if mode != "resume":
+        output_dir.mkdir(parents=True, exist_ok=False)
+        plan_path.write_text(json.dumps(plan, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         save_training_state(0, "in_progress")
 
     tracker = tracking.start_training_run(
@@ -735,6 +734,8 @@ def train_detector(
         for epoch in range(start_epoch, config.epochs):
             epoch_number = epoch + 1
             epoch_start = time.perf_counter()
+            # Reproduce each epoch's DataLoader shuffle after an epoch-boundary resume.
+            generator.manual_seed(config.seed + epoch)
             model.train()
             train_total = 0.0
             train_seen = 0
@@ -930,7 +931,7 @@ def train_reader(
         pin_memory=device.type == "cuda",
     )
 
-    weights = Weights.IMAGENET1K_V1 if config.pretrained else None
+    weights = Weights.IMAGENET1K_V1 if config.pretrained and mode == "fresh" else None
     model = mobilenet_v3_small(weights=weights)
     model.classifier[-1] = torch.nn.Linear(model.classifier[-1].in_features, len(classes))
     model.to(device)
@@ -947,14 +948,11 @@ def train_reader(
 
     output_dir = Path(output_dir)
     checkpoint_path = output_dir / "training-state.pt"
-    if mode == "resume":
-        if not checkpoint_path.is_file():
-            raise ValueError(f"no resumable training checkpoint: {checkpoint_path}")
-    else:
-        output_dir.mkdir(parents=True, exist_ok=False)
+    if mode not in ("fresh", "continue", "resume"):
+        raise ValueError(f"invalid training mode: {mode}")
+    if mode == "resume" and not checkpoint_path.is_file():
+        raise ValueError(f"no resumable training checkpoint: {checkpoint_path}")
     plan_path = output_dir / "training-plan.json"
-    if mode != "resume":
-        plan_path.write_text(json.dumps(plan, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     def reader_samples(inputs, targets, logits) -> list[Any]:
         # The first crops of the first validation batch (no shuffling, so the
@@ -1035,6 +1033,8 @@ def train_reader(
         }, checkpoint_path)
 
     if mode != "resume":
+        output_dir.mkdir(parents=True, exist_ok=False)
+        plan_path.write_text(json.dumps(plan, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         save_training_state(0, "in_progress")
 
     tracker = tracking.start_training_run(
@@ -1046,6 +1046,8 @@ def train_reader(
         for epoch in range(start_epoch, config.epochs):
             epoch_number = epoch + 1
             epoch_start = time.perf_counter()
+            # Reproduce each epoch's DataLoader shuffle after an epoch-boundary resume.
+            generator.manual_seed(config.seed + epoch)
             model.train()
             train_loss = 0.0
             train_seen = 0
