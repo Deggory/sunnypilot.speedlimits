@@ -281,8 +281,9 @@ details summary { padding: 8px 10px; cursor: pointer; font-size: 13.5px; font-we
 #zoom { display: block; width: 100%; height: 170px; touch-action: pan-x pan-y pinch-zoom; user-select: none; -webkit-user-select: none; }
 #zoomBox { fill: none; stroke: var(--ov-selected); stroke-width: 2; vector-effect: non-scaling-stroke; pointer-events: none; }
 .hint-list { display: flex; flex-direction: column; gap: 8px; }
-.hint-row { border: 1px dashed var(--hint); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; background: var(--surface-2); min-width: 0; }
-.hint-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.hint-row { border: 1px dashed var(--hint); border-radius: 8px; padding: 6px 8px 6px 10px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 10px; background: var(--surface-2); min-width: 0; }
+.hint-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.hint-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .hint-what { font-weight: 600; }
 .conf { font-size: 11.5px; font-weight: 600; border-radius: 999px; padding: 1px 8px; border: 1px solid currentColor; }
 .conf.high { color: var(--ok); }
@@ -290,7 +291,6 @@ details summary { padding: 8px 10px; cursor: pointer; font-size: 13.5px; font-we
 .conf.low { color: var(--muted); }
 .hint-sub { font-size: 12px; color: var(--muted); font-family: var(--font-data); }
 .hint-note { margin: 0; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
-.hint-row .btn { align-self: flex-start; }
 .hint-stats { margin: 0; font-size: 12px; color: var(--muted); }
 .confirm-area { display: flex; flex-direction: column; gap: 8px; }
 .confirm-area .btn.primary { padding: 11px 14px; font-size: 16px; min-height: 46px; }
@@ -310,6 +310,12 @@ details summary { padding: 8px 10px; cursor: pointer; font-size: 13.5px; font-we
 .state-box p { margin: 0; color: var(--muted); max-width: 62ch; }
 
 .mobilebar { display: none; }
+
+@media (min-width: 981px) {
+  /* The panel scrolls on its own next to the photo; the confirm button stays at its bottom edge. */
+  .panel { position: sticky; top: calc(var(--topbar-h, 58px) + 12px); max-height: calc(100vh - var(--topbar-h, 58px) - 24px); overflow-y: auto; overscroll-behavior: contain; }
+  .panel .confirm-section { position: sticky; bottom: 0; z-index: 2; background: var(--surface); box-shadow: 0 -8px 12px -12px rgba(0, 0, 0, 0.45); }
+}
 
 @media (max-width: 980px) {
   .workspace { grid-template-columns: minmax(0, 1fr); }
@@ -511,7 +517,7 @@ details summary { padding: 8px 10px; cursor: pointer; font-size: 13.5px; font-we
 
       <section id="hintSection" hidden>
         <p class="eyebrow">Seconda lettura</p>
-        <p class="empty-note">Un’altra lettura dello stesso fotogramma, solo come aiuto: non entra nella revisione finché non premi “Usa questo”.</p>
+        <p class="empty-note">Solo un aiuto: entra nella revisione unicamente con “Usa questo”.</p>
         <div class="hint-list" id="hintList"></div>
         <p class="empty-note" id="noHints" hidden>Nessuna seconda lettura per questo fotogramma.</p>
         <p class="hint-stats" id="hintStats"></p>
@@ -529,6 +535,9 @@ details summary { padding: 8px 10px; cursor: pointer; font-size: 13.5px; font-we
             </label>
           </div>
         </details>
+      </section>
+
+      <section class="confirm-section">
         <div class="confirm-area">
           <button type="button" class="btn primary" id="confirm">Conferma fotogramma</button>
           <p class="save-msg" id="saveMsg" role="status"></p>
@@ -673,6 +682,35 @@ function describe(d) {
   let text = f ? f.label : String(d.family || 'Senza tipo');
   if (d.value_kph !== null && d.value_kph !== undefined) { text += ' · ' + d.value_kph + ' km/h'; }
   return text;
+}
+// Short label on the photo: the list in the panel has the full description.
+function shortName(d) {
+  const v = d.value_kph;
+  const hasValue = v !== null && v !== undefined;
+  if (d.family === 'maximum_speed') { return hasValue ? String(v) : 'limite ?'; }
+  if (d.family === 'zone') { return hasValue ? 'zona ' + v : 'zona'; }
+  if (d.family === 'variable_display') { return hasValue ? 'variabile ' + v : 'variabile'; }
+  if (d.family === 'road_marking_candidate') { return hasValue ? 'a terra ' + v : 'a terra'; }
+  if (d.family === 'cancellation') { return 'fine'; }
+  if (d.family === 'other_sign') { return 'altro'; }
+  if (d.family === 'not_a_sign') { return 'no'; }
+  return '?';
+}
+// Labels must not cover each other: move a label by whole lines until it is free (rough text width).
+function labelWidth(text, fontSize) { return text.length * fontSize * 0.6; }
+function labelClash(placed, x, y, width, height) {
+  for (const p of placed) {
+    if (x < p.x + p.w && p.x < x + width && y - height < p.y && p.y - p.h < y) { return p; }
+  }
+  return null;
+}
+function freeLabelY(placed, x, y, width, height, step) {
+  let candidate = y;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if (labelClash(placed, x, candidate, width, height) === null) { return candidate; }
+    candidate = candidate + step;
+  }
+  return candidate;
 }
 function boxColor(d) {
   if (d.family === 'maximum_speed' || d.family === 'zone' || d.family === 'variable_display') { return 'var(--ov-speed)'; }
@@ -1236,8 +1274,8 @@ function renderStage(row, work) {
   el('stageHint').hidden = !S.drawing;
 
   const k = sceneScale(scene, row.width, row.height);
-  renderHintLayer(row, k);
   const fontSize = 14 / k;
+  const placed = [];
   const handleSize = 12 / k;
   const hitSize = (coarsePointer() ? 36 : 20) / k;
   const overlays = el('overlays');
@@ -1256,10 +1294,16 @@ function renderStage(row, work) {
     const rect = svgNode('rect', { x: b[0], y: b[1], width: b[2] - b[0], height: b[3] - b[1], class: cls, 'data-index': i });
     if (!isSelected) { rect.style.stroke = boxColor(d); }
     overlays.append(rect);
-    const tag = svgNode('text', { x: b[0], y: Math.max(fontSize, b[1] - fontSize * 0.35), class: 'tag', 'font-size': fontSize, 'stroke-width': 3 / k });
-    tag.textContent = (i + 1) + ' · ' + describe(d);
+    const text = (i + 1) + ' · ' + shortName(d);
+    const width = labelWidth(text, fontSize);
+    let y = freeLabelY(placed, b[0], Math.max(fontSize, b[1] - fontSize * 0.35), width, fontSize, -fontSize);
+    if (y < fontSize) { y = fontSize; }
+    placed.push({ x: b[0], y: y, w: width, h: fontSize, text: text });
+    const tag = svgNode('text', { x: b[0], y: y, class: 'tag', 'font-size': fontSize, 'stroke-width': 3 / k });
+    tag.textContent = text;
     overlays.append(tag);
   }
+  renderHintLayer(row, k, placed);
   if (S.selected >= 0 && S.selected < work.detections.length) {
     appendHandles(overlays, work.detections[S.selected].bbox_xyxy, handleSize, hitSize);
   }
@@ -1279,28 +1323,26 @@ function appendHandles(layer, b, size, hit) {
     }));
   }
 }
-function renderHintLayer(row, k) {
+function renderHintLayer(row, k, placed) {
   const layer = el('hintLayer');
   layer.replaceChildren();
   if (!S.showHints) { return; }
   const hints = hintsOf(row.frame_key);
   const fontSize = 12 / k;
-  const placed = [];
   for (let i = 0; i < hints.length; i++) {
     const h = hints[i];
     const b = h.box;
     layer.append(svgNode('rect', { x: b[0], y: b[1], width: b[2] - b[0], height: b[3] - b[1], class: 'hint-box ' + h.confidence }));
     const text = hintLabel(h);
-    // Below the box, where the label of a reviewed box never is; above it at the bottom edge.
+    const width = labelWidth(text, fontSize);
+    // Below the box, where the label of a reviewed box never is.
     let y = b[3] + fontSize * 1.05;
-    if (y > row.height) { y = Math.max(fontSize, b[1] - fontSize * 0.35); }
     // The two passes often see the same sign: one label is enough.
-    let overlaps = false;
-    for (const p of placed) {
-      if (p.text === text && Math.abs(p.x - b[0]) < 40 / k && Math.abs(p.y - y) < 30 / k) { overlaps = true; }
-    }
-    if (overlaps) { continue; }
-    placed.push({ text: text, x: b[0], y: y });
+    const clash = labelClash(placed, b[0], y, width, fontSize);
+    if (clash !== null && clash.text === text) { continue; }
+    y = freeLabelY(placed, b[0], y, width, fontSize, fontSize);
+    if (y > row.height) { y = row.height; }
+    placed.push({ x: b[0], y: y, w: width, h: fontSize, text: text });
     const tag = svgNode('text', { x: b[0], y: y, class: 'hint-tag', 'font-size': fontSize, 'stroke-width': 3 / k });
     tag.textContent = text;
     layer.append(tag);
@@ -1455,6 +1497,8 @@ function renderHintList(row, work) {
     const h = hints[i];
     const item = document.createElement('div');
     item.className = 'hint-row';
+    const body = document.createElement('div');
+    body.className = 'hint-text';
     const head = document.createElement('div');
     head.className = 'hint-head';
     const what = document.createElement('span');
@@ -1466,7 +1510,6 @@ function renderHintList(row, work) {
     conf.className = 'conf ' + h.confidence;
     conf.textContent = confidenceLabel(h.confidence);
     head.append(what, conf);
-    item.append(head);
     const parts = [];
     if (h.pass) { parts.push('lettura ' + h.pass); }
     if (h.side) { parts.push(sideLabel(h.side)); }
@@ -1474,14 +1517,16 @@ function renderHintList(row, work) {
       const sub = document.createElement('span');
       sub.className = 'hint-sub';
       sub.textContent = parts.join(' · ');
-      item.append(sub);
+      head.append(sub);
     }
+    body.append(head);
     if (h.note) {
       const note = document.createElement('p');
       note.className = 'hint-note';
       note.textContent = h.note;
-      item.append(note);
+      body.append(note);
     }
+    item.append(body);
     const use = document.createElement('button');
     use.type = 'button';
     use.className = 'btn small';
@@ -1503,7 +1548,8 @@ function renderHintList(row, work) {
   if (hintStats) {
     stats = 'Seconda lettura su ' + hintStats.frames + (hintStats.frames === 1 ? ' fotogramma' : ' fotogrammi') + ' di questa route';
     const skipped = (hintStats.skipped_lines || 0) + (hintStats.skipped_signs || 0) + (hintStats.skipped_files || 0);
-    if (skipped > 0) { stats += ' · ' + skipped + ' voci scartate perché non valide'; }
+    if (skipped === 1) { stats += ' · 1 voce scartata perché non valida'; }
+    if (skipped > 1) { stats += ' · ' + skipped + ' voci scartate perché non valide'; }
     stats += '.';
   }
   el('hintStats').textContent = stats;
@@ -1719,7 +1765,7 @@ function render() {
   const proposals = proposalsOf(row).length;
   const hints = hintsOf(key).length;
   let info = 'segmento ' + row.segment_index + ' · immagine ' + row.output_index + ' · ' + proposals + (proposals === 1 ? ' proposta' : ' proposte');
-  if (routeHasHints) { info += ' · ' + hints + ' seconda lettura'; }
+  if (routeHasHints) { info += ' · seconda lettura: ' + hints; }
   el('frameData').textContent = info;
 
   const reasons = reasonsOf(key);
@@ -2100,12 +2146,20 @@ function renderOverlaysOnly() {
   const d = selectedDetection();
   if (d) { renderZoom(row, d); }
 }
+// The sticky panel starts below the top bar, whose height changes with the width.
+function measureTopbar() {
+  const bar = document.querySelector('.topbar');
+  document.documentElement.style.setProperty('--topbar-h', Math.ceil(bar.getBoundingClientRect().height) + 'px');
+}
 if (typeof ResizeObserver === 'function') {
   const observer = new ResizeObserver(function () { renderOverlaysOnly(); });
   observer.observe(el('stage'));
   observer.observe(el('zoom'));
+  const barObserver = new ResizeObserver(measureTopbar);
+  barObserver.observe(document.querySelector('.topbar'));
 } else {
-  window.addEventListener('resize', renderOverlaysOnly);
+  window.addEventListener('resize', function () { renderOverlaysOnly(); measureTopbar(); });
+  measureTopbar();
 }
 
 /* ---------- start ---------- */

@@ -318,6 +318,8 @@ border-radius:10px;padding:14px 16px;color:inherit;text-decoration:none}
 .open{font-weight:600;color:var(--focus)}
 .state{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:24px;max-width:720px}
 .state p{margin:0 0 8px;color:var(--muted)}
+.foot{margin:20px 0 0;font-size:12.5px;color:var(--muted)}
+.foot code{font-size:12px}
 """
 
 
@@ -343,7 +345,7 @@ def render_index(summaries: list[dict], database: Path) -> str:
     lines = _page_head('Revisione cartelli · Route')
     lines.append('<main class="page">')
     lines.append('<p class="lead">Route con un report di pre-annotazione. Ogni conferma viene salvata subito '
-                 'nel database del server: <code>' + html.escape(str(database)) + '</code></p>')
+                 'nel database del server.</p>')
     if not summaries:
         lines.append('<div class="state"><p>Nessun report di pre-annotazione. Prepara una route con '
                      '<code>nnslr extract-frames</code> e <code>nnslr preannotate</code>, poi ricarica questa '
@@ -378,6 +380,7 @@ def render_index(summaries: list[dict], database: Path) -> str:
                 + '<span class="stats">' + ''.join(stats) + '</span>'
                 + '<span class="open">Apri la revisione →</span></a></li>')
         lines.append('</ul>')
+    lines.append('<p class="foot">Database delle revisioni: <code>' + html.escape(str(database)) + '</code></p>')
     lines.append('</main></body></html>')
     return '\n'.join(lines)
 

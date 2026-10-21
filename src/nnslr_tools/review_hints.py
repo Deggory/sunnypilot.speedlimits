@@ -252,11 +252,17 @@ def _join_words(words: list[str]) -> str:
     return ', '.join(words[:-1]) + ' e ' + words[-1]
 
 
+UNREADABLE_LIMIT = 'un limite illeggibile'
+
+
 def _unique(words: list[str]) -> list[str]:
+    """Words without repetitions; "un limite illeggibile" only when nothing better was read."""
     result = []
     for word in words:
         if word not in result:
             result.append(word)
+    if len(result) > 1 and UNREADABLE_LIMIT in result:
+        result.remove(UNREADABLE_LIMIT)
     return result
 
 
@@ -272,7 +278,7 @@ def hint_words(hint: dict) -> str:
     value = hint['value_kph']
     if kind == 'maximum_speed':
         if value is None:
-            return 'un limite illeggibile'
+            return UNREADABLE_LIMIT
         return str(value)
     elif kind == 'cancellation':
         return _with_value('fine limite', value)
@@ -294,7 +300,7 @@ def box_words(detection: dict) -> str:
     value = detection.get('value_kph')
     if family == 'maximum_speed':
         if value is None:
-            return 'un limite illeggibile'
+            return UNREADABLE_LIMIT
         return str(value)
     elif family == 'cancellation':
         return _with_value('fine limite', value)
