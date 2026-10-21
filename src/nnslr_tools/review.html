@@ -2,8 +2,9 @@
 <!doctype html><html lang="it"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NNSLR · Revisione cartelli</title>
 <style>
-:root{color-scheme:dark;font:16px system-ui;background:#111722;color:#edf2f8}body{margin:0;padding:24px;max-width:1600px;margin:auto}h1{font-size:24px;margin:0 0 8px}p{line-height:1.5;color:#b7c7d9}.toolbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:16px 0}button,select,input{font:inherit;background:#243349;color:#fff;border:1px solid #52647a;border-radius:6px;padding:8px}button{cursor:pointer}button:disabled{opacity:.4;cursor:default}.primary{background:#126e55}.layout{display:grid;grid-template-columns:minmax(0,1fr) 310px;gap:20px}svg{width:100%;background:#06090e;touch-action:none}aside{padding:12px;background:#192332;border-radius:8px}label{display:block;margin-bottom:12px}input,select{max-width:100%;box-sizing:border-box}#value{width:100px}.box{fill:#ffcd4612;stroke:#ffcd46;stroke-width:3;cursor:pointer}.box.selected{stroke:#3cf2be;stroke-width:5}#boxes button{display:block;text-align:left;width:100%;margin:5px 0}.note{font-size:14px}#status{color:#76e3bd}.warning{color:#ffd482}#editor{display:none}@media(max-width:850px){.layout{grid-template-columns:1fr}body{padding:12px}}
+:root{color-scheme:dark;font:16px system-ui;background:#111722;color:#edf2f8}body{margin:0;padding:24px;max-width:1600px;margin:auto}h1{font-size:24px;margin:0 0 8px}p{line-height:1.5;color:#b7c7d9}a{color:#8fd3ff}.toolbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:16px 0}button,select,input{font:inherit;background:#243349;color:#fff;border:1px solid #52647a;border-radius:6px;padding:8px}button{cursor:pointer}button:disabled{opacity:.4;cursor:default}.primary{background:#126e55}.layout{display:grid;grid-template-columns:minmax(0,1fr) 310px;gap:20px}svg{width:100%;background:#06090e;touch-action:none}aside{padding:12px;background:#192332;border-radius:8px}label{display:block;margin-bottom:12px}input,select{max-width:100%;box-sizing:border-box}#value{width:100px}.box{fill:#ffcd4612;stroke:#ffcd46;stroke-width:3;cursor:pointer}.box.selected{stroke:#3cf2be;stroke-width:5}#boxes button{display:block;text-align:left;width:100%;margin:5px 0}.note{font-size:14px}#status{color:#76e3bd}.warning{color:#ffd482}.saved{color:#76e3bd}.unsaved{color:#ffd482}.failed{color:#ff9b9b;font-weight:600}#editor{display:none}@media(max-width:850px){.layout{grid-template-columns:1fr}body{padding:12px}}
 </style>
+<p><a id="indexLink" href="/" hidden>← Elenco route</a></p>
 <h1>NNSLR · Revisione cartelli</h1>
 <p>Proposte di cartelli da un modello addestrato in Vietnam e numeri sull’asfalto da OCR verificato con segmentazione della strada. Modelli non validati sulle strade svizzere.
 Conferma solo ciò che riesci a vedere. Il numero proposto non è il limite applicabile alla vettura.</p>
@@ -11,9 +12,10 @@ Conferma solo ciò che riesci a vedere. Il numero proposto non è il limite appl
 <label>Revisore <input id="reviewer" autocomplete="name" placeholder="Nome o pseudonimo"></label>
 <!-- [reviewed-dataset] - END -->
 <div class="toolbar"><button id="prev">← Precedente</button><span id="position"></span><button id="next">Successivo →</button><label style="margin:0"><input type="checkbox" id="only"> Solo frame con proposte</label><button id="export">Scarica revisioni JSONL</button></div>
-<p id="status"></p><p id="storageWarning" class="warning" role="alert"></p><p class="note">Le modifiche sono salvate in questo browser. Esporta il JSONL per conservarle fuori dal browser; il file originale delle proposte resta invariato. Un frame senza riquadri non è automaticamente un esempio negativo: va controllato e confermato.</p>
+<p id="status"></p><p><span id="pending" class="failed"></span> <button id="retry" hidden>Riprova a salvare</button></p><p id="serverWarning" class="warning" role="alert"></p><p id="storageWarning" class="warning" role="alert"></p><p id="storageNote" class="note">Le modifiche sono salvate in questo browser. Esporta il JSONL per conservarle fuori dal browser; il file originale delle proposte resta invariato. Un frame senza riquadri non è automaticamente un esempio negativo: va controllato e confermato.</p>
 <div class="layout"><main><svg id="scene" xmlns="http://www.w3.org/2000/svg" aria-label="Fotogramma e riquadri"><image id="photo" x="0" y="0"/><g id="overlays"></g><rect id="draft" fill="#40ddb322" stroke="#40ddb3" stroke-width="3" visibility="hidden"/></svg></main><aside>
-<div class="toolbar"><button id="add">Aggiungi riquadro</button><button id="confirm" class="primary">Conferma fotogramma</button></div>
+<div class="toolbar"><button id="add">Aggiungi riquadro</button><button id="confirm" class="primary">Conferma fotogramma</button><button id="withdraw" hidden>Annulla conferma</button></div>
+<p id="saveState" class="note" role="status"></p>
 <p id="frameInfo" class="note"></p><p id="mode" class="warning"></p><div id="boxes"></div>
 <div id="editor"><label>Tipo <select id="family"><option value="maximum_speed">Limite massimo</option><option value="cancellation">Fine limitazione</option><option value="road_marking_candidate">Numero sulla carreggiata da verificare</option><option value="zone">Zona</option><option value="variable_display">Segnale variabile</option><option value="other_sign">Altro cartello</option><option value="not_a_sign">Non è un cartello</option><option value="unreadable">Illeggibile</option></select></label>
 <label>Valore km/h (vuoto = sconosciuto) <input id="value" type="number" min="5" max="250" step="1"></label>
@@ -30,39 +32,65 @@ Conferma solo ciò che riesci a vedere. Il numero proposto non è il limite appl
 <!-- [reviewed-dataset] - START -->
 <label>Sito fisico (facoltativo) <input id="site_group" placeholder="Stesso identificativo nelle altre route"></label>
 <label>Incontro (facoltativo) <input id="encounter_id" placeholder="Stesso identificativo nei frame vicini"></label>
-<p class="note">Lascia sconosciuto ciò che non puoi verificare. L’istante di passaggio resta non annotato. Il JSONL esportato viene controllato da import-annotations prima di entrare nel dataset.</p>
+<p class="note">Lascia sconosciuto ciò che non puoi verificare. L’istante di passaggio resta non annotato. Ogni revisione viene controllata con le regole di import-annotations prima di entrare nel dataset.</p>
 <!-- [reviewed-dataset] - END -->
 </aside></div>
 <script type="application/json" id="payload">__NNSLR_DATA__</script>
-<script>
+<script nonce="__NNSLR_NONCE__">
 'use strict';
 const data=JSON.parse(document.getElementById('payload').textContent), rows=data.frames;
 const el=id=>document.getElementById(id), key='nnslr-review-v1-'+data.run_id;
-let edits={},storageWarning='';try{const saved=JSON.parse(localStorage.getItem(key)||'{}');if(!saved||typeof saved!=='object'||Array.isArray(saved))throw new Error('Invalid review storage');edits=saved}catch(e){storageWarning='Revisioni precedenti non recuperabili dal browser. Esporta il JSONL prima di chiudere.'}
+// With the review server every confirmation is saved in its database; opened as a plain file the page works offline.
+const api=data.server?'/api/route/'+encodeURIComponent(data.route_id):null;
+let edits={},storageWarning='',serverWarning='';try{const saved=JSON.parse(localStorage.getItem(key)||'{}');if(!saved||typeof saved!=='object'||Array.isArray(saved))throw new Error('Invalid review storage');edits=saved}catch(e){storageWarning='Revisioni precedenti non recuperabili dal browser. Esporta il JSONL prima di chiudere.'}
 // [reviewed-dataset] - START
 try{el('reviewer').value=localStorage.getItem('nnslr-reviewer')||''}catch(e){}
 el('reviewer').onchange=()=>{try{localStorage.setItem('nnslr-reviewer',el('reviewer').value.trim())}catch(e){}};
 // [reviewed-dataset] - END
 let cursor=0, selected=-1, adding=false, start=null;
-const ns='http://www.w3.org/2000/svg';
+const ns='http://www.w3.org/2000/svg', inFlight=new Set();
+if(api){
+ el('indexLink').hidden=false;
+ el('storageNote').textContent='Ogni “Conferma fotogramma” viene salvata nel database del server. Se il salvataggio non riesce, il fotogramma resta segnato “non salvato” e viene ritentato; nel frattempo le modifiche restano in questo browser. Il JSONL resta disponibile come copia di sicurezza. Un frame senza riquadri non è automaticamente un esempio negativo: va controllato e confermato.';
+}
 function indices(){return rows.map((r,i)=>i).filter(i=>!el('only').checked||rows[i].detections.length>0)}
 function current(){return rows[indices()[cursor]]}
-function state(){const r=current();if(!r)return null;if(!edits[r.frame_key])edits[r.frame_key]={review_state:'pending',detections:JSON.parse(JSON.stringify(r.detections))};return edits[r.frame_key]}
+function state(){const r=current();if(!r)return null;if(!edits[r.frame_key])edits[r.frame_key]={review_state:'pending',detections:JSON.parse(JSON.stringify(r.detections)),saved:true,revision:0};return edits[r.frame_key]}
 function store(){try{localStorage.setItem(key,JSON.stringify(edits));storageWarning=''}catch(e){storageWarning='Salvataggio nel browser non disponibile: scarica il JSONL prima di chiudere.'}}
-function dirty(){state().review_state='pending';store();render()}
+function dirty(){const s=state();s.review_state='pending';s.saved=false;s.error=null;s.version=(s.version||0)+1;store();render()}
 function svgNode(tag,attrs){const n=document.createElementNS(ns,tag);for(const [k,v]of Object.entries(attrs))n.setAttribute(k,String(v));return n}
 function name(d){const labels={maximum_speed:'Limite massimo',road_marking_candidate:'Numero sulla carreggiata',cancellation:'Fine limitazione',zone:'Zona',variable_display:'Segnale variabile',other_sign:'Altro cartello',not_a_sign:'Non è un cartello',unreadable:'Illeggibile'};return (labels[d.family]||d.family)+(d.value_kph==null?'':' · '+d.value_kph+' km/h')}
+function fromServer(item){return {review_state:item.confirmed?'reviewed':'pending',detections:item.detections,reviewer:item.reviewer,review_timestamp:item.review_timestamp,site_group:item.site_group,encounter_id:item.encounter_id,revision:item.revision,saved:true,error:null,server_confirmed:item.confirmed}}
+function frameKeys(){return rows.map(r=>r.frame_key)}
+function unsavedKeys(){return frameKeys().filter(k=>edits[k]&&edits[k].saved===false&&edits[k].review_state==='reviewed')}
+function serverConfirmed(){return frameKeys().filter(k=>edits[k]&&edits[k].server_confirmed===true).length}
+function saveState(frameKey,s){
+ if(!api)return s.review_state==='reviewed'?['Confermato in questo browser: esporta il JSONL per conservarlo.','unsaved']:['',''];
+ if(inFlight.has(frameKey))return ['Salvataggio in corso…','unsaved'];
+ if(s.saved&&s.server_confirmed)return ['Salvato ✓ (revisione '+s.revision+(s.reviewer?', '+s.reviewer:'')+')','saved'];
+ if(s.review_state==='reviewed'&&s.saved===false&&s.error)return ['NON salvato: '+s.error,'failed'];
+ if(s.review_state==='reviewed'&&s.saved===false)return ['Confermato ma non ancora salvato: nuovo tentativo automatico.','failed'];
+ if(s.saved===false&&s.server_confirmed)return ['Modificato: premi “Conferma fotogramma” per salvare. Sul server resta la versione confermata prima.','unsaved'];
+ if(s.saved===false)return ['Modifiche non confermate (solo in questo browser).','unsaved'];
+ return ['',''];
+}
 function render(){
- el('storageWarning').textContent=storageWarning;
+ el('storageWarning').textContent=storageWarning;el('serverWarning').textContent=serverWarning;
  const ids=indices(),r=current();el('position').textContent=ids.length?`${cursor+1} / ${ids.length}`:'Nessun fotogramma';
  el('prev').disabled=cursor<=0;el('next').disabled=cursor>=ids.length-1;el('confirm').disabled=!r;el('add').disabled=!r;
  el('overlays').replaceChildren();el('boxes').replaceChildren();el('editor').style.display='none';
- if(!r){el('photo').removeAttribute('href');el('frameInfo').textContent='';return}
+ const unsaved=api?unsavedKeys():[];
+ el('pending').textContent=unsaved.length?`${unsaved.length} fotogrammi confermati NON salvati sul server (${unsaved.slice(0,8).join(', ')}${unsaved.length>8?', …':''}).`:'';
+ el('retry').hidden=unsaved.length===0;
+ if(!r){el('photo').removeAttribute('href');el('frameInfo').textContent='';el('saveState').textContent='';el('withdraw').hidden=true;return}
  const s=state();el('site_group').value=s.site_group??r.site_group??'';el('encounter_id').value=s.encounter_id??r.encounter_id??'';el('scene').setAttribute('viewBox',`0 0 ${r.width} ${r.height}`);el('photo').setAttribute('href',r.preview_path);el('photo').setAttribute('width',r.width);el('photo').setAttribute('height',r.height);
- const checked=Object.values(edits).filter(x=>x.review_state==='reviewed').length;
- el('status').textContent=`${checked} / ${rows.length} fotogrammi revisionati. Proposte originali: ${rows.reduce((n,r)=>n+r.detections.length,0)}.`;
+ const proposals=rows.reduce((n,r)=>n+r.detections.length,0);
+ if(api){el('status').textContent=`Confermati sul server: ${serverConfirmed()} / ${rows.length} fotogrammi. Proposte originali: ${proposals}.`}
+ else{const checked=Object.values(edits).filter(x=>x.review_state==='reviewed').length;el('status').textContent=`${checked} / ${rows.length} fotogrammi revisionati. Proposte originali: ${proposals}.`}
  el('frameInfo').textContent=`Segmento ${r.segment_index} · immagine ${r.output_index} · ${r.width}×${r.height} · ${s.review_state==='reviewed'?'confermato':'da verificare'}`;
  el('confirm').textContent=s.review_state==='reviewed'?'Fotogramma confermato ✓':'Conferma fotogramma';
+ const [saveText,saveClass]=saveState(r.frame_key,s);el('saveState').textContent=saveText;el('saveState').className='note '+saveClass;
+ el('withdraw').hidden=!(api&&s.saved&&s.server_confirmed&&!inFlight.has(r.frame_key));
  el('mode').textContent=adding?'Trascina sull’immagine per disegnare un riquadro.':'';
  s.detections.forEach((d,i)=>{
   const [x1,y1,x2,y2]=d.bbox_xyxy,g=svgNode('g',{}),b=svgNode('rect',{x:x1,y:y1,width:x2-x1,height:y2-y1,class:'box'+(i===selected?' selected':'')});
@@ -72,13 +100,65 @@ function render(){
  });
  if(selected>=0&&s.detections[selected]){const d=s.detections[selected];el('editor').style.display='block';el('family').value=d.family;el('value').value=d.value_kph??'';for(const k of ['applicability','visibility','occlusion','supplementary_panel','temporary','variable_display','notes'])el(k).value=d[k]??(k==='applicability'?'unresolved':k==='notes'?'':'unknown');el('evidence').textContent=d.model_label?'Proposta originale: '+d.model_label:'Riquadro aggiunto manualmente';}
 }
+async function call(method,url,body){
+ const options={method,headers:{'Accept':'application/json'},credentials:'same-origin',cache:'no-store'};
+ if(body!==undefined){options.headers['Content-Type']='application/json';options.body=JSON.stringify(body)}
+ let response;
+ try{response=await fetch(url,options)}catch(e){const error=new Error('server non raggiungibile.');error.retry=true;throw error}
+ let result=null;try{result=await response.json()}catch(e){}
+ if(!response.ok){const error=new Error(result&&result.message?result.message:'errore HTTP '+response.status+'.');error.retry=response.status>=500;throw error}
+ return result;
+}
+async function send(frameKey){
+ const s=edits[frameKey];if(!api||!s||inFlight.has(frameKey))return;
+ const version=s.version||0;inFlight.add(frameKey);render();
+ try{
+  const result=await call('POST',api+'/frame/'+frameKey,{run_id:data.run_id,reviewer:s.reviewer||el('reviewer').value.trim(),confirmed:true,detections:s.detections,site_group:s.site_group??null,encounter_id:s.encounter_id??null,base_revision:s.revision||0});
+  if(edits[frameKey]===s&&(s.version||0)===version){edits[frameKey]=fromServer(result.review)}
+  else{s.revision=result.review.revision;s.server_confirmed=result.review.confirmed}
+ }catch(e){s.error=e.message;s.retry=e.retry===true}
+ finally{inFlight.delete(frameKey);store();render()}
+}
+let retrying=false;
+async function retryUnsaved(all){
+ if(!api||retrying)return;retrying=true;
+ try{for(const k of unsavedKeys()){if(all||edits[k].retry!==false)await send(k)}}
+ finally{retrying=false}
+}
+async function loadServer(){
+ try{
+  const body=await call('GET',api+'/reviews');
+  if(body.run_id!==data.run_id){serverWarning='Il report di questa route è stato rigenerato: ricarica la pagina.';render();return}
+  const onServer=new Set();
+  for(const item of body.reviews){
+   onServer.add(item.frame_key);const local=edits[item.frame_key];
+   // Unsaved local edits survive only if they were made on top of the version the server still has.
+   if(local&&local.saved===false&&(local.revision||0)===item.revision){local.server_confirmed=item.confirmed}else{edits[item.frame_key]=fromServer(item)}
+  }
+  for(const k of frameKeys()){
+   const s=edits[k];if(!s||onServer.has(k))continue;
+   // Confirmed here but unknown to the server (older offline reviews): send them.
+   if(s.review_state==='reviewed'&&s.saved!==false){s.saved=false;s.revision=0;s.server_confirmed=false}
+   else if(s.saved===undefined){s.saved=true}
+  }
+  serverWarning='';store();render();retryUnsaved(true);
+ }catch(e){serverWarning='Revisioni non lette dal server: '+e.message+' Le modifiche restano in questo browser.';render()}
+}
 el('prev').onclick=()=>{cursor--;selected=-1;adding=false;render()};el('next').onclick=()=>{cursor++;selected=-1;adding=false;render()};el('only').onchange=()=>{cursor=0;selected=-1;adding=false;render()};
 el('add').onclick=()=>{adding=!adding;selected=-1;render()};
 // [reviewed-dataset] - START
-el('confirm').onclick=()=>{const reviewer=el('reviewer').value.trim();if(!reviewer){alert('Indica un nome o pseudonimo per registrare la revisione.');el('reviewer').focus();return}Object.assign(state(),{review_state:'reviewed',reviewer,review_timestamp:new Date().toISOString()});el('reviewer').onchange();store();render()};
+el('confirm').onclick=()=>{const reviewer=el('reviewer').value.trim();if(!reviewer){alert('Indica un nome o pseudonimo per registrare la revisione.');el('reviewer').focus();return}const r=current(),s=state();Object.assign(s,{review_state:'reviewed',reviewer,review_timestamp:new Date().toISOString(),saved:false,error:null,retry:true,version:(s.version||0)+1});el('reviewer').onchange();store();render();if(api)send(r.frame_key)};
 for(const k of ['applicability','visibility','occlusion','supplementary_panel','temporary','variable_display','notes'])el(k).onchange=()=>{let value=el(k).value;if(['temporary','variable_display'].includes(k))value=value==='unknown'?null:value==='true';state().detections[selected][k]=value;dirty()};
 for(const k of ['site_group','encounter_id'])el(k).onchange=()=>{state()[k]=el(k).value.trim()||null;dirty()};
 // [reviewed-dataset] - END
+el('withdraw').onclick=async()=>{
+ const reviewer=el('reviewer').value.trim();if(!reviewer){alert('Indica un nome o pseudonimo per registrare la revisione.');el('reviewer').focus();return}
+ const r=current(),s=state();if(!confirm('Annullare la conferma di questo fotogramma? Non verrà importato nel dataset.'))return;
+ try{const result=await call('POST',api+'/frame/'+r.frame_key,{run_id:data.run_id,reviewer,confirmed:false,base_revision:s.revision||0});edits[r.frame_key]=fromServer(result.review)}
+ catch(e){alert('Annullamento non riuscito: '+e.message)}
+ store();render();
+};
+el('retry').onclick=()=>retryUnsaved(true);
 el('remove').onclick=()=>{state().detections.splice(selected,1);selected=-1;dirty()};
 el('family').onchange=()=>{const d=state().detections[selected];d.family=el('family').value;if(!['maximum_speed','zone','variable_display','road_marking_candidate'].includes(d.family))d.value_kph=null;d.value_state=d.value_kph==null?'unknown':'reviewed';dirty()};
 el('value').onchange=()=>{const raw=el('value').value,n=Number(raw);if(raw!==''&&(!Number.isInteger(n)||n<5||n>250)){el('value').reportValidity();render();return}const d=state().detections[selected];if(raw!==''&&!['maximum_speed','zone','variable_display','road_marking_candidate'].includes(d.family)){alert('Seleziona un tipo con valore numerico.');render();return}d.value_kph=raw===''?null:n;d.value_state=d.value_kph==null?'unknown':'reviewed';dirty()};
@@ -94,5 +174,6 @@ el('export').onclick=()=>{
  if(!reviewed.length){alert('Conferma almeno un fotogramma prima di esportare.');return}
  const url=URL.createObjectURL(new Blob([reviewed.map(r=>JSON.stringify(r)).join('\n')+'\n'],{type:'application/x-ndjson'})),a=document.createElement('a');a.href=url;a.download='annotations-'+data.run_id+'.jsonl';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 };render();
+if(api){loadServer();setInterval(()=>retryUnsaved(false),30000);window.addEventListener('online',()=>retryUnsaved(false))}
 </script></html>
 <!-- [preannotation] - END -->

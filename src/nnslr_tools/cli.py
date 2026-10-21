@@ -1129,10 +1129,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_pre.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_pre.add_argument("--confidence", type=float, default=.25)
     p_pre.set_defaults(func=_cmd_preannotate)
-    p_review = sub.add_parser("review", help="open the latest route annotation report through a local HTTP server")
-    p_review.add_argument("--route", required=True)
+    p_review = sub.add_parser("review", help="serve the review pages; confirmed frames are saved in <data-root>/annotations/review.sqlite")
+    p_review.add_argument("--route", help="open this route directly; default: the index of every route with a report")
     p_review.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
-    p_review.add_argument("--host", default="127.0.0.1", help="listen address; default: local only")
+    p_review.add_argument("--host", default="127.0.0.1",
+                          help="listen address; default: local only. 0.0.0.0 opens it to the LAN and requires the "
+                               "access token (NNSLR_REVIEW_TOKEN or a random one, printed at start)")
     p_review.add_argument("--port", type=int, default=8765)
     p_review.set_defaults(func=_cmd_review)
     # [preannotation] - END
@@ -1144,6 +1146,10 @@ def build_parser() -> argparse.ArgumentParser:
     # [model-review] - START
     p_import.add_argument("--output", help="default: gold <data-root>/annotations/objects.jsonl; training-candidate <data-root>/datasets/training_candidate_dataset/objects.jsonl")
     # [model-review] - END
+    p_import.add_argument("--from-db", action="store_true",
+                          help="import the confirmed frames saved by 'nnslr review' in <data-root>/annotations/review.sqlite "
+                               "(current report of each route; frames already imported are skipped)")
+    p_import.add_argument("--route", help="with --from-db: only this route")
     p_import.set_defaults(func=_cmd_dataset)
     p_validate = sub.add_parser("validate-dataset", help="validate reviewed labels, images, hashes and capture provenance")
     # [model-review] - START
@@ -1309,7 +1315,21 @@ def _cmd_dataset(args: argparse.Namespace) -> int:
                        if kind == "training-candidate" else root / "annotations" / "objects.jsonl")
     # [model-review] - END
     try:
-        if hasattr(args, "inputs"):
+        if hasattr(args, "inputs") and args.from_db:
+            import sqlite3
+            from nnslr_tools.annotations import DatasetError
+            from nnslr_tools.review_db import import_from_db
+            if args.inputs:
+                raise DatasetError("invalid_arguments", "--from-db does not take review files")
+            output = Path(args.output) if args.output else default_dataset
+            try:
+                report = import_from_db(root, output, route=args.route, dataset_kind=kind)
+            except sqlite3.Error as exc:
+                raise DatasetError("review_db_error", str(exc)) from exc
+        elif hasattr(args, "inputs"):
+            if args.route:
+                from nnslr_tools.annotations import DatasetError
+                raise DatasetError("invalid_arguments", "--route needs --from-db")
             inputs = [Path(p) for p in args.inputs] if args.inputs else sorted((root / "annotations/inbox").glob("*.jsonl"))
             # [model-review] - START
             output = Path(args.output) if args.output else default_dataset

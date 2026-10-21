@@ -21,7 +21,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from nnslr_tools.annotations import (
-    DatasetError,
     import_review_sources,
     jsonl_bytes,
     load_jsonl,
@@ -228,13 +227,14 @@ class ReviewStore:
                             'updated_at = ? WHERE route_id = ? AND run_id = ? AND frame_key = ?',
                             (text, reviewer, revision, now, route_id, run_id, frame_key))
                     _append_history(connection, route_id, run_id, frame_key, revision, text, reviewer, 1, now, client)
+                    saved = _select_review(connection, route_id, run_id, frame_key)
                     connection.execute('COMMIT')
                 except BaseException:
                     connection.execute('ROLLBACK')
                     raise
             finally:
                 connection.close()
-        return self.review(route_id, run_id, frame_key)
+        return saved
 
     def withdraw_review(self, *, route_id: str, run_id: str, frame_key: str, reviewer: str, client: str,
                         base_revision: int | None = None) -> dict:
@@ -259,25 +259,21 @@ class ReviewStore:
                         (reviewer, revision, now, route_id, run_id, frame_key))
                     _append_history(connection, route_id, run_id, frame_key, revision, row['payload'], reviewer, 0,
                                     now, client)
+                    saved = _select_review(connection, route_id, run_id, frame_key)
                     connection.execute('COMMIT')
                 except BaseException:
                     connection.execute('ROLLBACK')
                     raise
             finally:
                 connection.close()
-        return self.review(route_id, run_id, frame_key)
+        return saved
 
     def review(self, route_id: str, run_id: str, frame_key: str) -> dict | None:
         connection = self._connect()
         try:
-            row = connection.execute(
-                'SELECT * FROM frame_reviews WHERE route_id = ? AND run_id = ? AND frame_key = ?',
-                (route_id, run_id, frame_key)).fetchone()
+            return _select_review(connection, route_id, run_id, frame_key)
         finally:
             connection.close()
-        if row is None:
-            return None
-        return _review_from_row(row)
 
     def reviews(self, route_id: str, run_id: str, *, confirmed_only: bool = False) -> list[dict]:
         query = 'SELECT * FROM frame_reviews WHERE route_id = ? AND run_id = ?'
@@ -347,6 +343,15 @@ def _current_revision(connection: sqlite3.Connection, route_id: str, run_id: str
     if row is None:
         return 0
     return row[0]
+
+
+def _select_review(connection: sqlite3.Connection, route_id: str, run_id: str, frame_key: str) -> dict | None:
+    row = connection.execute(
+        'SELECT * FROM frame_reviews WHERE route_id = ? AND run_id = ? AND frame_key = ?',
+        (route_id, run_id, frame_key)).fetchone()
+    if row is None:
+        return None
+    return _review_from_row(row)
 
 
 def _check_base_revision(base_revision: int | None, current: int) -> None:
@@ -609,9 +614,3 @@ def import_from_db(root: Path, output: Path, *, route: str | None = None, datase
     report['warnings'] = list(report.get('warnings', [])) + warnings
     return report
 
-
-__all__ = [
-    'DB_RELATIVE_PATH', 'DatasetError', 'ReviewRejected', 'ReviewStore', 'ReviewStoreError', 'SCHEMA_VERSION',
-    'build_reviewed_frame', 'db_path', 'import_from_db', 'italian_message', 'public_review',
-    'save_frame_review', 'utc_now', 'validate_reviewed_frame',
-]

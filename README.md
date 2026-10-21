@@ -31,6 +31,7 @@ pytest -q
 
 The existing `nnslr` command and Python package names are retained for compatibility. The core/CLI do not implicitly start training or import the GPU stack.
 
+- [Installation](docs/INSTALL.md) — system packages, Python environments, downloaded models and data folders.
 - [Training and data guide](docs/upstream-training-guide.md) — recovered upstream commands and workflow.
 - [GPU container setup](docs/proxmox-gpu-container.md) — historical host setup instructions.
 - [Runtime snapshot](integrations/sunnypilot/README.md) — what is present and what must be implemented.

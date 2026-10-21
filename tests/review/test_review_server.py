@@ -1,0 +1,293 @@
+"""Web review server: token/cookie, routes index, saving frames into the review database."""
+from __future__ import annotations
+
+import pytest
+
+from nnslr_tools.review_db import ReviewStore, db_path
+from review_helpers import (OTHER_ROUTE, ROUTE, RUN_ID, TOKEN, RunningServer, json_of, make_report,
+                            page_body)
+
+
+@pytest.fixture
+def report(tmp_path):
+    rows = make_report(tmp_path)
+    return tmp_path, rows
+
+
+@pytest.fixture
+def loopback(report):
+    root, rows = report
+    server = RunningServer(root)
+    yield server, root, rows
+    server.close()
+
+
+@pytest.fixture
+def tokened(report):
+    root, rows = report
+    server = RunningServer(root, token=TOKEN, require_token=True)
+    yield server, root, rows
+    server.close()
+
+
+def cookie_header(server, value=TOKEN):
+    return {'Cookie': f'{server.app.cookie_name}={value}'}
+
+
+def test_loopback_needs_no_token_and_index_lists_routes_with_counts(loopback, tmp_path):
+    server, root, rows = loopback
+    make_report(root, route=OTHER_ROUTE, count=2)
+    status, response, data = server.request('GET', '/')
+    assert status == 200
+    page = data.decode()
+    assert ROUTE in page and OTHER_ROUTE in page and '/route/' + ROUTE + '/' in page
+    assert 'review.sqlite' in page
+    assert "frame-ancestors 'none'" in response.getheader('Content-Security-Policy')
+    status, response, data = server.request('GET', '/api/routes')
+    routes = json_of(data)['routes']
+    first = next(r for r in routes if r['route_id'] == ROUTE)
+    assert first == {'route_id': ROUTE, 'run_id': RUN_ID, 'frame_count': 3, 'frames_with_proposals': 2,
+                     'confirmed_count': 0, 'url': '/route/' + ROUTE + '/'}
+    status, response, data = server.post_frame(ROUTE, '0/0', page_body(rows[0]))
+    assert status == 200, data
+    routes = json_of(server.request('GET', '/api/routes')[2])['routes']
+    assert next(r for r in routes if r['route_id'] == ROUTE)['confirmed_count'] == 1
+
+
+def test_token_required_wrong_token_refused_and_cookie_accepted(tokened):
+    server, root, rows = tokened
+    for path in ['/', '/api/routes', f'/route/{ROUTE}/', f'/route/{ROUTE}/images/00000000.jpg',
+                 f'/api/route/{ROUTE}/reviews']:
+        status, response, data = server.request('GET', path)
+        assert status == 403, path
+    status, response, data = server.request('GET', '/', headers=cookie_header(server, 'wrong-token-000000000000'))
+    assert status == 403
+    status, response, data = server.request('GET', '/?token=wrong-token')
+    assert status == 403 and response.getheader('Set-Cookie') is None
+    status, response, data = server.request('GET', f'/route/{ROUTE}/?token={TOKEN}')
+    assert status == 303
+    assert response.getheader('Location') == f'/route/{ROUTE}/'
+    cookie = response.getheader('Set-Cookie')
+    assert cookie.startswith(f'{server.app.cookie_name}={TOKEN};')
+    assert 'HttpOnly' in cookie and 'SameSite=Strict' in cookie and 'Path=/' in cookie
+    status, response, data = server.request('GET', f'/route/{ROUTE}/', headers=cookie_header(server))
+    assert status == 200 and b'"server": true' in data
+    status, response, data = server.request('GET', f'/route/{ROUTE}/images/00000000.jpg', headers=cookie_header(server))
+    assert status == 200 and data == b'jpeg preview'
+    status, response, data = server.request('GET', '/api/routes', headers={'X-Review-Token': TOKEN})
+    assert status == 200 and json_of(data)['routes'][0]['route_id'] == ROUTE
+    status, response, data = server.post_frame(ROUTE, '0/0', page_body(rows[0]))
+    assert status == 403
+    status, response, data = server.post_frame(ROUTE, '0/0', page_body(rows[0]), headers=cookie_header(server))
+    assert status == 200, data
+
+
+def test_token_redirect_never_leaves_the_server(tokened):
+    server, root, rows = tokened
+    for path in [f'//evil.example/?token={TOKEN}', f'/\\evil.example/?token={TOKEN}']:
+        status, response, data = server.request('GET', path)
+        assert status == 303
+        assert response.getheader('Location') == '/'
+
+
+def test_save_valid_frame_writes_current_row_and_history(loopback):
+    server, root, rows = loopback
+    status, response, data = server.post_frame(ROUTE, '0/0', page_body(rows[0], value_kph=50))
+    assert status == 200, data
+    saved = json_of(data)
+    assert saved['ok'] and saved['confirmed_count'] == 1
+    assert saved['review']['confirmed'] is True and saved['review']['revision'] == 1
+    assert saved['review']['detections'][0]['value_kph'] == 50
+    status, response, data = server.post_frame(ROUTE, '0/1', page_body(rows[1], manual_box=[2, 2, 10, 12]))
+    assert status == 200, data
+    store = ReviewStore(db_path(root))
+    review = store.review(ROUTE, RUN_ID, '0/0')
+    assert review['reviewer'] == 'Cristian' and review['confirmed']
+    payload = review['payload']
+    assert payload['kind'] == 'reviewed_frame' and payload['label_basis'] == 'human_review'
+    assert payload['source_proposals'][0]['value_kph'] == 30
+    assert payload['detections'][0]['value_kph'] == 50 and payload['detections'][0]['score'] == 0.8
+    assert payload['review_timestamp'].endswith('Z')
+    assert len(store.history(ROUTE, RUN_ID, '0/0')) == 1
+    status, response, data = server.post_frame(ROUTE, '0/0', page_body(rows[0], value_kph=60, base_revision=1))
+    assert status == 200, data
+    assert json_of(data)['review']['revision'] == 2
+    history = store.history(ROUTE, RUN_ID, '0/0')
+    assert [h['revision'] for h in history] == [1, 2]
+    assert history[0]['payload']['detections'][0]['value_kph'] == 50
+    assert history[1]['payload']['detections'][0]['value_kph'] == 60
+    assert history[1]['client'] == '127.0.0.1'
+
+
+def test_saved_reviews_are_returned_for_the_page(loopback):
+    server, root, rows = loopback
+    server.post_frame(ROUTE, '0/2', page_body(rows[2], drop_proposals=True))
+    status, response, data = server.request('GET', f'/api/route/{ROUTE}/reviews')
+    assert status == 200
+    body = json_of(data)
+    assert body['run_id'] == RUN_ID and body['frame_count'] == 3 and body['confirmed_count'] == 1
+    assert len(body['reviews']) == 1
+    review = body['reviews'][0]
+    assert review['frame_key'] == '0/2' and review['confirmed'] is True and review['detections'] == []
+    assert review['reviewer'] == 'Cristian' and review['revision'] == 1
+
+
+@pytest.mark.parametrize('change,reason,text', [
+    ({'value_kph': 0}, 'illegal_speed', 'km/h'),
+    ({'bbox_xyxy': [1, 2, 99, 20]}, 'invalid_bbox', 'Riquadro'),
+    ({'family': 'advertisement'}, 'unknown_enum', 'Valore non ammesso'),
+    ({'value_kph': 50, 'family': 'other_sign'}, 'value_family_mismatch', 'tipo di cartello'),
+])
+def test_invalid_detection_is_rejected_with_italian_message(loopback, change, reason, text):
+    server, root, rows = loopback
+    body = page_body(rows[0])
+    body['detections'][0].update(change)
+    status, response, data = server.post_frame(ROUTE, '0/0', body)
+    assert status == 400
+    problem = json_of(data)
+    assert problem['ok'] is False and problem['error'] == reason
+    assert text in problem['message']
+    assert ReviewStore(db_path(root)).review(ROUTE, RUN_ID, '0/0') is None
+
+
+def test_missing_reviewer_and_bad_body_are_rejected(loopback):
+    server, root, rows = loopback
+    status, response, data = server.post_frame(ROUTE, '0/0', page_body(rows[0], reviewer='  '))
+    assert status == 400 and 'revisore' in json_of(data)['message']
+    status, response, data = server.post_frame(ROUTE, '0/0', b'{"run_id": NaN}')
+    assert status == 400 and json_of(data)['error'] == 'invalid_json'
+    status, response, data = server.post_frame(ROUTE, '0/0', b'[1, 2]')
+    assert status == 400
+    body = page_body(rows[0])
+    body['detections'] = 'none'
+    status, response, data = server.post_frame(ROUTE, '0/0', body)
+    assert status == 400
+    status, response, data = server.post_frame(ROUTE, '0/0', b'x' * (512 * 1024 + 1))
+    assert status == 413
+    status, response, data = server.post_frame(ROUTE, '0/9', page_body(rows[0]))
+    assert status == 404 and json_of(data)['error'] == 'unknown_frame'
+    assert ReviewStore(db_path(root)).reviews(ROUTE, RUN_ID) == []
+
+
+def test_stale_report_and_concurrent_edit_conflicts(loopback):
+    server, root, rows = loopback
+    status, response, data = server.post_frame(ROUTE, '0/0', page_body(rows[0], run_id='20200101T000000Z-00000000'))
+    assert status == 409 and 'rigenerato' in json_of(data)['message']
+    assert server.post_frame(ROUTE, '0/0', page_body(rows[0], base_revision=0))[0] == 200
+    status, response, data = server.post_frame(ROUTE, '0/0', page_body(rows[0], base_revision=0))
+    assert status == 409 and json_of(data)['error'] == 'revision_conflict'
+
+
+def test_withdraw_keeps_payload_and_is_not_confirmed(loopback):
+    server, root, rows = loopback
+    status, response, data = server.post_frame(ROUTE, '0/0', page_body(rows[0], confirmed=False))
+    assert status == 404
+    server.post_frame(ROUTE, '0/0', page_body(rows[0]))
+    status, response, data = server.post_frame(ROUTE, '0/0', {'run_id': RUN_ID, 'reviewer': 'Anna',
+                                                              'confirmed': False, 'base_revision': 1})
+    assert status == 200, data
+    review = json_of(data)['review']
+    assert review['confirmed'] is False and review['revision'] == 2 and review['reviewer'] == 'Anna'
+    store = ReviewStore(db_path(root))
+    assert store.confirmed_count(ROUTE, RUN_ID) == 0
+    assert [h['confirmed'] for h in store.history(ROUTE, RUN_ID, '0/0')] == [True, False]
+
+
+def test_cross_origin_and_non_json_posts_are_refused(loopback):
+    server, root, rows = loopback
+    body = page_body(rows[0])
+    port = server.port
+    for headers in [{'Origin': 'http://evil.example'}, {'Origin': 'null'},
+                    {'Origin': f'http://127.0.0.1:{port}', 'Sec-Fetch-Site': 'cross-site'}]:
+        status, response, data = server.post_frame(ROUTE, '0/0', body, headers=headers)
+        assert status == 403 and json_of(data)['error'] == 'cross_origin'
+    status, response, data = server.post_frame(ROUTE, '0/0', body, headers={'Content-Type': 'text/plain'})
+    assert status == 415
+    assert ReviewStore(db_path(root)).review(ROUTE, RUN_ID, '0/0') is None
+    status, response, data = server.post_frame(ROUTE, '0/0', body, headers={
+        'Origin': f'http://127.0.0.1:{port}', 'Sec-Fetch-Site': 'same-origin'})
+    assert status == 200, data
+
+
+def test_loopback_server_refuses_foreign_host_names(loopback):
+    server, root, rows = loopback
+    status, response, data = server.request('GET', '/', headers={'Host': 'evil.example:8765'})
+    assert status == 403
+    status, response, data = server.request('GET', '/', headers={'Host': 'localhost:9000'})
+    assert status == 200
+
+
+def test_paths_outside_the_report_are_refused(loopback):
+    server, root, rows = loopback
+    directory = root / 'derived/preannotations' / ROUTE / RUN_ID
+    (directory / 'images' / '00000099.jpg').symlink_to('/etc/passwd')
+    (root / 'secret.txt').write_text('secret')
+    for path in [f'/route/{ROUTE}/run.json', f'/route/{ROUTE}/preannotations.jsonl',
+                 f'/route/{ROUTE}/images/00000099.jpg', f'/route/{ROUTE}/images/../run.json',
+                 f'/route/{ROUTE}/images/..%2Frun.json', '/route/..%2F..%2Fsecret.txt/',
+                 '/route/../secret.txt', '/route/not-a-route/', '/secret.txt', '/etc/passwd',
+                 f'/api/route/..%2F{ROUTE}/reviews', '/images/00000000.jpg']:
+        status, response, data = server.request('GET', path)
+        assert status == 404, path
+        assert b'secret' not in data and b'root:' not in data
+    status, response, data = server.post_frame('..%2F' + ROUTE, '0/0', page_body(rows[0]))
+    assert status == 404
+
+
+def test_route_page_is_rendered_without_touching_the_report(loopback):
+    server, root, rows = loopback
+    index = root / 'derived/preannotations' / ROUTE / RUN_ID / 'index.html'
+    before = index.read_bytes()
+    status, response, data = server.request('GET', f'/route/{ROUTE}')
+    assert status == 303 and response.getheader('Location') == f'/route/{ROUTE}/'
+    status, response, data = server.request('GET', f'/route/{ROUTE}/')
+    assert status == 200
+    csp = response.getheader('Content-Security-Policy')
+    nonce = csp.split("'nonce-")[1].split("'")[0]
+    assert f'<script nonce="{nonce}">'.encode() in data
+    assert "connect-src 'self'" in csp and 'unsafe-inline' not in csp.split('script-src')[1].split(';')[0]
+    assert b'__NNSLR_' not in data and b'"route_id": "' + ROUTE.encode() in data
+    assert response.getheader('X-Frame-Options') == 'DENY'
+    assert index.read_bytes() == before
+    status, response, data = server.request('GET', f'/route/{ROUTE}/images/00000001.jpg')
+    assert status == 200 and response.getheader('Content-Type') == 'image/jpeg'
+    status, response, data = server.request('GET', f'/route/{OTHER_ROUTE}/')
+    assert status == 404
+
+
+def test_static_report_page_still_works_offline(report):
+    root, rows = report
+    page = (root / 'derived/preannotations' / ROUTE / RUN_ID / 'index.html').read_text()
+    assert '"server": false' in page and '__NNSLR_' not in page and 'https://' not in page
+
+
+def test_non_loopback_host_requires_a_token(tmp_path, monkeypatch):
+    from nnslr_tools.review import create_review_server, is_loopback, review_token
+    assert is_loopback('127.0.0.1') and is_loopback('localhost') and is_loopback('::1')
+    assert not is_loopback('0.0.0.0') and not is_loopback('10.10.10.213')
+    monkeypatch.setenv('NNSLR_REVIEW_TOKEN', 'short')
+    from nnslr_tools.preannotate import PreannotationError
+    with pytest.raises(PreannotationError):
+        review_token()
+    monkeypatch.setenv('NNSLR_REVIEW_TOKEN', TOKEN)
+    assert review_token() == TOKEN
+    monkeypatch.delenv('NNSLR_REVIEW_TOKEN')
+    assert len(review_token()) >= 30 and review_token() != review_token()
+    server, app = create_review_server(tmp_path, host='0.0.0.0', port=0)
+    try:
+        assert app.require_token and app.token and len(app.token) >= 30
+    finally:
+        server.server_close()
+    server, app = create_review_server(tmp_path, host='127.0.0.1', port=0)
+    try:
+        assert not app.require_token and app.token is None
+    finally:
+        server.server_close()
+
+
+def test_review_cli_defaults_allow_index_and_lan_options():
+    from nnslr_tools.cli import build_parser
+    args = build_parser().parse_args(['review'])
+    assert args.route is None and args.host == '127.0.0.1' and args.port == 8765
+    args = build_parser().parse_args(['review', '--host', '0.0.0.0', '--port', '9000', '--route', ROUTE])
+    assert args.host == '0.0.0.0' and args.port == 9000 and args.route == ROUTE
