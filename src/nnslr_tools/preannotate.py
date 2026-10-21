@@ -226,9 +226,12 @@ def run_preannotation(route: str, *, data_root: Path | None = None, confidence: 
         raise PreannotationError('worker returned incomplete or reordered frames')
     from nnslr_tools.review import write_review
     write_review(pending, rows, run_id)
+    device='cpu'
+    if rows and rows[0].get('inference',{}).get('provider')=='CUDAExecutionProvider':
+        device='cuda'
     summary={'schema_version':1,'run_id':run_id,'route_id':route,'model':MODEL_INFO,
              'road_model':ROAD_MODEL_INFO,'ocr':OCR_INFO,
-             'confidence':confidence,'device':'cpu','frame_count':len(rows),
+             'confidence':confidence,'device':device,'frame_count':len(rows),
              'frames_with_proposals':sum(bool(r['detections']) for r in rows),
              'proposal_count':sum(len(r['detections']) for r in rows),
              'speed_proposal_count':sum(d['family']=='maximum_speed' for r in rows for d in r['detections']),

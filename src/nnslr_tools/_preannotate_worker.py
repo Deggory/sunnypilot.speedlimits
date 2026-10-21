@@ -1,5 +1,5 @@
 # [preannotation] - START
-"""Optional CPU ONNX worker, invoked only in its own interpreter."""
+"""Optional ONNX worker (GPU when onnxruntime-gpu can use it, else CPU), invoked only in its own interpreter."""
 from __future__ import annotations
 
 import ast
@@ -9,6 +9,7 @@ from pathlib import Path
 
 from nnslr_tools.preannotate import MODEL_SHA256, semantic_label, suppress_overlaps, unletterbox
 from nnslr_tools.manifest import sha256_of
+from nnslr_tools import onnx_device
 
 
 def tile_boxes(width, height, size=640, overlap=128):
@@ -28,8 +29,11 @@ def run(request):
 
     if sha256_of(Path(request['model_path'])) != MODEL_SHA256:
         raise ValueError('model checksum mismatch in worker')
-    options=ort.SessionOptions(); options.intra_op_num_threads=2
-    session=ort.InferenceSession(request['model_path'],sess_options=options,providers=['CPUExecutionProvider'])
+    session=ort.InferenceSession(request['model_path'],sess_options=onnx_device.session_options(ort),
+                                 providers=onnx_device.providers(ort))
+    # The provider really in use: CUDA can still fall back to the CPU (e.g. a missing library).
+    provider=session.get_providers()[0]
+    print(f"Preannotation on {provider}, {onnx_device.threads()} CPU threads",file=sys.stderr,flush=True)
     if session.get_inputs()[0].shape != [1,3,640,640] or session.get_outputs()[0].shape != [1,86,8400]:
         raise ValueError('unexpected model input/output contract')
     names=ast.literal_eval(session.get_modelmeta().custom_metadata_map['names'])
@@ -79,7 +83,7 @@ def run(request):
                  'width':width,'height':height,'preview_path':preview,'detections':detections,
                  'review_state':'pending','ground_truth':False,'model':request['model'],
                  'road_model':request['road_model'],'ocr':request['ocr'],
-                 'inference':{'provider':'CPUExecutionProvider','confidence':request['confidence'],
+                 'inference':{'provider':provider,'confidence':request['confidence'],
                               'nms_iou':.5,'tiles':len(tile_boxes(width,height))}}
             manifest.write(json.dumps(row,allow_nan=False)+'\n'); manifest.flush()
             print(f"Preannotating {ordinal+1}/{len(request['frames'])}: segment {frame['segment_index']}, frame {frame['output_index']}, {len(detections)} proposals",file=sys.stderr,flush=True)

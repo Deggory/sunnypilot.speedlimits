@@ -1,8 +1,9 @@
 # [road-text] - START
-"""Optional CPU models; imported only from the inference subprocess."""
+"""Optional road-surface and OCR models (GPU when onnxruntime-gpu can use it); imported only from the inference subprocess."""
 from importlib.metadata import version
 from pathlib import Path
 
+from nnslr_tools import onnx_device
 from nnslr_tools.manifest import sha256_of
 from nnslr_tools.road_text import OCR_ASSETS, ROAD_SHA256, road_text_proposals
 
@@ -19,16 +20,17 @@ class RoadTextDetector:
         for name, checksum in OCR_ASSETS.items():
             if sha256_of(assets/name) != checksum:
                 raise ValueError(f'OCR model checksum mismatch: {name}')
-        options = ort.SessionOptions()
-        options.intra_op_num_threads = 2
-        options.inter_op_num_threads = 1
-        self.surface = ort.InferenceSession(str(model_path), sess_options=options,
-                                           providers=['CPUExecutionProvider'])
+        providers = onnx_device.providers(ort)
+        self.surface = ort.InferenceSession(str(model_path), sess_options=onnx_device.session_options(ort),
+                                           providers=providers)
+        use_cuda = False
+        if onnx_device.CUDA in providers:
+            use_cuda = True
         self.ocr = rapidocr.RapidOCR(params={
             'Global.use_cls': False, 'Global.log_level': 'error',
-            'EngineConfig.onnxruntime.intra_op_num_threads': 2,
+            'EngineConfig.onnxruntime.intra_op_num_threads': onnx_device.threads(),
             'EngineConfig.onnxruntime.inter_op_num_threads': 1,
-            'EngineConfig.onnxruntime.use_cuda': False,
+            'EngineConfig.onnxruntime.use_cuda': use_cuda,
             'EngineConfig.onnxruntime.use_dml': False,
             'EngineConfig.onnxruntime.use_cann': False,
             'Det.model_path': str(assets/'ch_PP-OCRv4_det_infer.onnx'),
