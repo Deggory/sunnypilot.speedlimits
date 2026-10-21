@@ -1535,7 +1535,7 @@ function renderHintList(row, work) {
       if (sameBox(d.bbox_xyxy, h.box)) { used = true; }
     }
     if (used) {
-      use.textContent = 'Già nel fotogramma';
+      use.textContent = 'Usato ✓';
       use.disabled = true;
     } else {
       use.textContent = 'Usa questo';
