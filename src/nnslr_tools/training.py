@@ -21,6 +21,7 @@ import time
 from typing import Any
 
 from nnslr_tools import tracking
+from nnslr_tools.checkpoints import atomic_torch_save, model_weights, stable_weights, torch_load
 from nnslr_tools.annotations import load_jsonl, validate_dataset
 from nnslr_tools.splits import validate_splits
 
@@ -492,6 +493,10 @@ def train_detector(
     data_root: Path,
     output_dir: Path,
     config: DetectorTrainConfig,
+    *,
+    mode: str = "fresh",
+    hf_repo: str | None = None,
+    hf_revision: str = "main",
 ) -> dict[str, Any]:
     """Train the first single-class full-frame speed-sign detector baseline."""
     if not plan.get("trainable"):
@@ -588,9 +593,15 @@ def train_detector(
     scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
 
     output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=False)
+    checkpoint_path = output_dir / "training-state.pt"
+    if mode == "resume":
+        if not checkpoint_path.is_file():
+            raise ValueError(f"no resumable training checkpoint: {checkpoint_path}")
+    else:
+        output_dir.mkdir(parents=True, exist_ok=False)
     plan_path = output_dir / "training-plan.json"
-    plan_path.write_text(json.dumps(plan, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if mode != "resume":
+        plan_path.write_text(json.dumps(plan, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     def move_targets(targets):
         return [{k: v.to(device, non_blocking=True) for k, v in target.items()} for target in targets]
@@ -659,13 +670,69 @@ def train_detector(
     best_path = output_dir / "detector-best.pt"
     global_step = 0
 
+    start_epoch = 0
+    if mode == "continue":
+        if not hf_repo:
+            raise ValueError("continue requires --hf-repo")
+        saved, origin = stable_weights(hf_repo, "detector", revision=hf_revision)
+        if saved.get("task") != "detector" or saved.get("architecture") != "ssdlite320_mobilenet_v3_large":
+            raise ValueError("stable weight task/architecture mismatch")
+        if saved.get("classes") != ["background", "speed_sign"]:
+            raise ValueError("stable detector classes mismatch")
+        model.load_state_dict(model_weights(saved), strict=True)
+        print(f"continue detector from verified stable weights: {origin}")
+    elif mode == "resume":
+        saved = torch_load(checkpoint_path)
+        if saved.get("format_version") != 1 or saved.get("task") != "detector":
+            raise ValueError("invalid detector training-state checkpoint")
+        if saved.get("status") == "completed":
+            raise ValueError("training already completed; use --mode continue for a new run")
+        if saved.get("status") != "in_progress":
+            raise ValueError("invalid checkpoint status")
+        if saved.get("config") != config.__dict__:
+            raise ValueError("resume requires exactly the original training configuration")
+        if saved.get("dataset_sha256") != plan["dataset_sha256"] or saved.get("split_sha256") != plan["split_sha256"]:
+            raise ValueError("resume dataset/split mismatch")
+        start_epoch = saved.get("epoch")
+        if not isinstance(start_epoch, int) or not 0 <= start_epoch < config.epochs:
+            raise ValueError("invalid or already completed resume epoch")
+        model.load_state_dict(model_weights(saved), strict=True)
+        optimizer.load_state_dict(saved["optimizer"])
+        scaler.load_state_dict(saved["scaler"])
+        global_step = saved["global_step"]
+        history = saved["history"]
+        best_validation_loss = saved["best_validation_loss"]
+        print(f"resume detector at epoch {start_epoch}/{config.epochs}")
+
+    def save_training_state(epoch: int, status: str) -> None:
+        atomic_torch_save({
+            "format_version": 1,
+            "task": "detector",
+            "architecture": "ssdlite320_mobilenet_v3_large",
+            "status": status,
+            "epoch": epoch,
+            "global_step": global_step,
+            "config": config.__dict__,
+            "dataset_sha256": plan["dataset_sha256"],
+            "split_sha256": plan["split_sha256"],
+            "classes": ["background", "speed_sign"],
+            "best_validation_loss": best_validation_loss,
+            "history": history,
+            "state_dict": model.state_dict(),
+            "optimizer": optimizer.state_dict(),
+            "scaler": scaler.state_dict(),
+        }, checkpoint_path)
+
+    if mode != "resume":
+        save_training_state(0, "in_progress")
+
     tracker = tracking.start_training_run(
         "detector",
         output_dir,
         _tracking_config(plan, config, "ssdlite320_mobilenet_v3_large"),
     )
     try:
-        for epoch in range(config.epochs):
+        for epoch in range(start_epoch, config.epochs):
             epoch_number = epoch + 1
             epoch_start = time.perf_counter()
             model.train()
@@ -738,7 +805,9 @@ def train_detector(
                     epoch_metrics["validation/detections"] = detector_samples()
                 epoch_metrics["epoch_time"] = time.perf_counter() - epoch_start
                 tracker.log(epoch_metrics, step=global_step)
+            save_training_state(epoch_number, "in_progress")
 
+        save_training_state(config.epochs, "completed")
         gpu = None
         if device.type == "cuda":
             gpu = {
@@ -787,6 +856,10 @@ def train_reader(
     data_root: Path,
     output_dir: Path,
     config: TrainConfig,
+    *,
+    mode: str = "fresh",
+    hf_repo: str | None = None,
+    hf_revision: str = "main",
 ) -> dict[str, Any]:
     """Execute the first reader baseline after explicit compute opt-in."""
     if not plan.get("trainable"):
@@ -873,9 +946,15 @@ def train_reader(
     scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
 
     output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=False)
+    checkpoint_path = output_dir / "training-state.pt"
+    if mode == "resume":
+        if not checkpoint_path.is_file():
+            raise ValueError(f"no resumable training checkpoint: {checkpoint_path}")
+    else:
+        output_dir.mkdir(parents=True, exist_ok=False)
     plan_path = output_dir / "training-plan.json"
-    plan_path.write_text(json.dumps(plan, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if mode != "resume":
+        plan_path.write_text(json.dumps(plan, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     def reader_samples(inputs, targets, logits) -> list[Any]:
         # The first crops of the first validation batch (no shuffling, so the
@@ -899,13 +978,72 @@ def train_reader(
     best_path = output_dir / "reader-best.pt"
     global_step = 0
 
+    start_epoch = 0
+    if mode == "continue":
+        if not hf_repo:
+            raise ValueError("continue requires --hf-repo")
+        saved, origin = stable_weights(hf_repo, "reader", revision=hf_revision)
+        if saved.get("task") != "reader" or saved.get("architecture") != "mobilenet_v3_small":
+            raise ValueError("stable weight task/architecture mismatch")
+        if saved.get("classes") != classes or saved.get("input_size") != config.input_size:
+            raise ValueError("stable reader classes/input size mismatch")
+        model.load_state_dict(model_weights(saved), strict=True)
+        print(f"continue reader from verified stable weights: {origin}")
+    elif mode == "resume":
+        saved = torch_load(checkpoint_path)
+        if saved.get("format_version") != 1 or saved.get("task") != "reader":
+            raise ValueError("invalid reader training-state checkpoint")
+        if saved.get("status") == "completed":
+            raise ValueError("training already completed; use --mode continue for a new run")
+        if saved.get("status") != "in_progress":
+            raise ValueError("invalid checkpoint status")
+        if saved.get("config") != config.__dict__:
+            raise ValueError("resume requires exactly the original training configuration")
+        if saved.get("dataset_sha256") != plan["dataset_sha256"] or saved.get("split_sha256") != plan["split_sha256"]:
+            raise ValueError("resume dataset/split mismatch")
+        if saved.get("classes") != classes:
+            raise ValueError("resume reader classes mismatch")
+        start_epoch = saved.get("epoch")
+        if not isinstance(start_epoch, int) or not 0 <= start_epoch < config.epochs:
+            raise ValueError("invalid or already completed resume epoch")
+        model.load_state_dict(model_weights(saved), strict=True)
+        optimizer.load_state_dict(saved["optimizer"])
+        scaler.load_state_dict(saved["scaler"])
+        global_step = saved["global_step"]
+        history = saved["history"]
+        best_accuracy = saved["best_accuracy"]
+        print(f"resume reader at epoch {start_epoch}/{config.epochs}")
+
+    def save_training_state(epoch: int, status: str) -> None:
+        atomic_torch_save({
+            "format_version": 1,
+            "task": "reader",
+            "architecture": "mobilenet_v3_small",
+            "status": status,
+            "epoch": epoch,
+            "global_step": global_step,
+            "config": config.__dict__,
+            "dataset_sha256": plan["dataset_sha256"],
+            "split_sha256": plan["split_sha256"],
+            "classes": classes,
+            "input_size": config.input_size,
+            "best_accuracy": best_accuracy,
+            "history": history,
+            "state_dict": model.state_dict(),
+            "optimizer": optimizer.state_dict(),
+            "scaler": scaler.state_dict(),
+        }, checkpoint_path)
+
+    if mode != "resume":
+        save_training_state(0, "in_progress")
+
     tracker = tracking.start_training_run(
         "reader",
         output_dir,
         _tracking_config(plan, config, "mobilenet_v3_small"),
     )
     try:
-        for epoch in range(config.epochs):
+        for epoch in range(start_epoch, config.epochs):
             epoch_number = epoch + 1
             epoch_start = time.perf_counter()
             model.train()
@@ -1005,7 +1143,9 @@ def train_reader(
                 if len(sample_crops) > 0:
                     epoch_metrics["validation/crops"] = sample_crops
                 tracker.log(epoch_metrics, step=global_step)
+            save_training_state(epoch_number, "in_progress")
 
+        save_training_state(config.epochs, "completed")
         gpu = None
         if device.type == "cuda":
             gpu = {
