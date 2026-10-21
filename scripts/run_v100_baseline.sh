@@ -9,12 +9,18 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DATA_ROOT="${NNSLR_DATA_ROOT:-$ROOT_DIR/data}"
 GPU_INDEX="${NNSLR_GPU_INDEX:-0}"
 RUN_ID="${1:-}"
+MODE="${2:-${NNSLR_TRAIN_MODE:-fresh}}"
 DATASET_KIND="${NNSLR_DATASET_KIND:-gold}"
 VENV="${NNSLR_GPU_VENV:-$ROOT_DIR/.venv-gpu}"
 
 if [[ -z "$RUN_ID" ]]; then
-  echo "usage: $0 RUN_ID" >&2
+  echo "usage: $0 RUN_ID [fresh|continue|resume]" >&2
   echo "example: NNSLR_GPU_INDEX=0 $0 baseline-001" >&2
+  exit 2
+fi
+
+if [[ "$MODE" != "fresh" && "$MODE" != "continue" && "$MODE" != "resume" ]]; then
+  echo "error: training mode must be fresh, continue or resume" >&2
   exit 2
 fi
 
@@ -55,7 +61,12 @@ if [[ -n "$BUSY" && "${NNSLR_ALLOW_BUSY_GPU:-0}" != "1" ]]; then
 fi
 
 RUN_ROOT="$DATA_ROOT/runs/$RUN_ID"
-if [[ -e "$RUN_ROOT" ]]; then
+if [[ "$MODE" == "resume" ]]; then
+  if [[ ! -d "$RUN_ROOT" ]]; then
+    echo "error: no existing run to resume: $RUN_ROOT" >&2
+    exit 3
+  fi
+elif [[ -e "$RUN_ROOT" ]]; then
   echo "error: run directory already exists: $RUN_ROOT" >&2
   exit 3
 fi
@@ -85,6 +96,7 @@ NN="$VENV/bin/nnslr"
 
 echo "== NNSLR baseline pipeline =="
 echo "run:          $RUN_ID"
+echo "training mode: $MODE"
 echo "data root:    $DATA_ROOT"
 echo "dataset kind: $DATASET_KIND"
 echo "physical GPU: $GPU_INDEX"
@@ -103,11 +115,34 @@ echo "== 3/10 Explicit CUDA smoke test =="
 # CUDA_VISIBLE_DEVICES maps the selected physical GPU to logical cuda:0.
 "$NN" env --gpu-smoke --gpu-device 0
 
+train_task() {
+  local task="$1"
+  local output="$2"
+  local selected_mode="$MODE"
+  if [[ "$MODE" == "resume" ]]; then
+    if [[ -f "$output/result.json" ]]; then
+      echo "skip completed $task: $output/result.json"
+      return 0
+    fi
+    if [[ -f "$output/training-state.pt" ]]; then
+      selected_mode="resume"
+    elif [[ ! -e "$output" ]]; then
+      # The previous pipeline was interrupted before this task started.
+      selected_mode="fresh"
+    else
+      echo "error: $task output exists without a valid training state: $output" >&2
+      return 3
+    fi
+  fi
+  "$NN" train --task "$task" --dataset-kind "$DATASET_KIND" --device cuda \
+    --mode "$selected_mode" --output "$output"
+}
+
 echo "== 4/10 Train detector =="
-"$NN" train   --task detector   --dataset-kind "$DATASET_KIND"   --device cuda   --output "$DETECTOR_RUN"
+train_task detector "$DETECTOR_RUN"
 
 echo "== 5/10 Train reader =="
-"$NN" train   --task reader   --dataset-kind "$DATASET_KIND"   --device cuda   --output "$READER_RUN"
+train_task reader "$READER_RUN"
 
 echo "== 6/10 Evaluate held-out detector and reader =="
 "$NN" evaluate   --task detector   --dataset-kind "$DATASET_KIND"   --partition test   --device cuda   --checkpoint "$DETECTOR_RUN/detector-best.pt"   --output "$EVAL_DIR/detector-test.json"
@@ -122,7 +157,11 @@ echo "== 8/10 Export and parity-check ONNX =="
 "$NN" export-onnx   --task reader   --checkpoint "$READER_RUN/reader-best.pt"   --output "$EXPORT_DIR/reader.onnx"
 
 echo "== 9/10 Package immutable verified bundle =="
-"$NN" package-model   --detector-onnx "$EXPORT_DIR/detector.onnx"   --detector-contract "$EXPORT_DIR/detector.onnx.contract.json"   --reader-onnx "$EXPORT_DIR/reader.onnx"   --reader-contract "$EXPORT_DIR/reader.onnx.contract.json"   --output "$BUNDLE_DIR"
+if [[ "$MODE" == "resume" && -d "$BUNDLE_DIR" ]]; then
+  echo "bundle exists: verifying instead of overwriting"
+else
+  "$NN" package-model   --detector-onnx "$EXPORT_DIR/detector.onnx"   --detector-contract "$EXPORT_DIR/detector.onnx.contract.json"   --reader-onnx "$EXPORT_DIR/reader.onnx"   --reader-contract "$EXPORT_DIR/reader.onnx.contract.json"   --output "$BUNDLE_DIR"
+fi
 
 echo "== 10/10 Verify final bundle =="
 "$NN" verify-bundle "$BUNDLE_DIR"
