@@ -110,3 +110,48 @@ The recovered runtime is intentionally preserved as an **advisory-only historica
 See [NOTICE.md](NOTICE.md) and [provenance/import.json](provenance/import.json). Training source files retain the upstream MIT license metadata. The runtime snapshot retains the original comma MIT and sunnypilot custom license notices under `LICENSES/`.
 
 This project uses software from Haibin Wen and SUNNYPILOT LLC and is licensed under a custom license requiring permission for use.
+
+
+## Consistent training modes with openpilot.distill
+
+Both projects now expose `fresh`, `continue` and `resume`:
+
+- **Fresh** (default): a new run in a new output directory, with the existing random/default or optional ImageNet initialization.
+- **Continue**: a new run initialized from the latest **explicitly reviewed** PyTorch weights listed in Hugging Face `training/stable.json`. The manifest pins each model to a SHA256, and the detector/reader are independently checked for matching architecture and class mapping. No previous optimizer is reused.
+- **Resume**: reuse the **original output directory** after interruption; restore model, optimizer, AMP scaler, validation history and epoch counters from `training-state.pt`. A completed run is rejected. Changes to the dataset, split or training config are rejected. Checkpoints are atomic and saved at every epoch boundary; an interrupted partial epoch is repeated rather than replayed exactly.
+
+```bash
+# Train the whole baseline pipeline, selecting a fresh new run ID:
+bash scripts/run_v100_baseline.sh baseline-002 fresh
+
+# New run using the published stable detector and reader weights:
+bash scripts/run_v100_baseline.sh baseline-003 continue
+
+# Recover interrupted detector/reader stages under their existing run ID:
+bash scripts/run_v100_baseline.sh baseline-003 resume
+
+# Alternatively use the same --mode flag as Distill with nnslr directly:
+.venv-gpu/bin/nnslr train --task detector --mode continue --output data/runs/detector-v2
+.venv-gpu/bin/nnslr train --task reader --mode resume --output data/runs/reader-v2
+```
+
+`--hf-repo` defaults to `cristianku/sunnypilot-speedlimits-models`; set `NNSLR_HF_REPO` to override. `continue` fails clearly until approved PyTorch weights are actually published. `resume` cannot recover old baseline checkpoints that only contain weights rather than optimizer and progress. Neither command touches a comma device.
+
+### Publishing fine-tunable PyTorch weights
+
+`scripts/publish_model.sh` continues to handle **verified inference ONNX bundles**, unchanged. To make detector and reader **PyTorch weights** available for community fine-tuning, use the separate explicit publication command. Unlike `training-state.pt`, the existing `detector-best.pt` and `reader-best.pt` contain model weights without optimizer state.
+
+```bash
+python scripts/publish_training_weights.py \
+  --repo cristianku/sunnypilot-speedlimits-models --release baseline-002 \
+  --model detector=data/runs/baseline-002/detector/detector-best.pt \
+  --model reader=data/runs/baseline-002/reader/reader-best.pt
+
+# Only after separate validation and approval of this release:
+python scripts/publish_training_weights.py \
+  --repo cristianku/sunnypilot-speedlimits-models --release baseline-002 \
+  --model detector=data/runs/baseline-002/detector/detector-best.pt \
+  --model reader=data/runs/baseline-002/reader/reader-best.pt --upload --stable
+```
+
+The command is **dry-run by default** and rejects full optimizer checkpoints. It uploads immutable files under `training/releases/<release>/`; `--stable` explicitly updates `training/stable.json` with verified hashes. It never uploads private videos/logs. The model licence, source weights and training-data rights must be assessed before a public release. The Sunnypilot runtime snapshot retains separate upstream licence obligations and is not published as training weights.
