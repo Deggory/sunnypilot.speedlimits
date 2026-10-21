@@ -1,0 +1,34 @@
+# systemd unit of the NNSLR review web server ("nnslr review").
+#
+# Do not copy this file by hand: scripts/install_review_service.sh fills in
+# the two placeholders (the path of the clone and the token file,
+# /etc/nnslr-review.env) and installs the result as
+# /etc/systemd/system/nnslr-review.service.
+#
+# User=root is acceptable on the dedicated LXC. To run the server as another
+# account: create it, give it the clone and the data root
+# (chown -R <user>: <repo>/data), set User= and Group= below, run the install
+# script again and make the token file readable by that account only
+# (chown <user>: /etc/nnslr-review.env).
+
+[Unit]
+Description=NNSLR review web server (revisione cartelli)
+Documentation=file://__NNSLR_REPO__/docs/INSTALL.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=__NNSLR_REPO__
+# NNSLR_REVIEW_TOKEN (and optionally NNSLR_DATA_ROOT) come from this file, mode 600.
+EnvironmentFile=__NNSLR_ENV_FILE__
+Environment=PYTHONUNBUFFERED=1
+ExecStart=__NNSLR_REPO__/.venv/bin/nnslr review --host 0.0.0.0 --port 8765
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

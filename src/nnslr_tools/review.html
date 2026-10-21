@@ -581,7 +581,7 @@ details summary { padding: 8px 10px; cursor: pointer; font-size: 13.5px; font-we
 
 const FAMILIES = [
   { id: 'maximum_speed', label: 'Limite massimo', hasValue: true },
-  { id: 'cancellation', label: 'Fine limitazione', hasValue: false },
+  { id: 'cancellation', label: 'Fine limitazione', hasValue: true },
   { id: 'zone', label: 'Zona', hasValue: true },
   { id: 'variable_display', label: 'Segnale variabile', hasValue: true },
   { id: 'road_marking_candidate', label: 'Numero a terra', hasValue: true },
@@ -691,7 +691,7 @@ function shortName(d) {
   if (d.family === 'zone') { return hasValue ? 'zona ' + v : 'zona'; }
   if (d.family === 'variable_display') { return hasValue ? 'variabile ' + v : 'variabile'; }
   if (d.family === 'road_marking_candidate') { return hasValue ? 'a terra ' + v : 'a terra'; }
-  if (d.family === 'cancellation') { return 'fine'; }
+  if (d.family === 'cancellation') { return hasValue ? 'fine ' + v : 'fine'; }
   if (d.family === 'other_sign') { return 'altro'; }
   if (d.family === 'not_a_sign') { return 'no'; }
   return '?';
