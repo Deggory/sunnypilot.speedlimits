@@ -186,6 +186,7 @@ class ReviewApp:
     """State shared by the request threads: data root, review store, access token, report cache."""
 
     def __init__(self, root: Path, store, *, token: str | None, require_token: bool):
+        from nnslr_tools.panel import Panel
         self.root = root
         self.store = store
         self.token = token
@@ -193,6 +194,9 @@ class ReviewApp:
         self.cookie_name = 'nnslr_review'
         self._reports = {}
         self._reports_lock = threading.Lock()
+        # [control-panel] - START
+        self.panel = Panel(root)
+        # [control-panel] - END
 
     def token_matches(self, supplied) -> bool:
         if self.token is None or not isinstance(supplied, str):
@@ -296,6 +300,9 @@ padding:10px max(16px,env(safe-area-inset-right,0px)) 10px max(16px,env(safe-are
 .brand-mark{width:30px;height:30px;border-radius:50%;background:#fff;border:4px solid var(--sign-ring);
 display:grid;place-items:center;flex:none;color:#111;font-weight:700;font-size:11px}
 h1{margin:0;font-size:18px;font-weight:600}
+.topnav{display:flex;gap:4px;margin-left:8px}
+.topnav a{padding:6px 12px;border-radius:999px;text-decoration:none;color:var(--muted);font-weight:500}
+.topnav a[aria-current]{background:var(--surface-2);color:var(--fg);border:1px solid var(--line)}
 .page{max-width:1100px;margin:0 auto;padding:16px max(16px,env(safe-area-inset-right,0px)) 32px
 max(16px,env(safe-area-inset-left,0px))}
 .lead{margin:0 0 16px;color:var(--muted);max-width:70ch}
@@ -337,8 +344,16 @@ def _page_head(title: str) -> list[str]:
         '<title>' + html.escape(title) + '</title>',
         '<style>' + INDEX_STYLE + '</style></head><body>',
         '<header class="topbar"><div class="topbar-inner"><span class="brand-mark" aria-hidden="true">50</span>'
-        '<h1>Revisione cartelli</h1></div></header>',
+        '<h1>Revisione cartelli</h1><nav class="topnav" aria-label="Sezioni">'
+        '<a href="/" aria-current="page">Revisione</a><a href="/pannello">Pannello</a></nav></div></header>',
     ]
+
+
+# [control-panel] - START
+def render_panel(nonce: str) -> str:
+    """The control panel page; it loads its data from /api/panel/status."""
+    return files('nnslr_tools').joinpath('panel.html').read_text().replace('__NNSLR_NONCE__', nonce)
+# [control-panel] - END
 
 
 def render_index(summaries: list[dict], database: Path) -> str:
@@ -394,6 +409,7 @@ def render_problem(status: int, message: str) -> str:
 
 def make_handler(app: ReviewApp):
     from nnslr_tools.annotations import strict_json_loads
+    from nnslr_tools.panel import PanelError
     from nnslr_tools.review_db import ReviewRejected, db_path, public_review, save_frame_review
 
     class Handler(BaseHTTPRequestHandler):
@@ -417,6 +433,8 @@ def make_handler(app: ReviewApp):
             except (BrokenPipeError, ConnectionResetError, TimeoutError):
                 self.close_connection = True
             except ReviewRejected as exc:
+                self._problem(exc.status, exc.reason, exc.message, True)
+            except PanelError as exc:
                 self._problem(exc.status, exc.reason, exc.message, True)
             except Exception as exc:
                 self._problem(500, 'server_error', 'Errore interno del server: ' + type(exc).__name__ + '.',
@@ -483,6 +501,22 @@ def make_handler(app: ReviewApp):
             if path == '/api/routes':
                 self._json(200, {'routes': app.route_summaries()})
                 return
+            # [control-panel] - START
+            if path == '/pannello':
+                nonce = secrets.token_urlsafe(18)
+                csp = ("default-src 'none'; script-src 'nonce-" + nonce + "'; style-src 'unsafe-inline'; "
+                       "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+                self._send(200, 'text/html; charset=utf-8', render_panel(nonce).encode('utf-8'), csp)
+                return
+            if path == '/api/panel/status':
+                self._json(200, app.panel.status())
+                return
+            match = re.fullmatch(r'/api/panel/job/([0-9a-z_-]+)/log', path)
+            if match:
+                offset = parse_qs(urlsplit(self.path).query).get('offset', ['0'])[0]
+                self._json(200, app.panel.log(match.group(1), int(offset) if offset.isdigit() else 0))
+                return
+            # [control-panel] - END
             match = re.fullmatch(r'/api/route/([^/]+)/reviews', path)
             if match:
                 self._send_reviews(match.group(1))
@@ -570,6 +604,27 @@ def make_handler(app: ReviewApp):
                              'confirmed_count': confirmed, 'reviews': reviews, 'suspicious': suspicious})
 
         def _post(self, path):
+            # [control-panel] - START
+            run = re.fullmatch(r'/api/panel/run/([a-z_]+)', path)
+            stop = re.fullmatch(r'/api/panel/job/([0-9a-z_-]+)/stop', path)
+            if run or stop:
+                # Same protections as saving a frame: same origin, JSON only (no form can send it).
+                if not self._same_origin():
+                    self._problem(403, 'cross_origin', 'Richiesta da un’altra origine rifiutata.', True)
+                    return
+                content_type = self.headers.get('Content-Type', '')
+                if content_type.split(';')[0].strip().lower() != 'application/json':
+                    self._problem(415, 'unsupported_media_type', 'Sono accettati solo dati JSON.', True)
+                    return
+                self._read_json()
+                if run:
+                    job = app.panel.start(run.group(1))
+                    print(f'Pannello: avviata {job["label"]} ({job["id"]})', flush=True)
+                    self._json(200, {'ok': True, **job})
+                else:
+                    self._json(200, {'ok': True, **app.panel.stop(stop.group(1))})
+                return
+            # [control-panel] - END
             match = re.fullmatch(r'/api/route/([^/]+)/frame/([0-9]{1,9})/([0-9]{1,9})', path)
             if match is None:
                 self._problem(404, 'not_found', 'Indirizzo di salvataggio non valido.', True)

@@ -50,6 +50,8 @@ For the usual work you only need these, from the repository root. They take no a
 | 3 | `helpers/3_train.sh` | Imports the confirmed frames, validates the dataset, freezes the split, creates `.venv-gpu` the first time and runs `scripts/run_v100_baseline.sh`. `--dataset-only` stops before the GPU; `--continue` and `--resume=<run>` as in the baseline script. It stops when the GPU is busy (`--force` to share it). **Uses the GPU, installs packages the first time.** |
 | – | `helpers/status.sh` | Read-only: every route (segments, frames, reviewed frames, objects in the dataset), what is running, GPU, disk and the next command. |
 
+The review site also has a **Pannello** page (`/pannello`, link in its top bar): the state of every route, GPU/disk/CPU, what is running (also from a terminal, and the `openpilot.distill` training), and buttons that start steps 1 and 3 in the background with their log live in the page. Only those fixed actions can run, one per kind at a time, behind the same token and same-origin checks as the reviews; their logs are in `data/logs/panel/`. `NNSLR_PANEL_ACTIONS=0` makes the panel read-only (e.g. on a review service other people use).
+
 A route that already has a pre-annotation report is never processed again (its reviews would be left on the old report); segments of it that arrive later are only shown by `helpers/status.sh`. Training needs reviewed routes from at least five independent route/site groups, because `nnslr build-splits` makes five disjoint partitions.
 
 ## Helpers, commands and scripts
