@@ -16,14 +16,17 @@
 #      (src/nnslr_tools/model_catalog.py) with size, sha256 and download url of every file.
 #   4. one Hugging Face commit with models/<nome>/* and speed_models.json. Everything is also left
 #      in <data root>/publish/<nome>/.
-# Only model artifacts are uploaded: never videos, logs, datasets or checkpoints.
+# Only model artifacts are uploaded: never videos, logs, datasets or checkpoints. The two contracts
+# (detector.contract.json, reader.contract.json) do contain the absolute path of the checkpoint on the
+# training machine (e.g. /home/<utente>/.../data/runs/<id>/...): it becomes public with the model.
 # Nothing is compiled or installed on the comma: the on-device backend does not exist yet.
 #
 # Hugging Face, once on this machine:
-#   uvx --from huggingface_hub hf auth login       (token that can write the repo)
-#   uvx --from huggingface_hub hf repo create cristianku/sunnypilot-speedlimits-models
+#   uvx --from 'huggingface_hub>=1,<3' hf auth login       (token that can write the repo)
+#   uvx --from 'huggingface_hub>=1,<3' hf repos create cristianku/sunnypilot-speedlimits-models
 # Until the repo exists Hugging Face answers 401 to the catalog download and the script stops.
 # huggingface_hub is not a dependency of this repo: uvx (from uv) runs it in its own environment.
+# The version is pinned to 1.x/2.x, which have the same "hf auth", "hf repos" and "hf upload".
 #
 # --name: name of the model in the catalog and in the paths (default: the run folder that contains
 #         the bundle, e.g. baseline-001). Letters, digits, _ . - starting with a letter or a digit.
@@ -39,6 +42,8 @@ HF_REPO="${HF_REPO:-cristianku/sunnypilot-speedlimits-models}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DATA_ROOT="${NNSLR_DATA_ROOT:-$ROOT/data}"
 CATALOG_NAME="speed_models.json"
+# huggingface_hub version that uvx runs; keep it equal to the one in the help block above.
+HF_CLI="huggingface_hub>=1,<3"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
@@ -72,10 +77,13 @@ while [ $# -gt 0 ]; do
   elif [ "$1" = "--no-upload" ]; then
     upload=0
   elif [ "$1" = "--name" ]; then
+    [ $# -gt 1 ] || die "--name vuole un nome"
     shift
-    name="${1:-}"
+    name="$1"
+    [ -n "$name" ] || die "--name vuole un nome"
   elif [[ "$1" == --name=* ]]; then
     name="${1#--name=}"
+    [ -n "$name" ] || die "--name vuole un nome"
   elif [ -z "$bundle" ]; then
     bundle="$1"
   else
@@ -119,6 +127,14 @@ echo "Bundle verificato"
 
 # 2. Stage only the files the bundle defines, then verify the copy that is going to be uploaded.
 echo "== 2. preparo i file in $stage"
+# The stage is deleted and rebuilt: a bundle inside it would be deleted before being copied.
+# Compare the real paths, so symlinks and relative paths do not hide it.
+mkdir -p "$DATA_ROOT/publish"
+real_stage="$(cd "$DATA_ROOT/publish" && pwd -P)/$name"
+real_bundle="$(cd "$bundle" && pwd -P)"
+if [[ "$real_bundle/" == "$real_stage/"* ]]; then
+  die "il bundle e' dentro $stage: copialo altrove prima di pubblicarlo"
+fi
 rm -rf "$stage"
 mkdir -p "$model_dir"
 bundle_files="$(run_python -c 'from nnslr_tools.bundle import REQUIRED_FILES; print("\n".join(REQUIRED_FILES))')"
@@ -137,7 +153,7 @@ if [ "$http_code" = "404" ]; then
   rm -f "$stage/$CATALOG_NAME"
   echo "Nessun catalogo su $HF_REPO: ne creo uno nuovo"
 elif [ "$http_code" = "401" ]; then
-  die "HTTP 401 da $catalog_url: il repo $HF_REPO non esiste o e' privato (crealo con: uvx --from huggingface_hub hf repo create $HF_REPO)"
+  die "HTTP 401 da $catalog_url: il repo $HF_REPO non esiste o e' privato (crealo con: uvx --from '$HF_CLI' hf repos create $HF_REPO)"
 elif [ "$http_code" != "200" ]; then
   die "non riesco a scaricare $catalog_url (HTTP $http_code)"
 fi
@@ -152,6 +168,6 @@ fi
 
 # 4. One commit with the model files and the new catalog.
 echo "== 4. carico su https://huggingface.co/$HF_REPO"
-uvx --from huggingface_hub hf upload "$HF_REPO" "$stage" . --commit-message "Publish model $name"
+uvx --from "$HF_CLI" hf upload "$HF_REPO" "$stage" . --commit-message "Publish model $name"
 
 echo "Pubblicato. Catalogo: $catalog_url"

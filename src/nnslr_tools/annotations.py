@@ -63,18 +63,27 @@ def _object(pairs):
     return result
 
 
-def load_jsonl(path: Path) -> list[dict]:
+def strict_json_loads(text: str):
+    """json.loads that refuses NaN/Infinity and duplicate keys, as the importer does."""
+    return json.loads(text, parse_constant=_nonfinite, object_pairs_hook=_object)
+
+
+def parse_jsonl(text: str, name: str) -> list[dict]:
     rows = []
-    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+    for number, line in enumerate(text.splitlines(), 1):
         if not line.strip():
             continue
         try:
-            row = json.loads(line, parse_constant=_nonfinite, object_pairs_hook=_object)
+            row = strict_json_loads(line)
         except (ValueError, TypeError) as exc:
-            raise DatasetError("invalid_json", f"{path.name}:{number}: {exc}") from exc
+            raise DatasetError("invalid_json", f"{name}:{number}: {exc}") from exc
         require(isinstance(row, dict), "invalid_schema", f"line {number} must be an object")
         rows.append(row)
     return rows
+
+
+def load_jsonl(path: Path) -> list[dict]:
+    return parse_jsonl(path.read_text(encoding="utf-8"), path.name)
 
 
 def jsonl_bytes(rows: list[dict]) -> bytes:
@@ -295,55 +304,75 @@ def _canonical(frame: dict, detection: dict | None, original: dict | None, sourc
     }
 
 
+def reviewed_frame_annotations(frame: dict, source_hash: str, *, dataset_kind: str = 'gold',
+                               name: str = 'review') -> list[dict]:
+    """Canonical rows of one reviewed frame (one line of the review JSONL), after the import checks.
+
+    Used by import-annotations for every reviewed-frame line and by the review
+    server before it stores a confirmed frame, so both apply the same rules.
+    """
+    # [model-review] - START
+    if dataset_kind == 'gold':
+        require(frame.get('kind') == 'reviewed_frame' and frame.get('review_state') == 'reviewed'
+                and frame.get('label_basis') == 'human_review', 'unreviewed_proposal', name)
+    else:
+        require(frame.get('kind') == 'reviewed_frame' and frame.get('review_state') == 'reviewed'
+                and frame.get('label_basis') in ('human_review', 'model_review'), 'unreviewed_proposal', name)
+        if frame.get('label_basis') == 'model_review':
+            for field in ('review_model', 'review_model_version'):
+                require(isinstance(frame.get(field), str) and bool(frame[field].strip()), 'missing_provenance', field)
+            require(_hash(frame.get('review_model_sha256')), 'missing_provenance', 'review_model_sha256')
+            confidence = frame.get('confidence')
+            require(type(confidence) in (int, float) and not isinstance(confidence, bool)
+                    and math.isfinite(confidence) and 0 <= confidence <= 1, 'invalid_confidence', str(confidence))
+    # [model-review] - END
+    require(isinstance(frame.get('route_id'), str) and isinstance(frame.get('camera_stream'), str)
+            and _integer(frame.get('segment_index')) and _integer(frame.get('output_index')),
+            'invalid_identity', 'reviewed frame')
+    detections, proposals = frame.get('detections'), frame.get('source_proposals')
+    require(isinstance(detections, list) and isinstance(proposals, list)
+            and all(isinstance(d, dict) for d in detections + proposals), 'invalid_schema', 'detections/source_proposals')
+    require(all(isinstance(d.get('detection_id'), str) and d['detection_id'] for d in proposals),
+            'invalid_identity', 'proposal id')
+    by_id = {d.get('detection_id'): d for d in proposals}
+    require(len(by_id) == len(proposals) and None not in by_id, 'duplicate_identity', 'proposal id')
+    ids = [d.get('detection_id') for d in detections]
+    require(all(isinstance(i,str) and i for i in ids) and len(set(ids)) == len(ids), 'duplicate_identity', 'detection id')
+    rows = [_canonical(frame, d, by_id.get(d['detection_id']), source_hash) for d in detections]
+    if not detections:
+        rows.append(_canonical(frame, None, None, source_hash))
+    rows.extend(_canonical(frame, d, d, source_hash, rejected=True) for k,d in by_id.items() if k not in ids)
+    return rows
+
+
 def import_reviews(inputs: list[Path], root: Path, output: Path, *, dataset_kind: str = 'gold') -> dict:
+    sources = []
+    for path in inputs:
+        sources.append((path.name, path.read_bytes()))
+    return import_review_sources(sources, root, output, dataset_kind=dataset_kind)
+
+
+def import_review_sources(sources: list[tuple[str, bytes]], root: Path, output: Path, *,
+                          dataset_kind: str = 'gold') -> dict:
+    """Import review JSONL contents given as (name, bytes); files and the review database both end here."""
     # [model-review] - START
     require(dataset_kind in DATASET_KINDS, 'unknown_dataset_kind', str(dataset_kind))
     # [model-review] - END
     imported = []
     frame_ids = set()
-    sources = []
-    for path in inputs:
-        content = path.read_bytes()
+    archives = []
+    for name, content in sources:
         source_hash = hashlib.sha256(content).hexdigest()
-        sources.append((source_hash, content))
-        for frame in load_jsonl(path):
+        archives.append((source_hash, content))
+        for frame in parse_jsonl(content.decode('utf-8'), name):
             if 'annotation_id' in frame:
                 imported.append(frame)
                 continue
-            # [model-review] - START
-            if dataset_kind == 'gold':
-                require(frame.get('kind') == 'reviewed_frame' and frame.get('review_state') == 'reviewed'
-                        and frame.get('label_basis') == 'human_review', 'unreviewed_proposal', path.name)
-            else:
-                require(frame.get('kind') == 'reviewed_frame' and frame.get('review_state') == 'reviewed'
-                        and frame.get('label_basis') in ('human_review', 'model_review'), 'unreviewed_proposal', path.name)
-                if frame.get('label_basis') == 'model_review':
-                    for field in ('review_model', 'review_model_version'):
-                        require(isinstance(frame.get(field), str) and bool(frame[field].strip()), 'missing_provenance', field)
-                    require(_hash(frame.get('review_model_sha256')), 'missing_provenance', 'review_model_sha256')
-                    confidence = frame.get('confidence')
-                    require(type(confidence) in (int, float) and not isinstance(confidence, bool)
-                            and math.isfinite(confidence) and 0 <= confidence <= 1, 'invalid_confidence', str(confidence))
-            # [model-review] - END
-            require(isinstance(frame.get('route_id'), str) and isinstance(frame.get('camera_stream'), str)
-                    and _integer(frame.get('segment_index')) and _integer(frame.get('output_index')),
-                    'invalid_identity', 'reviewed frame')
+            rows = reviewed_frame_annotations(frame, source_hash, dataset_kind=dataset_kind, name=name)
             identity = tuple(frame.get(k) for k in ('route_id','segment_index','camera_stream','output_index'))
             require(identity not in frame_ids, 'duplicate_identity', 'reviewed frame')
             frame_ids.add(identity)
-            detections, proposals = frame.get('detections'), frame.get('source_proposals')
-            require(isinstance(detections, list) and isinstance(proposals, list)
-                    and all(isinstance(d, dict) for d in detections + proposals), 'invalid_schema', 'detections/source_proposals')
-            require(all(isinstance(d.get('detection_id'), str) and d['detection_id'] for d in proposals),
-                    'invalid_identity', 'proposal id')
-            by_id = {d.get('detection_id'): d for d in proposals}
-            require(len(by_id) == len(proposals) and None not in by_id, 'duplicate_identity', 'proposal id')
-            ids = [d.get('detection_id') for d in detections]
-            require(all(isinstance(i,str) and i for i in ids) and len(set(ids)) == len(ids), 'duplicate_identity', 'detection id')
-            imported.extend(_canonical(frame, d, by_id.get(d['detection_id']), source_hash) for d in detections)
-            if not detections:
-                imported.append(_canonical(frame, None, None, source_hash))
-            imported.extend(_canonical(frame, d, d, source_hash, rejected=True) for k,d in by_id.items() if k not in ids)
+            imported.extend(rows)
     require(bool(imported), 'empty_dataset', 'no annotations to import')
     existing = load_jsonl(output) if output.exists() else []
     combined = sorted(existing + imported, key=lambda r: str(r.get('annotation_id', '')))
@@ -353,7 +382,7 @@ def import_reviews(inputs: list[Path], root: Path, output: Path, *, dataset_kind
     if not report['valid']:
         raise DatasetError(report['errors'][0]['reason'], json.dumps(report, sort_keys=True))
     # Preserve exact source reviews; failed validation never publishes dataset truth.
-    for digest, payload in sources:
+    for digest, payload in archives:
         archived = root / 'annotations/imports' / (digest + '.jsonl')
         if archived.exists():
             require(archived.read_bytes() == payload, 'source_archive_mismatch')

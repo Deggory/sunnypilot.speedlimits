@@ -5,6 +5,29 @@ The executable contract is `nnslr_tools.annotations`; the portable structural
 schema is [annotation.schema.json](../schemas/annotation.schema.json).
 The CLI uses stdlib only. Dataset truth stays outside the runtime contract.
 
+## Where the raw files live
+
+Raw comma files (`fcamera.hevc`, `ecamera.hevc`, `rlog.zst`, ...) are stored
+once, outside the clone, in the shared folder `COMMA_VIDEOS_DIR` (default:
+`comma-videos` next to the clone, e.g. `/root/comma-videos` on the training
+container). Its layout is the comma one, `<route>--<segment>/<file>`, and
+`openpilot.distill` uses the same folder.
+
+`<data-root>/raw/routes/<route>/<segment>/<file>` only holds absolute symlinks
+to those files. `nnslr sync-routes` downloads into the shared folder and
+creates the links; `nnslr link-videos` links segments that are already there
+without network access. These two commands are the only writers of the shared
+folder and of the links.
+
+Readers (`route-manifest`, `extract-frames --route`, ...) accept such a link
+only when it is the file itself, inside `raw/routes/`, and it resolves into
+`COMMA_VIDEOS_DIR`; any other link out of the data root is still rejected.
+Derived files (frames, alignment, annotations, datasets, splits, runs) are
+always written under the data root, never into the shared folder. Paths in
+manifests and frame provenance stay paths inside the data root
+(`raw/routes/<route>/<segment>/fcamera.hevc`), and hashes are those of the
+shared file.
+
 ## Records and provenance
 
 Each JSONL record is one reviewed object, or an explicitly confirmed negative

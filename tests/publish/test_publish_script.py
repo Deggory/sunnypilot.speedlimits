@@ -13,6 +13,7 @@ from publish_helpers import make_bundle, write_fake_tools
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "publish_model.sh"
 DEFAULT_REPO = "cristianku/sunnypilot-speedlimits-models"
+HF_CLI = "huggingface_hub>=1,<3"
 
 
 class Fakes:
@@ -62,6 +63,9 @@ def test_help_prints_the_top_comment_without_side_effects(tmp_path) -> None:
         assert "--no-upload" in proc.stdout
         assert "HF_REPO" in proc.stdout
         assert "hf auth login" in proc.stdout
+        # huggingface_hub 2.x only knows "hf repos", 1.x knows both.
+        assert "hf repos create" in proc.stdout
+        assert "hf repo create" not in proc.stdout
         assert "set -euo pipefail" not in proc.stdout
 
     assert not fakes.data_root.exists()
@@ -119,7 +123,7 @@ def test_upload_makes_one_commit_with_the_stage(tmp_path) -> None:
     assert proc.returncode == 0, proc.stderr + proc.stdout
     stage = fakes.data_root / "publish" / "prova"
     assert fakes.uvx_args() == [
-        "--from", "huggingface_hub", "hf", "upload",
+        "--from", HF_CLI, "hf", "upload",
         DEFAULT_REPO, str(stage), ".",
         "--commit-message", "Publish model prova",
     ]
@@ -169,6 +173,57 @@ def test_http_error_on_catalog_stops_before_upload(tmp_path) -> None:
         assert f"HTTP {code}" in proc.stderr
 
     assert not fakes.uvx_log.exists()
+
+
+def test_401_suggests_the_repos_create_command(tmp_path) -> None:
+    fakes = Fakes(tmp_path)
+    _run_bundle(fakes, "baseline-001")
+
+    proc = fakes.run(curl_code="401")
+
+    assert proc.returncode != 0
+    assert f"uvx --from '{HF_CLI}' hf repos create {DEFAULT_REPO}" in proc.stderr
+    assert not fakes.uvx_log.exists()
+
+
+def test_catalog_that_is_not_json_stops_before_upload(tmp_path) -> None:
+    fakes = Fakes(tmp_path)
+    _run_bundle(fakes, "baseline-001")
+    remote = tmp_path / "remote_speed_models.json"
+    remote.write_text("<html>not json</html>")
+
+    proc = fakes.run(curl_code="200", curl_body=remote)
+
+    assert proc.returncode != 0
+    assert "JSON non valido" in proc.stderr
+    assert "Traceback" not in proc.stderr
+    assert not fakes.uvx_log.exists()
+
+
+def test_bundle_inside_the_stage_is_refused_and_kept(tmp_path) -> None:
+    fakes = Fakes(tmp_path)
+    bundle = make_bundle(fakes.data_root / "publish" / "baseline-001" / "models" / "baseline-001")
+
+    proc = fakes.run("--no-upload", "--name=baseline-001", str(bundle))
+
+    assert proc.returncode != 0
+    assert "il bundle e' dentro" in proc.stderr
+    assert (bundle / "reader.onnx").is_file()
+    assert not fakes.curl_log.exists()
+    assert not fakes.uvx_log.exists()
+
+
+def test_name_without_value_is_refused(tmp_path) -> None:
+    fakes = Fakes(tmp_path)
+    _run_bundle(fakes, "baseline-001")
+
+    for args in (["--no-upload", "--name"], ["--no-upload", "--name="], ["--no-upload", "--name", ""]):
+        proc = fakes.run(*args)
+        assert proc.returncode != 0
+        assert "--name vuole un nome" in proc.stderr
+
+    assert not (fakes.data_root / "publish").exists()
+    assert not fakes.curl_log.exists()
 
 
 def test_broken_bundle_is_refused(tmp_path) -> None:

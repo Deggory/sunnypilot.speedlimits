@@ -182,6 +182,15 @@ def test_catalog_with_unknown_schema_is_refused(tmp_path) -> None:
     assert json.loads(catalog.read_text())["schema_version"] == 99
 
 
+def test_catalog_that_is_not_json_is_refused(tmp_path) -> None:
+    catalog = tmp_path / "speed_models.json"
+    catalog.write_text("<html>error page</html>")
+
+    with pytest.raises(SystemExit, match="JSON non valido"):
+        _run(catalog, "baseline-001", _stage_model(tmp_path, "baseline-001"))
+    assert catalog.read_text() == "<html>error page</html>"
+
+
 def test_module_imports_only_the_standard_library() -> None:
     source = Path(model_catalog.__file__).read_text(encoding="utf-8")
     imported = []

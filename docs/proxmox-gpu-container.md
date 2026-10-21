@@ -61,9 +61,19 @@ zstd --version
 
 The Git repository lives under `~/sunnypilot.speedlimits`.
 
-All videos, logs, extracted frames, datasets, checkpoints and training output
-live under `~/sunnypilot.speedlimits/data` (gitignored, created on first use)
-and must not be committed to Git.
+The raw comma files (videos and full logs) are stored once in a shared folder
+next to the clones, `~/comma-videos` (`COMMA_VIDEOS_DIR`), with the same layout
+as on the comma: `~/comma-videos/<route>--<segment>/fcamera.hevc`,
+`ecamera.hevc`, `rlog.zst`. `openpilot.distill` (`~/openpilot.distill`) uses
+the same folder, so a segment is downloaded only once for both projects.
+
+Extracted frames, datasets, checkpoints and training output live under
+`~/sunnypilot.speedlimits/data` (gitignored, created on first use).
+`data/raw/routes/<route>/<segment>/` only holds absolute symlinks to the files
+in `~/comma-videos`. Neither folder may be committed to Git.
+
+If the videos outgrow the container disk, give `~/comma-videos` its own disk
+from the Proxmox host (`pct set <id> -mp0 ...`, run by hand on the host).
 
 ---
 
@@ -109,41 +119,73 @@ At this stage the core and T2 video tooling do not require PyTorch.
 
 ---
 
-## 5. Optional: a different data root
+## 5. Optional: a different data root or videos folder
 
 Without `NNSLR_DATA_ROOT` the data root is `~/sunnypilot.speedlimits/data`.
-Only to keep the data somewhere else:
+Without `COMMA_VIDEOS_DIR` the shared videos folder is `~/comma-videos`, the
+folder `comma-videos` next to the clone. Only to keep them somewhere else:
 
 ```bash
 cat >/etc/profile.d/nnslr.sh <<'EOF'
 export NNSLR_DATA_ROOT=/path/to/speed-vision-data
+export COMMA_VIDEOS_DIR=/path/to/comma-videos
 EOF
 
 chmod 0644 /etc/profile.d/nnslr.sh
 source /etc/profile.d/nnslr.sh
 ```
 
+`openpilot.distill` must see the same `COMMA_VIDEOS_DIR`, otherwise each
+project downloads its own copy.
+
 Check:
 
 ```bash
-echo "$NNSLR_DATA_ROOT"
+echo "$NNSLR_DATA_ROOT" "$COMMA_VIDEOS_DIR"
 nnslr env
 ```
 
-Expected data root:
+`nnslr env` shows both folders, also when the variables are not set:
 
 ```text
-/path/to/speed-vision-data
+"nnsler_data_root": ... "/path/to/speed-vision-data"
+"comma_videos_dir": ... "/path/to/comma-videos"
 ```
 
 ---
 
-## 6. Quick video test
+## 6. Get the videos and a quick video test
 
-Copy one local comma video into the data area, for example:
+Download a route from the comma into the shared folder; `sync-routes` also
+creates the links in `data/raw/routes`:
+
+```bash
+source ~/sunnypilot.speedlimits/.venv/bin/activate
+
+nnslr sync-routes --route <route>
+```
+
+Segments that are already in `~/comma-videos` (for example downloaded by
+`openpilot.distill`) are linked without any network access:
+
+```bash
+nnslr link-videos --dry-run          # show what would be linked
+nnslr link-videos                    # every route in ~/comma-videos
+nnslr link-videos --route <route>    # one route only
+```
+
+`link-videos` links `fcamera.hevc`, `ecamera.hevc`, the full log and the other
+raw comma files it finds. A segment without `fcamera.hevc` or without a full
+log is listed in `missing_files` (exit code 1); its other files are still
+linked. Existing links are kept; an old regular file in `data/raw/routes` that
+is identical to the shared copy is replaced by a link, a different one is
+reported and left alone.
+
+The video is then available as:
 
 ```text
 ~/sunnypilot.speedlimits/data/raw/routes/<route>/<segment>/fcamera.hevc
+  -> ~/comma-videos/<route>--<segment>/fcamera.hevc
 ```
 
 Then:
@@ -418,5 +460,6 @@ cd ~/sunnypilot.speedlimits
 git status
 ```
 
-Videos, logs, datasets, runs and checkpoints belong under
-`~/sunnypilot.speedlimits/data`, not under the repository.
+Raw videos and logs belong in `~/comma-videos`; datasets, runs and
+checkpoints belong under `~/sunnypilot.speedlimits/data` (gitignored), never
+in the tracked part of the repository.

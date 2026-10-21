@@ -86,7 +86,11 @@ def file_sha256(path: Path) -> str:
 def read_json_object(path: Path) -> dict:
     if not path.is_file():
         raise SystemExit(f"manca {path}")
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    # A download can answer 200 with an empty or HTML page: stop with a message, not a traceback.
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        raise SystemExit(f"JSON non valido: {path}")
     if not isinstance(payload, dict):
         raise SystemExit(f"non e' un oggetto JSON: {path}")
     return payload

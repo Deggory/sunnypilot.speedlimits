@@ -40,13 +40,13 @@ Private videos, logs, datasets, checkpoints and model weights stay outside Git. 
 
 ## Publishing on Hugging Face
 
-`scripts/publish_model.sh` publishes one model bundle (the `bundle/` folder that `scripts/run_v100_baseline.sh` writes in `data/runs/<run id>/`) to [cristianku/sunnypilot-speedlimits-models](https://huggingface.co/cristianku/sunnypilot-speedlimits-models). Only the model artifacts are uploaded: the detector and reader ONNX files with their contracts, `config.json`, `classes.json`, `model_card.json`, `capability.json` and `sha256sums.json`, plus the catalog `speed_models.json` with size, sha256 and download URL of every file. Videos, logs, datasets and checkpoints are never uploaded.
+`scripts/publish_model.sh` publishes one model bundle (the `bundle/` folder that `scripts/run_v100_baseline.sh` writes in `data/runs/<run id>/`) to [cristianku/sunnypilot-speedlimits-models](https://huggingface.co/cristianku/sunnypilot-speedlimits-models). Only the model artifacts are uploaded: the detector and reader ONNX files with their contracts, `config.json`, `classes.json`, `model_card.json`, `capability.json` and `sha256sums.json`, plus the catalog `speed_models.json` with size, sha256 and download URL of every file. Videos, logs, datasets and checkpoints are never uploaded. The two contracts do contain the absolute path of each checkpoint on the training machine (for example `/home/<user>/.../data/runs/<run id>/...`), so that path and user name become public with the model.
 
-Once per machine, with a Hugging Face token that can write the repository (`huggingface_hub` is not a dependency of this repo; `uvx` from [uv](https://docs.astral.sh/uv/) runs it on demand):
+Once per machine, with a Hugging Face token that can write the repository (`huggingface_hub` is not a dependency of this repo; `uvx` from [uv](https://docs.astral.sh/uv/) runs it on demand, pinned to 1.x/2.x like the script):
 
 ```sh
-uvx --from huggingface_hub hf auth login
-uvx --from huggingface_hub hf repo create cristianku/sunnypilot-speedlimits-models
+uvx --from 'huggingface_hub>=1,<3' hf auth login
+uvx --from 'huggingface_hub>=1,<3' hf repos create cristianku/sunnypilot-speedlimits-models
 ```
 
 Then try a dry run first, and publish:
