@@ -39,6 +39,19 @@ The existing `nnslr` command and Python package names are retained for compatibi
 
 Private videos, logs, datasets, checkpoints and model weights stay outside Git. Use the configured data root and publish reviewed model artifacts separately when available.
 
+## Easy path: three helpers
+
+For the usual work you only need these, from the repository root. They take no arguments, skip what is already done and end by printing the next command; `--help` on each one explains the options.
+
+| Step | Command | What it does |
+| --- | --- | --- |
+| 1 | `helpers/1_prepare.sh` | Links the videos of the shared folder (`COMMA_VIDEOS_DIR`, the same ones `openpilot.distill` downloads), extracts the frames and proposes the signs, for every new route. `--jobs=4` prepares 4 routes at a time, `--background` keeps going after the ssh closes. **CPU-heavy, writes in the data root.** |
+| 2 | `helpers/2_review.sh` | Starts the review site in the background and prints the link to open from the PC (LAN, with a fixed access token kept in `data/review.token`). Here you confirm the signs: the only manual step. `--stop` turns it off, `--local` serves only on 127.0.0.1 (ssh tunnel). **Opens port 8765 on the LAN.** |
+| 3 | `helpers/3_train.sh` | Imports the confirmed frames, validates the dataset, freezes the split, creates `.venv-gpu` the first time and runs `scripts/run_v100_baseline.sh`. `--dataset-only` stops before the GPU; `--continue` and `--resume=<run>` as in the baseline script. It stops when the GPU is busy (`--force` to share it). **Uses the GPU, installs packages the first time.** |
+| – | `helpers/status.sh` | Read-only: every route (segments, frames, reviewed frames, objects in the dataset), what is running, GPU, disk and the next command. |
+
+A route that already has a pre-annotation report is never processed again (its reviews would be left on the old report); segments of it that arrive later are only shown by `helpers/status.sh`. Training needs reviewed routes from at least five independent route/site groups, because `nnslr build-splits` makes five disjoint partitions.
+
 ## Helpers, commands and scripts
 
 Run these commands **from the repository root**. [`docs/INSTALL.md`](docs/INSTALL.md) covers required system packages and virtual environments; [`docs/upstream-training-guide.md`](docs/upstream-training-guide.md) covers data preparation, training/evaluation and complete CLI options.

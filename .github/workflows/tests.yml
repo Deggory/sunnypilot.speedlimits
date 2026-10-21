@@ -18,6 +18,8 @@ jobs:
       - run: nnslr selftest
       - run: bash -n scripts/setup_v100_training_env.sh
       - run: bash -n scripts/run_v100_baseline.sh
+      - run: for f in helpers/*.sh; do bash -n "$f"; done
+      - run: python -m unittest helpers.test_route_status
       - run: pytest -q
       - name: Recovered sunnypilot source contracts
         env:
