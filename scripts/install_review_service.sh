@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Install (or remove) the NNSLR review web server as the systemd service
-# "nnslr-review" on the LXC. Safe to run again: the token file is created only
-# when it is missing, the unit is rewritten only when it changed.
+# Install (or remove) the speed limits web site (nnslr review: review pages and control
+# panel) as the systemd service "speedlimits-web" on the LXC. Safe to run again: the token
+# file is created only when it is missing, the unit is rewritten only when it changed.
+# The service used to be called "nnslr-review": an install replaces it (the old token file
+# /etc/nnslr-review.env becomes /etc/speedlimits-web.env, with the same content).
 #
 #   sudo scripts/install_review_service.sh             install / update and start
 #   scripts/install_review_service.sh --dry-run        show what would be done, change nothing
@@ -16,13 +18,17 @@
 # three paths (used by the tests).
 set -euo pipefail
 
-SERVICE_NAME="nnslr-review"
+SERVICE_NAME="speedlimits-web"
 PORT=8765
-ENV_FILE="${NNSLR_REVIEW_ENV_FILE:-/etc/nnslr-review.env}"
+ENV_FILE="${NNSLR_REVIEW_ENV_FILE:-/etc/speedlimits-web.env}"
 UNIT_FILE="${NNSLR_REVIEW_UNIT_FILE:-/etc/systemd/system/${SERVICE_NAME}.service}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 REPO_ENV="${NNSLR_REVIEW_REPO_ENV:-$REPO/.env}"
-TEMPLATE="$REPO/deploy/nnslr-review.service"
+TEMPLATE="$REPO/deploy/speedlimits-web.service"
+# The same service under its old name: replaced by an install, removed by --uninstall.
+OLD_SERVICE_NAME="nnslr-review"
+OLD_UNIT_FILE="/etc/systemd/system/${OLD_SERVICE_NAME}.service"
+OLD_ENV_FILE="/etc/nnslr-review.env"
 NNSLR="$REPO/.venv/bin/nnslr"
 PYTHON="$REPO/.venv/bin/python"
 
@@ -30,8 +36,9 @@ usage() {
   cat <<USAGE
 Uso: $(basename "$0") [--dry-run] [--uninstall] [--help]
 
-Installa il server di revisione web (nnslr review) come servizio systemd
-"$SERVICE_NAME", in ascolto su 0.0.0.0:$PORT, avviato a ogni boot.
+Installa il sito web di speedlimits (nnslr review: revisione e pannello) come
+servizio systemd "$SERVICE_NAME", in ascolto su 0.0.0.0:$PORT, avviato a ogni boot.
+Se c'e' ancora il vecchio servizio "$OLD_SERVICE_NAME", lo sostituisce.
 
   (nessuna opzione)  installa o aggiorna e avvia il servizio (serve root)
   --dry-run          mostra cosa farebbe, senza cambiare niente
@@ -119,7 +126,7 @@ save_repo_token() {
       grep -v '^NNSLR_REVIEW_TOKEN=' "$REPO_ENV" > "$temporary" || true
     else
       say '# Segreti locali di questo clone: il file e'"'"' in .gitignore, non va mai in git.' > "$temporary"
-      say '# Token di accesso al sito di revisione (servizio nnslr-review e helpers/2_review.sh).' >> "$temporary"
+      say '# Token di accesso al sito di revisione (servizio speedlimits-web e helpers/2_review.sh).' >> "$temporary"
     fi
     say "NNSLR_REVIEW_TOKEN=$token" >> "$temporary"
     mv "$temporary" "$REPO_ENV"
@@ -157,9 +164,9 @@ write_env_file() {
   (
     umask 077
     {
-      say '# Token di accesso di "nnslr review" (servizio nnslr-review). Tienilo segreto.'
+      say '# Token di accesso di "nnslr review" (servizio speedlimits-web). Tienilo segreto.'
       say '# Per cambiarlo: scrivi un nuovo valore (almeno 16 caratteri tra lettere, cifre, - e _)'
-      say '# e riavvia: systemctl restart nnslr-review'
+      say '# e riavvia: systemctl restart speedlimits-web'
       say "NNSLR_REVIEW_TOKEN=$token"
       say '# Cartella dei dati, se non è <clone>/data:'
       say '# NNSLR_DATA_ROOT=/percorso/dei/dati'
@@ -168,9 +175,44 @@ write_env_file() {
   chmod 600 "$ENV_FILE"
 }
 
+# Stops and removes the service under its old name, nnslr-review. KillMode=process there too:
+# a preparation or a training started from the panel keeps running.
+remove_old_service() {
+  if [ ! -e "$OLD_UNIT_FILE" ]; then
+    return 0
+  fi
+  if [ "$DRY_RUN" -eq 1 ]; then
+    say "[prova] fermerei e toglierei il vecchio servizio $OLD_SERVICE_NAME ($OLD_UNIT_FILE)."
+    return 0
+  fi
+  need_writable_dir "$OLD_UNIT_FILE"
+  systemctl disable --now "$OLD_SERVICE_NAME.service" >/dev/null 2>&1 || true
+  rm -f "$OLD_UNIT_FILE"
+  systemctl daemon-reload
+  say "Tolto il vecchio servizio $OLD_SERVICE_NAME (ora si chiama $SERVICE_NAME)."
+}
+
+# The token file of the old service becomes the new one, so its token and settings
+# (NNSLR_DATA_ROOT, NNSLR_PANEL_ACTIONS) stay. Only with the default paths.
+move_old_env_file() {
+  if [ -n "${NNSLR_REVIEW_ENV_FILE:-}" ] || [ -e "$ENV_FILE" ] || [ ! -e "$OLD_ENV_FILE" ]; then
+    return 0
+  fi
+  if [ "$DRY_RUN" -eq 1 ]; then
+    say "[prova] sposterei $OLD_ENV_FILE in $ENV_FILE (stesso token, stesse impostazioni)."
+    return 0
+  fi
+  need_writable_dir "$ENV_FILE"
+  mv "$OLD_ENV_FILE" "$ENV_FILE"
+  sed -i 's/nnslr-review/speedlimits-web/g' "$ENV_FILE"
+  chmod 600 "$ENV_FILE"
+  say "Spostato il file del token: $OLD_ENV_FILE -> $ENV_FILE"
+}
+
 uninstall_service() {
   if [ "$DRY_RUN" -eq 1 ]; then
     say "[prova] fermerei e disabiliterei $SERVICE_NAME, cancellerei $UNIT_FILE e rileggerei systemd."
+    remove_old_service
     say "[prova] il file del token $ENV_FILE resterebbe."
     return 0
   fi
@@ -186,6 +228,7 @@ uninstall_service() {
     say "Servizio non installato: niente da rimuovere."
   fi
   systemctl daemon-reload
+  remove_old_service
   if [ -e "$ENV_FILE" ]; then
     say "Il file del token resta: $ENV_FILE (cancellalo a mano se non serve più)."
   fi
@@ -199,6 +242,8 @@ install_service() {
   check_plain_path "$ENV_FILE"
 
   if [ "$DRY_RUN" -eq 1 ]; then
+    remove_old_service
+    move_old_env_file
     if [ -e "$ENV_FILE" ]; then
       say "[prova] il file del token $ENV_FILE esiste già: lo lascerei com'è (permessi 600)."
     elif valid_token "$(read_token "$REPO_ENV")"; then
@@ -217,6 +262,9 @@ install_service() {
   need_systemctl
   need_writable_dir "$ENV_FILE"
   need_writable_dir "$UNIT_FILE"
+  # First the old service goes: it holds the port 8765 the new one needs.
+  remove_old_service
+  move_old_env_file
 
   if [ -e "$ENV_FILE" ]; then
     chmod 600 "$ENV_FILE"
