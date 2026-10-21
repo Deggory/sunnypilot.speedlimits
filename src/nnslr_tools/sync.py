@@ -8,8 +8,10 @@ The raw comma files are stored once in a shared folder outside the clone
 (COMMA_VIDEOS_DIR), with the same layout as on the comma:
 <videos dir>/<route>--<segment>/<file>. Other projects (openpilot.distill) use
 the same folder. <data root>/raw/routes/<route>/<segment>/<file> only holds
-absolute symlinks to those files; sync_route and link_videos are the only
-writers of the shared folder and of those symlinks.
+absolute symlinks to those files. In this project sync_route is the only
+writer of the shared folder (openpilot.distill's fetch script writes it too);
+link_videos only reads it. sync_route and link_videos are the only writers of
+those symlinks.
 """
 from __future__ import annotations
 
@@ -64,6 +66,16 @@ def _resolve_data_root(explicit: str | Path | None) -> Path:
         if not raw:
             raw = DEFAULT_DATA_ROOT
     return Path(raw).expanduser().resolve()
+
+
+def _videos_dir_warning(videos: Path) -> str | None:
+    # Readers (route-manifest, extract-frames, ...) take the shared folder from
+    # COMMA_VIDEOS_DIR or the default, never from --videos-dir.
+    readers = resolve_videos_dir()
+    if videos == readers:
+        return None
+    return (f"readers only accept links into COMMA_VIDEOS_DIR ({readers}); "
+            f"export COMMA_VIDEOS_DIR={shlex.quote(str(videos))}")
 
 
 def _check_roots(root: Path, videos: Path) -> None:
@@ -193,28 +205,44 @@ def _move_file(source: Path, target: Path) -> None:
         if exc.errno != errno.EXDEV:
             raise
     temporary = target.parent / (".nnslr-move-" + target.name)
+    if temporary.is_symlink() or temporary.exists():
+        # Left over by an interrupted move, or a planted link. copy2 would
+        # follow a link and overwrite its target; unlinking removes only the link.
+        temporary.unlink()
     shutil.copy2(source, temporary)
     os.replace(temporary, target)
     source.unlink()
 
 
+def _symlink_state(link: Path) -> str:
+    """'live', 'dangling' or 'loop' for a path the caller knows is a symlink."""
+    # os.stat follows the link; Path.resolve() would raise RuntimeError on a
+    # loop (Python 3.11), so the loop is detected here first.
+    try:
+        os.stat(link)
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            return "loop"
+        if exc.errno == errno.ENOENT or exc.errno == errno.ENOTDIR:
+            return "dangling"
+        raise
+    return "live"
+
+
 def _adopt_local_file(link: Path, shared: Path) -> tuple[str | None, str | None]:
     """Turn an old regular file in raw/routes into a symlink to the shared copy.
 
-    Returns (link_status, error). link_status is None when there is no old
-    regular file at the link path (nothing to do).
+    The shared copy must already exist. Returns (link_status, error).
+    link_status is None when there is no old regular file at the link path
+    (nothing to do). The old file is never moved here: only sync_route moves
+    one into the shared folder, after checking it against the comma.
     """
     if link.is_symlink() or not link.exists():
         return None, None
     if not link.is_file():
         return "failed", f"destination_conflict: not a regular file: {link}"
-    if not shared.exists():
-        # The old copy becomes the shared copy; nothing is downloaded again.
-        _move_file(link, shared)
-        link.symlink_to(shared)
-        return "moved_to_shared", None
-    if not shared.is_file():
-        return "failed", f"destination_conflict: shared path is not a regular file: {shared}"
+    if shared.is_symlink() or not shared.is_file():
+        return "failed", f"destination_conflict: shared copy is missing or not a regular file: {shared}"
     local_size = link.stat().st_size
     shared_size = shared.stat().st_size
     if local_size != shared_size:
@@ -233,6 +261,15 @@ def _adopt_local_file(link: Path, shared: Path) -> tuple[str | None, str | None]
 def _ensure_link(link: Path, shared: Path) -> tuple[str, str | None]:
     """Create the absolute symlink link -> shared, or accept an identical one."""
     if link.is_symlink():
+        state = _symlink_state(link)
+        if state == "loop":
+            return "failed", f"destination_conflict: symlink loop: {link}"
+        if state == "dangling":
+            # A link to nothing holds no data (e.g. the shared folder was moved
+            # to a new COMMA_VIDEOS_DIR), so it is pointed to the shared copy.
+            link.unlink()
+            link.symlink_to(shared)
+            return "relinked", None
         if link.resolve() == shared.resolve():
             return "existing", None
         return "failed", f"destination_conflict: {link} points to {os.readlink(link)}, expected {shared}"
@@ -241,6 +278,34 @@ def _ensure_link(link: Path, shared: Path) -> tuple[str, str | None]:
     link.parent.mkdir(parents=True, exist_ok=True)
     link.symlink_to(shared)
     return "created", None
+
+
+def _plan_link(link: Path, shared: Path) -> tuple[str, str | None]:
+    """Predict what link_videos will do at `link`, without changing anything.
+
+    Returns (status, error): planned, existing, would_relink,
+    would_replace_duplicate, or conflict with the reason.
+    """
+    if link.is_symlink():
+        state = _symlink_state(link)
+        if state == "loop":
+            return "conflict", f"destination_conflict: symlink loop: {link}"
+        if state == "dangling":
+            return "would_relink", None
+        if link.resolve() == shared.resolve():
+            return "existing", None
+        return "conflict", f"destination_conflict: {link} points to {os.readlink(link)}, expected {shared}"
+    if not link.exists():
+        return "planned", None
+    if not link.is_file():
+        return "conflict", f"destination_conflict: not a regular file: {link}"
+    local_size = link.stat().st_size
+    shared_size = shared.stat().st_size
+    if local_size != shared_size:
+        return "conflict", (f"destination_conflict: size differs: {link} ({local_size} bytes) "
+                            f"and shared copy {shared} ({shared_size} bytes)")
+    # Same size: the real run also compares the content (sha256) first.
+    return "would_replace_duplicate", None
 
 
 def sync_route(
@@ -277,6 +342,7 @@ def sync_route(
         "host": host, "route": route, "segments": selected, "camera": camera,
         "data_root": str(root), "videos_dir": str(videos), "destination": str(destination_root),
         "dry_run": dry_run, "missing_segments": [], "missing_files": [], "files": [], "ok": True,
+        "warning": _videos_dir_warning(videos),
     }
     for index in selected:
         if index not in inventory:
@@ -308,18 +374,29 @@ def sync_route(
         destination = Path(row["destination"])
         shared = Path(row["shared_path"])
         try:
-            link_status, error = _adopt_local_file(destination, shared)
-            if link_status is not None:
-                row["link_status"] = link_status
-            if error is None:
+            old_file = False
+            if not destination.is_symlink() and destination.exists():
+                old_file = True
+            if old_file and not shared.exists():
+                # An old regular file in raw/routes and no shared copy yet. It is
+                # checked against the comma first: only a verified copy becomes
+                # the shared copy; a different one stays untouched in raw/routes.
+                row["status"], error = _copy_file(row["source"], destination)
+                if error is None:
+                    _move_file(destination, shared)
+                    destination.symlink_to(shared)
+                    row["link_status"] = "moved_to_shared"
+            else:
+                # Download into the shared folder, or check the copy already
+                # there against the comma, before any link is changed.
                 row["status"], error = _copy_file(row["source"], shared)
-            if error is None:
-                status, error = _ensure_link(destination, shared)
-                if link_status is None:
-                    row["link_status"] = status
+                if error is None:
+                    link_status, error = _adopt_local_file(destination, shared)
+                    if link_status is None:
+                        link_status, error = _ensure_link(destination, shared)
+                    row["link_status"] = link_status
             if error:
-                if row["status"] == "planned":
-                    row["status"] = "failed"
+                row["status"] = "failed"
                 row["error"] = error
                 report["ok"] = False
                 break
@@ -338,9 +415,11 @@ def link_videos(
 ) -> dict[str, Any]:
     """Link segments already in the shared videos folder into raw/routes.
 
-    No network access. Every route in the shared folder is linked, or only
-    `route`. A segment without fcamera.hevc or without a full log is reported
-    in missing_files; its other files are still linked. Dry-run writes nothing.
+    No network access, and nothing is ever written into the shared folder.
+    Every route in the shared folder is linked, or only `route`. A segment
+    without fcamera.hevc or without a full log is reported in missing_files;
+    its other files are still linked. Dry-run writes nothing but already
+    reports the conflicts the real run would hit.
     """
     if route is not None:
         parse_route_id(route)
@@ -375,6 +454,7 @@ def link_videos(
     report: dict[str, Any] = {
         "videos_dir": str(videos), "data_root": str(root), "route": route, "dry_run": dry_run,
         "segments": [], "files": [], "missing_files": [], "ignored": ignored, "counts": {}, "ok": True,
+        "warning": _videos_dir_warning(videos),
     }
     # Plan and check every link before writing anything.
     for route_id, index, directory in found:
@@ -397,16 +477,15 @@ def link_videos(
         for name in present:
             destination = segment_dir / name
             shared = directory / name
-            status = "planned"
-            if destination.is_symlink() and destination.resolve() == shared:
-                status = "existing"
-            report["files"].append({
+            status, error = _plan_link(destination, shared)
+            row = {
                 "route": route_id, "segment": index, "name": name,
                 "destination": str(destination), "shared_path": str(shared), "status": status,
-            })
+            }
+            if error:
+                row["error"] = error
+            report["files"].append(row)
 
-    if report["missing_files"]:
-        report["ok"] = False
     if not dry_run:
         for row in report["files"]:
             destination = Path(row["destination"])
@@ -418,11 +497,18 @@ def link_videos(
             except OSError as exc:
                 status = "failed"
                 error = str(exc)
+            # A conflict on one file must not stop the other segments.
             row["status"] = status
             if error:
-                # A conflict on one file must not stop the other segments.
                 row["error"] = error
-                report["ok"] = False
+            elif "error" in row:
+                del row["error"]
+
+    if report["missing_files"]:
+        report["ok"] = False
+    for row in report["files"]:
+        if row["status"] == "failed" or row["status"] == "conflict":
+            report["ok"] = False
 
     for row in report["files"]:
         status = row["status"]

@@ -76,6 +76,15 @@ def test_normalize_relpath_accepts_only_file_links_into_shared_folder(linked, tm
         normalize_relpath(root, Path(f"raw/routes/{ROUTE}/0/../../../../../outside.hevc"))
 
 
+def test_symlink_loop_in_raw_routes_is_a_clear_error(linked):
+    _, root = linked
+    loop = root / "raw/routes" / ROUTE / "0/ecamera.hevc"
+    loop.symlink_to(loop)
+    with pytest.raises(NnslerManifestError) as error:
+        normalize_relpath(root, Path(f"raw/routes/{ROUTE}/0/ecamera.hevc"))
+    assert error.value.reason == "symlink_loop"
+
+
 def test_links_are_rejected_when_the_shared_folder_is_different(linked, tmp_path, monkeypatch):
     _, root = linked
     monkeypatch.setenv("COMMA_VIDEOS_DIR", str(tmp_path / "another folder"))

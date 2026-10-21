@@ -621,7 +621,7 @@ def serve_review(route: str | None = None, *, data_root: Path | None=None, host:
         if app.require_token:
             print(f'Il token resta valido finché il server è acceso (fissalo con {TOKEN_ENV}).', flush=True)
         else:
-            print('Solo da questo computer. Da un altro: ssh -L 8765:127.0.0.1:8765 <server>, '
+            print(f'Solo da questo computer. Da un altro: ssh -L {port}:127.0.0.1:{port} <server>, '
                   'oppure riavvia con --host 0.0.0.0', flush=True)
         print(f'Database revisioni: {db_path(root)}', flush=True)
         print('Ogni “Conferma fotogramma” viene salvata subito nel database. Ctrl+C per fermare.', flush=True)

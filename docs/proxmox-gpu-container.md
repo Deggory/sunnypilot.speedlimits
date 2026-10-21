@@ -145,7 +145,9 @@ echo "$NNSLR_DATA_ROOT" "$COMMA_VIDEOS_DIR"
 nnslr env
 ```
 
-`nnslr env` shows both folders, also when the variables are not set:
+`nnslr env` shows the shared videos folder (`path`, filled also when
+`COMMA_VIDEOS_DIR` is not set) and the data root; when `NNSLR_DATA_ROOT` is not
+set, its `path` is `null` and the default is in its `note`:
 
 ```text
 "nnsler_data_root": ... "/path/to/speed-vision-data"
@@ -169,17 +171,28 @@ Segments that are already in `~/comma-videos` (for example downloaded by
 `openpilot.distill`) are linked without any network access:
 
 ```bash
-nnslr link-videos --dry-run          # show what would be linked
+nnslr link-videos --dry-run          # show what would be linked, and the conflicts
 nnslr link-videos                    # every route in ~/comma-videos
 nnslr link-videos --route <route>    # one route only
 ```
 
 `link-videos` links `fcamera.hevc`, `ecamera.hevc`, the full log and the other
-raw comma files it finds. A segment without `fcamera.hevc` or without a full
-log is listed in `missing_files` (exit code 1); its other files are still
-linked. Existing links are kept; an old regular file in `data/raw/routes` that
-is identical to the shared copy is replaced by a link, a different one is
-reported and left alone.
+raw comma files it finds; it never writes into `~/comma-videos`. A segment
+without `fcamera.hevc` or without a full log is listed in `missing_files`
+(exit code 1); its other files are still linked. Existing links are kept; a
+link to a file that no longer exists (e.g. after moving `~/comma-videos`) is
+pointed to the shared copy (`relinked`); an old regular file in
+`data/raw/routes` that is identical to the shared copy is replaced by a link, a
+different one is reported (`conflict` in the dry run, `failed` in the real run)
+and left alone.
+
+With `--videos-dir <dir>` also `export COMMA_VIDEOS_DIR=<dir>`: the readers
+(`route-manifest`, `extract-frames`, ...) only accept links into
+`COMMA_VIDEOS_DIR`.
+
+If `sync-routes` reports `content differs` for a file in `~/comma-videos`
+(for example cut off by an interrupted `openpilot.distill` fetch), rerun the
+distill fetch or delete that file by hand, then rerun `sync-routes`.
 
 The video is then available as:
 

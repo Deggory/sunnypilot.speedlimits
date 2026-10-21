@@ -141,6 +141,9 @@ def db_path(root: Path) -> Path:
 
 
 def italian_message(reason: str, detail: str = '') -> str:
+    # validate_dataset reports "reason: detail"; keep only the detail.
+    if detail.startswith(reason + ':'):
+        detail = detail[len(reason) + 1:].strip()
     if reason == 'missing_provenance' and 'reviewer' in detail:
         text = 'Indica un nome o pseudonimo del revisore.'
     elif reason in REASON_MESSAGES:

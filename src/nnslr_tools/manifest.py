@@ -227,7 +227,11 @@ def _shared_video_relpath(root: Path, target: Path) -> str | None:
     # sync imports this module, so it is imported here and not at the top.
     from nnslr_tools.sync import resolve_videos_dir
     videos = resolve_videos_dir()
-    resolved = link.resolve()
+    try:
+        resolved = link.resolve()
+    except RuntimeError as exc:
+        # Python 3.11 raises RuntimeError for a symlink loop.
+        raise NnslerManifestError("symlink_loop", str(target)) from exc
     if resolved != videos and resolved.is_relative_to(videos):
         return target.as_posix()
     if resolved.is_relative_to(root):

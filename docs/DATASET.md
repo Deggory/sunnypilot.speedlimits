@@ -16,12 +16,24 @@ container). Its layout is the comma one, `<route>--<segment>/<file>`, and
 `<data-root>/raw/routes/<route>/<segment>/<file>` only holds absolute symlinks
 to those files. `nnslr sync-routes` downloads into the shared folder and
 creates the links; `nnslr link-videos` links segments that are already there
-without network access. These two commands are the only writers of the shared
-folder and of the links.
+without network access and never writes into the shared folder. In this
+project `sync-routes` is the only writer of the shared folder;
+`openpilot.distill`'s `helpers/fetch_comma_segments.sh` writes the same folder.
+The two commands are the only writers of the links.
+
+`sync-routes` never overwrites a file in the shared folder. If it reports
+`content differs` for a shared file (for example a copy cut off by an
+interrupted distill fetch), rerun distill's fetch or delete that shared file by
+hand, then rerun `sync-routes`. An old regular file in `raw/routes` is moved
+into the shared folder only after it has been checked against the comma.
 
 Readers (`route-manifest`, `extract-frames --route`, ...) accept such a link
 only when it is the file itself, inside `raw/routes/`, and it resolves into
 `COMMA_VIDEOS_DIR`; any other link out of the data root is still rejected.
+Readers take the shared folder from `COMMA_VIDEOS_DIR` (or its default), never
+from `--videos-dir`: after `sync-routes`/`link-videos --videos-dir <dir>`, also
+`export COMMA_VIDEOS_DIR=<dir>`, otherwise the readers reject the links (both
+commands print this warning).
 Derived files (frames, alignment, annotations, datasets, splits, runs) are
 always written under the data root, never into the shared folder. Paths in
 manifests and frame provenance stay paths inside the data root
@@ -175,3 +187,43 @@ resume. Failed/insufficient splits are reported without randomizing adjacent
 frames. No model review closes missing capture-time provenance, the human
 gold-set gate, Swiss coverage or the unimplemented training/evaluation stages.
 <!-- [model-review] - END -->
+
+## Revisione via web
+
+Start the review server on the training LXC (openpilot-distill, 10.10.10.213):
+
+```sh
+cd ~/sunnypilot.speedlimits && .venv/bin/nnslr review --host 0.0.0.0
+```
+
+It prints one address per LAN interface, for example
+`http://10.10.10.213:8765/?token=...`; open it in the browser on the Mac. The
+first visit stores the token in an HttpOnly, SameSite=Strict cookie and removes
+it from the address bar. Without that cookie (or an `X-Review-Token` header)
+every page, image and API call answers 403. The token is new at every start
+unless `NNSLR_REVIEW_TOKEN` is set (at least 16 letters, digits, `-` or `_`).
+Without `--host` the server listens on 127.0.0.1 only and needs no token
+(`ssh -L 8765:127.0.0.1:8765 openpilot-distill` from the Mac). The start page
+lists every route with a pre-annotation report: frames, frames with proposals
+and confirmed frames; `--route R` prints the address of that route directly.
+
+Every "Conferma fotogramma" is checked with the import-annotations rules and
+saved at once in `<data root>/annotations/review.sqlite`: `frame_reviews` holds
+the current review per route, report run and frame, `frame_review_history` every
+save (append-only). A refused frame shows the reason on the page; a frame the
+server did not receive stays marked "non salvato" and is retried. The reports
+themselves are never modified, and "Scarica revisioni JSONL" remains as a backup.
+
+Import the confirmed frames into the canonical dataset on the LXC:
+
+```sh
+.venv/bin/nnslr import-annotations --from-db
+.venv/bin/nnslr import-annotations --from-db --route <route>
+```
+
+Validation, the source archive under `annotations/imports/` and the output file
+are the same as for a JSONL import. Only the confirmed frames of each route's
+current report are taken. Frames already in the dataset with the same labels are
+skipped, so the command can be repeated after every review session; a frame
+changed after its import is not applied (the dataset is append-only) and is
+listed under `changed_after_import`.

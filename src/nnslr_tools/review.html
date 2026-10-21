@@ -80,7 +80,8 @@ function render(){
  el('prev').disabled=cursor<=0;el('next').disabled=cursor>=ids.length-1;el('confirm').disabled=!r;el('add').disabled=!r;
  el('overlays').replaceChildren();el('boxes').replaceChildren();el('editor').style.display='none';
  const unsaved=api?unsavedKeys():[];
- el('pending').textContent=unsaved.length?`${unsaved.length} fotogrammi confermati NON salvati sul server (${unsaved.slice(0,8).join(', ')}${unsaved.length>8?', …':''}).`:'';
+ const unsavedList=unsaved.slice(0,8).join(', ')+(unsaved.length>8?', …':'');
+ el('pending').textContent=unsaved.length===0?'':unsaved.length===1?`1 fotogramma confermato NON salvato sul server (${unsavedList}).`:`${unsaved.length} fotogrammi confermati NON salvati sul server (${unsavedList}).`;
  el('retry').hidden=unsaved.length===0;
  if(!r){el('photo').removeAttribute('href');el('frameInfo').textContent='';el('saveState').textContent='';el('withdraw').hidden=true;return}
  const s=state();el('site_group').value=s.site_group??r.site_group??'';el('encounter_id').value=s.encounter_id??r.encounter_id??'';el('scene').setAttribute('viewBox',`0 0 ${r.width} ${r.height}`);el('photo').setAttribute('href',r.preview_path);el('photo').setAttribute('width',r.width);el('photo').setAttribute('height',r.height);

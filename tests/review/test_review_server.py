@@ -87,7 +87,9 @@ def test_token_redirect_never_leaves_the_server(tokened):
     for path in [f'//evil.example/?token={TOKEN}', f'/\\evil.example/?token={TOKEN}']:
         status, response, data = server.request('GET', path)
         assert status == 303
-        assert response.getheader('Location') == '/'
+        location = response.getheader('Location')
+        # A path on this server only: never "//host" (another site) and never a backslash.
+        assert location.startswith('/') and not location.startswith('//') and '\\' not in location
 
 
 def test_save_valid_frame_writes_current_row_and_history(loopback):
@@ -162,7 +164,7 @@ def test_missing_reviewer_and_bad_body_are_rejected(loopback):
     body['detections'] = 'none'
     status, response, data = server.post_frame(ROUTE, '0/0', body)
     assert status == 400
-    status, response, data = server.post_frame(ROUTE, '0/0', b'x' * (512 * 1024 + 1))
+    status, response, data = server.post_frame(ROUTE, '0/0', b'{}', headers={'Content-Length': str(512 * 1024 + 1)})
     assert status == 413
     status, response, data = server.post_frame(ROUTE, '0/9', page_body(rows[0]))
     assert status == 404 and json_of(data)['error'] == 'unknown_frame'

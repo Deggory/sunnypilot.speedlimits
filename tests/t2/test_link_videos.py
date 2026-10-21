@@ -125,10 +125,24 @@ def test_explicit_folders_override_the_environment(shared, tmp_path, capfd, monk
     monkeypatch.setenv("COMMA_VIDEOS_DIR", str(tmp_path / "wrong"))
     monkeypatch.setenv("NNSLR_DATA_ROOT", str(tmp_path / "wrong root"))
     explicit_root = tmp_path / "explicit root"
-    code, _, err = run(capfd, "--route", ROUTE, "--videos-dir", str(videos), "--data-root", str(explicit_root))
+    code, out, err = run(capfd, "--route", ROUTE, "--videos-dir", str(videos), "--data-root", str(explicit_root))
     assert code == 0, err
     assert (explicit_root / "raw/routes" / ROUTE / "0/fcamera.hevc").is_symlink()
     assert not (tmp_path / "wrong root").exists()
+    # The readers would reject these links until COMMA_VIDEOS_DIR points to videos.
+    warning = json.loads(out)["warning"]
+    assert "readers only accept links into COMMA_VIDEOS_DIR" in warning
+    assert str(tmp_path / "wrong") in warning
+    assert f"export COMMA_VIDEOS_DIR='{videos}'" in warning
+    assert "warning: link-videos:" in err
+
+
+def test_no_warning_when_videos_dir_is_the_readers_folder(shared, capfd):
+    videos, _ = shared
+    code, out, err = run(capfd, "--route", ROUTE, "--videos-dir", str(videos))
+    assert code == 0, err
+    assert json.loads(out)["warning"] is None
+    assert "warning" not in err
 
 
 def test_old_regular_copies_in_raw_routes(shared, capfd):
@@ -152,6 +166,88 @@ def test_old_regular_copies_in_raw_routes(shared, capfd):
     # One conflict does not stop the other segments.
     assert (root / "raw/routes" / ROUTE / "10/rlog.zst").is_symlink()
     assert report["counts"] == {"created": 7, "failed": 1, "replaced_duplicate": 1}
+
+
+def make_conflicts(videos: Path, root: Path, tmp_path: Path) -> Path:
+    segment_dir = root / "raw/routes" / ROUTE / "0"
+    segment_dir.mkdir(parents=True)
+    # Same size as the shared copy, different size, a live link elsewhere, and a
+    # dangling link left after the shared folder was moved.
+    (segment_dir / "fcamera.hevc").write_bytes(f"{ROUTE}--0:fcamera.hevc".encode())
+    (segment_dir / "rlog.zst").write_bytes(b"a different, longer log file")
+    other = tmp_path / "other.hevc"
+    other.write_bytes(b"other")
+    (segment_dir / "ecamera.hevc").symlink_to(other)
+    second = root / "raw/routes" / ROUTE / "2"
+    second.mkdir(parents=True)
+    (second / "fcamera.hevc").symlink_to(tmp_path / "old place" / f"{ROUTE}--2" / "fcamera.hevc")
+    return segment_dir
+
+
+def test_dry_run_predicts_conflicts_and_writes_nothing(shared, tmp_path, capfd):
+    videos, root = shared
+    segment_dir = make_conflicts(videos, root, tmp_path)
+    before = sorted((str(p), p.is_symlink()) for p in root.rglob("*"))
+    code, out, err = run(capfd, "--route", ROUTE, "--dry-run")
+    assert code == 1, err  # no misleading all-clear
+    report = json.loads(out)
+    assert report["ok"] is False
+    rows = {(row["segment"], row["name"]): row for row in report["files"]}
+    assert rows[(0, "fcamera.hevc")]["status"] == "would_replace_duplicate"
+    assert rows[(0, "rlog.zst")]["status"] == "conflict"
+    assert "size differs" in rows[(0, "rlog.zst")]["error"]
+    assert rows[(0, "ecamera.hevc")]["status"] == "conflict"
+    assert "points to" in rows[(0, "ecamera.hevc")]["error"]
+    assert rows[(2, "fcamera.hevc")]["status"] == "would_relink"
+    assert report["counts"] == {"conflict": 2, "planned": 5, "would_relink": 1, "would_replace_duplicate": 1}
+    assert sorted((str(p), p.is_symlink()) for p in root.rglob("*")) == before
+    assert not (segment_dir / "fcamera.hevc").is_symlink()
+
+
+def test_real_run_matches_the_dry_run(shared, tmp_path, capfd):
+    videos, root = shared
+    segment_dir = make_conflicts(videos, root, tmp_path)
+    code, out, _ = run(capfd, "--route", ROUTE)
+    assert code == 1
+    report = json.loads(out)
+    rows = {(row["segment"], row["name"]): row for row in report["files"]}
+    assert rows[(0, "fcamera.hevc")]["status"] == "replaced_duplicate"
+    assert "error" not in rows[(0, "fcamera.hevc")]
+    assert rows[(0, "rlog.zst")]["status"] == "failed"
+    assert rows[(0, "ecamera.hevc")]["status"] == "failed"
+    assert rows[(2, "fcamera.hevc")]["status"] == "relinked"
+    assert os.readlink(root / "raw/routes" / ROUTE / "2/fcamera.hevc") == str(videos / f"{ROUTE}--2" / "fcamera.hevc")
+    assert os.readlink(segment_dir / "ecamera.hevc") == str(tmp_path / "other.hevc")
+    assert report["counts"] == {"created": 5, "failed": 2, "relinked": 1, "replaced_duplicate": 1}
+
+
+def test_moved_shared_folder_is_relinked(shared, tmp_path, capfd, monkeypatch):
+    videos, root = shared
+    assert run(capfd, "--route", ROUTE)[0] == 0
+    moved = tmp_path / "new disk" / "comma-videos"
+    moved.parent.mkdir()
+    videos.rename(moved)
+    monkeypatch.setenv("COMMA_VIDEOS_DIR", str(moved))
+    code, out, err = run(capfd, "--route", ROUTE)
+    assert code == 0, err
+    assert json.loads(out)["counts"] == {"relinked": 9}
+    link = root / "raw/routes" / ROUTE / "0/fcamera.hevc"
+    assert os.readlink(link) == str(moved / f"{ROUTE}--0" / "fcamera.hevc")
+
+
+def test_symlink_loop_is_reported_not_a_crash(shared, capfd):
+    _, root = shared
+    segment_dir = root / "raw/routes" / ROUTE / "0"
+    segment_dir.mkdir(parents=True)
+    (segment_dir / "fcamera.hevc").symlink_to(segment_dir / "fcamera.hevc")
+    for args in (("--route", ROUTE, "--dry-run"), ("--route", ROUTE)):
+        code, out, err = run(capfd, *args)
+        assert code == 1
+        assert "Traceback" not in err
+        rows = {(row["segment"], row["name"]): row for row in json.loads(out)["files"]}
+        assert "symlink loop" in rows[(0, "fcamera.hevc")]["error"]
+    assert rows[(0, "fcamera.hevc")]["status"] == "failed"
+    assert (root / "raw/routes" / ROUTE / "2/fcamera.hevc").is_symlink()
 
 
 def test_symlinked_route_folder_in_data_root_is_refused(shared, tmp_path, capfd):

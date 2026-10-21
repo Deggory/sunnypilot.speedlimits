@@ -74,6 +74,12 @@ def collect_env_report() -> dict[str, Any]:
     data_root_path = Path(data_root) if data_root else None
     videos_env = os.environ.get("COMMA_VIDEOS_DIR", "").strip()
     videos_dir = resolve_videos_dir()
+    if videos_env:
+        videos_note = ("COMMA_VIDEOS_DIR is read from the environment. Raw comma files are stored "
+                       "there once; <data root>/raw/routes only holds symlinks to them.")
+    else:
+        videos_note = (f"COMMA_VIDEOS_DIR is not set; raw comma files default to {DEFAULT_VIDEOS_DIR}. "
+                       "<data root>/raw/routes only holds symlinks to them.")
     report: dict[str, Any] = {
         "nnslr_tools": __version__,
         "speed_vision_core": speed_vision_core.__version__,
@@ -96,13 +102,7 @@ def collect_env_report() -> dict[str, Any]:
             "configured": bool(videos_env),
             "path": str(videos_dir),
             "exists": videos_dir.is_dir(),
-            "note": (
-                "COMMA_VIDEOS_DIR is read from the environment. Raw comma files are stored "
-                "there once; <data root>/raw/routes only holds symlinks to them."
-                if videos_env
-                else f"COMMA_VIDEOS_DIR is not set; raw comma files default to {DEFAULT_VIDEOS_DIR}. "
-                "<data root>/raw/routes only holds symlinks to them."
-            ),
+            "note": videos_note,
         },
         "cpu": {
             "available": True,
@@ -645,6 +645,8 @@ def _cmd_sync_routes(args: argparse.Namespace) -> int:
     except OSError as exc:
         print(f"error: sync-routes: {exc}", file=sys.stderr)
         return 2
+    if report["warning"] is not None:
+        print(f"warning: sync-routes: {report['warning']}", file=sys.stderr)
     print(json.dumps(report, indent=2, sort_keys=True))
     return 0 if report["ok"] else 1
 
@@ -658,6 +660,8 @@ def _cmd_link_videos(args: argparse.Namespace) -> int:
     except OSError as exc:
         print(f"error: link-videos: {exc}", file=sys.stderr)
         return 2
+    if report["warning"] is not None:
+        print(f"warning: link-videos: {report['warning']}", file=sys.stderr)
     print(json.dumps(report, indent=2, sort_keys=True))
     return 0 if report["ok"] else 1
 # [nnslr-sync] - END
@@ -1019,7 +1023,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_sync.add_argument("--camera", choices=("narrow", "wide", "both"), default="narrow",
                         help="narrow=fcamera (default), wide=ecamera, both=both road cameras")
     p_sync.add_argument("--data-root", help="root of the raw/routes symlinks (default: NNSLR_DATA_ROOT or <repo>/data)")
-    p_sync.add_argument("--videos-dir", help="shared folder of the raw comma files (default: COMMA_VIDEOS_DIR or <repo>/../comma-videos)")
+    p_sync.add_argument("--videos-dir", help="shared folder of the raw comma files (default: COMMA_VIDEOS_DIR or <repo>/../comma-videos); "
+                        "readers only accept links into COMMA_VIDEOS_DIR, so also export COMMA_VIDEOS_DIR=<this folder>")
     p_sync.add_argument("--dry-run", action="store_true", help="inventory via SSH and print the plan without copying or writing files")
     p_sync.set_defaults(func=_cmd_sync_routes)
 
@@ -1028,9 +1033,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="link segments already in the shared videos folder into raw/routes (no network)",
     )
     p_link.add_argument("--route", help="link only this route ID (default: every route in the shared folder)")
-    p_link.add_argument("--videos-dir", help="shared folder of the raw comma files (default: COMMA_VIDEOS_DIR or <repo>/../comma-videos)")
+    p_link.add_argument("--videos-dir", help="shared folder of the raw comma files (default: COMMA_VIDEOS_DIR or <repo>/../comma-videos); "
+                        "readers only accept links into COMMA_VIDEOS_DIR, so also export COMMA_VIDEOS_DIR=<this folder>")
     p_link.add_argument("--data-root", help="root of the raw/routes symlinks (default: NNSLR_DATA_ROOT or <repo>/data)")
-    p_link.add_argument("--dry-run", action="store_true", help="print the plan without creating links")
+    p_link.add_argument("--dry-run", action="store_true", help="print the plan and the conflicts without creating links")
     p_link.set_defaults(func=_cmd_link_videos)
     # [nnslr-sync] - END
 

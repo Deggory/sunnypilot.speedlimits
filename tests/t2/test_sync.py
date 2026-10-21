@@ -2,6 +2,7 @@
 """Exercise the CLI and real rsync protocol against local files, never a device."""
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -11,7 +12,7 @@ import sys
 
 import pytest
 
-from nnslr_tools import cli
+from nnslr_tools import cli, sync
 from nnslr_tools.sync import DEFAULT_DATA_ROOT, DEFAULT_VIDEOS_DIR
 
 ROUTE = "000001a3--c20ba54385"
@@ -292,11 +293,34 @@ def test_existing_different_content_is_not_overwritten_even_if_same_size(source,
     original = b"x" * len(b"0:fcamera.hevc")
     (dest / "fcamera.hevc").write_bytes(original)
     code, out, err = run(capfd)
-    assert code != 0
-    assert "conflict" in out + err
-    # The old local file was only moved into the shared folder, never overwritten.
+    assert code == 1, err
+    row = json.loads(out)["files"][0]
+    assert row["status"] == "failed" and row["link_status"] == "planned"
+    assert "content differs" in row["error"]
+    # Checked against the comma before the move: the old file stays where it
+    # was, and nothing that differs from the comma reaches the shared folder.
+    assert not (dest / "fcamera.hevc").is_symlink()
     assert (dest / "fcamera.hevc").read_bytes() == original
-    assert shared_file(videos, 0, "fcamera.hevc").read_bytes() == original
+    assert not shared_file(videos, 0, "fcamera.hevc").exists()
+    assert not shared_file(videos, 0, "fcamera.hevc").is_symlink()
+
+
+def test_shared_copy_is_checked_against_the_comma_before_an_old_file_is_replaced(source, capfd):
+    remote, root, _, videos = source
+    directory = segment(remote, 0)
+    dest = root / "raw/routes" / ROUTE / "0"
+    dest.mkdir(parents=True)
+    shutil.copy2(directory / "fcamera.hevc", dest / "fcamera.hevc")
+    shared = shared_file(videos, 0, "fcamera.hevc")
+    shared.parent.mkdir(parents=True)
+    shared.write_bytes(b"y" * len(b"0:fcamera.hevc"))  # e.g. cut off by another fetch
+    code, out, _ = run(capfd)
+    assert code == 1
+    row = json.loads(out)["files"][0]
+    assert "content differs" in row["error"] and str(shared) in row["error"]
+    assert not (dest / "fcamera.hevc").is_symlink()
+    assert (dest / "fcamera.hevc").read_bytes() == b"0:fcamera.hevc"
+    assert shared.read_bytes() == b"y" * len(b"0:fcamera.hevc")
 
 
 def test_different_shared_copy_is_not_overwritten(source, capfd):
@@ -325,6 +349,72 @@ def test_raw_routes_symlink_to_another_file_is_a_conflict(source, tmp_path, capf
     assert "points to" in json.loads(out)["files"][0]["error"]
     assert os.readlink(dest / "fcamera.hevc") == str(other)
     assert other.read_bytes() == b"other"
+
+
+def test_dangling_raw_routes_link_is_pointed_to_the_shared_copy(source, tmp_path, capfd):
+    remote, root, _, videos = source
+    segment(remote, 0)
+    dest = root / "raw/routes" / ROUTE / "0"
+    dest.mkdir(parents=True)
+    # e.g. the shared folder was moved to a new COMMA_VIDEOS_DIR.
+    (dest / "fcamera.hevc").symlink_to(tmp_path / "old place" / "fcamera.hevc")
+    code, out, err = run(capfd)
+    assert code == 0, err
+    rows = json.loads(out)["files"]
+    assert [(row["status"], row["link_status"]) for row in rows] == [("copied", "relinked"), ("copied", "created")]
+    assert_linked(root, videos, 0, "fcamera.hevc")
+
+
+def test_raw_routes_symlink_loop_is_reported_not_a_crash(source, capfd):
+    remote, root, _, _ = source
+    segment(remote, 0)
+    dest = root / "raw/routes" / ROUTE / "0"
+    dest.mkdir(parents=True)
+    (dest / "fcamera.hevc").symlink_to(dest / "fcamera.hevc")
+    code, out, err = run(capfd)
+    assert code == 1
+    assert "Traceback" not in err
+    assert "symlink loop" in json.loads(out)["files"][0]["error"]
+
+
+def test_videos_dir_other_than_the_readers_folder_prints_a_warning(source, tmp_path, capfd):
+    remote, _, _, videos = source
+    segment(remote, 0)
+    code, out, err = run(capfd, "--dry-run")
+    assert code == 0, err
+    assert json.loads(out)["warning"] is None
+    assert "warning" not in err
+    other = tmp_path / "other videos"
+    code, out, err = run(capfd, "--dry-run", "--videos-dir", str(other))
+    assert code == 0, err
+    warning = json.loads(out)["warning"]
+    assert "readers only accept links into COMMA_VIDEOS_DIR" in warning
+    assert str(videos) in warning
+    assert f"export COMMA_VIDEOS_DIR='{other}'" in warning
+    assert "warning: sync-routes: readers only accept links" in err
+
+
+def test_cross_device_move_does_not_follow_a_planted_temporary_link(tmp_path, monkeypatch):
+    # The shared folder on its own disk (pct set -mp0): os.rename fails with EXDEV.
+    def no_rename(source, target):
+        raise OSError(errno.EXDEV, "Invalid cross-device link")
+
+    monkeypatch.setattr(sync.os, "rename", no_rename)
+    old = tmp_path / "raw" / "fcamera.hevc"
+    old.parent.mkdir()
+    old.write_bytes(b"old copy")
+    shared = tmp_path / "videos" / f"{ROUTE}--0" / "fcamera.hevc"
+    shared.parent.mkdir(parents=True)
+    victim = tmp_path / "victim.txt"
+    victim.write_bytes(b"victim")
+    (shared.parent / ".nnslr-move-fcamera.hevc").symlink_to(victim)
+    sync._move_file(old, shared)
+    assert victim.read_bytes() == b"victim"
+    assert not shared.is_symlink()
+    assert shared.read_bytes() == b"old copy"
+    assert not old.exists()
+    assert not (shared.parent / ".nnslr-move-fcamera.hevc").is_symlink()
+    assert not (shared.parent / ".nnslr-move-fcamera.hevc").exists()
 
 
 def test_resume_from_rsync_partial_directory(source, capfd):
