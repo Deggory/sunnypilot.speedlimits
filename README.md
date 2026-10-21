@@ -39,6 +39,45 @@ The existing `nnslr` command and Python package names are retained for compatibi
 
 Private videos, logs, datasets, checkpoints and model weights stay outside Git. Use the configured data root and publish reviewed model artifacts separately when available.
 
+## Helpers, commands and scripts
+
+Run these commands **from the repository root**. [`docs/INSTALL.md`](docs/INSTALL.md) covers required system packages and virtual environments; [`docs/upstream-training-guide.md`](docs/upstream-training-guide.md) covers data preparation, training/evaluation and complete CLI options.
+
+| Entry point | Purpose | Requirements / safe first command |
+| --- | --- | --- |
+| `.venv/bin/nnslr` | Main command-line interface: verify the environment, synchronize or link videos, extract frames, propose/review/import annotations, validate dataset, train, evaluate and export. | Core `.venv`; start with `.venv/bin/nnslr --help` and `.venv/bin/nnslr selftest`. GPU and pre-annotation commands need separate dependencies. |
+| `scripts/setup_v100_training_env.sh` | Create `.venv-gpu` with CUDA 12.6-compatible PyTorch for **NVIDIA Tesla V100**. Does not install the NVIDIA driver or start a training job. | NVIDIA driver visible via `nvidia-smi`; run `bash scripts/setup_v100_training_env.sh` only when the GPU environment setup is authorized. |
+| `scripts/run_v100_baseline.sh` | Validate dataset/splits, then train detector and reader, evaluate, mine errors, export ONNX and package a verified bundle. **Uses GPU and creates output files.** | Prepared, validated dataset and `.venv-gpu`; invoke `NNSLR_GPU_INDEX=0 bash scripts/run_v100_baseline.sh baseline-001` only when training is authorized. The run ID must be new. |
+| `scripts/publish_model.sh` | Verify/stage an existing bundle, create a catalog and optionally upload it to Hugging Face. **The normal invocation publishes externally.** | Have a bundle; first run `bash scripts/publish_model.sh --no-upload`. Upload requires `uvx`, Hugging Face authorization and explicit approval. |
+| `scripts/install_review_service.sh` | Install/update or remove `nnslr-review` as a systemd service for the web review UI. **Installation changes system configuration.** | Linux with systemd, `.venv` installed; inspect with `bash scripts/install_review_service.sh --dry-run` before an authorized `sudo bash scripts/install_review_service.sh`. |
+
+Common local workflows (use `--help` on each `nnslr` subcommand for exact arguments):
+
+```sh
+# Choose a private data folder outside Git when convenient:
+export NNSLR_DATA_ROOT=/path/to/speed-vision-data
+
+# Option A: inspect an SSH route download without transferring files.
+.venv/bin/nnslr sync-routes --route ROUTE_ID --dry-run
+
+# Option B: inspect symlinks from COMMA_VIDEOS_DIR / the shared videos folder.
+.venv/bin/nnslr link-videos --dry-run
+
+# Once recordings are present in the data root:
+.venv/bin/nnslr extract-frames --route ROUTE_ID
+# Preannotation requires the optional [preannotate] dependencies and downloads model weights.
+.venv/bin/nnslr preannotate --route ROUTE_ID
+.venv/bin/nnslr review --route ROUTE_ID
+```
+
+`sync-routes` and `link-videos` are **alternative ways to make local recordings available**, not mandatory consecutive steps. Review/annotation decisions must be confirmed by a human before importing as ground truth. Training is a separate, explicitly initiated action. See [`instructions.md`](instructions.md) for the authorized reviewer/Playwright workflow and [`docs/proxmox-gpu-container.md`](docs/proxmox-gpu-container.md) for the shared `COMMA_VIDEOS_DIR` layout.
+
+### Relationship to the other Openpilot repositories
+
+- [`openpilot.distill`](https://github.com/cristianku/openpilot.distill) trains a **driving model** and provides its own [video/calibration helpers](https://github.com/cristianku/openpilot.distill/blob/master/helpers/README.md). It is **not** the speed-limit detector or `nnslr` CLI.
+- [`openpilot_scripts`](https://github.com/cristianku/openpilot_scripts) manages fork/branch/device update workflows. Its [`OP-update-distilled`](https://github.com/cristianku/openpilot_scripts/blob/main/OP-update-distilled/SKILL.md) skill synchronizes **Distill's Sunnypilot source and installation mirror**; it does **not** train, publish, integrate or install speed-limit model weights.
+- This repository currently produces **research tools and model bundles**. Its archived SunnyPilot runtime snapshot has no functioning inference backend or operational Speed Limit Assist adapter. Do not advertise an installable speed-limit feature until that integration and branch are implemented and verified.
+
 ## Publishing on Hugging Face
 
 `scripts/publish_model.sh` publishes one model bundle (the `bundle/` folder that `scripts/run_v100_baseline.sh` writes in `data/runs/<run id>/`) to [cristianku/sunnypilot-speedlimits-models](https://huggingface.co/cristianku/sunnypilot-speedlimits-models). Only the model artifacts are uploaded: the detector and reader ONNX files with their contracts, `config.json`, `classes.json`, `model_card.json`, `capability.json` and `sha256sums.json`, plus the catalog `speed_models.json` with size, sha256 and download URL of every file. Videos, logs, datasets and checkpoints are never uploaded. The two contracts do contain the absolute path of each checkpoint on the training machine (for example `/home/<user>/.../data/runs/<run id>/...`), so that path and user name become public with the model.
