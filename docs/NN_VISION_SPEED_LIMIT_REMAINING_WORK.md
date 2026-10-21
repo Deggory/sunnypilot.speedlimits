@@ -88,7 +88,7 @@ removed and the narrow-camera/full-rlog set was downloaded again as requested.
    nnslr extract-frames --route ROUTE
    ```
    Default SSH host: `comma`; `--host` / `NNSLR_COMMA_HOST` override it.
-   Data root: `NNSLR_DATA_ROOT`, otherwise `/srv/nnslr-data`.
+   Data root: `NNSLR_DATA_ROOT`, otherwise `data/` inside the clone.
    The proposed `copy-comma-route.sh` is superseded by this CLI.
 <!-- [t2-validation] - END -->
 

@@ -1,7 +1,7 @@
 # Proxmox GPU container setup
 
 This guide prepares a Debian/Ubuntu Proxmox LXC/container for
-`openpilot-nnslr-tools`, local comma video/log processing, and later V100
+`sunnypilot.speedlimits`, local comma video/log processing, and later V100
 training.
 
 ## Assumptions
@@ -57,34 +57,28 @@ zstd --version
 
 ---
 
-## 2. Create software and data directories
+## 2. Software and data directories
 
-Recommended layout:
-
-```bash
-mkdir -p /opt/nnslr
-mkdir -p /srv/nnslr-data/{raw/routes,derived/probes,derived/alignment,derived/clips,derived/frames,manifests,annotations,datasets,splits,runs,evaluation}
-```
-
-The Git repository lives under `/opt/nnslr`.
+The Git repository lives under `~/sunnypilot.speedlimits`.
 
 All videos, logs, extracted frames, datasets, checkpoints and training output
-live under `/srv/nnslr-data` and must not be committed to Git.
+live under `~/sunnypilot.speedlimits/data` (gitignored, created on first use)
+and must not be committed to Git.
 
 ---
 
-## 3. Clone NNSLR
+## 3. Clone sunnypilot.speedlimits
 
 ```bash
-cd /opt
-git clone https://github.com/cristianku/openpilot-nnslr-tools.git nnslr
-cd /opt/nnslr
+cd ~
+git clone https://github.com/cristianku/sunnypilot.speedlimits.git
+cd ~/sunnypilot.speedlimits
 ```
 
 For an existing checkout:
 
 ```bash
-cd /opt/nnslr
+cd ~/sunnypilot.speedlimits
 git pull --ff-only
 ```
 
@@ -93,7 +87,7 @@ git pull --ff-only
 ## 4. Create the NNSLR Python environment
 
 ```bash
-cd /opt/nnslr
+cd ~/sunnypilot.speedlimits
 
 python3 -m venv .venv
 source .venv/bin/activate
@@ -115,13 +109,14 @@ At this stage the core and T2 video tooling do not require PyTorch.
 
 ---
 
-## 5. Configure the persistent data root
+## 5. Optional: a different data root
 
-Create:
+Without `NNSLR_DATA_ROOT` the data root is `~/sunnypilot.speedlimits/data`.
+Only to keep the data somewhere else:
 
 ```bash
 cat >/etc/profile.d/nnslr.sh <<'EOF'
-export NNSLR_DATA_ROOT=/srv/nnslr-data
+export NNSLR_DATA_ROOT=/path/to/speed-vision-data
 EOF
 
 chmod 0644 /etc/profile.d/nnslr.sh
@@ -138,7 +133,7 @@ nnslr env
 Expected data root:
 
 ```text
-/srv/nnslr-data
+/path/to/speed-vision-data
 ```
 
 ---
@@ -148,32 +143,32 @@ Expected data root:
 Copy one local comma video into the data area, for example:
 
 ```text
-/srv/nnslr-data/raw/routes/<route>/<segment>/fcamera.hevc
+~/sunnypilot.speedlimits/data/raw/routes/<route>/<segment>/fcamera.hevc
 ```
 
 Then:
 
 ```bash
-source /opt/nnslr/.venv/bin/activate
+source ~/sunnypilot.speedlimits/.venv/bin/activate
 
 nnslr video-probe \
-  /srv/nnslr-data/raw/routes/<route>/<segment>/fcamera.hevc
+  ~/sunnypilot.speedlimits/data/raw/routes/<route>/<segment>/fcamera.hevc
 ```
 
 Broad discovery extraction defaults to approximately 1 fps:
 
 ```bash
 nnslr extract-frames \
-  --video /srv/nnslr-data/raw/routes/<route>/<segment>/fcamera.hevc \
-  --output /srv/nnslr-data/derived/frames/discovery
+  --video ~/sunnypilot.speedlimits/data/raw/routes/<route>/<segment>/fcamera.hevc \
+  --output ~/sunnypilot.speedlimits/data/derived/frames/discovery
 ```
 
 Focused extraction around a known interval:
 
 ```bash
 nnslr extract-frames \
-  --video /srv/nnslr-data/raw/routes/<route>/<segment>/fcamera.hevc \
-  --output /srv/nnslr-data/derived/frames/encounter-001 \
+  --video ~/sunnypilot.speedlimits/data/raw/routes/<route>/<segment>/fcamera.hevc \
+  --output ~/sunnypilot.speedlimits/data/derived/frames/encounter-001 \
   --start 120 \
   --end 135 \
   --fps 10
@@ -239,11 +234,11 @@ test -f "$NNSLR_OPENPILOT_ROOT/openpilot/tools/lib/logreader.py" && echo OK
 Now a local compressed log can be read directly:
 
 ```bash
-source /opt/nnslr/.venv/bin/activate
+source ~/sunnypilot.speedlimits/.venv/bin/activate
 
 nnslr log-metadata \
-  /srv/nnslr-data/raw/routes/<route>/<segment>/rlog.zst \
-  --output /srv/nnslr-data/manifests/log-metadata.jsonl
+  ~/sunnypilot.speedlimits/data/raw/routes/<route>/<segment>/rlog.zst \
+  --output ~/sunnypilot.speedlimits/data/manifests/log-metadata.jsonl
 ```
 
 No manual `zstd -d` step is required when the matching openpilot LogReader
@@ -257,18 +252,18 @@ Example for the narrow road camera:
 
 ```bash
 nnslr align-route \
-  --video /srv/nnslr-data/raw/routes/<route>/<segment>/fcamera.hevc \
-  --log /srv/nnslr-data/raw/routes/<route>/<segment>/rlog.zst \
+  --video ~/sunnypilot.speedlimits/data/raw/routes/<route>/<segment>/fcamera.hevc \
+  --log ~/sunnypilot.speedlimits/data/raw/routes/<route>/<segment>/rlog.zst \
   --stream narrow_road \
   --segment-num <segment> \
-  --output /srv/nnslr-data/derived/alignment/<segment>.jsonl
+  --output ~/sunnypilot.speedlimits/data/derived/alignment/<segment>.jsonl
 ```
 
 Inspect:
 
 ```bash
 nnslr alignment-report \
-  /srv/nnslr-data/derived/alignment/<segment>.jsonl
+  ~/sunnypilot.speedlimits/data/derived/alignment/<segment>.jsonl
 ```
 
 The production alignment uses openpilot `EncodeIndex.segmentId`, which is the
@@ -283,7 +278,7 @@ The Tesla V100 is Volta, compute capability `sm_70`. Use the repository's
 pinned setup script rather than duplicating package-version commands manually:
 
 ```bash
-cd /opt/nnslr
+cd ~/sunnypilot.speedlimits
 bash scripts/setup_v100_training_env.sh
 source .venv-gpu/bin/activate
 ```
@@ -304,7 +299,7 @@ host/container NVIDIA driver must be compatible with that runtime.
 After installation, run the GPU workload explicitly:
 
 ```bash
-source /opt/nnslr/.venv-gpu/bin/activate
+source ~/sunnypilot.speedlimits/.venv-gpu/bin/activate
 nnslr env --gpu-smoke --gpu-device 0
 ```
 
@@ -334,14 +329,14 @@ another service.
 For video/dataset work:
 
 ```bash
-source /opt/nnslr/.venv/bin/activate
+source ~/sunnypilot.speedlimits/.venv/bin/activate
 source /etc/profile.d/nnslr.sh
 ```
 
 For GPU training later:
 
 ```bash
-source /opt/nnslr/.venv-gpu/bin/activate
+source ~/sunnypilot.speedlimits/.venv-gpu/bin/activate
 source /etc/profile.d/nnslr.sh
 ```
 
@@ -354,7 +349,7 @@ Do not mix the two virtual environments.
 CPU/T2 environment:
 
 ```bash
-cd /opt/nnslr
+cd ~/sunnypilot.speedlimits
 git pull --ff-only
 
 source .venv/bin/activate
@@ -365,7 +360,7 @@ pytest -q
 GPU environment after training dependencies change:
 
 ```bash
-cd /opt/nnslr
+cd ~/sunnypilot.speedlimits
 source .venv-gpu/bin/activate
 python -m pip install -e .
 ```
@@ -379,7 +374,7 @@ python -m pip install -e .
 Check:
 
 ```bash
-source /opt/nnslr/.venv-gpu/bin/activate
+source ~/sunnypilot.speedlimits/.venv-gpu/bin/activate
 
 python -c 'import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available())'
 python -c 'import torch; print(torch.cuda.get_arch_list())'
@@ -419,9 +414,9 @@ core environment.
 Before doing any development from the container:
 
 ```bash
-cd /opt/nnslr
+cd ~/sunnypilot.speedlimits
 git status
 ```
 
 Videos, logs, datasets, runs and checkpoints belong under
-`/srv/nnslr-data`, not under the repository.
+`~/sunnypilot.speedlimits/data`, not under the repository.

@@ -95,10 +95,8 @@ export NNSLR_DATA_ROOT=/path/to/speed-vision-data
 
 <!-- [nnslr-sync] - START -->
 <!-- [route-extract] - START -->
-`sync-routes` and `extract-frames --route` also work without this variable:
-their default is `/srv/nnslr-data`. An explicit `--data-root` overrides the
-variable. Other data-root-dependent commands still require the variable or
-their explicit `--data-root` option.
+Without this variable every command uses `data/` inside the clone
+(gitignored). An explicit `--data-root` overrides the variable.
 <!-- [route-extract] - END -->
 
 The local processing commands operate on recordings already present on disk.
@@ -172,7 +170,7 @@ Defaults:
 | Segments | All available segments of the specified route only |
 | Camera | `narrow`: `fcamera.hevc` (front road camera) |
 | Log | Full `rlog`, preferring `rlog.zst`, then `rlog`, then `rlog.bz2` |
-| Data root | `NNSLR_DATA_ROOT`, otherwise `/srv/nnslr-data` |
+| Data root | `NNSLR_DATA_ROOT`, otherwise `data/` inside the clone |
 | Destination | `<data-root>/raw/routes/<route>/<segment>/` |
 
 Override only what you need:
@@ -226,7 +224,7 @@ nnslr extract-frames --route "$ROUTE"
 ```
 
 Defaults are `fcamera.hevc` (front narrow road camera), one PNG per second at
-the original resolution, and `NNSLR_DATA_ROOT` or `/srv/nnslr-data` as the data
+the original resolution, and `NNSLR_DATA_ROOT` or `data/` inside the clone as the data
 root. Images and a `frames.jsonl` manifest are written for each segment:
 
 ```text
@@ -276,7 +274,7 @@ python -m pip install '.[preannotate]'
 
 After extracting a route, these commands process all its frames and open the
 review server. No environment variables, output directories or segment loop
-are required; the default data root is `/srv/nnslr-data`.
+are required; the default data root is `data/` inside the clone.
 
 ```sh
 nnslr preannotate --route 00000089--0ac1c0fdec
@@ -464,7 +462,7 @@ nnslr build-splits
 ```
 
 No environment variables or output folder arguments are required. All three
-commands use the configured data root, defaulting to `/srv/nnslr-data`.
+commands use the configured data root, defaulting to `data/` inside the clone.
 The default canonical dataset is `annotations/objects.jsonl`. Alternatively,
 put review files into `annotations/inbox/` under that root and run
 `nnslr import-annotations` with no arguments. Multiple input files can be
@@ -560,7 +558,6 @@ including dataset/split hashes and GPU identity.
 For the complete guarded pipeline on the training host:
 
 ```sh
-export NNSLR_DATA_ROOT=/srv/nnslr-data
 export NNSLR_GPU_INDEX=0
 bash scripts/run_v100_baseline.sh baseline-001
 ```

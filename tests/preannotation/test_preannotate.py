@@ -9,6 +9,7 @@ from nnslr_tools.preannotate import (
     MODEL_SHA256, PreannotationError, discover_frames, resolve_data_root,
     semantic_label, suppress_overlaps, unletterbox, run_preannotation,
 )
+from nnslr_tools.sync import DEFAULT_DATA_ROOT
 
 ROUTE = '00000089--0ac1c0fdec'
 
@@ -30,7 +31,7 @@ def frames(root, segment=0, count=1):
 def test_root_and_cli_have_defaults_without_environment(monkeypatch):
     from nnslr_tools.cli import build_parser
     monkeypatch.delenv('NNSLR_DATA_ROOT', raising=False)
-    assert resolve_data_root() == Path('/srv/nnslr-data')
+    assert resolve_data_root() == Path(DEFAULT_DATA_ROOT).resolve()
     args = build_parser().parse_args(['preannotate', '--route', ROUTE])
     assert args.route == ROUTE and args.data_root is None
     assert not getattr(args, 'output', None)

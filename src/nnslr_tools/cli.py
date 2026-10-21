@@ -86,8 +86,7 @@ def collect_env_report() -> dict[str, Any]:
                 "hardcoded (decision D4)."
                 if data_root
                 # [nnslr-sync] - START
-                else "NNSLR_DATA_ROOT is not set; sync-routes defaults to "
-                "/srv/nnslr-data. Other data-root commands need --data-root."
+                else f"NNSLR_DATA_ROOT is not set; data root defaults to {DEFAULT_DATA_ROOT}."
                 # [nnslr-sync] - END
             ),
         },
@@ -343,7 +342,7 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
 def _resolve_data_root(explicit: str | None) -> Path:
     raw = (explicit or os.environ.get("NNSLR_DATA_ROOT", "")).strip()
     if not raw:
-        raise ValueError("NNSLR_DATA_ROOT is not set; use --data-root or export it")
+        raw = DEFAULT_DATA_ROOT
     root = Path(raw).expanduser().resolve()
     if not root.is_dir():
         raise ValueError(f"data root is not a directory: {root}")
@@ -988,7 +987,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_sync.add_argument("--segments", default="all", help="all (default), 0-3, or 0,2,4-6")
     p_sync.add_argument("--camera", choices=("narrow", "wide", "both"), default="narrow",
                         help="narrow=fcamera (default), wide=ecamera, both=both road cameras")
-    p_sync.add_argument("--data-root", help="destination root (default: NNSLR_DATA_ROOT or /srv/nnslr-data)")
+    p_sync.add_argument("--data-root", help="destination root (default: NNSLR_DATA_ROOT or <repo>/data)")
     p_sync.add_argument("--dry-run", action="store_true", help="inventory via SSH and print the plan without copying or writing files")
     p_sync.set_defaults(func=_cmd_sync_routes)
     # [nnslr-sync] - END
@@ -1013,7 +1012,7 @@ def build_parser() -> argparse.ArgumentParser:
     extract_source = p_extract.add_mutually_exclusive_group(required=True)
     extract_source.add_argument("--video", help="one local video; requires --output")
     extract_source.add_argument("--route", help="automatically extract fcamera.hevc from every local segment of this route")
-    p_extract.add_argument("--data-root", help="with --route: NNSLR_DATA_ROOT or /srv/nnslr-data by default")
+    p_extract.add_argument("--data-root", help="with --route: NNSLR_DATA_ROOT or <repo>/data by default")
     p_extract.add_argument("--output", help="with --route: defaults to <data-root>/derived/frames/<route>; required with --video")
     # [route-extract] - END
     p_extract.add_argument("--fps", type=float, default=1.0, help="sampling FPS (default: 1 for broad discovery)")
@@ -1085,12 +1084,12 @@ def build_parser() -> argparse.ArgumentParser:
     # [preannotation] - START
     p_pre = sub.add_parser("preannotate", help="propose sign boxes/values on all extracted route frames (CPU)")
     p_pre.add_argument("--route", required=True)
-    p_pre.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or /srv/nnslr-data")
+    p_pre.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_pre.add_argument("--confidence", type=float, default=.25)
     p_pre.set_defaults(func=_cmd_preannotate)
     p_review = sub.add_parser("review", help="open the latest route annotation report through a local HTTP server")
     p_review.add_argument("--route", required=True)
-    p_review.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or /srv/nnslr-data")
+    p_review.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_review.add_argument("--host", default="127.0.0.1", help="listen address; default: local only")
     p_review.add_argument("--port", type=int, default=8765)
     p_review.set_defaults(func=_cmd_review)
@@ -1099,7 +1098,7 @@ def build_parser() -> argparse.ArgumentParser:
     # [reviewed-dataset] - START
     p_import = sub.add_parser("import-annotations", help="import explicitly reviewed annotations into the canonical dataset")
     p_import.add_argument("inputs", nargs="*", help="review JSONL files; default: <data-root>/annotations/inbox/*.jsonl")
-    p_import.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or /srv/nnslr-data")
+    p_import.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     # [model-review] - START
     p_import.add_argument("--output", help="default: gold <data-root>/annotations/objects.jsonl; training-candidate <data-root>/datasets/training_candidate_dataset/objects.jsonl")
     # [model-review] - END
@@ -1108,14 +1107,14 @@ def build_parser() -> argparse.ArgumentParser:
     # [model-review] - START
     p_validate.add_argument("dataset", nargs="?", help="default: gold <data-root>/annotations/objects.jsonl; training-candidate <data-root>/datasets/training_candidate_dataset/objects.jsonl")
     # [model-review] - END
-    p_validate.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or /srv/nnslr-data")
+    p_validate.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_validate.add_argument("--splits", help="also check a frozen split for leakage and dataset identity")
     p_validate.set_defaults(func=_cmd_dataset)
     p_splits = sub.add_parser("build-splits", help="freeze deterministic route/site-connected dataset partitions")
     # [model-review] - START
     p_splits.add_argument("dataset", nargs="?", help="default: gold <data-root>/annotations/objects.jsonl; training-candidate <data-root>/datasets/training_candidate_dataset/objects.jsonl")
     # [model-review] - END
-    p_splits.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or /srv/nnslr-data")
+    p_splits.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_splits.add_argument("--seed", type=int, default=0)
     p_splits.add_argument("--output", help="default: <data-root>/splits/<sha256>.json (immutable)")
     p_splits.set_defaults(func=_cmd_dataset)
@@ -1133,7 +1132,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_train.add_argument("dataset", nargs="?", help="canonical dataset JSONL; defaults from --dataset-kind")
     p_train.add_argument("--task", choices=("reader", "detector"), default="reader",
                          help="baseline task to train (default: reader)")
-    p_train.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or /srv/nnslr-data")
+    p_train.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_train.add_argument("--splits", help="frozen split JSON; default: <data-root>/splits/latest.json")
     p_train.add_argument("--dataset-kind", choices=("gold", "training-candidate"), default="gold")
     p_train.add_argument("--dry-run", action="store_true", help="validate and print the exact plan without importing torch or touching a GPU")
@@ -1161,7 +1160,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_eval.add_argument("dataset", nargs="?", help="canonical dataset JSONL; defaults from --dataset-kind")
     p_eval.add_argument("--task", choices=("reader", "detector"), default="reader")
-    p_eval.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or /srv/nnslr-data")
+    p_eval.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_eval.add_argument("--splits", help="frozen split JSON; default: <data-root>/splits/latest.json")
     p_eval.add_argument("--dataset-kind", choices=("gold", "training-candidate"), default="gold")
     p_eval.add_argument(
@@ -1212,7 +1211,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="run offline detector -> reader perception over extracted route frames",
     )
     p_replay.add_argument("--route", required=True, help="local extracted route ID")
-    p_replay.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or /srv/nnslr-data")
+    p_replay.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_replay.add_argument("--bundle", help="verified packaged ONNX bundle; uses CPU reference runtime")
     p_replay.add_argument("--detector-checkpoint", help="detector-best.pt")
     p_replay.add_argument("--reader-checkpoint", help="reader-best.pt")

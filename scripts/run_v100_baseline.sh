@@ -6,7 +6,7 @@ set -euo pipefail
 # Sunnypilot or a comma device.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DATA_ROOT="${NNSLR_DATA_ROOT:-/srv/nnslr-data}"
+DATA_ROOT="${NNSLR_DATA_ROOT:-$ROOT_DIR/data}"
 GPU_INDEX="${NNSLR_GPU_INDEX:-0}"
 RUN_ID="${1:-}"
 DATASET_KIND="${NNSLR_DATASET_KIND:-gold}"
@@ -14,7 +14,7 @@ VENV="${NNSLR_GPU_VENV:-$ROOT_DIR/.venv-gpu}"
 
 if [[ -z "$RUN_ID" ]]; then
   echo "usage: $0 RUN_ID" >&2
-  echo "example: NNSLR_DATA_ROOT=/srv/nnslr-data NNSLR_GPU_INDEX=0 $0 baseline-001" >&2
+  echo "example: NNSLR_GPU_INDEX=0 $0 baseline-001" >&2
   exit 2
 fi
 

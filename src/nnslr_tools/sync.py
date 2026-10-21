@@ -18,7 +18,8 @@ from typing import Any
 from nnslr_tools.manifest import parse_route_id, sha256_of
 
 DEFAULT_HOST = "comma"
-DEFAULT_DATA_ROOT = "/srv/nnslr-data"
+# Videos, logs, datasets and runs live in data/ inside the clone (gitignored).
+DEFAULT_DATA_ROOT = str(Path(__file__).resolve().parents[2] / "data")
 REMOTE_ROOT = "/data/media/0/realdata"
 _CAMERAS = {"narrow": ("fcamera.hevc",), "wide": ("ecamera.hevc",),
             "both": ("fcamera.hevc", "ecamera.hevc")}

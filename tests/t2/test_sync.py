@@ -12,6 +12,7 @@ import sys
 import pytest
 
 from nnslr_tools import cli
+from nnslr_tools.sync import DEFAULT_DATA_ROOT
 
 ROUTE = "000001a3--c20ba54385"
 
@@ -97,7 +98,7 @@ def test_dry_run_uses_fallback_defaults_without_creating_destination(source, cap
     code, out, err = run(capfd, "--dry-run")
     assert code == 0, err
     report = json.loads(out)
-    assert report["data_root"] == "/srv/nnslr-data"
+    assert report["data_root"] == str(Path(DEFAULT_DATA_ROOT).resolve())
     assert report["dry_run"] is True
     assert all(row["status"] == "planned" and row["sha256"] is None for row in report["files"])
 
