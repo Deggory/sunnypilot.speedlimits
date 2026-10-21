@@ -45,9 +45,9 @@ def sign(**changes) -> dict:
     return value
 
 
-def line(frame_key: str = '3/27', signs=None, **changes) -> str:
-    segment, output = frame_key.split('/')
-    row = {'route_id': REAL_ROUTE, 'frame_key': frame_key, 'segment_index': int(segment),
+def line(key: str = '3/27', signs=None, **changes) -> str:
+    segment, output = key.split('/')
+    row = {'route_id': REAL_ROUTE, 'frame_key': key, 'segment_index': int(segment),
            'output_index': int(output), 'source': 'claude_vision_second_opinion', 'passes': ['A'],
            'signs': [sign()] if signs is None else signs}
     row.update(changes)
