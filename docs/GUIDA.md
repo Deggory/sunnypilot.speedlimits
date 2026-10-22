@@ -44,12 +44,12 @@ Gli helper si possono rilanciare quando si vuole: il lavoro già fatto viene sal
 Il sito di revisione ha due pagine, raggiungibili dalla barra in alto:
 
 - **Revisione** (`/`): le route con il loro report, da aprire e revisionare.
-- **Pannello** (`/pannello`): lo stato di tutto e i pulsanti per lanciare i passi 1 e 3 senza terminale.
+- **Pannello** (`/pannello`): lo stato di tutto e i pulsanti per lanciare i passi 0, 1 e 3 senza terminale.
 
 Il pannello mostra:
 
 - il **prossimo passo**, con il pulsante giusto;
-- i tre passi con i numeri (route nuove, frame revisionati, route revisionate su 5) e i pulsanti **Prepara le route nuove**, **Importa le revisioni**, **Allena da zero**, **Allena dai pesi stable**. Un pulsante spento ha sotto il motivo (per esempio "servono 5 route revisionate, ora 1" o "la GPU è occupata");
+- i tre passi con i numeri (route nuove, frame revisionati, route revisionate su 5) e i pulsanti **Scarica dal comma**, **Prepara le route nuove**, **Importa le revisioni**, **Allena da zero**, **Allena dai pesi stable**. Un pulsante spento ha sotto il motivo (per esempio "servono 5 route revisionate, ora 1" o "la GPU è occupata");
 - GPU, disco, CPU e cosa sta girando, anche lanciato da terminale e anche il training di `openpilot.distill`;
 - durante una preparazione, la **percentuale** e le route pronte sul totale del giro, più la route su cui sta lavorando (segmenti estratti, frame con i cartelli proposti). Ogni route vale metà per l'estrazione e metà per i cartelli. Il totale lo scrive `helpers/1_prepare.sh` in `data/logs/prepare/batch.json` quando parte: una preparazione partita prima dell'aggiornamento mostra solo le route in lavorazione;
 - la tabella delle route con lo stato;
@@ -57,7 +57,9 @@ Il pannello mostra:
 
 In **Azioni dal pannello** c'è anche **Aggiorna il codice**: lancia `helpers/update.sh --no-link` (sezione 3), cioè `git pull` e riavvio del sito, senza bisogno della ssh. Parte solo se non ci sono preparazioni o training in corso, e finché gira non ne parte nessuno: il pull cambierebbe gli script sotto i piedi a quelli in corso. Durante il riavvio la pagina resta qualche secondo "non raggiungibile", poi riprende da sola.
 
-Il pannello lancia solo queste cinque azioni fisse, mai un comando qualsiasi, e una sola per tipo alla volta (preparazione da una parte, import/training dall'altra), contando anche quelle partite da terminale. È protetto come il resto del sito: token sulla LAN, e i pulsanti accettano solo richieste dalla pagina stessa. I log delle azioni sono in `data/logs/panel/`; l'ultima riga di ognuno è il codice di uscita.
+**Scarica dal comma** lancia `helpers/fetch_comma_segments.sh` senza argomenti (passo 0): tutti i giri ancora sul comma, via ssh con la chiave di questa macchina (`Host comma` in `~/.ssh/config`), senza bisogno di `ssh -A`. Per leggere i log del comma (durata del giro, retromarcia) usa `COMMA_FETCH_PYTHON` se è impostata, altrimenti il Python di `../openpilot.distill/.venv`, che ha il `LogReader` di openpilot; senza nessuno dei due il pulsante resta spento con il motivo. Non parte insieme a una preparazione: tutti e due scrivono i collegamenti in `data/raw/routes`. Dopo il download il prossimo passo è **Prepara le route nuove**.
+
+Il pannello lancia solo queste sei azioni fisse, mai un comando qualsiasi, e una sola per tipo alla volta (download, preparazione, import/training), contando anche quelle partite da terminale, compreso il download di `openpilot.distill`. È protetto come il resto del sito: token sulla LAN, e i pulsanti accettano solo richieste dalla pagina stessa. I log delle azioni sono in `data/logs/panel/`; l'ultima riga di ognuno è il codice di uscita.
 
 `NNSLR_PANEL_ACTIONS=0` (nell'ambiente del server, per il servizio in `/etc/speedlimits-web.env`) lascia il pannello in sola lettura, per esempio se il sito lo usano altre persone per revisionare.
 

@@ -1,7 +1,7 @@
 # [control-panel] - START
 """Control panel of the review site: the state of every route, the machine, and buttons that run
-the easy helpers (helpers/1_prepare.sh, helpers/3_train.sh, helpers/update.sh) in the background
-with a live log.
+the easy helpers (helpers/fetch_comma_segments.sh, helpers/1_prepare.sh, helpers/3_train.sh,
+helpers/update.sh) in the background with a live log.
 
 Only the fixed actions of ACTIONS can run, never a command taken from a request. They are the
 helpers of the checkout this package runs from (editable install); without them (wheel
@@ -36,6 +36,8 @@ FINISHED = re.compile(r'== finito con codice (\d+)\s*$')
 WRAPPER = '"$@"; code=$?; echo; echo "== finito con codice $code"; exit $code'
 
 ACTIONS = {
+    # Every route still on the comma, over ssh with this machine's key (Host comma in ~/.ssh/config).
+    'fetch': {'label': 'Scarica dal comma', 'group': 'fetch', 'command': ['helpers/fetch_comma_segments.sh']},
     'prepare': {'label': 'Prepara le route nuove', 'group': 'prepare', 'command': ['helpers/1_prepare.sh']},
     'dataset': {'label': 'Importa le revisioni', 'group': 'train',
                 'command': ['helpers/3_train.sh', '--dataset-only']},
@@ -48,6 +50,8 @@ ACTIONS = {
 }
 # The same work started from a terminal: (group, label, fragment of the command line).
 ACTIVITIES = (
+    # Also the copy in openpilot.distill: both write the shared folder of the comma videos.
+    ('fetch', 'download dal comma', 'fetch_comma_segments.sh'),
     ('prepare', 'preparazione', 'helpers/1_prepare.sh'),
     ('prepare', 'estrazione dei frame', 'nnslr extract-frames'),
     ('prepare', 'pre-annotazione', 'nnslr preannotate'),
@@ -57,8 +61,17 @@ ACTIVITIES = (
     # Shown only: the driving model of openpilot.distill shares the GPU (the training refuses a busy GPU).
     ('other', 'training openpilot.distill', 'supervised.train'),
 )
-GROUP_NAMES = {'prepare': 'una preparazione', 'train': 'un import o un training',
-               'update': 'un aggiornamento del codice'}
+GROUP_NAMES = {'fetch': 'un download dal comma', 'prepare': 'una preparazione',
+               'train': 'un import o un training', 'update': 'un aggiornamento del codice'}
+# Groups that never run together with a group, besides itself. The download and the preparation
+# both write the links of data/raw/routes; the update rewrites the helpers under a running bash
+# and restarts this server.
+CONFLICTS = {'fetch': ('prepare', 'update'), 'prepare': ('fetch', 'update'), 'train': ('update',),
+             'update': ('fetch', 'prepare', 'train')}
+# The fetch reads the comma logs (trip length, reverse gear) with openpilot's LogReader; the
+# .venv of this repository has it only with the [log-reader] extra and the schema checkouts.
+FETCH_PYTHON_ENV = 'COMMA_FETCH_PYTHON'
+DISTILL_PYTHON = 'openpilot.distill/.venv/bin/python'
 
 
 class PanelError(Exception):
@@ -86,6 +99,19 @@ class Panel:
     def available(self) -> bool:
         return all((self.repo / name).is_file() for name in
                    ('helpers/route_status.py', 'helpers/1_prepare.sh', 'helpers/3_train.sh'))
+
+    def fetch_python(self) -> str | None:
+        """The Python the fetch reads the comma logs with: COMMA_FETCH_PYTHON, else the .venv of
+        openpilot.distill next to this checkout. '' when the fetch finds its own (NNSLR_OPENPILOT_ROOT
+        set for the [log-reader] extra), None when there is none."""
+        if os.environ.get(FETCH_PYTHON_ENV):
+            return os.environ[FETCH_PYTHON_ENV]
+        distill = self.repo.parent / DISTILL_PYTHON
+        if os.access(distill, os.X_OK):
+            return str(distill)
+        if os.environ.get('NNSLR_OPENPILOT_ROOT'):
+            return ''
+        return None
 
     def _route_status(self):
         if self._status_module is None:
@@ -217,6 +243,12 @@ class Panel:
                 reason = 'manca helpers/update.sh in questa installazione'
             elif name == 'update':
                 pass
+            elif name == 'fetch' and not (self.repo / 'helpers/fetch_comma_segments.sh').is_file():
+                reason = 'manca helpers/fetch_comma_segments.sh in questa installazione'
+            elif name == 'fetch' and self.fetch_python() is None:
+                reason = 'manca il lettore dei log del comma (vedi docs/GUIDA.md)'
+            elif name == 'fetch':
+                pass
             elif name == 'prepare' and not to_prepare:
                 reason = 'nessuna route nuova da preparare'
             elif name != 'prepare' and not confirmed:
@@ -343,6 +375,13 @@ class Panel:
         group = ACTIONS[action]['group']
         if action == 'update' and not (self.repo / 'helpers/update.sh').is_file():
             raise PanelError(403, 'actions_disabled', 'Manca helpers/update.sh in questa installazione.')
+        fetch_python = None
+        if action == 'fetch':
+            if not (self.repo / 'helpers/fetch_comma_segments.sh').is_file():
+                raise PanelError(403, 'actions_disabled', 'Manca helpers/fetch_comma_segments.sh in questa installazione.')
+            fetch_python = self.fetch_python()
+            if fetch_python is None:
+                raise PanelError(403, 'actions_disabled', 'Manca il lettore dei log del comma (vedi docs/GUIDA.md).')
         with self._lock:
             conflict = _conflicting_group(group, self._running_groups(self.activities()))
             if conflict is not None:
@@ -356,6 +395,8 @@ class Panel:
             if action == 'prepare':
                 command.append('--jobs=' + os.environ.get(PREPARE_JOBS_ENV, '2'))
             environment = dict(os.environ, NNSLR_DATA_ROOT=str(self.root))
+            if fetch_python:
+                environment[FETCH_PYTHON_ENV] = fetch_python
             with path.open('wb') as log:
                 log.write(('== ' + ' '.join(command) + '\n').encode())
                 log.flush()
@@ -402,17 +443,11 @@ class Panel:
 def _conflicting_group(group: str, running: set[str]) -> str | None:
     """The running group that keeps an action of `group` from starting, or None.
 
-    One action per group at a time. The update rewrites the helpers under a running bash and
-    restarts this server, so it never runs together with a preparation or a training.
+    One action per group at a time, and never together with the groups of CONFLICTS.
     """
-    if group in running:
-        return group
-    if group == 'update':
-        for other in ('prepare', 'train'):
-            if other in running:
-                return other
-    elif 'update' in running:
-        return 'update'
+    for other in (group, *CONFLICTS.get(group, ())):
+        if other in running:
+            return other
     return None
 
 

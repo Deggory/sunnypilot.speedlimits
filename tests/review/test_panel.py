@@ -18,6 +18,7 @@ REPO = Path(__file__).resolve().parents[2]
 FAKE_PREPARE = '#!/usr/bin/env bash\necho "prepare $*"\necho "data root $NNSLR_DATA_ROOT"\nsleep "${FAKE_SLEEP:-0}"\n'
 FAKE_TRAIN = '#!/usr/bin/env bash\necho "train $*"\nexit 3\n'
 FAKE_UPDATE = '#!/usr/bin/env bash\necho "update $*"\nsleep "${FAKE_UPDATE_SLEEP:-0}"\n'
+FAKE_FETCH = '#!/usr/bin/env bash\necho "fetch $*"\necho "python $COMMA_FETCH_PYTHON"\nsleep "${FAKE_FETCH_SLEEP:-0}"\n'
 
 
 @pytest.fixture
@@ -25,7 +26,8 @@ def checkout(tmp_path):
     repo = tmp_path / 'repo'
     (repo / 'helpers').mkdir(parents=True)
     shutil.copy(REPO / 'helpers/route_status.py', repo / 'helpers/route_status.py')
-    for name, text in (('1_prepare.sh', FAKE_PREPARE), ('3_train.sh', FAKE_TRAIN), ('update.sh', FAKE_UPDATE)):
+    for name, text in (('1_prepare.sh', FAKE_PREPARE), ('3_train.sh', FAKE_TRAIN), ('update.sh', FAKE_UPDATE),
+                       ('fetch_comma_segments.sh', FAKE_FETCH)):
         script = repo / 'helpers' / name
         script.write_text(text)
         script.chmod(0o755)
@@ -137,6 +139,57 @@ def test_update_needs_its_helper(root, checkout):
     with pytest.raises(PanelError) as missing:
         panel.start('update')
     assert missing.value.status == 403
+
+
+@pytest.fixture
+def no_log_reader(monkeypatch):
+    monkeypatch.delenv('COMMA_FETCH_PYTHON', raising=False)
+    monkeypatch.delenv('NNSLR_OPENPILOT_ROOT', raising=False)
+
+
+def test_fetch_uses_the_log_reader_of_openpilot_distill(root, checkout, no_log_reader):
+    distill = checkout.parent / 'openpilot.distill/.venv/bin/python'
+    distill.parent.mkdir(parents=True)
+    distill.write_text('#!/bin/sh\n')
+    distill.chmod(0o755)
+    panel = Panel(root, repo=checkout)
+    # No confirmed frame needed: the download comes before everything else.
+    assert panel.status()['actions']['fetch'] == {'label': 'Scarica dal comma', 'allowed': True, 'reason': ''}
+    done = finished(panel, panel.start('fetch')['id'])
+    assert (done['state'], done['code']) == ('ok', 0)
+    text = full_log(panel, done['id'])
+    assert 'fetch \n' in text and f'python {distill}' in text
+
+
+def test_fetch_needs_a_log_reader(root, checkout, no_log_reader):
+    panel = Panel(root, repo=checkout)
+    assert panel.status()['actions']['fetch']['reason'] == 'manca il lettore dei log del comma (vedi docs/GUIDA.md)'
+    with pytest.raises(PanelError) as missing:
+        panel.start('fetch')
+    assert missing.value.status == 403
+
+
+def test_fetch_never_runs_together_with_a_preparation_or_an_update(root, checkout, monkeypatch):
+    monkeypatch.setenv('COMMA_FETCH_PYTHON', '/usr/bin/python3')
+    monkeypatch.setenv('FAKE_FETCH_SLEEP', '30')
+    panel = Panel(root, repo=checkout)
+    fetch = panel.start('fetch')
+    assert any(item['label'] == 'download dal comma' for item in panel.activities())
+    for action in ('fetch', 'prepare', 'update'):
+        with pytest.raises(PanelError) as busy:
+            panel.start(action)
+        assert busy.value.status == 409
+    assert panel.status()['actions']['prepare']['reason'] == "c'è già un download dal comma in corso"
+    # A training does not touch the videos.
+    assert panel.status()['actions']['dataset']['reason'] != "c'è già un download dal comma in corso"
+    panel.stop(fetch['id'])
+    finished(panel, fetch['id'])
+
+    monkeypatch.setenv('FAKE_SLEEP', '30')
+    prepare = panel.start('prepare')
+    assert panel.status()['actions']['fetch']['reason'] == "c'è già una preparazione in corso"
+    panel.stop(prepare['id'])
+    finished(panel, prepare['id'])
 
 
 def make_route(root, route, segments, extracted, frames_per_segment=4):

@@ -361,7 +361,7 @@ td.route { font-family: var(--font-data); font-size: 13px; white-space: nowrap; 
     <article class="card step" id="step-prepare">
       <div class="step-head"><span class="step-num">1</span><h3>Prepara</h3></div>
       <div class="big" id="prepare-big">–</div>
-      <div class="sub" id="prepare-sub">Video nuovi → frame → cartelli proposti, tutto automatico.</div>
+      <div class="sub" id="prepare-sub">Giri dal comma → frame → cartelli proposti, tutto automatico.</div>
       <div class="buttons" id="prepare-buttons"></div>
     </article>
     <article class="card step" id="step-review">
@@ -403,7 +403,7 @@ td.route { font-family: var(--font-data); font-size: 13px; white-space: nowrap; 
           <th class="num">Oggetti</th><th>Stato</th></tr></thead>
         <tbody id="routes"></tbody>
       </table></div>
-      <p class="empty" id="routes-empty" hidden>Nessuna route: scarica i giri dal comma con <code>helpers/fetch_comma_segments.sh</code>.</p>
+      <p class="empty" id="routes-empty" hidden>Nessuna route: scarica i giri con <strong>Scarica dal comma</strong> (passo 1).</p>
     </div>
   </section>
 
@@ -512,11 +512,7 @@ td.route { font-family: var(--font-data); font-size: 13px; white-space: nowrap; 
       link.href = '/';
       actions.appendChild(link);
     }
-    if (action === 'fetch') {
-      const hint = node('div', 'reason');
-      hint.append('Dal terminale: ', node('code', '', 'helpers/fetch_comma_segments.sh'));
-      actions.appendChild(hint);
-    }
+    if (action === 'fetch') actions.appendChild(actionButton('fetch', true));
     for (const id of ['step-prepare', 'step-review', 'step-train']) byId(id).classList.remove('attention');
     const attention = {prepare: 'step-prepare', review: 'step-review', train: 'step-train'}[action];
     if (attention) byId(attention).classList.add('attention');
@@ -526,7 +522,7 @@ td.route { font-family: var(--font-data); font-size: 13px; white-space: nowrap; 
     const rows = status.routes;
     const toPrepare = rows.filter((r) => ['collegare', 'estrarre', 'preannotare'].includes(r.state)).length;
     byId('prepare-big').textContent = toPrepare ? toPrepare + (toPrepare === 1 ? ' route nuova' : ' route nuove') : 'Tutto preparato';
-    byId('prepare-buttons').replaceChildren(actionButton('prepare', false));
+    byId('prepare-buttons').replaceChildren(actionButton('fetch', false), actionButton('prepare', false));
 
     const reported = rows.filter((r) => r.run_id);
     const frames = reported.reduce((sum, r) => sum + r.report_frames, 0);
