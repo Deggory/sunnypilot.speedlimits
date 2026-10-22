@@ -116,9 +116,30 @@ Lo stesso servizio offre anche la **REST API** (`/api/v1/...`) e, con le dipende
 
 - token **nell'header** `Authorization: Bearer <NNSLR_REVIEW_TOKEN>`, mai nell'indirizzo; serve anche su 127.0.0.1;
 - stesse regole e stesso database della pagina; il pannello (Prepara, Importa, Allena, Aggiorna) non è raggiungibile da API e MCP;
-- installare una volta le dipendenze MCP: `uv pip install --python .venv/bin/python -e ".[mcp]"`, poi riavviare il servizio (`systemctl restart speedlimits-web`);
+- installare una volta le dipendenze MCP e riavviare il sito: `helpers/setup_mcp.sh --restart` (sezione "Installazione locale per MCP" qui sotto);
 - MCP anche senza HTTP, via ssh: `helpers/mcp.sh` (con `--read-only` per una prova senza salvataggio; `NNSLR_MCP_READ_ONLY=1` nel servizio fa lo stesso su `/mcp`);
 - le revisioni di un'AI sono salvate come `ai/<nome>`, tipo `ai`: non cambiano le conferme di una persona e `helpers/3_train.sh` non le importa nel dataset (restano nel database, elencate come `skipped_ai_reviews`).
+
+#### Installazione locale per MCP
+
+Alcune cose non stanno in git perché sono installazioni o impostazioni della macchina. Le fa tutte `helpers/setup_mcp.sh`, che si può rilanciare quando si vuole (salta quello che c'è già):
+
+```sh
+cd ~/sunnypilot.speedlimits
+helpers/setup_mcp.sh                         # solo l'SDK MCP in .venv (extra [mcp])
+helpers/setup_mcp.sh --claude                # + Claude Code in questa cartella, per le sessioni di revisione
+helpers/setup_mcp.sh --claude --effort=low   # come sopra, con un effort diverso (default medium)
+helpers/setup_mcp.sh --restart               # + copia del database se va migrato, e riavvio di speedlimits-web
+```
+
+| Cosa | Dove finisce | Perché non è in git |
+| --- | --- | --- |
+| SDK MCP (`mcp` 2.x e dipendenze) | `.venv` | pacchetti installati |
+| server MCP `nnslr-review` (stdio, `helpers/mcp.sh`) per Claude Code | `~/.claude.json`, per la cartella del repository | configurazione di Claude Code della macchina |
+| strumenti `mcp__nnslr-review` permessi senza chiedere, `effortLevel` delle sessioni | `.claude/settings.local.json`, elencato in `.git/info/exclude` | impostazione locale: le sessioni di revisione lanciate qui (anche quelle remote dell'ambiente bridge) non si fermano a chiedere e non usano l'effort alto |
+| copia del database prima della migrazione | `data/annotations/review.sqlite.bak-v1-<ora>` | dati |
+
+Per togliere i permessi alle sessioni basta cancellare `.claude/settings.local.json`; il server MCP si toglie con `claude mcp remove -s local nnslr-review`.
 
 Il database delle revisioni si aggiorna da solo alla versione 2 al primo avvio del codice nuovo (aggiunge tipo di revisore e canale; le revisioni già fatte restano "umane, dalla pagina"). Dopo, un `nnslr` vecchio non lo apre più.
 
@@ -151,6 +172,7 @@ Il database delle revisioni si aggiorna da solo alla versione 2 al primo avvio d
 | `helpers/2_review.sh` | accende/spegne il sito di revisione, stampa il link | apre la porta 8765 sulla LAN, crea il token in `.env` |
 | `helpers/3_train.sh` | revisioni → dataset → modello | scrive il dataset, installa `.venv-gpu` la prima volta, GPU |
 | `helpers/update.sh` | aggiorna il codice e riavvia il sito | `git pull`, `.venv`, riavvio del servizio |
+| `helpers/setup_mcp.sh` | installa l'SDK MCP; `--claude` prepara Claude Code in questa cartella; `--restart` copia il database se va migrato e riavvia il sito | pacchetti in `.venv`, `~/.claude.json`, `.claude/settings.local.json`, riavvio del servizio |
 | `helpers/mcp.sh` | server MCP (stdio) per Claude Code, Codex e altri client, anche via ssh ([API_MCP.md](API_MCP.md)) | legge le route; salva revisioni AI nel database (non con `--read-only`) |
 | `helpers/fetch_comma_segments.sh` | scarica i giri nuovi dal comma | rete, cartella condivisa dei video |
 | `scripts/install_review_service.sh` | installa/aggiorna/toglie il servizio `speedlimits-web` | systemd, `/etc/speedlimits-web.env`, `.env` |

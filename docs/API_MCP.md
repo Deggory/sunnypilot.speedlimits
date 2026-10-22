@@ -226,14 +226,15 @@ saved = call('POST', f"/routes/{route}/frames/{frame['frame_key']}/review", {
 
 ### Installare solo le dipendenze MCP
 
-Sul server, nella cartella del repository (aggiunge `mcp` 2.x e le sue dipendenze, niente GPU):
+Sul server, nella cartella del repository, lo fa `helpers/setup_mcp.sh` (aggiunge `mcp` 2.x e le sue dipendenze a `.venv`, niente GPU; con uv se c'è, altrimenti pip):
 
 ```sh
-uv pip install --python .venv/bin/python -e ".[mcp]"       # .venv creato con uv (senza pip)
-# oppure: .venv/bin/python -m pip install -e ".[mcp]"
+helpers/setup_mcp.sh               # solo l'SDK
+helpers/setup_mcp.sh --restart     # + copia del database se va migrato e riavvio di speedlimits-web: /mcp attivo
+helpers/setup_mcp.sh --claude      # + Claude Code in questa cartella (server nnslr-review, permessi, effort medium)
 ```
 
-Poi `/mcp` è attivo dal prossimo avvio del sito (`systemctl restart speedlimits-web`, che fa Cristian; oppure `helpers/2_review.sh --stop` e di nuovo `helpers/2_review.sh`). `helpers/update.sh` non installa da solo l'extra `mcp`, ma non lo toglie. `GET /api/v1` dice `"mcp": true` quando è attivo. Per ritagli e ingrandimenti serve Pillow, già presente con l'extra `preannotate`.
+A mano è `uv pip install --python .venv/bin/python -e ".[mcp]"` (oppure `.venv/bin/python -m pip install -e ".[mcp]"`), poi un riavvio del sito. Tutto quello che lo script installa o scrive fuori da git è elencato in [GUIDA.md](GUIDA.md), "Installazione locale per MCP". `helpers/update.sh` non installa da solo l'extra `mcp`, ma non lo toglie. `GET /api/v1` dice `"mcp": true` quando è attivo. Per ritagli e ingrandimenti serve Pillow, già presente con l'extra `preannotate`.
 
 ### Claude Code: Streamable HTTP (dal PC, verso il servizio)
 
