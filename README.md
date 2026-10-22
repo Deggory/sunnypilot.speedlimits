@@ -90,7 +90,7 @@ export NNSLR_DATA_ROOT=/path/to/speed-vision-data
 .venv/bin/nnslr review --route ROUTE_ID
 ```
 
-`sync-routes` and `link-videos` are **alternative ways to make local recordings available**, not mandatory consecutive steps. Review/annotation decisions must be confirmed by a human before importing as ground truth. Training is a separate, explicitly initiated action. See [`instructions.md`](instructions.md) for the authorized reviewer/Playwright workflow and [`docs/proxmox-gpu-container.md`](docs/proxmox-gpu-container.md) for the shared `COMMA_VIDEOS_DIR` layout.
+`sync-routes` and `link-videos` are **alternative ways to make local recordings available**, not mandatory consecutive steps. Review/annotation decisions must be confirmed by a human before importing as ground truth. Training is a separate, explicitly initiated action. See [`review_instructions.md`](review_instructions.md) for the authorized reviewer/Playwright workflow and [`docs/proxmox-gpu-container.md`](docs/proxmox-gpu-container.md) for the shared `COMMA_VIDEOS_DIR` layout.
 
 ### Relationship to the other Openpilot repositories
 

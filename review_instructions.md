@@ -6,12 +6,14 @@ L'indirizzo del sito lo indica Cristian, oppure il sito è già aperto in Chrome
 
 ## 1. Regole prima di iniziare
 
-1. Leggere anche `AGENTS.md`.
+1. Se si lavora dal repository, leggere anche `AGENTS.md`. Un agente che ha solo il browser segue queste istruzioni e, nel dubbio, chiede a Cristian.
 2. Capire quale delle due attività è stata chiesta:
-   - **prova senza salvataggio**: si guarda e si modifica, ma non si preme **Conferma**;
+   - **prova senza salvataggio**: si guarda e si modifica, ma non si preme **Conferma**. Il browser ricorda le modifiche anche dopo una ricarica. Alla fine premere **Annulla modifiche** su ogni fotogramma toccato, finché non restano tacche arancioni;
    - **revisione con salvataggio**: si conferma. Solo se Cristian l'ha chiesto esplicitamente per quella route.
-3. Scrivere nel campo **Revisore** (in alto a destra) un nome riconoscibile dell'agente, per esempio `Claude` o `ChatGPT`. Mai `cristianku` o altri nomi di persone.
+3. Controllare il campo **Revisore** (in alto a destra). La pagina lo riempie da sola con l'ultimo nome usato in quel browser, quindi può contenere già `cristianku` o il nome di un'altra persona. Cancellarlo e scrivere un nome riconoscibile dell'agente, per esempio `Claude` o `ChatGPT`. Mai `cristianku` o altri nomi di persone. Ricontrollarlo dopo ogni ricarica.
 4. Non modificare né ritirare conferme già fatte da altri revisori, salvo richiesta esplicita che le comprenda.
+   - Chi ha confermato un fotogramma si legge nella riga di stato in fondo al pannello: "Salvato ✓ · revisione N · <revisore>".
+   - La pagina non si aggiorna da sola: le conferme fatte da altri dopo l'apertura compaiono solo ricaricando. Se altri possono lavorare sulla stessa route, ricaricare prima di iniziare e ogni tanto durante il lavoro.
 5. Nel **Pannello** non premere nessun pulsante (Prepara, Importa, Allena, Aggiorna il codice): hanno effetti reali sul server. Non riavviare il server, non toccare il comma, non importare nel dataset, non avviare training.
 6. Il link di accesso contiene un token. Non copiarlo in file, resoconti, screenshot o log.
 7. Non confermare mai un fotogramma senza averlo guardato davvero. Non accettare in blocco le proposte del modello.
@@ -20,8 +22,11 @@ L'indirizzo del sito lo indica Cristian, oppure il sito è già aperto in Chrome
 
 1. Aprire l'indirizzo ricevuto. Se compare **Accesso negato**, serve il link con il token: chiederlo a Cristian. Dopo la prima apertura il browser tiene un cookie e basta l'indirizzo senza token.
 2. La pagina iniziale **Route** elenca le route con un report. Ogni card mostra "N di M confermati", i sospetti e un'azione: **Inizia →**, **Riprendi →** o **Ricontrolla →**. Aprire la route indicata da Cristian.
-3. Lavorare con la finestra larga almeno 1000 px. Sotto i 981 px la pagina passa al layout da telefono: il pulsante Conferma diventa la barra fissa in basso.
+3. Lavorare con la **pagina** larga almeno 1000 px. Con il pannello laterale dell'estensione aperto la pagina è più stretta della finestra: allargare la finestra.
+
+   Sotto i 981 px la pagina passa al layout da telefono. Il pulsante Conferma diventa la barra fissa in basso, tra ‹ e ›, e dice solo **Conferma**, **Nessun cartello**, **Avanti →** (cioè "Già confermato · avanti →") o **Salvataggio…**. Cosa si salva si legge allora nella lista dei cartelli.
 4. Se in fondo al pannello compare **"Revisioni non lette dal server"** o **"Il report di questa route è stato rigenerato: ricarica la pagina"**, fermarsi: ricaricare la pagina e, se resta, avvisare Cristian.
+5. La pagina della route riapre con il filtro e il fotogramma usati l'ultima volta in quel browser. All'inizio scegliere il filtro **Da rivedere**.
 
 ## 3. Com'è fatta la pagina di revisione
 
@@ -29,7 +34,7 @@ L'indirizzo del sito lo indica Cristian, oppure il sito è già aperto in Chrome
 - Il menu della route.
 - I filtri **Da rivedere / Sospetti / Con proposte / Tutti**:
   - **Da rivedere**: i fotogrammi non ancora confermati;
-  - **Sospetti**: modello e seconda lettura non sono d'accordo;
+  - **Sospetti**: modello e seconda lettura non sono d'accordo, oppure un fotogramma vicino ha un cartello (confermato o visto dalla seconda lettura) e questo non ha niente. Il motivo è nella riga viola **Sospetto: …**. Un fotogramma confermato non è mai sospetto, ma una conferma può rendere sospetti i vicini, quindi il numero dei sospetti non scende sempre;
   - **Con proposte**: il modello ha proposto almeno un riquadro.
 - Il contatore "N di M confermati · K sospetti".
 - Il campo **Revisore**.
@@ -42,16 +47,24 @@ L'indirizzo del sito lo indica Cristian, oppure il sito è già aperto in Chrome
   - le frecce **‹ ›** con la posizione nel filtro, per esempio `62 / 68`;
   - lo stato del fotogramma: Da rivedere, Da confermare, Da riconfermare, Salvataggio…, Confermato, Non salvato;
   - "Segmento X · immagine Y · N proposte";
-  - **+ Riquadro**, **Elimina** e l'interruttore **Seconda lettura**.
-- **La timeline**: una riga di tacche per segmento ("seg 2", "seg 3"…). Cliccando una tacca si apre quel fotogramma. I colori:
-  - verde: confermato;
-  - verde con la parte alta gialla: confermato con dubbi;
-  - viola: sospetto;
-  - giallo: con proposte o seconda lettura;
-  - arancione: modificato, da confermare;
-  - rosso: non salvato;
-  - grigio: niente proposto.
-- **Confermati con dubbi:** tre contatori cliccabili, **senza numero**, **con illeggibili** e **strada non indicata**. Ciascuno filtra i fotogrammi confermati che hanno quel dubbio; un secondo clic torna a "Da rivedere".
+  - **+ Riquadro**, **Elimina** (elimina il riquadro selezionato) e l'interruttore **Seconda lettura**.
+- **La timeline**: una riga di tacche per segmento ("seg 2", "seg 3"…), una tacca per immagine, in ordine.
+  - Le tacche non hanno scritte. Passandoci sopra col mouse, o leggendo l'albero di accessibilità, ognuna dice per esempio "Segmento 2 · immagine 6 · confermato".
+  - Cliccando una tacca si apre quel fotogramma: controllare poi "Segmento X · immagine Y" sotto la foto.
+  - I colori:
+    - verde: confermato;
+    - verde con la parte alta gialla: confermato con un cartello senza numero o illeggibile;
+    - viola: sospetto;
+    - giallo: con proposte o seconda lettura;
+    - arancione: modificato, da confermare;
+    - rosso: non salvato;
+    - grigio: niente proposto.
+- **Confermati con dubbi:** tre contatori cliccabili. Contano fotogrammi, non riquadri:
+  - **senza numero**: un Limite massimo, una Zona, un Segnale variabile o un Numero a terra con **?**. La Fine limitazione non conta;
+  - **con illeggibili**: almeno un riquadro Illeggibile;
+  - **strada non indicata**: un Limite massimo, una Zona o un Segnale variabile con strada **Da chiarire**. È il valore iniziale di ogni riquadro, quindi questo contatore sale se non si sceglie la strada. La strada non cambia il colore della tacca.
+
+  Ciascuno filtra i fotogrammi confermati che hanno quel dubbio; un secondo clic torna a "Da rivedere".
 
 **A destra, il pannello**
 - **Cartelli**: un'eventuale riga viola **Sospetto: …** con il motivo, poi un riquadro per riga:
@@ -62,15 +75,16 @@ L'indirizzo del sito lo indica Cristian, oppure il sito è già aperto in Chrome
 - **Riquadro N**, quando un riquadro è selezionato:
   - lo zoom sul cartello, con gli angoli gialli per ridimensionare;
   - i cartelli rapidi **20 30 40 50 60 70 80 100 120** e **?** (numero non leggibile);
-  - **Altro valore** per i numeri che non ci sono tra quelli rapidi;
+  - **Altro valore**, per i numeri che non ci sono tra quelli rapidi. Compare solo quando il tipo ammette un numero;
   - **Tipo**: Limite massimo, Fine limitazione, Illeggibile, Segnale variabile, Zona; più in piccolo Numero a terra, Altro cartello, Non è un cartello;
   - **Strada**: La nostra, Un'altra, Da chiarire;
   - **Dettagli del cartello**, chiuso: visibilità, occlusione, pannello sotto, temporaneo, display variabile, note.
-- **Seconda lettura**: c'è solo sui fotogrammi che ne hanno una. Ogni voce indica tipo, valore, sicurezza e lato, con il pulsante **Usa**, che diventa **Già usato** quando quel cartello c'è già.
+- **Seconda lettura**: c'è solo sui fotogrammi che ne hanno una. Ogni voce indica tipo, valore, sicurezza, letture (A, B) e lato, con il pulsante **Usa**, che diventa **Già usato** quando quel cartello c'è già.
 - **Altro**, chiuso: sito fisico, incontro, esportazione JSONL, scorciatoie.
 - **In fondo**, sempre nello stesso punto:
   - la riga di stato;
-  - i link **Annulla modifiche** e **Annulla conferma**;
+  - il link **Annulla modifiche**, solo su un fotogramma modificato o non salvato;
+  - il link **Annulla conferma**, solo su un fotogramma confermato sul server;
   - il pulsante **Conferma**, che dice cosa salva: "Conferma · 60 · 40", "Conferma · nessun cartello", oppure "Già confermato · avanti →" su un fotogramma già confermato e non modificato.
 
 La foto e il pulsante Conferma non si spostano mai da soli: avvisi ed errori compaiono nel pannello, sopra la riga di stato.
@@ -86,7 +100,7 @@ La foto e il pulsante Conferma non si spostano mai da soli: avvisi ed errori com
 
 - Dare un valore solo quando il numero si legge in quel fotogramma. Non copiarlo dai fotogrammi vicini né dalla seconda lettura.
 - Se si riconosce un limite ma non il numero: tipo **Limite massimo** e cartello **?**. Se non si capisce neppure che cartello è: **Illeggibile**, con una nota nei dettagli.
-- Distinguere un limite attivo da una **Fine limitazione**. Nel formato attuale la fine limitazione non ha un numero: un numero barrato leggibile va nelle note.
+- Distinguere un limite attivo da una **Fine limitazione**. La fine limitazione si salva senza numero, come nella revisione del 21 ottobre 2026: scegliere **Fine limitazione**, poi premere **?** per togliere il numero, e scrivere l'eventuale numero barrato nelle note. Passando a Fine limitazione la pagina tiene il numero scelto prima: controllare che la riga dica solo "Fine limitazione".
 - Distinguere **Zona** da un normale limite massimo.
 - **Strada**:
   - **La nostra**: il limite vale per la strada che si sta percorrendo;
@@ -94,7 +108,7 @@ La foto e il pulsante Conferma non si spostano mai da soli: avvisi ed errori com
   - **Da chiarire**: quando non si può stabilire, per esempio un ramo oltre una rotonda.
 - Un pannello variabile spento o vuoto non mostra una velocità: tipo **Segnale variabile**, cartello **?** e una nota. Un segnale luminoso sovraesposto resta illeggibile anche se la proposta suggerisce un numero.
 - Non sono cartelli di velocità e vanno eliminati con **✕**: loghi, pubblicità, precedenze, frecce, limiti di altezza e altri divieti. **Altro cartello** e **Non è un cartello** si usano solo se Cristian lo chiede: tengono il riquadro come esempio.
-- I doppioni sullo stesso cartello ("stesso cartello di N", per esempio 40 e 80 sullo stesso disco) si eliminano con **✕**. Si tiene un solo riquadro, con il valore giusto.
+- I doppioni sullo stesso cartello ("stesso cartello di N", per esempio 40 e 80 sullo stesso disco) si eliminano con **✕**. Si tiene un solo riquadro, con il valore giusto. "Stesso cartello di N" compare solo sul secondo riquadro della coppia e non dice quale dei due sia sbagliato: deciderlo guardando.
 - Controllare anche i riquadri piccoli contenuti in uno più grande.
 - Un fotogramma senza cartelli pertinenti si conferma comunque, con **Conferma · nessun cartello**: anche gli esempi negativi servono.
 
@@ -109,47 +123,68 @@ Esempi visti nelle route reali:
 1. **Aprire il fotogramma**: con le frecce **‹ ›**, con una tacca della timeline o, per un agente che usa JavaScript, per chiave (sezione 9). Il filtro **Da rivedere** mostra solo ciò che resta da fare.
 2. **Aspettare la foto**. I riquadri compaiono solo quando la foto nuova è caricata. Controllare che "Segmento X · immagine Y" sia il fotogramma voluto.
 3. **Correggere i riquadri esistenti.** Cliccare la riga nella lista (o il riquadro sulla foto), poi:
-   - scegliere il valore con un cartello rapido, con **?** o con **Altro valore**;
-   - scegliere il **Tipo** e la **Strada**;
-   - se il riquadro non racchiude bene il cartello, trascinare gli angoli gialli, meglio nello zoom;
-   - eliminare con **✕** i falsi positivi e i doppioni.
+   - scegliere il valore con un cartello rapido o con **?**;
+   - per un numero che non c'è tra quelli rapidi:
+     - scriverlo in **Altro valore** e premere **Invio**, prima di cliccare qualunque altro pulsante. Se si clicca subito altrove, quel primo clic serve solo a registrare il numero e va perso;
+     - controllare che la riga del riquadro mostri il nuovo valore, per esempio "Limite massimo · 90 km/h";
+     - se il numero non è un intero tra 5 e 250, sotto il campo compare in rosso "Scrivi un numero intero tra 5 e 250, oppure lascia vuoto se non si legge." e il riquadro **tiene il valore di prima**: Conferma salverebbe quello, senza nessun errore;
+   - scegliere il **Tipo**. Il valore e il tipo si influenzano:
+     - un cartello rapido, anche **?**, trasforma da solo in **Limite massimo** un riquadro Illeggibile, Altro cartello o Non è un cartello. Per **Zona** o **Segnale variabile** premere poi il tipo;
+     - i tipi senza numero (Illeggibile, Altro cartello, Non è un cartello) cancellano il valore: se si torna indietro, il numero va scelto di nuovo;
+   - scegliere la **Strada**. Ogni riquadro parte con **Da chiarire** già premuto, anche quello disegnato o preso con **Usa**. Per ogni cartello di velocità premere **La nostra** o **Un'altra**, e lasciare **Da chiarire** solo quando lo si è deciso davvero;
+   - se il riquadro non racchiude bene il cartello, trascinare gli angoli gialli, meglio nello zoom, un angolo alla volta. Dopo ogni trascinamento lo zoom si ricentra sul riquadro nuovo: gli angoli tornano più o meno nello stesso punto ed è il cartello a sembrare più piccolo. Fare un nuovo screenshot, controllare i bordi e solo dopo trascinare l'angolo successivo;
+   - eliminare con **✕** i falsi positivi e i doppioni, uno alla volta. Dopo ogni ✕ i riquadri si rinumerano (anche in "stesso cartello di N") e la ✕ della riga successiva finisce sotto il puntatore. Fare un nuovo screenshot prima di ogni ✕, oppure eliminare partendo dall'ultima riga.
 4. **Aggiungere i cartelli mancanti**:
-   - premere **+ Riquadro** (la foto mostra "Trascina sull'immagine per disegnare il riquadro");
+   - premere **+ Riquadro**. La foto mostra "Trascina sull'immagine per disegnare il riquadro" e il pulsante diventa **Annulla**: premerlo per uscire senza disegnare;
    - trascinare sulla foto da un angolo all'opposto del cartello;
-   - il riquadro nuovo nasce come **Illeggibile** e resta selezionato: assegnargli tipo, valore e strada.
+   - il riquadro nuovo nasce come **Illeggibile**, con strada **Da chiarire**, e resta selezionato. Assegnargli valore, tipo e strada come al punto 3. Per lasciarlo Illeggibile non premere nessun cartello rapido: anche **?** lo trasformerebbe in Limite massimo senza numero.
 
-   In alternativa, se la seconda lettura ha visto il cartello, premere **Usa** sulla sua voce e poi controllarlo.
+   In alternativa, se la seconda lettura ha visto il cartello, premere **Usa** sulla sua voce. **Usa** aggiunge un riquadro nuovo ("aggiunto a mano", strada **Da chiarire**) e non corregge quello del modello. Se compare "stesso cartello di N", eliminare con **✕** il riquadro sbagliato. Poi controllare valore, tipo e strada.
 5. **Confermare**:
-   - verificare che il campo **Revisore** sia compilato;
+   - verificare che il campo **Revisore** contenga il nome dell'agente;
    - premere **Conferma · …**.
 
    Il risultato:
-   - **Riuscita**: la pagina passa da sola al fotogramma successivo del filtro. In fondo compare in verde "Salvato `<segmento/immagine>` alle HH:MM. Ecco il prossimo.", il contatore in alto sale e la tacca diventa verde.
+   - **Riuscita**: in fondo compare in verde "Salvato `<segmento/immagine>` alle HH:MM. Ecco il prossimo." e la pagina passa da sola al fotogramma successivo del filtro. La tacca diventa verde (con la parte alta gialla se restano dubbi). Il contatore in alto sale solo per un fotogramma non ancora confermato: su una riconferma resta uguale.
    - **Fallita**: si resta sul fotogramma, lo stato diventa **Non salvato** e la riga di stato dice in rosso "NON salvato: motivo". Vedere la sezione 7.
    - **Già confermato · avanti →**: il fotogramma era già confermato e non è stato modificato. Non si salva niente, si passa al successivo.
 6. **Annotarsi** l'esito: chiave del fotogramma, riquadri salvati e dubbi. Servono per il resoconto (sezione 8).
 
-Non usare la tastiera per navigare o confermare. **Invio** conferma il fotogramma, anche subito dopo un clic su una freccia. Usare sempre i pulsanti.
+**Tastiera.** Non usarla per navigare o confermare: usare sempre i pulsanti. Scrivere solo dopo aver cliccato dentro un campo di testo. Fuori dai campi:
+- **Invio** conferma il fotogramma, anche subito dopo un clic su una freccia o su + Riquadro;
+- **Canc** e **Backspace** eliminano il riquadro selezionato;
+- le frecce **← →** cambiano fotogramma;
+- **N** avvia il disegno, **H** nasconde la seconda lettura, **Esc** toglie la selezione.
+
+Dentro **Altro valore** e **Note**, invece, **Invio** registra il valore e non conferma.
 
 ## 7. Errori e casi particolari
 
 - **"Scrivi nome o sigla del revisore, poi conferma."**: il campo Revisore è vuoto. Compilarlo e premere di nuovo **Conferma**.
 - **"NON salvato: …"**: il motivo è scritto nella riga.
-  - "Valore non ammesso…" o un valore fuori 5–250 km/h: correggere il riquadro e riconfermare.
-  - "salvato da un'altra pagina nel frattempo": qualcun altro ha cambiato quel fotogramma. Ricaricare la pagina, guardare la versione attuale e non sovrascriverla senza autorizzazione.
+  - "Valore non ammesso in uno dei campi a scelta.": correggere il riquadro e riconfermare. Un numero fuori 5–250 non arriva fin qui: lo blocca già **Altro valore** (sezione 6).
+  - "salvato da un'altra pagina nel frattempo": qualcun altro ha cambiato quel fotogramma. Ricaricare la pagina: la modifica locale viene scartata e si vede la versione del server. Non sovrascriverla senza autorizzazione.
   - "server non raggiungibile": aspettare e premere **Riprova a salvare** nel riquadro rosso. Se continua, fermarsi e avvisare Cristian.
-- **Riquadro rosso "N fotogrammi confermati NON salvati sul server"**: ci sono conferme rimaste nel browser. Premere **Riprova a salvare**. Il lavoro è finito solo quando il riquadro sparisce.
+- **Riquadro rosso "N fotogrammi confermati NON salvati sul server"** (con uno solo: "1 fotogramma confermato NON salvato sul server (chiave)."): ci sono conferme rimaste nel browser. Aprire quel fotogramma e leggere il motivo nella riga di stato.
+  - **Riprova a salvare** serve solo quando il motivo è "server non raggiungibile" o un errore del server. La pagina riprova anche da sola ogni 30 secondi, quindi il riquadro può sparire senza clic. Quando riesce si resta sullo stesso fotogramma e la riga dice "Salvato ✓ · revisione N · <revisore>".
+  - Con un valore non ammesso o con "salvato da un'altra pagina", riprovare dà lo stesso errore: correggere e riconfermare, oppure ricaricare, come sopra.
+
+  Il lavoro è finito solo quando il riquadro rosso sparisce.
 - **Annulla modifiche** riporta il fotogramma all'ultima versione confermata, o alle proposte se non era mai stato confermato.
 - **Annulla conferma** va premuto due volte: il primo clic lo trasforma in **Sì, annulla**, il secondo toglie la conferma. Va usato solo se richiesto.
 - **Modificare non è salvare.** Un fotogramma modificato e non confermato resta arancione "Da confermare". Prima di finire non ne devono restare.
-- Dopo l'ultimo fotogramma del filtro compare "Non restano fotogrammi da rivedere con questo filtro."
+- "Non restano fotogrammi da rivedere con questo filtro." vuol dire che non ce ne sono più **dopo** questo: la pagina non ricomincia dall'inizio. Controllare la posizione `N / M` sotto la foto e la timeline. Se ne restano prima, aprirli con una tacca o con **‹**.
 
 ## 8. Controllo finale e resoconto
 
 1. Ricaricare la pagina. Controllare il contatore "N di M confermati" e che non ci siano riquadri rossi né tacche rosse o arancioni.
 2. Aprire il filtro **Da rivedere**: deve restare vuoto, o contenere solo quello che si è deciso di lasciare.
 3. Guardare i contatori **Confermati con dubbi** e ricontrollare almeno alcuni di quei fotogrammi.
-4. Per gli agenti che possono fare richieste HTTP: `GET /api/route/<route_id>/reviews`, con la stessa sessione del browser, restituisce `confirmed_count` e la lista `reviews` (`frame_key`, `confirmed`, `reviewer`, `revision`, `detections`). Confrontarla con lo stato iniziale: le conferme di altri revisori devono essere rimaste uguali.
+4. Per gli agenti che possono fare richieste HTTP: `GET /api/route/<route_id>/reviews`, con la stessa sessione del browser, restituisce:
+   - `confirmed_count`;
+   - la lista `reviews` (`frame_key`, `confirmed`, `reviewer`, `revision`, `detections`), comprese le conferme annullate (`confirmed: false`).
+
+   Farla anche all'inizio, prima di confermare, e conservare `frame_key`, `reviewer`, `revision` e `confirmed`. Alla fine le voci di altri revisori devono avere la stessa `revision`.
 5. Riferire a Cristian:
    - route;
    - fotogrammi confermati da te, con e senza cartelli;
@@ -159,6 +194,7 @@ Non usare la tastiera per navigare o confermare. **Invio** conferma il fotogramm
    - fotogrammi lasciati in sospeso e perché.
 
    Lo "0 sospetti" non dimostra che le etichette siano giuste: dirlo esplicitamente.
+6. Il browser ricorda il nome del revisore. Se si è lavorato nel Chrome di Cristian, alla fine svuotare il campo **Revisore**: altrimenti le sue prossime conferme risultano firmate dall'agente.
 
 ## 9. Per agenti che usano JavaScript o Playwright
 
@@ -172,7 +208,7 @@ La pagina espone il proprio stato con attributi che non cambiano il layout. Conv
 | `body` | `data-unsaved` | Fotogrammi confermati non ancora salvati (`0` = tutto salvato) |
 | `body` | `data-last-save-key`, `data-last-save-result`, `data-last-save-revision`, `data-save-count` | Ultimo salvataggio. Il risultato vale `saving`, poi `ok` o `error`; `unchanged` se la conferma non ha inviato niente; `withdrawn` dopo un ritiro; `need-reviewer` se manca il revisore |
 | `#stage` | `data-photo-key` | Chiave del fotogramma la cui foto è caricata (`error:<chiave>` se la foto non si carica) |
-| `#boxList .box-row` | `data-index`, `data-detection-id`, `data-duplicate-of` | Riga di un riquadro. `.box-main` lo seleziona, `.box-del` lo elimina |
+| `#boxList .box-row` | `data-index`, `data-detection-id`, `data-duplicate-of` | Riga di un riquadro. `.box-main` lo seleziona, `.box-del` lo elimina. `data-duplicate-of` è l'indice (da 0) dell'altro riquadro, cioè N−1 di "stesso cartello di N", e c'è solo sulla seconda riga della coppia: non dice quale dei due è sbagliato |
 | `#families`, `#familiesMore` | `[data-family]` | Tipo di cartello |
 | `#quickValues` | `[data-value]` | Velocità rapide; `data-value="unknown"` = numero non leggibile |
 | `#roads` | `[data-applicability]` | `own_road`, `other_road`, `unresolved` |
@@ -184,6 +220,7 @@ La pagina espone il proprio stato con attributi che non cambiano il layout. Conv
 Note:
 - Anche i riquadri disegnati sulla foto hanno `data-index`. Per la lista usare sempre `#boxList .box-row[...]`, meglio con `data-detection-id`, perché l'indice cambia dopo ogni eliminazione.
 - I campi di **Dettagli del cartello** e di **Altro** sono dentro sezioni chiuse: aprirle (clic sul titolo) prima di usarli.
+- Dopo `fill` su `#value` o `#notes` premere `Enter` (o lanciare l'evento `change`) prima di cliccare altro: il valore si registra solo così.
 
 Schema per un fotogramma, con Playwright:
 
@@ -214,6 +251,8 @@ Più indicazioni:
     return [q.x, q.y];
   }, [x, y]);
   ```
+
+  La stessa conversione vale per lo zoom, con `document.getElementById('zoom')`. Per ridimensionare un riquadro selezionato premere il mouse esattamente su un suo angolo (per esempio `x2, y2` per quello in basso a destra), trascinarlo nel punto nuovo e poi controllare `bbox_xyxy`.
 - **Navigazione.** Dopo ogni conferma riuscita la pagina passa da sola al fotogramma successivo. Aprire sempre il prossimo per chiave e controllare `body[data-frame-key]`, invece di premere ‹ › o Invio.
 - **Funzioni interne.** Esistono anche funzioni come `openFrame(key)`, `rows`, `S`, `workOf(row)`, `addManualBox(row, box, family, value)` e `render()`, ma sono dettagli interni che possono cambiare. Se una modifica passa da `workOf(...)`, chiamare poi `render()`. Non modificare mai SQLite o i report sul server.
 - **Valori ammessi dal server.** Se non sono rispettati, il server risponde con un errore 400:
@@ -221,11 +260,15 @@ Più indicazioni:
   | Campo | Valori |
   | --- | --- |
   | `family` | `maximum_speed`, `cancellation`, `zone`, `variable_display`, `road_marking_candidate`, `other_sign`, `unreadable`, `not_a_sign` |
-  | `value_kph` | intero tra 5 e 250, oppure `null` |
+  | `value_kph` | intero tra 5 e 250, oppure `null`. Un numero è ammesso solo con `maximum_speed`, `cancellation`, `zone`, `variable_display`, `road_marking_candidate`; con `other_sign`, `unreadable`, `not_a_sign` deve essere `null` |
   | `applicability` | `own_road`, `other_road`, `unresolved` |
   | `visibility` | `unknown`, `clear`, `partial`, `poor` |
   | `occlusion` | `unknown`, `none`, `partial`, `heavy` |
   | `supplementary_panel` | `unknown`, `none`, `present`, `unresolved` |
+  | `temporary`, `variable_display` | `true`, `false` oppure `null` |
+  | `notes` | testo, anche vuoto; mai `null` |
+  | `bbox_xyxy` | dentro l'immagine, con `x1 < x2` e `y1 < y2` |
 
   Al massimo 100 riquadri per fotogramma; il nome del revisore al massimo 100 caratteri.
-- **Stato iniziale.** Il JSON dei fotogrammi è nello script `#payload` della pagina ed è grande: non stamparlo tutto, estrarre solo chiavi, `preview_path` e numero di proposte. Per una sessione lunga conservare lo stesso `context` (cookie) e registrare gli eventi `pageerror` e le risposte HTTP con stato ≥ 400, stampando solo stato e percorso, senza query string né token.
+- **Stato iniziale.** Il JSON dei fotogrammi è nello script `#payload` della pagina ed è grande: non stamparlo tutto, estrarre solo chiavi, `preview_path` e numero di proposte. Le revisioni non sono lì: leggerle con `GET /api/route/<route_id>/reviews` (sezione 8).
+- **Sessione.** Per una sessione lunga conservare lo stesso `context` (cookie) e registrare gli eventi `pageerror` e le risposte HTTP con stato ≥ 400, stampando solo stato e percorso, senza query string né token.
