@@ -26,7 +26,7 @@ Un agente che ha a disposizione il **server MCP** della revisione (strumenti `li
 2. La pagina iniziale **Route** elenca le route con un report. Ogni card mostra "N di M confermati", i sospetti e un'azione: **Inizia →**, **Riprendi →** o **Ricontrolla →**. Aprire la route indicata da Cristian.
 3. Lavorare con la **pagina** larga almeno 1000 px. Con il pannello laterale dell'estensione aperto la pagina è più stretta della finestra: allargare la finestra.
 
-   Sotto i 981 px la pagina passa al layout da telefono. Il pulsante Conferma diventa la barra fissa in basso, tra ‹ e ›, e dice solo **Conferma**, **Nessun cartello**, **Avanti →** (cioè "Già confermato · avanti →") o **Salvataggio…**. Cosa si salva si legge allora nella lista dei cartelli.
+   Sotto i 981 px la pagina passa al layout da telefono: sotto la foto vengono subito i cartelli; timeline, legenda e "Confermati con dubbi" sono chiusi sotto il pulsante **Timeline** (lo stato aperto/chiuso resta nel browser). Il pulsante Conferma diventa la barra fissa in basso, tra ‹ e ›, e dice cosa salva in breve: **Conferma · 60**, **Nessun cartello**, **Approva · 60**, **Avanti →** (cioè "Già confermato · avanti →") o **Salvataggio…**.
 4. Se in fondo al pannello compare **"Revisioni non lette dal server"** o **"Il report di questa route è stato rigenerato: ricarica la pagina"**, fermarsi: ricaricare la pagina e, se resta, avvisare Cristian.
 5. La pagina della route riapre con il filtro e il fotogramma usati l'ultima volta in quel browser. All'inizio scegliere il filtro **Da rivedere**.
 
@@ -34,10 +34,11 @@ Un agente che ha a disposizione il **server MCP** della revisione (strumenti `li
 
 **Barra in alto**
 - Il menu della route.
-- I filtri **Da rivedere / Sospetti / Con proposte / Tutti**:
+- I filtri **Da rivedere / Sospetti / Con proposte / Tutti** e, solo quando ce ne sono, **AI · N**:
   - **Da rivedere**: i fotogrammi non ancora confermati;
   - **Sospetti**: modello e seconda lettura non sono d'accordo, oppure un fotogramma vicino ha un cartello (confermato o visto dalla seconda lettura) e questo non ha niente. Il motivo è nella riga viola **Sospetto: …**. Un fotogramma confermato non è mai sospetto, ma una conferma può rendere sospetti i vicini, quindi il numero dei sospetti non scende sempre;
-  - **Con proposte**: il modello ha proposto almeno un riquadro.
+  - **Con proposte**: il modello ha proposto almeno un riquadro;
+  - **AI · N**: i fotogrammi confermati da un revisore AI (REST API o MCP) e non ancora approvati da una persona. Su questi il pulsante dice **Approva (AI) · …** e la riga di stato "Confermato da ai/<nome> (AI)"; approvare salva il fotogramma com'è come revisione umana, e solo allora entra nel dataset. Un agente AI non approva mai: è un compito di Cristian.
 - Il contatore "N di M confermati · K sospetti".
 - Il campo **Revisore**.
 
@@ -56,6 +57,7 @@ Un agente che ha a disposizione il **server MCP** della revisione (strumenti `li
   - I colori:
     - verde: confermato;
     - verde con la parte alta gialla: confermato con un cartello senza numero o illeggibile;
+    - verde a righe: confermato da un revisore AI, da approvare;
     - viola: sospetto;
     - giallo: con proposte o seconda lettura;
     - arancione: modificato, da confermare;
@@ -206,6 +208,7 @@ La pagina espone il proprio stato con attributi che non cambiano il layout. Conv
 | --- | --- | --- |
 | `body` | `data-frame-key` | Fotogramma mostrato (`segmento/immagine`) |
 | `body` | `data-frame-status` | `todo`, `dirty`, `saving`, `error`, `done` |
+| `body` | `data-frame-reviewer-kind` | Chi ha la conferma sul server: `human`, `ai` (da approvare), vuoto se non confermato |
 | `body` | `data-server` | `loading` finché le revisioni non arrivano dal server, poi `ready`; `error` o `stale` (report rigenerato); `offline` per la pagina aperta senza server |
 | `body` | `data-unsaved` | Fotogrammi confermati non ancora salvati (`0` = tutto salvato) |
 | `body` | `data-last-save-key`, `data-last-save-result`, `data-last-save-revision`, `data-save-count` | Ultimo salvataggio. Il risultato vale `saving`, poi `ok` o `error`; `unchanged` se la conferma non ha inviato niente; `withdrawn` dopo un ritiro; `need-reviewer` se manca il revisore |

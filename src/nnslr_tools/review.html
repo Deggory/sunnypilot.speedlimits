@@ -28,6 +28,7 @@
   --ok: #12702f;
   --ok-fill: #34c759;
   --ok-tint: rgba(52, 199, 89, 0.14);
+  --ai-stripe: #c9f0d4;
   --warn: #9a4400;
   --warn-fill: #ff9f0a;
   --warn-tint: rgba(255, 159, 10, 0.15);
@@ -207,6 +208,7 @@ input::placeholder { color: var(--muted); }
 .pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
 .pill.todo { color: var(--muted); }
 .pill.done { color: var(--ok); background: var(--ok-tint); }
+.pill.done.ai { color: var(--hint); background: var(--hint-tint); }
 .pill.dirty { color: var(--warn); background: var(--warn-tint); }
 .pill.saving { color: var(--muted); }
 .pill.error { color: var(--danger); background: var(--danger-tint); }
@@ -252,9 +254,12 @@ input::placeholder { color: var(--muted); }
 .tl-ticks button.error { background: var(--danger-fill); }
 .tl-ticks button.done { background: var(--ok-fill); }
 .tl-ticks button.done.unsure { background: linear-gradient(var(--yellow) 0 6px, var(--ok-fill) 6px); }
+/* Confirmed by an AI (REST API or MCP): striped until a person approves it. */
+.tl-ticks button.done.ai { background: repeating-linear-gradient(135deg, var(--ok-fill) 0 3px, var(--ai-stripe) 3px 6px); }
+.tl-ticks button.done.ai.unsure { background: linear-gradient(var(--yellow) 0 6px, transparent 6px), repeating-linear-gradient(135deg, var(--ok-fill) 0 3px, var(--ai-stripe) 3px 6px); }
 .tl-ticks button.cur { box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--fg); }
 .tl-ticks button:hover { filter: brightness(0.92); }
-.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--muted); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--muted); }
 .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 0; }
 .legend .l-done { background: var(--ok-fill); }
 .legend .l-has { background: var(--yellow); }
@@ -263,6 +268,9 @@ input::placeholder { color: var(--muted); }
 .legend .l-error { background: var(--danger-fill); }
 .legend .l-none { background: var(--fill-strong); }
 .legend .l-unsure { background: linear-gradient(var(--yellow) 0 50%, var(--ok-fill) 50%); }
+.legend .l-ai { background: repeating-linear-gradient(135deg, var(--ok-fill) 0 2px, var(--ai-stripe) 2px 4px); }
+/* Phone only: one button folds the timeline, the legend and the doubt counters away. */
+.tl-toggle { display: none; }
 .quality { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: 13px; color: var(--muted); }
 .quality-label { margin-right: 2px; }
 .qchip { border: 0; background: var(--fill); color: var(--fg); border-radius: 999px; padding: 3px 11px; font-size: 12.5px; font-weight: 500; min-height: 26px; font-variant-numeric: tabular-nums; }
@@ -416,6 +424,28 @@ details[open] summary::after { transform: rotate(90deg); }
   .stage-tools { margin-left: auto; }
   .tl-ticks { overflow-x: auto; scrollbar-width: none; }
   .tl-ticks button { flex: none; width: 9px; height: 26px; }
+  /* Photo, its bar, then the panel: the boxes to check come right under the photo. The timeline,
+     the legend and the doubt counters follow, folded under one button. */
+  .workspace { display: flex; flex-direction: column; align-items: stretch; gap: 14px; }
+  .stage-col { display: contents; }
+  .stage { order: 1; }
+  .stage-bar { order: 2; }
+  .panel { order: 3; }
+  .tl-toggle {
+    order: 4; display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%;
+    border: 0; background: var(--fill); color: var(--fg); border-radius: 12px; padding: 10px 14px; min-height: 46px;
+    font-size: 14px; font-weight: 500; text-align: left;
+  }
+  .tl-toggle::after { content: "›"; color: var(--muted); font-size: 18px; transition: transform 0.2s ease; }
+  .tl-toggle[aria-expanded="true"]::after { transform: rotate(90deg); }
+  .tl-toggle .tl-title { flex: none; }
+  .tl-toggle .tl-sub { flex: 1 1 auto; text-align: right; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .timeline { order: 5; }
+  .legend { order: 6; }
+  .quality { order: 7; }
+  .workspace:not(.tl-open) .timeline, .workspace:not(.tl-open) .legend, .workspace:not(.tl-open) .quality { display: none; }
+  /* The confirm button is in the bottom bar: the section under the panel shows only messages and links. */
+  .panel .confirm-section.quiet { display: none; }
   .mobilebar {
     display: flex; flex-direction: column; gap: 6px; position: fixed; left: 0; right: 0; bottom: 0; z-index: 6;
     background: var(--bar); -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px);
@@ -427,7 +457,7 @@ details[open] summary::after { transform: rotate(90deg); }
   }
   .mobile-buttons { display: flex; gap: 8px; }
   .mobile-buttons .btn { flex: 1; padding: 10px; min-height: 48px; font-size: 16px; border-radius: 12px; }
-  .mobile-buttons .btn.primary { flex: 2.4; }
+  .mobile-buttons .btn.primary { flex: 2.4; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .mobile-msg { margin: 0; font-size: 13px; color: var(--danger); font-weight: 600; overflow-wrap: anywhere; }
   .page { padding-bottom: 124px; }
   .confirm-area .btn.primary { display: none; }
@@ -443,8 +473,8 @@ details[open] summary::after { transform: rotate(90deg); }
   .brand-name { display: none; }
   .route-pick { order: 1; flex: 1 1 0; }
   .reviewer { order: 2; }
-  .reviewer input { width: 112px; }
-  .filters { order: 3; flex: 1 1 100%; display: flex; }
+  .reviewer input { width: 96px; }
+  .filters { order: 3; flex: 1 1 100%; display: flex; scrollbar-width: none; }
   .filters button { flex: 1 0 auto; padding: 4px 8px; }
   .progress { order: 4; flex: 1 1 100%; flex-direction: row; align-items: center; gap: 10px; }
   .progress-bar { flex: 1; }
@@ -482,6 +512,7 @@ details[open] summary::after { transform: rotate(90deg); }
       <button type="button" data-filter="suspicious" aria-pressed="false" title="Il modello e la seconda lettura non sono d’accordo">Sospetti</button>
       <button type="button" data-filter="proposals" aria-pressed="false" title="Con proposte del modello">Con proposte</button>
       <button type="button" data-filter="all" aria-pressed="false">Tutti</button>
+      <button type="button" data-filter="ai" aria-pressed="false" title="Confermati da un revisore AI: da verificare e approvare" hidden>AI</button>
     </div>
     <div class="progress" aria-live="polite">
       <div class="progress-text" id="progressText"></div>
@@ -522,12 +553,14 @@ details[open] summary::after { transform: rotate(90deg); }
           <label class="switch" id="hintToggle" hidden><input type="checkbox" id="showHints" checked><span class="track" aria-hidden="true"></span>Seconda lettura</label>
         </div>
       </div>
+      <button type="button" class="tl-toggle" id="tlToggle" aria-expanded="false" aria-controls="timeline"><span class="tl-title">Timeline</span><span class="tl-sub" id="tlSub"></span></button>
       <div class="timeline" id="timeline" aria-label="Tutti i fotogrammi della route"></div>
       <div class="legend">
         <span><i class="l-done"></i>confermato</span>
         <span><i class="l-sus"></i>sospetto</span>
         <span><i class="l-has"></i>con proposte o seconda lettura</span>
         <span><i class="l-unsure"></i>confermato con dubbi</span>
+        <span><i class="l-ai"></i>da AI</span>
         <span><i class="l-dirty"></i>da confermare</span>
         <span><i class="l-error"></i>non salvato</span>
         <span><i class="l-none"></i>niente proposto</span>
@@ -958,9 +991,15 @@ function frameStatus(key) {
   if (s.saved === false) { return 'dirty'; }
   return 'todo';
 }
+// Confirmed on the server by an AI reviewer (REST API or MCP) and not changed here: a person still has to approve it.
+function aiConfirmed(key) {
+  const s = S.edits[key];
+  return Boolean(api && s && s.reviewer_kind === 'ai' && frameStatus(key) === 'done' && sameAsServer(s));
+}
 function statusLabel(key) {
   const status = frameStatus(key);
   const s = S.edits[key];
+  if (status === 'done' && aiConfirmed(key)) { return 'Confermato · AI'; }
   if (status === 'done') { return 'Confermato'; }
   if (status === 'saving') { return 'Salvataggio…'; }
   if (status === 'error') { return s && s.error ? 'Non salvato' : 'In attesa'; }
@@ -985,10 +1024,15 @@ function doubtsOf(key) {
 function isQualityFilter(filter) {
   return filter === 'unknown' || filter === 'unreadable' || filter === 'road';
 }
+// Filters over confirmed frames: a confirmation does not take the frame out of them by itself.
+function confirmedFilter(filter) {
+  return isQualityFilter(filter) || filter === 'ai';
+}
 function matchesFilter(row, filter) {
   if (filter === 'todo') { return frameStatus(row.frame_key) !== 'done'; }
   if (filter === 'suspicious') { return reasonsOf(row.frame_key).length > 0; }
   if (filter === 'proposals') { return proposalsOf(row).length > 0; }
+  if (filter === 'ai') { return aiConfirmed(row.frame_key); }
   if (filter === 'unknown') { return doubtsOf(row.frame_key).unknown > 0; }
   if (filter === 'unreadable') { return doubtsOf(row.frame_key).unreadable > 0; }
   if (filter === 'road') { return doubtsOf(row.frame_key).road > 0; }
@@ -1086,7 +1130,7 @@ function nextAfterConfirm(key) {
   for (let i = start + 1; i < rows.length; i++) {
     const row = rows[i];
     if (S.filter === 'all') { return row.frame_key; }
-    if (isQualityFilter(S.filter)) {
+    if (confirmedFilter(S.filter)) {
       if (matchesFilter(row, S.filter)) { return row.frame_key; }
       continue;
     }
@@ -1127,6 +1171,7 @@ function setFilter(filter) {
   if (target === null) {
     if (filter === 'suspicious') { S.filterNote = 'Nessun fotogramma sospetto da rivedere.'; }
     else if (isQualityFilter(filter)) { S.filterNote = 'Nessun fotogramma confermato con questo dubbio.'; }
+    else if (filter === 'ai') { S.filterNote = 'Nessun fotogramma confermato da un’AI da approvare.'; }
     else { S.filterNote = 'Nessun fotogramma corrisponde a questo filtro.'; }
     render();
     return;
@@ -1296,7 +1341,8 @@ async function confirmFrame() {
   const key = row.frame_key;
   if (S.inFlight.has(key)) { return; }
   // Already on the server and not changed since: Conferma moves on, it does not sign the frame again.
-  if (api && frameStatus(key) === 'done' && sameAsServer(S.edits[key])) {
+  // A frame an AI confirmed is the exception: confirming it is the person's approval, saved as a human review.
+  if (api && frameStatus(key) === 'done' && sameAsServer(S.edits[key]) && !aiConfirmed(key)) {
     S.lastSave = { key: key, result: 'unchanged', revision: S.edits[key].revision || 0 };
     go(1);
     if (S.currentKey === key) {
@@ -1334,9 +1380,10 @@ async function confirmFrame() {
   S.notice = null;
   store();
   render();
+  const approved = S.edits[key].base && S.edits[key].base.reviewer_kind === 'ai' && sameAsServer(S.edits[key]);
   const ok = await send(key);
   if (ok && S.currentKey === key) {
-    advanceAfterConfirm(key, 'Salvato ' + key + ' alle ' + timeNow() + '.');
+    advanceAfterConfirm(key, (approved ? 'Approvato ' : 'Salvato ') + key + ' alle ' + timeNow() + '.');
   }
 }
 async function withdrawFrame() {
@@ -1892,6 +1939,7 @@ function renderTimeline() {
     if (status === 'done') {
       const doubts = doubtsOf(key);
       if (doubts.unknown + doubts.unreadable > 0) { cls = 'done unsure'; } else { cls = 'done'; }
+      if (aiConfirmed(key)) { cls += ' ai'; }
     }
     else if (status === 'error') { cls = 'error'; }
     else if (status === 'dirty' || status === 'saving') { cls = 'dirty'; }
@@ -1923,10 +1971,20 @@ function renderProgress() {
   const total = rows.length;
   let done = 0;
   let suspicious = 0;
+  let byAi = 0;
   for (const row of rows) {
     if (isConfirmed(row.frame_key)) { done += 1; }
     if (reasonsOf(row.frame_key).length > 0) { suspicious += 1; }
+    if (aiConfirmed(row.frame_key)) { byAi += 1; }
   }
+  // The AI filter appears only when there is something to approve (or while it is the filter in use).
+  const aiButton = document.querySelector('.filters button[data-filter="ai"]');
+  aiButton.textContent = 'AI · ' + byAi;
+  aiButton.hidden = byAi === 0 && S.filter !== 'ai';
+  let summary = done + '/' + total + ' confermati';
+  if (byAi > 0) { summary += ' · ' + byAi + ' AI'; }
+  if (suspicious > 0) { summary += ' · ' + suspicious + (suspicious === 1 ? ' sospetto' : ' sospetti'); }
+  el('tlSub').textContent = summary;
   const text = el('progressText');
   text.replaceChildren();
   if (total === 0) {
@@ -2055,6 +2113,9 @@ function saveText(key, s) {
     return ['', ''];
   }
   if (status === 'saving') { return ['Salvataggio in corso…', '']; }
+  if (status === 'done' && aiConfirmed(key)) {
+    return ['Confermato da ' + (s.reviewer || 'un’AI') + ' (AI) · revisione ' + s.revision + ': controlla e premi Approva.', 'warn'];
+  }
   if (status === 'done') {
     return ['Salvato ✓ · revisione ' + s.revision + (s.reviewer ? ' · ' + s.reviewer : ''), 'ok'];
   }
@@ -2109,7 +2170,7 @@ function render() {
 
   const status = frameStatus(key);
   const pill = el('statePill');
-  pill.className = 'pill ' + status;
+  pill.className = 'pill ' + status + (aiConfirmed(key) ? ' ai' : '');
   pill.textContent = statusLabel(key);
 
   const proposals = proposalsOf(row).length;
@@ -2140,14 +2201,18 @@ function render() {
   // The button says what it saves: "Conferma · 60 · 40".
   const names = [];
   for (const d of work.detections) { names.push(shortName(d)); }
+  // On a phone too: "Conferma · 60", so the list under the photo need not be checked to know what is saved.
   let label = 'Conferma · ' + names.join(' · ');
-  let mobileLabel = 'Conferma';
+  let mobileLabel = 'Conferma · ' + names.join(' · ');
   if (work.detections.length === 0) {
     label = 'Conferma · nessun cartello';
     mobileLabel = 'Nessun cartello';
   }
   let already = false;
-  if (status === 'done' && api && sameAsServer(S.edits[key])) {
+  if (aiConfirmed(key)) {
+    label = 'Approva (AI) · ' + (names.length > 0 ? names.join(' · ') : 'nessun cartello');
+    mobileLabel = 'Approva · ' + (names.length > 0 ? names.join(' · ') : 'nessuno');
+  } else if (status === 'done' && api && sameAsServer(S.edits[key])) {
     label = 'Già confermato · avanti →';
     mobileLabel = 'Avanti →';
     already = true;
@@ -2210,6 +2275,9 @@ function render() {
   else if (api && unsavedKeys().length > 0) { mobileText = unsavedKeys().length + ' fotogrammi confermati NON salvati: riprova dal pannello.'; }
   el('mobileMsg').textContent = mobileText;
   el('mobileMsg').hidden = mobileText === '';
+  // Nothing to say under the panel: on a phone that section folds away instead of leaving an empty block.
+  const quiet = lineText === '' && el('notices').childElementCount === 0 && el('discard').hidden && el('withdraw').hidden;
+  document.querySelector('.confirm-section').classList.toggle('quiet', quiet);
 
   if (document.activeElement !== el('site_group')) {
     el('site_group').value = work.site_group ?? row.site_group ?? '';
@@ -2222,6 +2290,7 @@ function render() {
   const body = document.body;
   body.dataset.frameKey = key;
   body.dataset.frameStatus = status;
+  body.dataset.frameReviewerKind = s && s.server_confirmed ? (s.reviewer_kind || 'human') : '';
   body.dataset.server = S.server;
   body.dataset.unsaved = String(unsavedKeys().length);
   body.dataset.saving = S.inFlight.size > 0 ? 'true' : 'false';
@@ -2498,6 +2567,13 @@ el('photo').addEventListener('error', function () {
   el('overlays').style.visibility = '';
   el('hintLayer').style.visibility = '';
 });
+el('tlToggle').addEventListener('click', function () {
+  const open = !el('workspace').classList.contains('tl-open');
+  el('workspace').classList.toggle('tl-open', open);
+  el('tlToggle').setAttribute('aria-expanded', open ? 'true' : 'false');
+  writeLocal('nnslr-timeline-open', open ? '1' : '0');
+  if (open) { scrollTimelineToCurrent(); }
+});
 el('timeline').addEventListener('click', function (evt) {
   const key = evt.target.dataset ? evt.target.dataset.key : null;
   if (key) { openFrame(key); }
@@ -2620,8 +2696,12 @@ function start() {
   }
   el('reviewer').value = readLocal('nnslr-reviewer', '') || '';
   const savedFilter = readLocal('nnslr-review-filter', 'todo');
-  if (savedFilter === 'todo' || savedFilter === 'suspicious' || savedFilter === 'proposals' || savedFilter === 'all' || isQualityFilter(savedFilter)) {
+  if (savedFilter === 'todo' || savedFilter === 'suspicious' || savedFilter === 'proposals' || savedFilter === 'all' || confirmedFilter(savedFilter)) {
     S.filter = savedFilter;
+  }
+  if (readLocal('nnslr-timeline-open', '0') === '1') {
+    el('workspace').classList.add('tl-open');
+    el('tlToggle').setAttribute('aria-expanded', 'true');
   }
   S.showHints = readLocal('nnslr-show-hints', '1') !== '0';
   el('showHints').checked = S.showHints;

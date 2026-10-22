@@ -516,3 +516,22 @@ print('ok')
     result = subprocess.run([sys.executable, '-c', script], capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.strip().endswith('ok')
+
+
+def test_review_page_marks_ai_reviews_and_offers_approval(api):
+    """The page shows AI confirmations apart (filter, striped ticks) and approves them as human reviews."""
+    server, root, rows = api
+    assert save(server, ROUTE, '0/0', ai_body())[0] == 200
+    status, response, page = server.request('GET', f'/route/{ROUTE}/')
+    assert status == 200
+    page = page.decode()
+    assert 'data-filter="ai"' in page and 'id="tlToggle"' in page
+    assert "Approva (AI)" in page and 'frameReviewerKind' in page
+    reviews = json_of(server.request('GET', f'/api/route/{ROUTE}/reviews')[2])['reviews']
+    assert reviews[0]['reviewer_kind'] == 'ai'
+    # The approval is the page's normal save of the same boxes: it becomes a human review.
+    body = page_body(rows['0/0'], drop_proposals=True, base_revision=1)
+    status, response, data = server.post_frame(ROUTE, '0/0', body)
+    assert status == 200, data
+    review = ReviewStore(db_path(root)).review(ROUTE, RUN_ID, '0/0')
+    assert review['reviewer_kind'] == 'human' and review['payload']['label_basis'] == 'human_review'
