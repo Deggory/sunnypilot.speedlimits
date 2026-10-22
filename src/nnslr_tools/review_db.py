@@ -328,6 +328,56 @@ class ReviewStore:
                 connection.close()
         return saved
 
+    def reclassify_as_ai(self, reviewer: str, *, client: str, dry_run: bool = False) -> list[dict]:
+        """Mark every current review saved under ``reviewer`` as a human review as an AI review.
+
+        For reviews an AI saved through the review page before reviewer_kind
+        existed. Each frame gets a new revision with the same boxes and review
+        time: reviewer "ai/<name>", reviewer_kind "ai", label_basis "ai_review",
+        recorded in the history. Returns the frames changed (or to change, with dry_run).
+        """
+        now = utc_now()
+        changed = []
+        with self._write_lock:
+            connection = self._connect()
+            try:
+                connection.execute('BEGIN IMMEDIATE')
+                try:
+                    rows = connection.execute(
+                        "SELECT * FROM frame_reviews WHERE reviewer = ? AND reviewer_kind = 'human' "
+                        'ORDER BY route_id, run_id, segment_index, output_index', (reviewer,)).fetchall()
+                    for row in rows:
+                        review = _review_from_row(row)
+                        name = _stored_reviewer(reviewer, 'ai')
+                        payload = copy.deepcopy(review['payload'])
+                        payload['reviewer'] = name
+                        payload['label_basis'] = AI_LABEL_BASIS
+                        payload['reviewer_kind'] = 'ai'
+                        payload['review_channel'] = review['channel']
+                        payload['reclassified_from'] = {'label_basis': review['payload'].get('label_basis'),
+                                                        'reviewer': reviewer, 'at': now}
+                        revision = review['revision'] + 1
+                        changed.append({'route_id': review['route_id'], 'run_id': review['run_id'],
+                                        'frame_key': review['frame_key'], 'confirmed': review['confirmed'],
+                                        'revision': revision, 'reviewer': name})
+                        if dry_run:
+                            continue
+                        text = json.dumps(payload, sort_keys=True, separators=(',', ':'), allow_nan=False)
+                        connection.execute(
+                            "UPDATE frame_reviews SET payload = ?, reviewer = ?, reviewer_kind = 'ai', revision = ?, "
+                            'updated_at = ? WHERE route_id = ? AND run_id = ? AND frame_key = ?',
+                            (text, name, revision, now, review['route_id'], review['run_id'], review['frame_key']))
+                        _append_history(connection, review['route_id'], review['run_id'], review['frame_key'],
+                                        revision, text, name, 1 if review['confirmed'] else 0, now, client, 'ai',
+                                        review['channel'])
+                    connection.execute('ROLLBACK' if dry_run else 'COMMIT')
+                except BaseException:
+                    connection.execute('ROLLBACK')
+                    raise
+            finally:
+                connection.close()
+        return changed
+
     def review(self, route_id: str, run_id: str, frame_key: str) -> dict | None:
         connection = self._connect()
         try:

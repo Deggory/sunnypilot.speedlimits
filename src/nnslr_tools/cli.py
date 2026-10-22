@@ -1147,6 +1147,15 @@ def build_parser() -> argparse.ArgumentParser:
                                "access token (NNSLR_REVIEW_TOKEN or a random one, printed at start)")
     p_review.add_argument("--port", type=int, default=8765)
     p_review.set_defaults(func=_cmd_review)
+    p_reclassify = sub.add_parser(
+        "review-reclassify-ai",
+        help="mark the reviews saved by the named reviewers (AI agents that used the review page, e.g. Codex) "
+             "as AI reviews: new revision, reviewer ai/<name>, never imported as human reviews")
+    p_reclassify.add_argument("--reviewer", action="append", required=True,
+                              help="reviewer name exactly as stored, e.g. Codex; repeat for more names")
+    p_reclassify.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+    p_reclassify.add_argument("--dry-run", action="store_true", help="only count what would change")
+    p_reclassify.set_defaults(func=_cmd_review_reclassify)
     p_mcp = sub.add_parser("mcp", help="MCP server (stdio) with the review tools, for Claude Code, Codex and other "
                                        "MCP clients; needs the optional [mcp] dependencies. The review server "
                                        "also serves MCP over HTTP at /mcp")
@@ -1397,6 +1406,23 @@ def _cmd_review(args: argparse.Namespace) -> int:
     from nnslr_tools.review import serve_review
     serve_review(args.route, data_root=Path(args.data_root) if args.data_root else None,
                  host=args.host, port=args.port)
+    return 0
+
+
+def _cmd_review_reclassify(args: argparse.Namespace) -> int:
+    from collections import Counter
+    from nnslr_tools.preannotate import resolve_data_root
+    from nnslr_tools.review_db import ReviewStore, db_path
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    store = ReviewStore(db_path(root))
+    report = {"dry_run": args.dry_run, "database": str(db_path(root)), "reviewers": {}}
+    for reviewer in args.reviewer:
+        changed = store.reclassify_as_ai(reviewer, client="review-reclassify-ai", dry_run=args.dry_run)
+        routes = Counter()
+        for item in changed:
+            routes[item["route_id"] + " " + item["run_id"]] += 1
+        report["reviewers"][reviewer] = {"frames": len(changed), "by_route_run": dict(sorted(routes.items()))}
+    print(json.dumps(report, indent=2, ensure_ascii=False))
     return 0
 
 

@@ -141,6 +141,8 @@ helpers/setup_mcp.sh --restart               # + copia del database se va migrat
 
 Per togliere i permessi alle sessioni basta cancellare `.claude/settings.local.json`; il server MCP si toglie con `claude mcp remove -s local nnslr-review`.
 
+Revisioni fatte da un'AI dalla pagina (con un nome come `Codex` o `ChatGPT`) risultano umane: `nnslr review-reclassify-ai --reviewer Codex --reviewer ChatGPT --dry-run` conta quelle da cambiare, senza `--dry-run` le segna come AI (nuova revisione nella cronologia, stessi riquadri). Fare prima una copia del database.
+
 Il database delle revisioni si aggiorna da solo alla versione 2 al primo avvio del codice nuovo (aggiunge tipo di revisore e canale; le revisioni già fatte restano "umane, dalla pagina"). Dopo, un `nnslr` vecchio non lo apre più.
 
 ## 4. Dove stanno le cose
