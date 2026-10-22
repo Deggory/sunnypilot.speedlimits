@@ -41,13 +41,16 @@ try:
         page.on('pageerror',lambda err:errors.append(str(err)))
         page.goto(f'http://127.0.0.1:{server.server_port}')
         page.locator('#reviewer').fill('synthetic-human')
-        page.locator('#boxes button').click()
-        assert page.locator('#family').input_value()=='road_marking_candidate'
+        page.locator('#boxList .box-main').click()
+        assert page.locator('#familiesMore [data-family="road_marking_candidate"]').get_attribute('aria-pressed')=='true'
         page.locator('#value').fill('50');page.locator('#value').dispatch_event('change')
         page.locator('#confirm').click();page.reload()
-        assert 'confermato' in page.locator('#confirm').inner_text()
-        page.locator('#boxes button').click()
+        # The confirmation moved on to the next frame: open 0/0 again from the timeline.
+        page.locator('#timeline button[data-key="0/0"]').click()
+        assert 'Confermato' in page.locator('#confirm').inner_text()
+        page.locator('#boxList .box-main').click()
         assert page.locator('#value').input_value()=='50'
+        page.locator('summary', has_text='Altro').click()
         with page.expect_download() as event:page.locator('#export').click()
         event.value.save_as(root/'reviewed.jsonl')
         exported=[json.loads(s) for s in (root/'reviewed.jsonl').read_text().splitlines()]
@@ -59,10 +62,10 @@ try:
         assert not exported[0]['training_ready'] and not exported[0]['ground_truth']
         page.evaluate("() => { Storage.prototype.setItem=()=>{throw new DOMException('full','QuotaExceededError')}; }")
         page.locator('#value').fill('30');page.locator('#value').dispatch_event('change')
-        assert page.locator('#confirm').inner_text()=='Conferma fotogramma'
-        assert 'Salvataggio nel browser non disponibile' in page.locator('#storageWarning').inner_text()
+        assert page.locator('#confirm').inner_text().startswith('Conferma ·')
+        assert 'Salvataggio nel browser non disponibile' in page.locator('#notices').inner_text()
         page.locator('#next').click()
-        assert 'Salvataggio nel browser non disponibile' in page.locator('#storageWarning').inner_text()
+        assert 'Salvataggio nel browser non disponibile' in page.locator('#notices').inner_text()
         assert not errors,errors
         browser.close()
 finally:

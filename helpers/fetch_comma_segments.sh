@@ -3,12 +3,11 @@
 # comma videos, and link them into data/ under the hex folder name the dataset expects;
 # with --localizer it also runs the localizer on each.
 #
-# Usage: helpers/fetch_comma_segments.sh [--host=<ip|nome>] [--since=<AAAA-MM-GG>] [--localizer]
+# Usage: helpers/fetch_comma_segments.sh [--host=<ip|nome>]
 #        helpers/fetch_comma_segments.sh [--host=<ip|nome>] <route> --segments=<lista> [--localizer]
 #        helpers/fetch_comma_segments.sh [--host=<ip|nome>] <route> --skip=<lista> [--localizer]
 #        helpers/fetch_comma_segments.sh [--host=<ip|nome>] <route> [--strip-ends] [--localizer]
 #   helpers/fetch_comma_segments.sh                                         (automatico, vedi sotto)
-#   helpers/fetch_comma_segments.sh --since=2026-10-25
 #   helpers/fetch_comma_segments.sh 6616faac453a3064/0000011c--8152ba83cf   (= --strip-ends)
 #   helpers/fetch_comma_segments.sh 6616faac453a3064/0000011c--8152ba83cf --skip=0,1,2,last
 #   helpers/fetch_comma_segments.sh 6616faac453a3064/0000011c--8152ba83cf --skip 0,1,14
@@ -38,29 +37,31 @@
 # The comma only accepts the keys registered on GitHub: connect to this machine
 # with agent forwarding (ssh -A) so the Mac's key is used.
 #
-# Without a route (automatic): every route on the comma with a segment written on or
-# after --since (default 2026-10-20) is checked for dashcam mode. Before fetching,
+# Without a route (automatic): every route still on the comma is taken, dashcam mode or
+# not and whatever its date (the signs do not depend on who was driving). Before fetching,
 # exclude whole trips lasting less than 300 seconds (measured from the very first
 # to the very last qlog, INCLUDING the first/last two segments). Then discard
 # first two + last two segments and any remaining segment whose rlog contains
 # carState.gearShifter=reverse. Missing/unreadable logs are skipped, never assumed safe.
 # Explicit route/segment selection remains manual and does not apply these automatic filters.
-# The script is kept BYTE-IDENTICAL in openpilot.distill/v100 and
-# sunnypilot.speedlimits/main. In speedlimits its data links use raw/routes/<route>/<segment>/
-# rather than Distill's hex segment folders, while both share COMMA_VIDEOS_DIR.
+# The same script lives in openpilot.distill, but the two copies are not identical: that one
+# only takes the dashcam routes from its --since date on, and loads its helpers/common.sh.
+# In speedlimits its data links use raw/routes/<route>/<segment>/ rather than Distill's hex
+# segment folders, while both share COMMA_VIDEOS_DIR. Distill never sees the routes fetched
+# here: it only trains on the links its own fetcher makes in its data/.
 # Requires a Python log reader: Distill uses uv run python; speedlimits can use
 # its .venv with [log-reader], NNSLR_OPENPILOT_ROOT and NNSLR_OPENDBC_ROOT.
 # COMMA_FETCH_PYTHON can override the Python interpreter (speedlimits).
 # Already downloaded files are skipped by rsync, so it can be run after every drive.
 #
 # --skip: every segment of the route found on the comma, except the listed ones.
-#         The list takes numbers, ranges (2-5), "last" (the highest segment, the arrival)
-#         and "last-N" (N segments before the last one).
+#         The list takes numbers, ranges (2-5), "last" (the highest segment, the arrival),
+#         "last-N" (N segments before the last one) and first, second, second_last
+#         (the lowest, the second lowest and the second highest segment found).
 # --strip-ends: skip first two and last two AVAILABLE segment folders (even with gaps). No list needed.
 #               It is the default when neither segments nor --skip are given.
 # --localizer: also run the localizer on each segment (off by default: helpers/localize_segments.sh
 #              does it later and redoes it when a better ionosphere map comes out).
-# --since: automatic mode only, first day to look at (AAAA-MM-GG).
 # -h, --help: this help.
 # --host: IP or ssh name of the comma; "comma@" is added when no user is given.
 # Env: COMMA_HOST (default "comma", the Host in ~/.ssh/config), overridden by --host
@@ -154,7 +155,6 @@ segments=""
 run_localizer=0
 skip=""
 skip_mode=0
-since="2026-10-20"
 
 # Adds one segment item to $segments: a number (3) or a range (2-9).
 add_segment() {
@@ -181,13 +181,14 @@ add_segment_list() {
 }
 
 # Adds a comma separated skip list (0,1,14 or 0,1,2,last or 2-5) to $skip.
-# "last" stays a word here: the highest segment is known only after asking the comma.
+# first, second, second_last, last and last-N stay words here: the segments they mean are
+# known only after asking the comma (select_segments turns them into numbers).
 add_skip_list() {
   [ -n "$1" ] || die "--skip vuole una lista (es. --skip=0,1,last)"
   IFS=',' read -r -a items <<< "$1"
   for item in "${items[@]}"; do
     if [ "$item" = "first" ] || [ "$item" = "second" ] || [ "$item" = "second_last" ] || [ "$item" = "last" ]; then
-      skip="$skip last"
+      skip="$skip $item"
     elif [[ "$item" =~ ^last-[0-9]+$ ]]; then
       skip="$skip $item"
     elif [[ "$item" =~ ^[0-9]+-[0-9]+$ ]]; then
@@ -321,71 +322,21 @@ download_segments() {
   done
 }
 
-# Automatic mode: finds the routes since $since recorded in dashcam mode and puts
-# them in $dashcam_routes.
-find_dashcam_routes() {
-  # One line per segment folder: "2026-10-20 14:03:22.123456789 +0000 00000123--8fe1b32468--5"
-  listing="$(ssh "$COMMA_HOST" "cd $REMOTE_DIR && stat -c '%y %n' *--*--* 2>/dev/null || true")"
+# Automatic mode: puts every route still on the comma in $comma_routes, dashcam or not.
+find_comma_routes() {
+  # One line per segment folder: "00000123--8fe1b32468--5"
+  listing="$(ssh "$COMMA_HOST" "cd $REMOTE_DIR && ls -d *--*--* 2>/dev/null || true")"
 
-  # Routes with at least one segment written on or after $since.
-  recent_routes=""
-  while read -r day hour zone dir; do
+  comma_routes=""
+  while read -r dir; do
     if [ -z "$dir" ]; then
       continue
     fi
-    if [[ "$day" < "$since" ]]; then
-      continue
-    fi
     r="${dir%--*}"
-    if [[ " $recent_routes " != *" $r "* ]]; then
-      recent_routes="$recent_routes $r"
+    if [[ " $comma_routes " != *" $r "* ]]; then
+      comma_routes="$comma_routes $r"
     fi
   done <<< "$listing"
-
-  dashcam_routes=""
-  if [ -z "$recent_routes" ]; then
-    echo "Nessuna route sul comma dal $since."
-    return 0
-  fi
-  echo "Route sul comma dal $since:$recent_routes"
-
-  qlog_dir="$(mktemp -d)"
-  trap 'rm -rf "$qlog_dir"' EXIT
-
-  # The qlog of the first segment still on the comma, one per route.
-  qlogs=""
-  for r in $recent_routes; do
-    first_segment=""
-    while read -r day hour zone dir; do
-      if [ "${dir%--*}" = "$r" ]; then
-        s="${dir##*--}"
-        if [ -z "$first_segment" ] || [ "$s" -lt "$first_segment" ]; then
-          first_segment="$s"
-        fi
-      fi
-    done <<< "$listing"
-
-    if rsync -a "$COMMA_HOST:$REMOTE_DIR/$r--$first_segment/qlog.zst" "$qlog_dir/$r.qlog.zst"; then
-      qlogs="$qlogs $qlog_dir/$r.qlog.zst"
-    else
-      echo "$r: qlog del segmento $first_segment non copiato, salto la route" >&2
-    fi
-  done
-
-  if [ -z "$qlogs" ]; then
-    return 0
-  fi
-
-  for r in $recent_routes; do
-    if [ ! -f "$qlog_dir/$r.qlog.zst" ]; then
-      continue
-    fi
-    state="$(inspect_log dashcam "$qlog_dir/$r.qlog.zst")" || state="unknown"
-    echo "  $r: $state"
-    if [ "$state" = "dashcam" ]; then
-      dashcam_routes="$dashcam_routes $r"
-    fi
-  done
 }
 
 # Called in automatic mode after select_segments: $found contains ALL indices
@@ -451,13 +402,6 @@ filter_reverse_segments() {
 while [ $# -gt 0 ]; do
   if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
     usage
-  elif [ "$1" = "--since" ]; then
-    shift
-    since="${1:-}"
-    [[ "$since" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || die "--since vuole una data AAAA-MM-GG (es. --since=2026-10-20)"
-  elif [[ "$1" == --since=* ]]; then
-    since="${1#--since=}"
-    [[ "$since" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || die "--since vuole una data AAAA-MM-GG (es. --since=2026-10-20)"
   elif [ "$1" = "--localizer" ]; then
     run_localizer=1
   elif [ "$1" = "--no-localizer" ]; then
@@ -523,14 +467,14 @@ ssh -o ConnectTimeout=8 "$COMMA_HOST" true \
   || die "comma '$COMMA_HOST' non raggiungibile via ssh (hai fatto ssh -A?)"
 
 if [ "$auto_mode" -eq 1 ]; then
-  find_dashcam_routes
-  if [ -z "$dashcam_routes" ]; then
-    echo "Nessuna route in dashcam mode da scaricare."
+  find_comma_routes
+  if [ -z "$comma_routes" ]; then
+    echo "Nessuna route sul comma."
     exit 0
   fi
-  echo "In dashcam mode:$dashcam_routes"
+  echo "Route sul comma:$comma_routes"
 
-  for r in $dashcam_routes; do
+  for r in $comma_routes; do
     route="$r"
     segments=""
     skip=""

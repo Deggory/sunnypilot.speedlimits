@@ -207,7 +207,7 @@ Without `--host` the server listens on 127.0.0.1 only and needs no token
 lists every route with a pre-annotation report: frames, frames with proposals
 and confirmed frames; `--route R` prints the address of that route directly.
 
-Every "Conferma fotogramma" is checked with the import-annotations rules and
+Every "Conferma" is checked with the import-annotations rules and
 saved at once in `<data root>/annotations/review.sqlite`: `frame_reviews` holds
 the current review per route, report run and frame, `frame_review_history` every
 save (append-only). A refused frame shows the reason on the page; a frame the

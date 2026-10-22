@@ -3,84 +3,62 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="color-scheme" content="light dark">
+<meta name="color-scheme" content="light">
 <title>Revisione cartelli</title>
 <style>
-/* Layout: sticky bar on top; photo stage, its tools, the frame line and the timeline on the left;
-   review panel on the right. One column with a fixed bottom bar (Prev / Conferma / Next) on phones. */
+/* Layout: translucent bar on top; photo, its controls and the timeline on the left; review panel on the right.
+   Nothing above the photo or above the timeline changes height after loading: messages live in the panel.
+   One column with a fixed bottom bar (Prev / Conferma / Next) on phones. */
 :root {
-  --bg: #e9ecef;
+  --bg: #ffffff;
   --surface: #ffffff;
-  --surface-2: #f1f3f5;
-  --fg: #16191d;
-  --muted: #5a626c;
-  --line: #cfd4da;
-  --stage: #1c1f23;
-  --yellow: #e0b000;
-  --todo: #8a6700;
-  --ok: #1d7a4c;
-  --warn: #b5530b;
-  --danger: #b42318;
-  --sus: #8e3bbf;
-  --hint: #0b6fc2;
-  --focus: #1f5fd6;
+  --surface-2: #f5f5f7;
+  --fill: rgba(118, 118, 128, 0.12);
+  --fill-strong: rgba(118, 118, 128, 0.22);
+  --seg-on: #ffffff;
+  --fg: #1d1d1f;
+  --muted: #636366;
+  --line: rgba(0, 0, 0, 0.08);
+  --bar: rgba(251, 251, 253, 0.78);
+  --stage: #0b0b0c;
+  --accent: #0071e3;
+  --button: #0071e3;
+  --on-accent: #ffffff;
+  --yellow: #f5b800;
+  --ok: #12702f;
+  --ok-fill: #34c759;
+  --ok-tint: rgba(52, 199, 89, 0.14);
+  --warn: #9a4400;
+  --warn-fill: #ff9f0a;
+  --warn-tint: rgba(255, 159, 10, 0.15);
+  --danger: #c4000f;
+  --danger-fill: #ff3b30;
+  --danger-tint: rgba(255, 59, 48, 0.1);
+  --sus: #8944ab;
+  --sus-fill: #af52de;
+  --sus-tint: rgba(175, 82, 222, 0.1);
+  --hint: #0066cc;
+  --hint-tint: rgba(0, 113, 227, 0.07);
+  --focus: #0071e3;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.03), 0 6px 20px rgba(0, 0, 0, 0.05);
+  --card-border: rgba(0, 0, 0, 0.08);
   --sign-face: #ffffff;
   --sign-ink: #111111;
-  --sign-ring: #d1112b;
-  /* Overlay colours sit on the dark stage in both themes. */
+  --sign-ring: #e3001b;
+  /* Overlay colours sit on the dark photo stage. */
   --ov-speed: #ff5964;
   --ov-cancel: #d4d9df;
   --ov-other: #ffa94d;
   --ov-none: #8a929c;
-  --ov-selected: #ffd23f;
-  --ov-hint: #4fd1ff;
+  --ov-selected: #ffd60a;
+  --ov-hint: #64d2ff;
   --ov-text: #fff3b0;
   --ov-halo: #0d0f12;
-  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", "Segoe UI", Roboto, Arial, sans-serif;
   --font-data: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-  --radius: 10px;
-  --control: 34px;
+  --radius: 18px;
+  --control: 32px;
   color-scheme: light;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #111317;
-    --surface: #191c21;
-    --surface-2: #22262c;
-    --fg: #e8ebee;
-    --muted: #9ba4ae;
-    --line: #2e333a;
-    --stage: #08090b;
-    --yellow: #ffd23f;
-    --todo: #ffd23f;
-    --ok: #41b97c;
-    --warn: #ec9446;
-    --danger: #f2655a;
-    --sus: #c58af9;
-    --hint: #5ab8ff;
-    --focus: #7aa7ff;
-    --sign-ring: #ef4b55;
-    color-scheme: dark;
-  }
-}
-:root[data-theme="dark"] {
-  --bg: #111317;
-  --surface: #191c21;
-  --surface-2: #22262c;
-  --fg: #e8ebee;
-  --muted: #9ba4ae;
-  --line: #2e333a;
-  --stage: #08090b;
-  --yellow: #ffd23f;
-  --todo: #ffd23f;
-  --ok: #41b97c;
-  --warn: #ec9446;
-  --danger: #f2655a;
-  --sus: #c58af9;
-  --hint: #5ab8ff;
-  --focus: #7aa7ff;
-  --sign-ring: #ef4b55;
-  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -93,7 +71,9 @@ body {
   font-family: var(--font-ui);
   font-size: 15px;
   line-height: 1.45;
+  letter-spacing: -0.006em;
   overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
 }
 body::before {
   content: "";
@@ -101,268 +81,385 @@ body::before {
   inset: 0 0 auto;
   height: env(safe-area-inset-top, 0px);
   z-index: 10;
-  background: var(--surface);
+  background: var(--bar);
 }
-button, input, select, textarea { font: inherit; color: inherit; }
+button, input, select, textarea { font: inherit; color: inherit; letter-spacing: inherit; }
 button { cursor: pointer; }
 :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 [hidden] { display: none !important; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
+/* ---------- top bar ---------- */
 .topbar {
   position: sticky;
   top: env(safe-area-inset-top, 0px);
   z-index: 5;
-  background: var(--surface);
+  background: var(--bar);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
   border-bottom: 1px solid var(--line);
-  padding-block: 10px;
-  padding-left: max(16px, env(safe-area-inset-left, 0px));
-  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-left: max(20px, env(safe-area-inset-left, 0px));
+  padding-right: max(20px, env(safe-area-inset-right, 0px));
 }
 .topbar-inner {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 10px 18px;
-  max-width: 1500px;
+  gap: 18px;
+  height: 52px;
+  max-width: 1600px;
   margin: 0 auto;
 }
-.brand { display: flex; align-items: center; gap: 10px; min-width: 0; color: inherit; text-decoration: none; }
+.brand { display: flex; align-items: center; gap: 10px; min-width: 0; color: inherit; text-decoration: none; flex: none; }
 .brand-mark {
-  width: 30px; height: 30px; border-radius: 50%;
-  background: var(--sign-face); border: 4px solid var(--sign-ring);
+  width: 26px; height: 26px; border-radius: 50%;
+  background: var(--sign-face); border: 3.5px solid var(--sign-ring);
   display: grid; place-items: center; flex: none;
-  color: var(--sign-ink); font-weight: 700; font-size: 11px; font-variant-numeric: tabular-nums;
+  color: var(--sign-ink); font-weight: 700; font-size: 10px; font-variant-numeric: tabular-nums;
 }
-.brand-name { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: 0.01em; white-space: nowrap; }
-.route-pick { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1 1 220px; }
-.route-pick label, .reviewer label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
-.route-pick select { min-width: 0; flex: 1; max-width: 360px; font-family: var(--font-data); font-size: 13px; }
+.brand-name { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; white-space: nowrap; }
+.route-pick { display: flex; align-items: center; min-width: 0; flex: 0 1 230px; }
+.route-pick select { min-width: 0; width: 100%; font-family: var(--font-data); font-size: 12.5px; color: var(--muted); }
 select, input[type="text"], input[type="number"] {
-  background: var(--surface-2);
-  border: 1px solid var(--line);
+  background: var(--fill);
+  border: 0;
   border-radius: 8px;
-  padding: 6px 10px;
+  padding: 5px 10px;
   min-height: var(--control);
   color: var(--fg);
   max-width: 100%;
 }
-.progress { display: flex; flex-direction: column; gap: 4px; flex: 1 1 200px; min-width: 0; }
-.progress-text { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+input[type="text"]:focus, input[type="number"]:focus, select:focus { outline: none; box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.35); }
+input::placeholder { color: var(--muted); }
+.filters, .segmented {
+  display: inline-flex; gap: 2px; background: var(--fill); border-radius: 9px; padding: 2px; flex: none; max-width: 100%; overflow-x: auto;
+}
+.filters button, .segmented button {
+  border: 0; background: transparent; padding: 4px 12px; border-radius: 7px; font-size: 13px; font-weight: 500;
+  color: var(--fg); white-space: nowrap; min-height: 28px;
+}
+.filters button:focus-visible, .segmented button:focus-visible { outline-offset: -3px; }
+.filters button[aria-pressed="true"], .segmented button[aria-pressed="true"] {
+  background: var(--seg-on); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(0, 0, 0, 0.04); font-weight: 600;
+}
+.progress { display: flex; flex-direction: column; gap: 4px; flex: 1 1 140px; min-width: 0; }
+.progress-text { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .progress-text strong { color: var(--fg); font-weight: 600; }
 .progress-text .sus { color: var(--sus); font-weight: 600; }
-.progress-bar { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; border: 1px solid var(--line); }
-.progress-bar span { display: block; height: 100%; width: 0; background: var(--ok); transition: width 0.3s ease; }
-.filters { display: flex; gap: 4px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 9px; padding: 3px; max-width: 100%; overflow-x: auto; }
-.filters button { border: 0; background: transparent; padding: 5px 10px; border-radius: 6px; font-size: 13px; color: var(--muted); white-space: nowrap; }
-.filters button[aria-pressed="true"] { background: var(--surface); color: var(--fg); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.14); font-weight: 600; }
-.filters button[data-filter="suspicious"][aria-pressed="true"] { color: var(--sus); }
-.reviewer { display: flex; align-items: center; gap: 8px; }
-.reviewer input { width: 140px; }
-.reviewer input.need { border-color: var(--danger); box-shadow: 0 0 0 2px var(--danger); }
+.progress-bar { height: 4px; border-radius: 2px; background: var(--fill); overflow: hidden; }
+.progress-bar span { display: block; height: 100%; width: 0; background: var(--ok-fill); border-radius: 2px; transition: width 0.4s ease; }
+.reviewer { display: flex; align-items: center; flex: none; }
+.reviewer input { width: 130px; }
+.reviewer input.need { box-shadow: 0 0 0 2px var(--danger); }
 
+/* ---------- page ---------- */
 .page {
-  max-width: 1500px;
+  max-width: 1600px;
   margin: 0 auto;
-  padding-block: 16px 24px;
-  padding-left: max(16px, env(safe-area-inset-left, 0px));
-  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 28px;
+  padding-left: max(20px, env(safe-area-inset-left, 0px));
+  padding-right: max(20px, env(safe-area-inset-right, 0px));
 }
-.notices { display: flex; flex-direction: column; gap: 8px; }
-.notices:not(:empty) { margin-bottom: 12px; }
-.notice { margin: 0; border: 1px solid var(--line); border-left: 4px solid var(--warn); background: var(--surface); border-radius: 8px; padding: 8px 12px; font-size: 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
-.notice.error { border-left-color: var(--danger); }
-.workspace { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 16px; align-items: start; }
-.stage-col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.workspace { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 20px; align-items: start; }
+.stage-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .stage {
   position: relative;
   background: var(--stage);
-  border-radius: var(--radius);
+  border-radius: 14px;
   overflow: hidden;
   min-height: 160px;
   display: grid;
   place-items: center;
+  box-shadow: var(--shadow);
 }
 #scene { display: block; width: 100%; height: auto; max-height: 74vh; touch-action: pan-x pan-y pinch-zoom; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 #scene.drawing { cursor: crosshair; touch-action: none; }
 #scene.dragging, #zoom.dragging { touch-action: none; }
 .box { fill: transparent; stroke-width: 2.5; vector-effect: non-scaling-stroke; cursor: pointer; }
 .box.proposal { stroke-dasharray: 7 5; }
-.box.selected { stroke: var(--ov-selected); stroke-width: 3.5; stroke-dasharray: none; }
+.box.selected { stroke: var(--ov-selected); stroke-width: 3; stroke-dasharray: none; }
 .handle { fill: var(--ov-selected); stroke: var(--ov-halo); stroke-width: 1; vector-effect: non-scaling-stroke; pointer-events: none; }
 .handle-hit { fill: transparent; stroke: none; cursor: nwse-resize; touch-action: none; }
 .handle-hit.ne, .handle-hit.sw { cursor: nesw-resize; }
 .tag { fill: var(--ov-text); stroke: var(--ov-halo); paint-order: stroke; font-family: var(--font-ui); font-weight: 600; pointer-events: none; }
-.hint-box { fill: none; stroke: var(--ov-hint); stroke-width: 1.5; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; pointer-events: none; }
-.hint-box.low { opacity: 0.6; }
+.hint-box { fill: none; stroke: var(--ov-hint); stroke-width: 2; stroke-dasharray: 4 2; vector-effect: non-scaling-stroke; pointer-events: none; }
+.hint-box.low { opacity: 0.85; }
 .hint-tag { fill: var(--ov-hint); stroke: var(--ov-halo); paint-order: stroke; font-family: var(--font-ui); font-weight: 600; pointer-events: none; }
-#draft { fill: rgba(255, 210, 63, 0.18); stroke: var(--ov-selected); stroke-width: 2; vector-effect: non-scaling-stroke; pointer-events: none; }
-.stage-hint { position: absolute; left: 12px; bottom: 12px; right: 12px; display: flex; justify-content: center; pointer-events: none; }
-.stage-hint span { background: rgba(8, 9, 11, 0.78); color: #f5f6f7; border-radius: 999px; padding: 5px 12px; font-size: 13px; }
-.stage-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
-.toggle { display: inline-flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--muted); min-height: var(--control); cursor: pointer; margin-left: auto; }
-.toggle input { width: 18px; height: 18px; margin: 0; accent-color: var(--hint); }
-.frame-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; font-size: 13px; color: var(--muted); }
-.frame-meta .data { font-family: var(--font-data); font-size: 12.5px; color: var(--fg); overflow-wrap: anywhere; }
-.reasons { margin: 0; font-size: 13.5px; color: var(--sus); border-left: 3px solid var(--sus); padding: 2px 0 2px 10px; overflow-wrap: anywhere; }
-.reasons strong { font-weight: 600; }
-.filter-note { margin: 0; font-size: 13px; color: var(--muted); }
-.pill { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 2px 10px; font-size: 12.5px; font-weight: 600; border: 1px solid currentColor; white-space: nowrap; }
-.pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
-.pill.todo { color: var(--todo); }
-.pill.done { color: var(--ok); }
-.pill.dirty { color: var(--warn); }
-.pill.saving { color: var(--muted); }
-.pill.error { color: var(--danger); }
-.nav { display: flex; align-items: center; gap: 8px; }
-.nav .pos { font-family: var(--font-data); font-size: 13px; min-width: 7ch; text-align: center; font-variant-numeric: tabular-nums; color: var(--fg); }
-.btn {
-  border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 6px 12px; font-weight: 500;
-  min-height: var(--control);
+#draft { fill: rgba(255, 214, 10, 0.18); stroke: var(--ov-selected); stroke-width: 2; vector-effect: non-scaling-stroke; pointer-events: none; }
+.stage-hint { position: absolute; left: 12px; bottom: 14px; right: 12px; display: flex; justify-content: center; pointer-events: none; }
+.stage-hint span {
+  background: rgba(30, 30, 32, 0.72); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+  color: #f5f5f7; border-radius: 999px; padding: 6px 14px; font-size: 13px; font-weight: 500;
 }
-.btn:hover:not(:disabled) { border-color: var(--muted); }
-.btn:disabled { opacity: 0.45; cursor: not-allowed; }
-.btn.primary { background: var(--ok); border-color: var(--ok); color: #ffffff; font-weight: 600; }
-.btn.danger { color: var(--danger); }
-.btn.on { border-color: var(--yellow); box-shadow: inset 0 0 0 1px var(--yellow); }
-.btn.small { padding: 4px 10px; font-size: 13.5px; }
-.btn.quiet { background: transparent; }
-.timeline { display: flex; gap: 2px; overflow-x: auto; padding: 6px 2px 8px; scrollbar-width: thin; }
-.timeline button { flex: none; width: 7px; height: 22px; border: 0; padding: 0; border-radius: 2px; background: var(--line); }
-.timeline button.seg { margin-left: 6px; }
-.timeline button.has { background: var(--yellow); }
-.timeline button.sus { background: var(--sus); }
-.timeline button.dirty { background: var(--warn); }
-.timeline button.error { background: var(--danger); }
-.timeline button.done { background: var(--ok); }
-.timeline button.cur { outline: 2px solid var(--fg); outline-offset: 1px; }
-.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--muted); }
-.legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
-.legend .l-done { background: var(--ok); }
-.legend .l-has { background: var(--yellow); }
-.legend .l-sus { background: var(--sus); }
-.legend .l-dirty { background: var(--warn); }
-.legend .l-none { background: var(--line); }
 
-.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); display: flex; flex-direction: column; min-width: 0; }
-.panel section { padding: 14px 16px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+/* The bar under the photo: one line, fixed height; the frame data text shrinks, nothing else moves. */
+.stage-bar { display: flex; align-items: center; gap: 12px; min-height: 36px; }
+.nav { display: inline-flex; align-items: center; gap: 2px; background: var(--fill); border-radius: 999px; padding: 2px; flex: none; }
+.nav .btn { background: transparent; }
+.nav .btn:hover:not(:disabled) { background: var(--seg-on); }
+.nav .pos { font-size: 13px; min-width: 8.5ch; text-align: center; font-variant-numeric: tabular-nums; color: var(--fg); font-weight: 500; }
+.stage-bar .data { flex: 1 1 auto; min-width: 0; font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.stage-tools { display: flex; align-items: center; gap: 8px; flex: none; }
+.pill {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: none; width: 138px;
+  border-radius: 999px; padding: 4px 10px; font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden;
+  background: var(--fill); color: var(--muted);
+}
+.pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
+.pill.todo { color: var(--muted); }
+.pill.done { color: var(--ok); background: var(--ok-tint); }
+.pill.dirty { color: var(--warn); background: var(--warn-tint); }
+.pill.saving { color: var(--muted); }
+.pill.error { color: var(--danger); background: var(--danger-tint); }
+
+.btn {
+  border: 0; background: var(--fill); color: var(--fg); border-radius: 999px; padding: 6px 14px; font-size: 14px; font-weight: 500;
+  min-height: var(--control); white-space: nowrap; transition: background 0.15s ease;
+}
+.btn:hover:not(:disabled) { background: var(--fill-strong); }
+.btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.btn.icon { width: var(--control); padding: 0; font-size: 19px; line-height: 1; display: inline-grid; place-items: center; }
+.btn.danger { color: var(--danger); }
+.btn.on, .btn.on:hover:not(:disabled) { background: var(--button); color: var(--on-accent); }
+.btn.small { padding: 4px 12px; font-size: 13px; min-height: 28px; }
+.btn.tint { background: var(--hint-tint); color: var(--hint); font-weight: 600; }
+.btn.primary {
+  background: var(--button); color: var(--on-accent); font-weight: 600; border-radius: 12px;
+}
+.btn.primary:hover:not(:disabled) { background: #0077ed; }
+.btn.primary.already, .btn.primary.already:hover:not(:disabled) { background: var(--ok-tint); color: var(--ok); }
+.link { border: 0; background: transparent; color: var(--accent); font-size: 13px; font-weight: 500; padding: 4px 2px; white-space: nowrap; flex: none; }
+.link:hover { text-decoration: underline; }
+.link.danger { color: var(--danger); }
+
+/* iOS switch: the checkbox stays real and focusable. */
+.switch { position: relative; display: inline-flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--fg); cursor: pointer; white-space: nowrap; min-height: var(--control); }
+.switch input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }
+.switch .track { position: relative; width: 36px; height: 22px; border-radius: 11px; background: var(--fill-strong); flex: none; transition: background 0.2s ease; }
+.switch .track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #ffffff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); transition: transform 0.2s ease; }
+.switch input:checked + .track { background: var(--ok-fill); }
+.switch input:checked + .track::after { transform: translateX(14px); }
+.switch input:focus-visible + .track { outline: 3px solid var(--focus); outline-offset: 2px; }
+
+/* Timeline: one row per segment; the ticks shrink to fit, so there is no horizontal scrolling on a computer. */
+.timeline { display: flex; flex-direction: column; gap: 6px; }
+.tl-seg { display: grid; grid-template-columns: 52px minmax(0, 1fr); align-items: center; gap: 8px; }
+.tl-label { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tl-ticks { display: flex; gap: 3px; min-width: 0; padding: 3px 2px; }
+.tl-ticks button { flex: 0 1 10px; min-width: 3px; height: 20px; border: 0; padding: 0; border-radius: 3px; background: var(--fill-strong); }
+.tl-ticks button.has { background: var(--yellow); }
+.tl-ticks button.sus { background: var(--sus-fill); }
+.tl-ticks button.dirty { background: var(--warn-fill); }
+.tl-ticks button.error { background: var(--danger-fill); }
+.tl-ticks button.done { background: var(--ok-fill); }
+.tl-ticks button.done.unsure { background: linear-gradient(var(--yellow) 0 6px, var(--ok-fill) 6px); }
+.tl-ticks button.cur { box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--fg); }
+.tl-ticks button:hover { filter: brightness(0.92); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--muted); }
+.legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 0; }
+.legend .l-done { background: var(--ok-fill); }
+.legend .l-has { background: var(--yellow); }
+.legend .l-sus { background: var(--sus-fill); }
+.legend .l-dirty { background: var(--warn-fill); }
+.legend .l-error { background: var(--danger-fill); }
+.legend .l-none { background: var(--fill-strong); }
+.legend .l-unsure { background: linear-gradient(var(--yellow) 0 50%, var(--ok-fill) 50%); }
+.quality { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: 13px; color: var(--muted); }
+.quality-label { margin-right: 2px; }
+.qchip { border: 0; background: var(--fill); color: var(--fg); border-radius: 999px; padding: 3px 11px; font-size: 12.5px; font-weight: 500; min-height: 26px; font-variant-numeric: tabular-nums; }
+.qchip:hover { background: var(--fill-strong); }
+.qchip.zero { color: var(--muted); }
+.qchip.some { color: var(--warn); background: var(--warn-tint); }
+.qchip[aria-pressed="true"] { background: var(--fg); color: var(--bg); }
+
+/* ---------- panel ---------- */
+.panel {
+  background: var(--surface); border: 1px solid var(--card-border); border-radius: var(--radius); box-shadow: var(--shadow);
+  display: flex; flex-direction: column; min-width: 0;
+}
+.panel section { padding: 16px 18px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .panel section:first-child { border-top: 0; }
-.eyebrow { margin: 0; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); font-weight: 600; }
+.section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.section-head h2 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.015em; }
+.section-head .count { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.reasons { margin: 0; font-size: 13px; color: var(--sus); background: var(--sus-tint); border-radius: 10px; padding: 8px 12px; overflow-wrap: anywhere; }
+.reasons strong { font-weight: 600; }
+.filter-note { margin: 0; font-size: 13px; color: var(--muted); background: var(--fill); border-radius: 10px; padding: 8px 12px; }
 .box-list { display: flex; flex-direction: column; gap: 6px; }
-.box-row {
-  display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; align-items: center; gap: 8px; min-height: var(--control);
-  border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; background: var(--surface-2); text-align: left;
+.box-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; border-radius: 12px; background: var(--surface-2); transition: box-shadow 0.15s ease; }
+.box-row.selected { box-shadow: inset 0 0 0 2px var(--accent); }
+.box-main {
+  display: grid; grid-template-columns: 26px minmax(0, 1fr); column-gap: 10px; align-items: center;
+  border: 0; background: transparent; padding: 8px 4px 8px 10px; min-height: 50px; border-radius: 12px; text-align: left; min-width: 0;
 }
-.box-row[aria-pressed="true"] { border-color: var(--yellow); box-shadow: inset 0 0 0 1px var(--yellow); }
-.box-row .n { font-family: var(--font-data); font-size: 12px; color: var(--muted); }
-.box-row .what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.box-row .src { font-size: 11.5px; color: var(--muted); font-family: var(--font-data); }
+.box-main .n {
+  grid-row: 1 / span 2; width: 24px; height: 24px; border-radius: 50%; background: var(--fill-strong); color: var(--fg);
+  display: grid; place-items: center; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums;
+}
+.box-row.selected .n { background: var(--button); color: var(--on-accent); }
+.box-main .what { font-weight: 600; font-size: 14.5px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.box-main .src { font-size: 12.5px; color: var(--muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.box-main .src .changed { color: var(--hint); font-weight: 600; }
+.box-main .src .dup { color: var(--warn); font-weight: 600; }
+.box-del { border: 0; background: transparent; width: 34px; height: 34px; margin-right: 6px; border-radius: 50%; color: var(--muted); font-size: 14px; }
+.box-del:hover { background: var(--danger-tint); color: var(--danger); }
 .empty-note { margin: 0; font-size: 13.5px; color: var(--muted); }
+.field-label { margin: 2px 0 -4px; font-size: 12.5px; font-weight: 500; color: var(--muted); }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.chip { border: 1px solid var(--line); background: var(--surface-2); border-radius: 999px; padding: 4px 11px; font-size: 13.5px; min-height: 30px; }
-.chip[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
-.signs { display: grid; grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); gap: 8px; }
+.chip { border: 0; background: var(--fill); border-radius: 999px; padding: 5px 12px; font-size: 13.5px; font-weight: 500; min-height: 30px; }
+.chip:hover { background: var(--fill-strong); }
+.chip[aria-pressed="true"] { background: var(--fg); color: var(--bg); }
+.chips.minor { gap: 2px 4px; margin-top: -4px; }
+.chips.minor .chip { background: transparent; color: var(--muted); padding: 3px 8px; font-size: 12.5px; min-height: 26px; }
+.chips.minor .chip:hover { background: var(--fill); color: var(--fg); }
+.chips.minor .chip[aria-pressed="true"] { background: var(--fg); color: var(--bg); }
+.segmented { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
+.signs { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 6px; }
 .sign {
-  aspect-ratio: 1; max-width: 100%; border-radius: 50%; border: 5px solid var(--sign-ring); background: var(--sign-face); color: var(--sign-ink);
-  display: grid; place-items: center; font-weight: 700; font-size: 15px; padding: 0; font-variant-numeric: tabular-nums; letter-spacing: -0.02em;
+  aspect-ratio: 1; max-width: 100%; border-radius: 50%; border: 3.5px solid var(--sign-ring); background: var(--sign-face); color: var(--sign-ink);
+  display: grid; place-items: center; font-weight: 700; font-size: 12.5px; padding: 0; font-variant-numeric: tabular-nums; letter-spacing: -0.03em;
+  transition: transform 0.12s ease;
 }
-.sign[aria-pressed="true"] { box-shadow: 0 0 0 3px var(--surface), 0 0 0 6px var(--yellow); }
-.value-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.value-line input { width: 92px; font-family: var(--font-data); }
-.value-line .unit { color: var(--muted); font-size: 13px; }
+.sign:hover { transform: scale(1.06); }
+.sign.unknown { border: 2px dashed var(--muted); background: var(--fill); color: var(--muted); font-size: 15px; }
+.sign[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); }
+.value-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.value-line input { width: 84px; font-variant-numeric: tabular-nums; }
 .field-error { margin: 0; color: var(--danger); font-size: 13px; }
-details { border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); }
-details summary { padding: 8px 10px; cursor: pointer; font-size: 13.5px; font-weight: 500; min-height: var(--control); display: flex; align-items: center; }
-.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 10px; padding: 4px 10px 12px; }
-.grid2 label, .stack label { display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; color: var(--muted); min-width: 0; }
-.grid2 select, .grid2 input, .stack input { min-width: 0; width: 100%; }
-.stack { display: flex; flex-direction: column; gap: 8px; padding: 4px 10px 12px; }
-.zoom-wrap { background: var(--stage); border-radius: 8px; overflow: hidden; }
-#zoom { display: block; width: 100%; height: 170px; touch-action: pan-x pan-y pinch-zoom; user-select: none; -webkit-user-select: none; }
+details { border-radius: 12px; background: var(--surface-2); }
+details summary { padding: 9px 12px; cursor: pointer; font-size: 14px; font-weight: 500; min-height: 40px; display: flex; align-items: center; justify-content: space-between; list-style: none; }
+details summary::-webkit-details-marker { display: none; }
+details summary::after { content: "›"; color: var(--muted); font-size: 18px; transition: transform 0.2s ease; }
+details[open] summary::after { transform: rotate(90deg); }
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; padding: 2px 12px 14px; }
+.grid2 label, .stack label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--muted); min-width: 0; }
+.grid2 select, .grid2 input, .stack input { min-width: 0; width: 100%; background: var(--surface); }
+.stack { display: flex; flex-direction: column; gap: 10px; padding: 2px 12px 14px; }
+.stack p { margin: 0; font-size: 12.5px; color: var(--muted); }
+.stack .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.zoom-wrap { background: var(--stage); border-radius: 12px; overflow: hidden; }
+#zoom { display: block; width: 100%; height: 220px; touch-action: pan-x pan-y pinch-zoom; user-select: none; -webkit-user-select: none; }
 #zoomBox { fill: none; stroke: var(--ov-selected); stroke-width: 2; vector-effect: non-scaling-stroke; pointer-events: none; }
-.hint-list { display: flex; flex-direction: column; gap: 8px; }
-.hint-row { border: 1px dashed var(--hint); border-radius: 8px; padding: 6px 8px 6px 10px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 10px; background: var(--surface-2); min-width: 0; }
+.evidence { margin: -4px 0 0; font-size: 12px; color: var(--muted); }
+.hint-intro { margin: -6px 0 0; font-size: 12.5px; color: var(--muted); }
+.hint-list { display: flex; flex-direction: column; gap: 6px; }
+.hint-row { border-radius: 12px; padding: 8px 8px 8px 12px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 10px; background: var(--hint-tint); min-width: 0; }
 .hint-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .hint-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
-.hint-what { font-weight: 600; }
-.conf { font-size: 11.5px; font-weight: 600; border-radius: 999px; padding: 1px 8px; border: 1px solid currentColor; }
-.conf.high { color: var(--ok); }
-.conf.medium { color: var(--todo); }
+.hint-what { font-weight: 600; font-size: 14px; }
+.conf { font-size: 11.5px; font-weight: 600; border-radius: 999px; padding: 1px 8px; background: var(--fill); }
+.conf.high { color: var(--ok); background: var(--ok-tint); }
+.conf.medium { color: var(--warn); background: var(--warn-tint); }
 .conf.low { color: var(--muted); }
-.hint-sub { font-size: 12px; color: var(--muted); font-family: var(--font-data); }
-.hint-note { margin: 0; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.hint-sub { font-size: 12px; color: var(--muted); }
+.hint-note { margin: 0; font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
 .hint-stats { margin: 0; font-size: 12px; color: var(--muted); }
-.confirm-area { display: flex; flex-direction: column; gap: 8px; }
-.confirm-area .btn.primary { padding: 11px 14px; font-size: 16px; min-height: 46px; }
-.save-msg { margin: 0; font-size: 13.5px; color: var(--muted); min-height: 1.2em; overflow-wrap: anywhere; }
+
+/* Confirm block: the button stays at the bottom; messages make the section grow upwards, never the photo. */
+.confirm-section { gap: 10px; }
+.notices { display: flex; flex-direction: column; gap: 6px; }
+.notice { margin: 0; border-radius: 12px; background: var(--warn-tint); color: var(--warn); padding: 8px 12px; font-size: 13px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.notice.error { background: var(--danger-tint); color: var(--danger); }
+.notice .btn { background: var(--surface); color: var(--fg); }
+.status-line { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; min-height: 2.75em; }
+.save-msg {
+  margin: 0; font-size: 13px; color: var(--muted); line-height: 1.35; min-width: 0; overflow-wrap: anywhere;
+}
 .save-msg.ok { color: var(--ok); }
 .save-msg.warn { color: var(--warn); }
 .save-msg.error { color: var(--danger); font-weight: 600; }
-.keys { margin: 0; font-size: 12px; color: var(--muted); }
-.keys kbd { font-family: var(--font-data); font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; background: var(--surface-2); color: var(--fg); }
-.backup p { margin: 0; font-size: 12.5px; color: var(--muted); }
-.backup .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.status-actions { display: flex; gap: 10px; flex: none; }
+.confirm-area { display: flex; flex-direction: column; gap: 8px; }
+.confirm-area .btn.primary { padding: 12px 16px; font-size: 16px; min-height: 50px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.keys { margin: 0; font-size: 12px; color: var(--muted); line-height: 1.9; }
+.keys kbd { font-family: var(--font-ui); font-size: 11px; font-weight: 600; border-radius: 5px; padding: 1px 6px; background: var(--surface); box-shadow: 0 0 0 1px var(--line), 0 1px 0 var(--line); color: var(--fg); }
 .state-box {
-  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 28px 24px; max-width: 720px; margin: 24px auto;
+  background: var(--surface); border: 1px solid var(--card-border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 32px 28px; max-width: 720px; margin: 32px auto;
   display: flex; flex-direction: column; gap: 12px;
 }
-.state-box h2 { margin: 0; font-size: 22px; font-weight: 600; }
+.state-box h2 { margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.02em; }
 .state-box p { margin: 0; color: var(--muted); max-width: 62ch; }
 
 .mobilebar { display: none; }
 
 @media (min-width: 981px) {
-  /* The panel scrolls on its own next to the photo; the confirm button stays at its bottom edge. */
-  .panel { position: sticky; top: calc(var(--topbar-h, 58px) + 12px); max-height: calc(100vh - var(--topbar-h, 58px) - 24px); overflow-y: auto; overscroll-behavior: contain; }
-  .panel .confirm-section { position: sticky; bottom: 0; z-index: 2; background: var(--surface); box-shadow: 0 -8px 12px -12px rgba(0, 0, 0, 0.45); }
+  /* The panel has a fixed height next to the photo and scrolls on its own: the confirm button never moves. */
+  .panel { position: sticky; top: calc(var(--topbar-h, 53px) + 20px); height: calc(100vh - var(--topbar-h, 53px) - 48px); overflow-y: auto; overscroll-behavior: contain; scroll-padding-bottom: 160px; }
+  /* On low laptops the photo leaves room for its bar, the timeline and the counters: the page never scrolls. */
+  #scene { max-height: min(74vh, calc(100vh - var(--topbar-h, 53px) - 250px)); }
+  .panel .confirm-section { position: sticky; bottom: 0; z-index: 2; margin-top: auto; background: var(--surface); box-shadow: 0 -10px 16px -16px rgba(0, 0, 0, 0.5); }
 }
-
+@media (min-width: 641px) {
+  /* "+ Riquadro" and "Annulla" take the same width: the bar never re-wraps while drawing. */
+  #draw { min-width: 7.5em; }
+}
+@media (min-width: 981px) and (max-width: 1400px) {
+  /* The frame data get their own line; the height is the same on every frame. */
+  .stage-bar { flex-wrap: wrap; row-gap: 6px; }
+  .stage-bar .data { order: 5; flex-basis: 100%; }
+  .stage-tools { margin-left: auto; }
+  #scene { max-height: min(74vh, calc(100vh - var(--topbar-h, 53px) - 290px)); }
+}
+@media (min-width: 981px) and (max-width: 1240px) {
+  .sign { font-size: 11px; border-width: 3px; letter-spacing: -0.05em; }
+  .brand-name { display: none; }
+  .topbar-inner { gap: 12px; }
+  .filters button { padding: 4px 9px; }
+  .reviewer input { width: 104px; }
+  .workspace { grid-template-columns: minmax(0, 1fr) 360px; }
+}
 @media (max-width: 980px) {
+  .topbar-inner { height: auto; flex-wrap: wrap; padding-block: 8px; gap: 8px 12px; }
   .workspace { grid-template-columns: minmax(0, 1fr); }
   #scene { max-height: none; }
+  .stage-bar { flex-wrap: wrap; }
+  .stage-bar .data { order: 5; flex-basis: 100%; }
+  .stage-tools { margin-left: auto; }
+  .tl-ticks { overflow-x: auto; scrollbar-width: none; }
+  .tl-ticks button { flex: none; width: 9px; height: 26px; }
   .mobilebar {
     display: flex; flex-direction: column; gap: 6px; position: fixed; left: 0; right: 0; bottom: 0; z-index: 6;
-    background: var(--surface); border-top: 1px solid var(--line);
-    padding-top: 8px;
-    padding-bottom: max(10px, env(safe-area-inset-bottom, 0px));
+    background: var(--bar); -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px);
+    border-top: 1px solid var(--line);
+    padding-top: 10px;
+    padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
     padding-left: max(16px, env(safe-area-inset-left, 0px));
     padding-right: max(16px, env(safe-area-inset-right, 0px));
   }
   .mobile-buttons { display: flex; gap: 8px; }
-  .mobile-buttons .btn { flex: 1; padding: 10px; min-height: 46px; font-size: 16px; }
-  .mobile-buttons .btn.primary { flex: 2; }
+  .mobile-buttons .btn { flex: 1; padding: 10px; min-height: 48px; font-size: 16px; border-radius: 12px; }
+  .mobile-buttons .btn.primary { flex: 2.4; }
   .mobile-msg { margin: 0; font-size: 13px; color: var(--danger); font-weight: 600; overflow-wrap: anywhere; }
-  .page { padding-bottom: 120px; }
+  .page { padding-bottom: 124px; }
   .confirm-area .btn.primary { display: none; }
 }
 @media (max-width: 980px), (pointer: coarse) {
   :root { --control: 40px; }
-  .chip { min-height: 40px; padding: 6px 13px; }
-  .filters button { min-height: 40px; }
-  .timeline button { width: 9px; height: 40px; }
-  .btn.small { min-height: 40px; }
+  .chip { min-height: 38px; padding: 6px 14px; }
+  .filters button, .segmented button { min-height: 36px; }
+  .btn.small { min-height: 38px; }
 }
 @media (max-width: 640px) {
-  .topbar { padding-block: 8px; }
-  .topbar-inner { gap: 8px; }
+  .page { padding-top: 12px; padding-left: max(12px, env(safe-area-inset-left, 0px)); padding-right: max(12px, env(safe-area-inset-right, 0px)); }
   .brand-name { display: none; }
   .route-pick { order: 1; flex: 1 1 0; }
-  .route-pick label, .reviewer label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-  .route-pick select { max-width: none; }
   .reviewer { order: 2; }
   .reviewer input { width: 112px; }
-  .filters { order: 3; flex: 1 1 100%; }
-  .filters button { flex: 1 0 auto; padding: 5px 8px; }
+  .filters { order: 3; flex: 1 1 100%; display: flex; }
+  .filters button { flex: 1 0 auto; padding: 4px 8px; }
   .progress { order: 4; flex: 1 1 100%; flex-direction: row; align-items: center; gap: 10px; }
-  .progress-text { font-size: 12px; }
-  .progress-bar { flex: 1; height: 5px; }
-  .page { padding-top: 12px; }
-  .panel section { padding: 12px; }
+  .progress-bar { flex: 1; }
+  .panel section { padding: 14px; }
   .grid2 { grid-template-columns: minmax(0, 1fr); }
-  .toggle { margin-left: 0; }
+  .topbar { position: static; }
+  .stage-bar .pill { flex: 1 1 auto; width: auto; }
+  .stage-tools { width: 100%; margin-left: 0; }
+  .stage-tools .switch { margin-left: auto; }
+  .signs { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .sign { font-size: 15px; }
 }
 @media (max-height: 500px) and (max-width: 980px) {
   .topbar { position: static; }
+  #scene { max-height: calc(100vh - 96px); }
 }
 @media (hover: none) {
   .keys { display: none; }
@@ -377,29 +474,27 @@ details summary { padding: 8px 10px; cursor: pointer; font-size: 13.5px; font-we
   <div class="topbar-inner">
     <a class="brand" id="brand" href="/" title="Elenco delle route"><span class="brand-mark" aria-hidden="true">50</span><span class="brand-name">Revisione cartelli</span></a>
     <div class="route-pick">
-      <label for="route">Route</label>
+      <label for="route" class="sr-only">Route</label>
       <select id="route"></select>
+    </div>
+    <div class="filters" role="group" aria-label="Quali fotogrammi mostrare">
+      <button type="button" data-filter="todo" aria-pressed="true" title="Non ancora confermati">Da rivedere</button>
+      <button type="button" data-filter="suspicious" aria-pressed="false" title="Il modello e la seconda lettura non sono d’accordo">Sospetti</button>
+      <button type="button" data-filter="proposals" aria-pressed="false" title="Con proposte del modello">Con proposte</button>
+      <button type="button" data-filter="all" aria-pressed="false">Tutti</button>
     </div>
     <div class="progress" aria-live="polite">
       <div class="progress-text" id="progressText"></div>
       <div class="progress-bar"><span id="progressBar"></span></div>
     </div>
-    <div class="filters" role="group" aria-label="Quali fotogrammi mostrare">
-      <button type="button" data-filter="todo" aria-pressed="true">Da rivedere</button>
-      <button type="button" data-filter="suspicious" aria-pressed="false">Sospetti</button>
-      <button type="button" data-filter="proposals" aria-pressed="false">Con proposte</button>
-      <button type="button" data-filter="all" aria-pressed="false">Tutti</button>
-    </div>
     <div class="reviewer">
-      <label for="reviewer">Revisore</label>
+      <label for="reviewer" class="sr-only">Revisore</label>
       <input type="text" id="reviewer" maxlength="100" placeholder="Revisore" autocomplete="name" spellcheck="false">
     </div>
   </div>
 </header>
 
 <div class="page">
-  <div class="notices" id="notices"></div>
-
   <div id="stateBox" class="state-box" hidden></div>
 
   <div id="workspace" class="workspace">
@@ -413,41 +508,49 @@ details summary { padding: 8px 10px; cursor: pointer; font-size: 13.5px; font-we
         </svg>
         <div class="stage-hint" id="stageHint" hidden><span>Trascina sull’immagine per disegnare il riquadro</span></div>
       </div>
-      <div class="stage-tools">
-        <button type="button" class="btn" id="draw">+ Nuovo riquadro</button>
-        <button type="button" class="btn danger" id="remove" disabled>Elimina riquadro</button>
-        <label class="toggle" id="hintToggle" hidden><input type="checkbox" id="showHints" checked> Mostra seconda lettura</label>
-      </div>
-      <div class="frame-meta">
+      <div class="stage-bar">
         <div class="nav">
-          <button type="button" class="btn" id="prev" aria-label="Fotogramma precedente">←</button>
+          <button type="button" class="btn icon" id="prev" aria-label="Fotogramma precedente">‹</button>
           <span class="pos" id="pos">–</span>
-          <button type="button" class="btn" id="next" aria-label="Fotogramma successivo">→</button>
+          <button type="button" class="btn icon" id="next" aria-label="Fotogramma successivo">›</button>
         </div>
         <span id="statePill" class="pill todo">Da rivedere</span>
         <span class="data" id="frameData"></span>
+        <div class="stage-tools">
+          <button type="button" class="btn" id="draw">+ Riquadro</button>
+          <button type="button" class="btn danger" id="remove" disabled>Elimina</button>
+          <label class="switch" id="hintToggle" hidden><input type="checkbox" id="showHints" checked><span class="track" aria-hidden="true"></span>Seconda lettura</label>
+        </div>
       </div>
-      <p class="reasons" id="reasons" hidden></p>
-      <p class="filter-note" id="filterNote" hidden></p>
       <div class="timeline" id="timeline" aria-label="Tutti i fotogrammi della route"></div>
       <div class="legend">
         <span><i class="l-done"></i>confermato</span>
         <span><i class="l-sus"></i>sospetto</span>
         <span><i class="l-has"></i>con proposte o seconda lettura</span>
-        <span><i class="l-dirty"></i>modificato, non salvato</span>
+        <span><i class="l-unsure"></i>confermato con dubbi</span>
+        <span><i class="l-dirty"></i>da confermare</span>
+        <span><i class="l-error"></i>non salvato</span>
         <span><i class="l-none"></i>niente proposto</span>
+      </div>
+      <div class="quality" role="group" aria-label="Dubbi nei fotogrammi confermati">
+        <span class="quality-label">Confermati con dubbi:</span>
+        <button type="button" class="qchip" id="qUnknown" data-filter="unknown" aria-pressed="false"></button>
+        <button type="button" class="qchip" id="qUnreadable" data-filter="unreadable" aria-pressed="false"></button>
+        <button type="button" class="qchip" id="qRoad" data-filter="road" aria-pressed="false"></button>
       </div>
     </div>
 
     <aside class="panel" aria-label="Revisione del fotogramma">
       <section>
-        <p class="eyebrow">Cartelli nel fotogramma</p>
+        <div class="section-head"><h2>Cartelli</h2><span class="count" id="boxCount"></span></div>
+        <p class="reasons" id="reasons" hidden></p>
+        <p class="filter-note" id="filterNote" hidden></p>
         <div class="box-list" id="boxList"></div>
-        <p class="empty-note" id="noBoxes" hidden>Nessun riquadro. Se nel fotogramma non ci sono cartelli di velocità, conferma con “Nessun cartello”: serve anche questo esempio.</p>
+        <p class="empty-note" id="noBoxes" hidden>Nessun riquadro. Se non ci sono cartelli di velocità, conferma “nessun cartello”: serve anche questo esempio.</p>
       </section>
 
       <section id="editor" hidden>
-        <p class="eyebrow" id="editorTitle">Riquadro</p>
+        <div class="section-head"><h2 id="editorTitle">Riquadro</h2></div>
         <div class="zoom-wrap">
           <svg id="zoom" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" aria-label="Ingrandimento del riquadro selezionato">
             <image id="zoomPhoto" x="0" y="0" preserveAspectRatio="none"></image>
@@ -455,17 +558,19 @@ details summary { padding: 8px 10px; cursor: pointer; font-size: 13.5px; font-we
             <g id="zoomHandles"></g>
           </svg>
         </div>
-        <div class="chips" id="families" role="group" aria-label="Tipo di cartello"></div>
-        <div id="valueBlock" class="stack" style="padding: 0">
-          <div class="signs" id="quickValues" role="group" aria-label="Velocità rapide"></div>
-          <div class="value-line">
-            <label for="value" class="eyebrow">Valore</label>
-            <input type="number" id="value" min="5" max="250" step="1" inputmode="numeric" placeholder="vuoto">
-            <span class="unit">km/h · vuoto = non leggibile</span>
-          </div>
-          <p class="field-error" id="valueError" hidden></p>
+        <p class="evidence" id="evidence"></p>
+        <div class="signs" id="quickValues" role="group" aria-label="Velocità"></div>
+        <div id="valueBlock" class="value-line">
+          <label for="value">Altro valore</label>
+          <input type="number" id="value" min="5" max="250" step="1" inputmode="numeric" placeholder="–">
+          <span>km/h</span>
         </div>
-        <div class="chips" id="roads" role="group" aria-label="Su quale strada vale"></div>
+        <p class="field-error" id="valueError" hidden></p>
+        <p class="field-label">Tipo</p>
+        <div class="chips" id="families" role="group" aria-label="Tipo di cartello"></div>
+        <div class="chips minor" id="familiesMore" role="group" aria-label="Altri tipi"></div>
+        <p class="field-label">Strada</p>
+        <div class="segmented" id="roads" role="group" aria-label="Su quale strada vale"></div>
         <details>
           <summary>Dettagli del cartello</summary>
           <div class="grid2">
@@ -512,20 +617,18 @@ details summary { padding: 8px 10px; cursor: pointer; font-size: 13.5px; font-we
             </label>
           </div>
         </details>
-        <p class="empty-note" id="evidence"></p>
       </section>
 
       <section id="hintSection" hidden>
-        <p class="eyebrow">Seconda lettura</p>
-        <p class="empty-note">Solo un aiuto: entra nella revisione unicamente con “Usa questo”.</p>
+        <div class="section-head"><h2>Seconda lettura</h2></div>
+        <p class="hint-intro">Un altro modello ha guardato il fotogramma. Usala solo se lo vedi anche tu.</p>
         <div class="hint-list" id="hintList"></div>
-        <p class="empty-note" id="noHints" hidden>Nessuna seconda lettura per questo fotogramma.</p>
         <p class="hint-stats" id="hintStats"></p>
       </section>
 
       <section>
         <details>
-          <summary>Dati del fotogramma (facoltativi)</summary>
+          <summary>Altro</summary>
           <div class="stack">
             <label>Sito fisico
               <input type="text" id="site_group" placeholder="Stesso identificativo nelle altre route" autocomplete="off">
@@ -533,34 +636,30 @@ details summary { padding: 8px 10px; cursor: pointer; font-size: 13.5px; font-we
             <label>Incontro
               <input type="text" id="encounter_id" placeholder="Stesso identificativo nei frame vicini" autocomplete="off">
             </label>
-          </div>
-        </details>
-      </section>
-
-      <section class="confirm-section">
-        <div class="confirm-area">
-          <button type="button" class="btn primary" id="confirm">Conferma fotogramma</button>
-          <p class="save-msg" id="saveMsg" role="status"></p>
-          <p class="save-msg" id="noticeMsg" role="status" hidden></p>
-          <button type="button" class="btn" id="discard" hidden>Annulla le modifiche non salvate</button>
-          <button type="button" class="btn danger" id="withdraw" hidden>Annulla conferma</button>
-        </div>
-        <p class="keys"><kbd>←</kbd> <kbd>→</kbd> fotogramma · <kbd>Invio</kbd> conferma · <kbd>N</kbd> nuovo riquadro · <kbd>Canc</kbd> elimina · <kbd>H</kbd> seconda lettura · <kbd>Esc</kbd> annulla</p>
-      </section>
-
-      <section class="backup">
-        <details>
-          <summary>Copia di sicurezza e note</summary>
-          <div class="stack">
             <div class="row">
               <button type="button" class="btn small" id="export">Scarica revisioni JSONL</button>
               <span class="save-msg" id="exportMsg" role="status"></span>
             </div>
+            <p class="keys"><kbd>←</kbd> <kbd>→</kbd> fotogramma · <kbd>Invio</kbd> conferma · <kbd>N</kbd> nuovo riquadro · <kbd>Canc</kbd> elimina · <kbd>H</kbd> seconda lettura · <kbd>Esc</kbd> annulla</p>
             <p id="storageNote"></p>
             <p>Proposte di cartelli da un modello addestrato in Vietnam e numeri sull’asfalto da OCR verificato con segmentazione della strada. Modelli non validati sulle strade svizzere. Conferma solo ciò che riesci a vedere. Il numero proposto non è il limite applicabile alla vettura.</p>
             <p>Lascia sconosciuto ciò che non puoi verificare. L’istante di passaggio resta non annotato. Ogni revisione viene controllata con le regole di import-annotations prima di entrare nel dataset.</p>
           </div>
         </details>
+      </section>
+
+      <section class="confirm-section">
+        <div class="notices" id="notices"></div>
+        <div class="confirm-area">
+          <div class="status-line">
+            <p class="save-msg" id="saveMsg" role="status"></p>
+            <div class="status-actions">
+              <button type="button" class="link" id="discard" hidden>Annulla modifiche</button>
+              <button type="button" class="link danger" id="withdraw" hidden>Annulla conferma</button>
+            </div>
+          </div>
+          <button type="button" class="btn primary" id="confirm" data-action="confirm">Conferma</button>
+        </div>
       </section>
     </aside>
   </div>
@@ -569,9 +668,9 @@ details summary { padding: 8px 10px; cursor: pointer; font-size: 13.5px; font-we
 <nav class="mobilebar" id="mobilebar" aria-label="Navigazione">
   <p class="mobile-msg" id="mobileMsg" role="alert" hidden></p>
   <div class="mobile-buttons">
-    <button type="button" class="btn" id="mPrev" aria-label="Fotogramma precedente">←</button>
-    <button type="button" class="btn primary" id="mConfirm">Conferma</button>
-    <button type="button" class="btn" id="mNext" aria-label="Fotogramma successivo">→</button>
+    <button type="button" class="btn" id="mPrev" aria-label="Fotogramma precedente">‹</button>
+    <button type="button" class="btn primary" id="mConfirm" data-action="confirm">Conferma</button>
+    <button type="button" class="btn" id="mNext" aria-label="Fotogramma successivo">›</button>
   </div>
 </nav>
 
@@ -579,21 +678,22 @@ details summary { padding: 8px 10px; cursor: pointer; font-size: 13.5px; font-we
 <script nonce="__NNSLR_NONCE__">
 'use strict';
 
+// The first five are the usual choices; the minor ones are shown smaller under them.
 const FAMILIES = [
-  { id: 'maximum_speed', label: 'Limite massimo', hasValue: true },
-  { id: 'cancellation', label: 'Fine limitazione', hasValue: true },
-  { id: 'zone', label: 'Zona', hasValue: true },
-  { id: 'variable_display', label: 'Segnale variabile', hasValue: true },
-  { id: 'road_marking_candidate', label: 'Numero a terra', hasValue: true },
-  { id: 'other_sign', label: 'Altro cartello', hasValue: false },
-  { id: 'unreadable', label: 'Illeggibile', hasValue: false },
-  { id: 'not_a_sign', label: 'Non è un cartello', hasValue: false }
+  { id: 'maximum_speed', label: 'Limite massimo', hasValue: true, minor: false },
+  { id: 'cancellation', label: 'Fine limitazione', hasValue: true, minor: false },
+  { id: 'unreadable', label: 'Illeggibile', hasValue: false, minor: false },
+  { id: 'variable_display', label: 'Segnale variabile', hasValue: true, minor: false },
+  { id: 'zone', label: 'Zona', hasValue: true, minor: false },
+  { id: 'road_marking_candidate', label: 'Numero a terra', hasValue: true, minor: true },
+  { id: 'other_sign', label: 'Altro cartello', hasValue: false, minor: true },
+  { id: 'not_a_sign', label: 'Non è un cartello', hasValue: false, minor: true }
 ];
 const QUICK_VALUES = [20, 30, 40, 50, 60, 70, 80, 100, 120];
 const ROADS = [
-  { id: 'own_road', label: 'La nostra strada' },
-  { id: 'other_road', label: 'Altra strada' },
-  { id: 'unresolved', label: 'Non determinata' }
+  { id: 'own_road', label: 'La nostra' },
+  { id: 'other_road', label: 'Un’altra' },
+  { id: 'unresolved', label: 'Da chiarire' }
 ];
 const DETAIL_FIELDS = ['visibility', 'occlusion', 'supplementary_panel', 'temporary', 'variable_display', 'notes'];
 const BOOLEAN_FIELDS = ['temporary', 'variable_display'];
@@ -640,7 +740,11 @@ const S = {
   notice: null,
   storageWarning: '',
   serverWarning: '',
-  retrying: false
+  retrying: false,
+  withdrawArmed: null,
+  saveCount: 0,
+  lastSave: null,
+  server: 'offline'
 };
 
 const rowIndex = new Map();
@@ -737,14 +841,16 @@ function sideLabel(side) {
   if (side === 'overhead') { return 'sopra la strada'; }
   return side;
 }
-// Short label drawn next to a hint box, e.g. "2a lettura · 60".
+// Short label drawn next to a hint box, e.g. "60?": its colour says it is the second opinion.
 function hintLabel(h) {
   const t = hintTypeOf(h.type);
   let what = t.short;
   if (h.value_kph !== null && h.value_kph !== undefined) {
-    if (h.type === 'maximum_speed') { what = String(h.value_kph); } else { what = t.short + ' ' + h.value_kph; }
+    if (h.type === 'maximum_speed' || h.type === 'unsure') { what = String(h.value_kph); } else { what = t.short + ' ' + h.value_kph; }
+  } else if (h.type === 'unsure') {
+    what = 'incerto';
   }
-  return '2a lettura · ' + what;
+  return what + '?';
 }
 // The family a hint becomes when the reviewer presses "Usa questo".
 function familyForHint(type) {
@@ -762,6 +868,34 @@ function sameBox(a, b) {
     if (Math.abs(a[i] - b[i]) > 0.01) { return false; }
   }
   return true;
+}
+function boxesOverlap(a, b) {
+  if (a[2] < b[0] || b[2] < a[0]) { return false; }
+  if (a[3] < b[1] || b[3] < a[1]) { return false; }
+  return true;
+}
+// Shared area over the area of the smaller box: 1 when one box contains the other.
+function overlap(a, b) {
+  const x1 = Math.max(a[0], b[0]);
+  const y1 = Math.max(a[1], b[1]);
+  const x2 = Math.min(a[2], b[2]);
+  const y2 = Math.min(a[3], b[3]);
+  if (x2 <= x1 || y2 <= y1) { return 0; }
+  const shared = (x2 - x1) * (y2 - y1);
+  const areaA = (a[2] - a[0]) * (a[3] - a[1]);
+  const areaB = (b[2] - b[0]) * (b[3] - b[1]);
+  let smaller = areaA;
+  if (areaB < smaller) { smaller = areaB; }
+  if (smaller <= 0) { return 0; }
+  return shared / smaller;
+}
+// The proposal a reviewed box comes from, by detection_id; null for a box added by hand.
+function originalOf(row, d) {
+  if (!d.detection_id) { return null; }
+  for (const p of proposalsOf(row)) {
+    if (p.detection_id === d.detection_id) { return p; }
+  }
+  return null;
 }
 function narrowLayout() { return window.matchMedia('(max-width: 980px)').matches; }
 function coarsePointer() { return window.matchMedia('(pointer: coarse)').matches; }
@@ -785,9 +919,20 @@ function hintsOf(key) {
 function workOf(row) {
   const key = row.frame_key;
   if (!S.edits[key]) {
-    S.edits[key] = { review_state: 'pending', detections: clone(proposalsOf(row)), saved: true, revision: 0 };
+    const detections = clone(proposalsOf(row));
+    // Numbered from left to right, as they appear on the photo.
+    detections.sort(function (a, b) { return a.bbox_xyxy[0] - b.bbox_xyxy[0]; });
+    S.edits[key] = { review_state: 'pending', detections: detections, saved: true, revision: 0 };
   }
   return S.edits[key];
+}
+// True when the working copy is exactly what the server has confirmed (an agent may edit it without changed()).
+function sameAsServer(s) {
+  if (!s || !s.base) { return false; }
+  if (JSON.stringify(s.detections) !== JSON.stringify(s.base.detections || [])) { return false; }
+  if ((s.site_group ?? null) !== (s.base.site_group ?? null)) { return false; }
+  if ((s.encounter_id ?? null) !== (s.base.encounter_id ?? null)) { return false; }
+  return true;
 }
 function isConfirmed(key) {
   const s = S.edits[key];
@@ -818,14 +963,35 @@ function statusLabel(key) {
   const s = S.edits[key];
   if (status === 'done') { return 'Confermato'; }
   if (status === 'saving') { return 'Salvataggio…'; }
-  if (status === 'error') { return s && s.error ? 'Non salvato' : 'In attesa di salvataggio'; }
-  if (status === 'dirty') { return s && s.server_confirmed ? 'Modificato, da riconfermare' : 'Modifiche non salvate'; }
+  if (status === 'error') { return s && s.error ? 'Non salvato' : 'In attesa'; }
+  if (status === 'dirty') { return s && s.server_confirmed ? 'Da riconfermare' : 'Da confermare'; }
   return 'Da rivedere';
+}
+// Doubts left in a confirmed frame: a speed sign without its number, an unreadable sign, a road not chosen.
+function doubtsOf(key) {
+  const out = { unknown: 0, unreadable: 0, road: 0 };
+  if (!isConfirmed(key)) { return out; }
+  for (const d of S.edits[key].detections) {
+    const speed = d.family === 'maximum_speed' || d.family === 'zone' || d.family === 'variable_display';
+    if (d.family === 'unreadable') {
+      out.unreadable += 1;
+    } else if ((speed || d.family === 'road_marking_candidate') && (d.value_kph === null || d.value_kph === undefined)) {
+      out.unknown += 1;
+    }
+    if (speed && (!d.applicability || d.applicability === 'unresolved')) { out.road += 1; }
+  }
+  return out;
+}
+function isQualityFilter(filter) {
+  return filter === 'unknown' || filter === 'unreadable' || filter === 'road';
 }
 function matchesFilter(row, filter) {
   if (filter === 'todo') { return frameStatus(row.frame_key) !== 'done'; }
   if (filter === 'suspicious') { return reasonsOf(row.frame_key).length > 0; }
   if (filter === 'proposals') { return proposalsOf(row).length > 0; }
+  if (filter === 'unknown') { return doubtsOf(row.frame_key).unknown > 0; }
+  if (filter === 'unreadable') { return doubtsOf(row.frame_key).unreadable > 0; }
+  if (filter === 'road') { return doubtsOf(row.frame_key).road > 0; }
   return true;
 }
 // Frames of the current filter, plus the frame on screen so that it never disappears under the reviewer.
@@ -850,6 +1016,7 @@ function changed(row) {
   s.saved = false;
   s.error = null;
   s.version = (s.version || 0) + 1;
+  S.withdrawArmed = null;
   if (S.notice && S.notice.key === row.frame_key) { S.notice = null; }
   store();
   render();
@@ -896,6 +1063,7 @@ function openFrame(key) {
   S.drawing = false;
   S.drag = null;
   S.filterNote = '';
+  S.withdrawArmed = null;
   writeLocal(lastKeyStorage, key);
   render();
   scrollTimelineToCurrent();
@@ -917,6 +1085,10 @@ function nextAfterConfirm(key) {
   for (let i = start + 1; i < rows.length; i++) {
     const row = rows[i];
     if (S.filter === 'all') { return row.frame_key; }
+    if (isQualityFilter(S.filter)) {
+      if (matchesFilter(row, S.filter)) { return row.frame_key; }
+      continue;
+    }
     if (frameStatus(row.frame_key) === 'done') { continue; }
     if (matchesFilter(row, S.filter)) { return row.frame_key; }
   }
@@ -953,6 +1125,7 @@ function setFilter(filter) {
   }
   if (target === null) {
     if (filter === 'suspicious') { S.filterNote = 'Nessun fotogramma sospetto da rivedere.'; }
+    else if (isQualityFilter(filter)) { S.filterNote = 'Nessun fotogramma confermato con questo dubbio.'; }
     else { S.filterNote = 'Nessun fotogramma corrisponde a questo filtro.'; }
     render();
     return;
@@ -1005,6 +1178,7 @@ async function send(key) {
   if (!api || !s || S.inFlight.has(key)) { return false; }
   const version = s.version || 0;
   S.inFlight.add(key);
+  S.lastSave = { key: key, result: 'saving', revision: s.revision || 0 };
   render();
   let ok = false;
   try {
@@ -1032,6 +1206,12 @@ async function send(key) {
     s.retry = e.retry === true;
   } finally {
     S.inFlight.delete(key);
+    S.saveCount += 1;
+    if (ok) {
+      S.lastSave = { key: key, result: 'ok', revision: S.edits[key].revision || 0 };
+    } else {
+      S.lastSave = { key: key, result: 'error', revision: s.revision || 0 };
+    }
     store();
     render();
   }
@@ -1053,6 +1233,7 @@ async function loadServer() {
     const body = await call('GET', api + '/reviews');
     if (body.run_id !== payload.run_id) {
       S.serverWarning = 'Il report di questa route è stato rigenerato: ricarica la pagina.';
+      S.server = 'stale';
       render();
       return;
     }
@@ -1084,11 +1265,13 @@ async function loadServer() {
     }
     takeSuspicious(body);
     S.serverWarning = '';
+    S.server = 'ready';
     store();
     render();
     retryUnsaved(true);
   } catch (e) {
     S.serverWarning = 'Revisioni non lette dal server: ' + e.message + ' Le modifiche restano in questo browser.';
+    S.server = 'error';
     render();
   }
 }
@@ -1100,6 +1283,7 @@ function needReviewer(key) {
   el('reviewer').classList.add('need');
   el('reviewer').focus();
   S.notice = { key: key, text: 'Scrivi nome o sigla del revisore, poi conferma.', error: true };
+  S.lastSave = { key: key, result: 'need-reviewer', revision: 0 };
   render();
 }
 function timeNow() {
@@ -1110,6 +1294,16 @@ async function confirmFrame() {
   if (!row) { return; }
   const key = row.frame_key;
   if (S.inFlight.has(key)) { return; }
+  // Already on the server and not changed since: Conferma moves on, it does not sign the frame again.
+  if (api && frameStatus(key) === 'done' && sameAsServer(S.edits[key])) {
+    S.lastSave = { key: key, result: 'unchanged', revision: S.edits[key].revision || 0 };
+    go(1);
+    if (S.currentKey === key) {
+      S.notice = { key: key, text: 'Già confermato: non ci sono altri fotogrammi con questo filtro.', error: false };
+    }
+    render();
+    return;
+  }
   const reviewer = reviewerName();
   if (!reviewer) { needReviewer(key); return; }
   writeLocal('nnslr-reviewer', reviewer);
@@ -1150,7 +1344,14 @@ async function withdrawFrame() {
   if (S.inFlight.has(key)) { return; }
   const reviewer = reviewerName();
   if (!reviewer) { needReviewer(key); return; }
-  if (!window.confirm('Annullare la conferma di questo fotogramma? Non verrà importato nel dataset.')) { return; }
+  // Two presses instead of a browser dialog: the second one, on the same frame, withdraws.
+  if (S.withdrawArmed !== key) {
+    S.withdrawArmed = key;
+    S.notice = { key: key, text: 'Premi “Sì, annulla” per togliere la conferma: il fotogramma non verrà importato.', error: false, warn: true };
+    render();
+    return;
+  }
+  S.withdrawArmed = null;
   const s = workOf(row);
   S.inFlight.add(key);
   render();
@@ -1159,10 +1360,13 @@ async function withdrawFrame() {
     S.edits[key] = fromServer(result.review);
     takeSuspicious(result);
     S.notice = { key: key, text: 'Conferma annullata: il fotogramma non verrà importato.', error: false };
+    S.lastSave = { key: key, result: 'withdrawn', revision: S.edits[key].revision || 0 };
   } catch (e) {
     S.notice = { key: key, text: 'Annullamento non riuscito: ' + e.message, error: true };
+    S.lastSave = { key: key, result: 'error', revision: s.revision || 0 };
   } finally {
     S.inFlight.delete(key);
+    S.saveCount += 1;
     store();
     render();
   }
@@ -1195,6 +1399,7 @@ function discardChanges() {
   }
   S.selected = -1;
   S.notice = null;
+  S.withdrawArmed = null;
   el('valueError').hidden = true;
   store();
   render();
@@ -1267,7 +1472,13 @@ function renderStage(row, work) {
   const scene = el('scene');
   scene.setAttribute('viewBox', '0 0 ' + row.width + ' ' + row.height);
   const photo = el('photo');
-  if (photo.getAttribute('href') !== row.preview_path) { photo.setAttribute('href', row.preview_path); }
+  if (photo.getAttribute('href') !== row.preview_path) {
+    // The boxes of the new frame wait for its photo: never drawn on the previous one.
+    photo.setAttribute('href', row.preview_path);
+    el('stage').dataset.photoKey = '';
+    el('overlays').style.visibility = 'hidden';
+    el('hintLayer').style.visibility = 'hidden';
+  }
   photo.setAttribute('width', row.width);
   photo.setAttribute('height', row.height);
   if (S.drawing) { scene.classList.add('drawing'); } else { scene.classList.remove('drawing'); }
@@ -1276,7 +1487,7 @@ function renderStage(row, work) {
   const k = sceneScale(scene, row.width, row.height);
   const fontSize = 14 / k;
   const placed = [];
-  const handleSize = 12 / k;
+  const handleSize = 8 / k;
   const hitSize = (coarsePointer() ? 36 : 20) / k;
   const overlays = el('overlays');
   overlays.replaceChildren();
@@ -1296,7 +1507,10 @@ function renderStage(row, work) {
     overlays.append(rect);
     const text = (i + 1) + ' · ' + shortName(d);
     const width = labelWidth(text, fontSize);
-    let y = freeLabelY(placed, b[0], Math.max(fontSize, b[1] - fontSize * 0.35), width, fontSize, -fontSize);
+    // The selected box has its corners outside: its label goes above them.
+    let top = b[1] - fontSize * 0.35;
+    if (isSelected) { top = b[1] - handleSize - fontSize * 0.2; }
+    let y = freeLabelY(placed, b[0], Math.max(fontSize, top), width, fontSize, -fontSize);
     if (y < fontSize) { y = fontSize; }
     placed.push({ x: b[0], y: y, w: width, h: fontSize, text: text });
     const tag = svgNode('text', { x: b[0], y: y, class: 'tag', 'font-size': fontSize, 'stroke-width': 3 / k });
@@ -1305,17 +1519,24 @@ function renderStage(row, work) {
   }
   renderHintLayer(row, k, placed);
   if (S.selected >= 0 && S.selected < work.detections.length) {
-    appendHandles(overlays, work.detections[S.selected].bbox_xyxy, handleSize, hitSize);
+    appendHandles(overlays, work.detections[S.selected].bbox_xyxy, handleSize, hitSize, true);
   }
 }
 function boxArea(d) {
   const b = d.bbox_xyxy;
   return Math.abs((b[2] - b[0]) * (b[3] - b[1]));
 }
-function appendHandles(layer, b, size, hit) {
+// On the photo the corners sit outside the box, so they never cover a small sign.
+function appendHandles(layer, b, size, hit, outside) {
   const corners = [['nw', b[0], b[1]], ['ne', b[2], b[1]], ['sw', b[0], b[3]], ['se', b[2], b[3]]];
   for (const c of corners) {
-    layer.append(svgNode('rect', { x: c[1] - size / 2, y: c[2] - size / 2, width: size, height: size, class: 'handle' }));
+    let hx = c[1] - size / 2;
+    let hy = c[2] - size / 2;
+    if (outside) {
+      if (c[0] === 'nw' || c[0] === 'sw') { hx = c[1] - size; } else { hx = c[1]; }
+      if (c[0] === 'nw' || c[0] === 'ne') { hy = c[2] - size; } else { hy = c[2]; }
+    }
+    layer.append(svgNode('rect', { x: hx, y: hy, width: size, height: size, class: 'handle' }));
   }
   for (const c of corners) {
     layer.append(svgNode('rect', {
@@ -1338,11 +1559,14 @@ function renderHintLayer(row, k, placed) {
     // Below the box, where the label of a reviewed box never is.
     let y = b[3] + fontSize * 1.05;
     // The two passes often see the same sign: one label is enough.
-    const clash = labelClash(placed, b[0], y, width, fontSize);
-    if (clash !== null && clash.text === text) { continue; }
+    let duplicate = false;
+    for (const p of placed) {
+      if (p.text === text && p.box && boxesOverlap(p.box, b)) { duplicate = true; }
+    }
+    if (duplicate) { continue; }
     y = freeLabelY(placed, b[0], y, width, fontSize, fontSize);
     if (y > row.height) { y = row.height; }
-    placed.push({ x: b[0], y: y, w: width, h: fontSize, text: text });
+    placed.push({ x: b[0], y: y, w: width, h: fontSize, text: text, box: b });
     const tag = svgNode('text', { x: b[0], y: y, class: 'hint-tag', 'font-size': fontSize, 'stroke-width': 3 / k });
     tag.textContent = text;
     layer.append(tag);
@@ -1357,7 +1581,7 @@ function renderZoom(row, d) {
   if (!keepView) {
     const w = b[2] - b[0];
     const h = b[3] - b[1];
-    const pad = Math.max(w, h) * 0.6 + 12;
+    const pad = Math.max(w, h) * 0.35 + 4;
     let x = b[0] - pad;
     let y = b[1] - pad;
     let vw = w + pad * 2;
@@ -1382,7 +1606,7 @@ function renderZoom(row, d) {
   if (view && view.width && view.height) { kz = sceneScale(zoom, view.width, view.height); }
   const layer = el('zoomHandles');
   layer.replaceChildren();
-  appendHandles(layer, b, 12 / kz, (coarsePointer() ? 36 : 22) / kz);
+  appendHandles(layer, b, 12 / kz, (coarsePointer() ? 36 : 22) / kz, false);
 }
 
 function renderBoxList(row, work) {
@@ -1390,10 +1614,14 @@ function renderBoxList(row, work) {
   list.replaceChildren();
   for (let i = 0; i < work.detections.length; i++) {
     const d = work.detections[i];
-    const item = document.createElement('button');
-    item.type = 'button';
-    item.className = 'box-row';
-    item.setAttribute('aria-pressed', i === S.selected ? 'true' : 'false');
+    const item = document.createElement('div');
+    item.className = i === S.selected ? 'box-row selected' : 'box-row';
+    item.dataset.index = String(i);
+    item.dataset.detectionId = String(d.detection_id || '');
+    const main = document.createElement('button');
+    main.type = 'button';
+    main.className = 'box-main';
+    main.setAttribute('aria-pressed', i === S.selected ? 'true' : 'false');
     const n = document.createElement('span');
     n.className = 'n';
     n.textContent = String(i + 1);
@@ -1402,16 +1630,48 @@ function renderBoxList(row, work) {
     what.textContent = describe(d);
     const src = document.createElement('span');
     src.className = 'src';
-    if (d.model_label) {
-      src.textContent = d.score === null || d.score === undefined ? 'modello' : 'modello ' + Number(d.score).toFixed(2);
+    const orig = originalOf(row, d);
+    if (orig === null) {
+      src.textContent = 'aggiunto a mano';
+    } else if (orig.family !== d.family || orig.value_kph !== d.value_kph) {
+      // What the reviewer changed: "modello 40 → 60".
+      src.append(document.createTextNode('modello ' + shortName(orig) + ' '));
+      const changed = document.createElement('span');
+      changed.className = 'changed';
+      changed.textContent = '→ ' + shortName(d);
+      src.append(changed);
+    } else if (orig.score === null || orig.score === undefined) {
+      src.textContent = 'modello';
     } else {
-      src.textContent = 'a mano';
+      src.textContent = 'modello · ' + Math.round(Number(orig.score) * 100) + '%';
     }
-    item.append(n, what, src);
-    item.addEventListener('click', function () { S.selected = i; S.drawing = false; render(); });
+    for (let j = 0; j < i; j++) {
+      if (overlap(work.detections[j].bbox_xyxy, d.bbox_xyxy) > 0.6) {
+        const dup = document.createElement('span');
+        dup.className = 'dup';
+        dup.textContent = ' · stesso cartello di ' + (j + 1);
+        src.append(dup);
+        item.dataset.duplicateOf = String(j);
+        break;
+      }
+    }
+    main.append(n, what, src);
+    main.addEventListener('click', function () { S.selected = i; S.drawing = false; render(); revealEditor(); });
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'box-del';
+    del.textContent = '✕';
+    del.title = 'Elimina il riquadro ' + (i + 1);
+    del.setAttribute('aria-label', 'Elimina il riquadro ' + (i + 1));
+    del.addEventListener('click', function () { removeBox(i); });
+    item.append(main, del);
     list.append(item);
   }
   el('noBoxes').hidden = work.detections.length > 0;
+  let count = '';
+  if (work.detections.length === 1) { count = '1 riquadro'; }
+  if (work.detections.length > 1) { count = work.detections.length + ' riquadri'; }
+  el('boxCount').textContent = count;
 }
 
 function renderEditor(row, work) {
@@ -1428,17 +1688,22 @@ function renderEditor(row, work) {
   renderZoom(row, d);
 
   const fam = el('families');
+  const famMore = el('familiesMore');
   fam.replaceChildren();
+  famMore.replaceChildren();
   for (const f of FAMILIES) {
     const chip = document.createElement('button');
     chip.type = 'button';
     chip.className = 'chip';
     chip.textContent = f.label;
+    chip.dataset.family = f.id;
     chip.setAttribute('aria-pressed', d.family === f.id ? 'true' : 'false');
+    if (f.id === 'not_a_sign') { chip.title = 'Resta come esempio negativo; per togliere un riquadro sbagliato usa ✕'; }
     chip.addEventListener('click', function () { setFamily(f.id); });
-    fam.append(chip);
+    if (f.minor) { famMore.append(chip); } else { fam.append(chip); }
   }
 
+  // The signs are always there: a number makes the box a speed limit, "?" means the number cannot be read.
   el('valueBlock').hidden = !familyHasValue(d.family);
   const quick = el('quickValues');
   quick.replaceChildren();
@@ -1447,11 +1712,23 @@ function renderEditor(row, work) {
     sign.type = 'button';
     sign.className = 'sign';
     sign.textContent = String(v);
+    sign.dataset.value = String(v);
     sign.setAttribute('aria-label', v + ' km/h');
     sign.setAttribute('aria-pressed', d.value_kph === v ? 'true' : 'false');
     sign.addEventListener('click', function () { setValue(v); });
     quick.append(sign);
   }
+  const unknown = document.createElement('button');
+  unknown.type = 'button';
+  unknown.className = 'sign unknown';
+  unknown.textContent = '?';
+  unknown.dataset.value = 'unknown';
+  unknown.title = 'Numero non leggibile';
+  unknown.setAttribute('aria-label', 'Numero non leggibile');
+  const noValue = familyHasValue(d.family) && (d.value_kph === null || d.value_kph === undefined);
+  unknown.setAttribute('aria-pressed', noValue ? 'true' : 'false');
+  unknown.addEventListener('click', function () { setValue(null); });
+  quick.append(unknown);
   const valueInput = el('value');
   if (document.activeElement !== valueInput) {
     valueInput.value = d.value_kph === null || d.value_kph === undefined ? '' : String(d.value_kph);
@@ -1463,8 +1740,8 @@ function renderEditor(row, work) {
   for (const r of ROADS) {
     const chip = document.createElement('button');
     chip.type = 'button';
-    chip.className = 'chip';
     chip.textContent = r.label;
+    chip.dataset.applicability = r.id;
     chip.setAttribute('aria-pressed', currentRoad === r.id ? 'true' : 'false');
     chip.addEventListener('click', function () { setField('applicability', r.id); });
     roads.append(chip);
@@ -1486,14 +1763,25 @@ function renderEditor(row, work) {
 }
 
 function renderHintList(row, work) {
-  el('hintSection').hidden = !routeHasHints;
-  el('hintToggle').hidden = !routeHasHints;
-  if (!routeHasHints) { return; }
   const hints = hintsOf(row.frame_key);
+  el('hintToggle').hidden = !routeHasHints;
+  // Only on the frames the second opinion has looked at.
+  el('hintSection').hidden = hints.length === 0;
+  if (hints.length === 0) { return; }
   const list = el('hintList');
   list.replaceChildren();
-  el('noHints').hidden = hints.length > 0;
+  // Readings A and B of the same sign become one row: same type and value, boxes overlapping.
+  const groups = [];
   for (let i = 0; i < hints.length; i++) {
+    let found = null;
+    for (const g of groups) {
+      const first = hints[g[0]];
+      if (first.type === hints[i].type && first.value_kph === hints[i].value_kph && overlap(first.box, hints[i].box) > 0.3) { found = g; }
+    }
+    if (found === null) { groups.push([i]); } else { found.push(i); }
+  }
+  for (const group of groups) {
+    const i = group[0];
     const h = hints[i];
     const item = document.createElement('div');
     item.className = 'hint-row';
@@ -1511,7 +1799,12 @@ function renderHintList(row, work) {
     conf.textContent = confidenceLabel(h.confidence);
     head.append(what, conf);
     const parts = [];
-    if (h.pass) { parts.push('lettura ' + h.pass); }
+    const passes = [];
+    for (const k of group) {
+      if (hints[k].pass && passes.indexOf(hints[k].pass) < 0) { passes.push(hints[k].pass); }
+    }
+    if (passes.length === 1) { parts.push('lettura ' + passes[0]); }
+    if (passes.length > 1) { parts.push('letture ' + passes.join(' e ')); }
     if (h.side) { parts.push(sideLabel(h.side)); }
     if (parts.length > 0) {
       const sub = document.createElement('span');
@@ -1529,16 +1822,19 @@ function renderHintList(row, work) {
     item.append(body);
     const use = document.createElement('button');
     use.type = 'button';
-    use.className = 'btn small';
+    use.className = 'btn small tint';
     let used = false;
     for (const d of work.detections) {
       if (sameBox(d.bbox_xyxy, h.box)) { used = true; }
+      if (overlap(d.bbox_xyxy, h.box) > 0.3 && d.family === familyForHint(h.type) && d.value_kph === h.value_kph) { used = true; }
     }
+    use.dataset.hintIndex = String(i);
     if (used) {
-      use.textContent = 'Usato ✓';
+      use.textContent = 'Già usato';
       use.disabled = true;
     } else {
-      use.textContent = 'Usa questo';
+      use.textContent = 'Usa';
+      use.setAttribute('aria-label', 'Usa questo: ' + text + (h.pass ? ' (lettura ' + h.pass + ')' : ''));
       use.addEventListener('click', function () { useHint(i); });
     }
     item.append(use);
@@ -1555,32 +1851,46 @@ function renderHintList(row, work) {
   el('hintStats').textContent = stats;
 }
 
+// One row of ticks per segment, with its label.
 function buildTimeline() {
   const box = el('timeline');
   box.replaceChildren();
   let lastSegment = null;
+  let ticks = null;
   for (const row of rows) {
+    if (ticks === null || row.segment_index !== lastSegment) {
+      const seg = document.createElement('div');
+      seg.className = 'tl-seg';
+      const label = document.createElement('span');
+      label.className = 'tl-label';
+      label.textContent = 'seg ' + row.segment_index;
+      ticks = document.createElement('div');
+      ticks.className = 'tl-ticks';
+      seg.append(label, ticks);
+      box.append(seg);
+      lastSegment = row.segment_index;
+    }
     const tick = document.createElement('button');
     tick.type = 'button';
     tick.tabIndex = -1;
     tick.dataset.key = row.frame_key;
-    if (lastSegment !== null && row.segment_index !== lastSegment) { tick.dataset.seg = '1'; }
-    lastSegment = row.segment_index;
-    box.append(tick);
+    ticks.append(tick);
   }
 }
 function renderTimeline() {
-  for (const tick of el('timeline').children) {
+  for (const tick of el('timeline').querySelectorAll('button')) {
     const key = tick.dataset.key;
     const row = rowOf(key);
     const status = frameStatus(key);
     let cls = '';
-    if (status === 'done') { cls = 'done'; }
+    if (status === 'done') {
+      const doubts = doubtsOf(key);
+      if (doubts.unknown + doubts.unreadable > 0) { cls = 'done unsure'; } else { cls = 'done'; }
+    }
     else if (status === 'error') { cls = 'error'; }
     else if (status === 'dirty' || status === 'saving') { cls = 'dirty'; }
     else if (reasonsOf(key).length > 0) { cls = 'sus'; }
     else if (proposalsOf(row).length > 0 || hintsOf(key).length > 0) { cls = 'has'; }
-    if (tick.dataset.seg === '1') { cls += ' seg'; }
     if (key === S.currentKey) { cls += ' cur'; }
     if (tick.className !== cls) { tick.className = cls; }
     const label = 'Segmento ' + row.segment_index + ' · immagine ' + row.output_index + ' · ' + statusLabel(key).toLowerCase();
@@ -1590,13 +1900,16 @@ function renderTimeline() {
     }
   }
 }
+// Only a row that scrolls (phones) moves, and only when the current tick is out of sight.
 function scrollTimelineToCurrent() {
-  const box = el('timeline');
-  for (const tick of box.children) {
-    if (tick.dataset.key === S.currentKey) {
-      const left = tick.offsetLeft - box.offsetLeft - box.clientWidth / 2;
-      box.scrollLeft = left < 0 ? 0 : left;
-    }
+  for (const tick of el('timeline').querySelectorAll('button')) {
+    if (tick.dataset.key !== S.currentKey) { continue; }
+    const strip = tick.parentNode;
+    if (strip.scrollWidth <= strip.clientWidth) { return; }
+    const left = tick.offsetLeft - strip.offsetLeft;
+    if (left >= strip.scrollLeft + 40 && left <= strip.scrollLeft + strip.clientWidth - 40) { return; }
+    const target = left - strip.clientWidth / 2;
+    strip.scrollLeft = target < 0 ? 0 : target;
   }
 }
 
@@ -1614,7 +1927,7 @@ function renderProgress() {
     text.textContent = 'Nessun fotogramma';
   } else {
     const strong = document.createElement('strong');
-    strong.textContent = done + ' / ' + total;
+    strong.textContent = done + ' di ' + total;
     text.append(strong, document.createTextNode(' confermati'));
     if (suspicious > 0 || routeHasHints) {
       const sus = document.createElement('span');
@@ -1624,6 +1937,30 @@ function renderProgress() {
     }
   }
   el('progressBar').style.width = total === 0 ? '0' : Math.round(done * 100 / total) + '%';
+  renderQuality();
+}
+// Confirmed is not the same as certain: how many confirmed frames still carry a doubt. Each counter is a filter.
+function renderQuality() {
+  let unknown = 0;
+  let unreadable = 0;
+  let road = 0;
+  for (const row of rows) {
+    const doubts = doubtsOf(row.frame_key);
+    if (doubts.unknown > 0) { unknown += 1; }
+    if (doubts.unreadable > 0) { unreadable += 1; }
+    if (doubts.road > 0) { road += 1; }
+  }
+  setQualityChip(el('qUnknown'), unknown, 'senza numero', true);
+  setQualityChip(el('qUnreadable'), unreadable, 'con illeggibili', true);
+  setQualityChip(el('qRoad'), road, 'strada non indicata', false);
+}
+function setQualityChip(chip, count, label, warn) {
+  chip.textContent = count + ' ' + label;
+  chip.dataset.count = String(count);
+  if (count > 0 && warn) { chip.className = 'qchip some'; }
+  else if (count > 0) { chip.className = 'qchip'; }
+  else { chip.className = 'qchip zero'; }
+  chip.setAttribute('aria-pressed', S.filter === chip.dataset.filter ? 'true' : 'false');
 }
 
 function renderRoutes() {
@@ -1653,7 +1990,14 @@ function renderNotices() {
   box.replaceChildren();
   if (S.serverWarning) { box.append(noticeNode(S.serverWarning, 'notice')); }
   if (S.storageWarning) { box.append(noticeNode(S.storageWarning, 'notice')); }
-  const unsaved = api ? unsavedKeys() : [];
+  const unsaved = [];
+  if (api) {
+    for (const key of unsavedKeys()) {
+      // The first send of a fresh confirmation is not an error: it becomes one only if it fails.
+      if (S.inFlight.has(key) && !S.edits[key].error) { continue; }
+      unsaved.push(key);
+    }
+  }
   if (unsaved.length > 0) {
     let list = unsaved.slice(0, 8).join(', ');
     if (unsaved.length > 8) { list += ', …'; }
@@ -1706,14 +2050,14 @@ function saveText(key, s) {
   }
   if (status === 'saving') { return ['Salvataggio in corso…', '']; }
   if (status === 'done') {
-    return ['Salvato ✓ (revisione ' + s.revision + (s.reviewer ? ', ' + s.reviewer : '') + ')', 'ok'];
+    return ['Salvato ✓ · revisione ' + s.revision + (s.reviewer ? ' · ' + s.reviewer : ''), 'ok'];
   }
   if (status === 'error' && s.error) { return ['NON salvato: ' + s.error, 'error']; }
   if (status === 'error') { return ['Confermato ma non ancora salvato: nuovo tentativo automatico.', 'error']; }
   if (status === 'dirty' && s.server_confirmed) {
-    return ['Modificato: premi “Conferma” per salvare. Sul server resta la versione confermata prima.', 'warn'];
+    return ['Modificato: premi Conferma per salvarlo. Sul server resta la versione di prima.', 'warn'];
   }
-  if (status === 'dirty') { return ['Modifiche non confermate (solo in questo browser).', 'warn']; }
+  if (status === 'dirty') { return ['Modifiche da confermare.', 'warn']; }
   if (s && s.base && s.base.confirmed === false) { return ['Conferma annullata: non verrà importato finché non lo confermi di nuovo.', '']; }
   return ['', ''];
 }
@@ -1764,8 +2108,8 @@ function render() {
 
   const proposals = proposalsOf(row).length;
   const hints = hintsOf(key).length;
-  let info = 'segmento ' + row.segment_index + ' · immagine ' + row.output_index + ' · ' + proposals + (proposals === 1 ? ' proposta' : ' proposte');
-  if (routeHasHints) { info += ' · seconda lettura: ' + hints; }
+  let info = 'Segmento ' + row.segment_index + ' · immagine ' + row.output_index + ' · ' + proposals + (proposals === 1 ? ' proposta' : ' proposte');
+  if (routeHasHints) { info += ' · ' + hints + ' in seconda lettura'; }
   el('frameData').textContent = info;
 
   const reasons = reasonsOf(key);
@@ -1785,15 +2129,23 @@ function render() {
   el('filterNote').hidden = S.filterNote === '';
 
   el('draw').classList.toggle('on', S.drawing);
-  el('draw').textContent = S.drawing ? 'Annulla disegno' : '+ Nuovo riquadro';
+  el('draw').textContent = S.drawing ? 'Annulla' : '+ Riquadro';
 
-  let label = 'Conferma fotogramma';
+  // The button says what it saves: "Conferma · 60 · 40".
+  const names = [];
+  for (const d of work.detections) { names.push(shortName(d)); }
+  let label = 'Conferma · ' + names.join(' · ');
   let mobileLabel = 'Conferma';
   if (work.detections.length === 0) {
-    label = 'Conferma: nessun cartello';
+    label = 'Conferma · nessun cartello';
     mobileLabel = 'Nessun cartello';
   }
-  if (status === 'done') {
+  let already = false;
+  if (status === 'done' && api && sameAsServer(S.edits[key])) {
+    label = 'Già confermato · avanti →';
+    mobileLabel = 'Avanti →';
+    already = true;
+  } else if (status === 'done') {
     label = 'Confermato ✓ · conferma di nuovo';
     mobileLabel = 'Confermato ✓';
   }
@@ -1803,23 +2155,53 @@ function render() {
   }
   el('confirm').textContent = label;
   el('confirm').disabled = status === 'saving';
+  el('confirm').dataset.saveState = status;
   el('mConfirm').textContent = mobileLabel;
   el('mConfirm').disabled = status === 'saving';
+  el('mConfirm').dataset.saveState = status;
+  if (already) {
+    el('confirm').classList.add('already');
+    el('mConfirm').classList.add('already');
+  } else {
+    el('confirm').classList.remove('already');
+    el('mConfirm').classList.remove('already');
+  }
 
   const s = S.edits[key];
   el('discard').hidden = !(status === 'dirty' || status === 'error');
   el('withdraw').hidden = !(api && s && s.saved === true && s.server_confirmed === true && status !== 'saving');
+  if (S.withdrawArmed === key) {
+    el('withdraw').textContent = 'Sì, annulla';
+    el('withdraw').dataset.armed = 'true';
+  } else {
+    el('withdraw').textContent = 'Annulla conferma';
+    el('withdraw').dataset.armed = 'false';
+  }
 
+  // One status line of fixed height: the latest message for this frame, else what the server holds.
   const saved = saveText(key, s);
-  el('saveMsg').textContent = saved[0];
-  el('saveMsg').className = 'save-msg' + (saved[1] ? ' ' + saved[1] : '');
   const notice = S.notice && S.notice.key === key ? S.notice : null;
-  el('noticeMsg').hidden = notice === null;
-  el('noticeMsg').textContent = notice ? notice.text : '';
-  el('noticeMsg').className = 'save-msg' + (notice && notice.error ? ' error' : '');
+  let lineText = saved[0];
+  let lineClass = saved[1];
+  if (notice !== null) {
+    if (notice.error) {
+      lineText = notice.text;
+      lineClass = 'error';
+    } else if (saved[1] !== 'error') {
+      // A failed save of this frame stays on the line: a note about the frame saved before must not hide it.
+      lineText = notice.text;
+      if (notice.warn) { lineClass = 'warn'; } else { lineClass = 'ok'; }
+    }
+  }
+  el('saveMsg').textContent = lineText;
+  el('saveMsg').title = lineText;
+  el('saveMsg').className = 'save-msg' + (lineClass ? ' ' + lineClass : '');
   let mobileText = '';
   if (notice && notice.error) { mobileText = notice.text; }
   else if (saved[1] === 'error') { mobileText = saved[0]; }
+  else if (S.serverWarning) { mobileText = S.serverWarning; }
+  else if (S.storageWarning) { mobileText = S.storageWarning; }
+  else if (api && unsavedKeys().length > 0) { mobileText = unsavedKeys().length + ' fotogrammi confermati NON salvati: riprova dal pannello.'; }
   el('mobileMsg').textContent = mobileText;
   el('mobileMsg').hidden = mobileText === '';
 
@@ -1828,6 +2210,20 @@ function render() {
   }
   if (document.activeElement !== el('encounter_id')) {
     el('encounter_id').value = work.encounter_id ?? row.encounter_id ?? '';
+  }
+
+  // State for whoever drives the page (an agent with Playwright): attributes only, the layout does not change.
+  const body = document.body;
+  body.dataset.frameKey = key;
+  body.dataset.frameStatus = status;
+  body.dataset.server = S.server;
+  body.dataset.unsaved = String(unsavedKeys().length);
+  body.dataset.saving = S.inFlight.size > 0 ? 'true' : 'false';
+  body.dataset.saveCount = String(S.saveCount);
+  if (S.lastSave) {
+    body.dataset.lastSaveKey = S.lastSave.key;
+    body.dataset.lastSaveResult = S.lastSave.result;
+    body.dataset.lastSaveRevision = String(S.lastSave.revision);
   }
 }
 
@@ -1864,15 +2260,16 @@ function setField(key, value) {
   d[key] = value;
   changed(currentRow());
 }
-function removeSelected() {
+function removeBox(index) {
   const row = currentRow();
   if (!row) { return; }
   const work = workOf(row);
-  if (S.selected < 0 || S.selected >= work.detections.length) { return; }
-  work.detections.splice(S.selected, 1);
+  if (index < 0 || index >= work.detections.length) { return; }
+  work.detections.splice(index, 1);
   S.selected = -1;
   changed(row);
 }
+function removeSelected() { removeBox(S.selected); }
 function manualId(work) {
   const stamp = Date.now();
   let id = 'manual-' + stamp;
@@ -1919,6 +2316,11 @@ function useHint(index) {
   let value = null;
   if (familyHasValue(family) && Number.isInteger(hint.value_kph)) { value = hint.value_kph; }
   addManualBox(row, hint.box.slice(), family, value);
+}
+// On a computer the panel scrolls so that values, type and road of the chosen box are in sight.
+function revealEditor() {
+  if (narrowLayout()) { return; }
+  el('roads').scrollIntoView({ block: 'nearest' });
 }
 function toggleDrawing() {
   S.drawing = !S.drawing;
@@ -2048,6 +2450,7 @@ el('scene').addEventListener('click', function (evt) {
   if (target && target.dataset && target.dataset.index !== undefined) {
     S.selected = Number(target.dataset.index);
     render();
+    revealEditor();
     return;
   }
   if (target && target.dataset && target.dataset.corner) { return; }
@@ -2073,12 +2476,32 @@ el('remove').addEventListener('click', removeSelected);
 el('showHints').addEventListener('change', function () {
   if (el('showHints').checked !== S.showHints) { toggleHints(); }
 });
+el('photo').addEventListener('load', function () {
+  const row = currentRow();
+  if (row === null) { return; }
+  if (el('photo').getAttribute('href') !== row.preview_path) { return; }
+  el('stage').dataset.photoKey = row.frame_key;
+  el('overlays').style.visibility = '';
+  el('hintLayer').style.visibility = '';
+});
+el('photo').addEventListener('error', function () {
+  const row = currentRow();
+  if (row === null) { return; }
+  if (el('photo').getAttribute('href') !== row.preview_path) { return; }
+  el('stage').dataset.photoKey = 'error:' + row.frame_key;
+  el('overlays').style.visibility = '';
+  el('hintLayer').style.visibility = '';
+});
 el('timeline').addEventListener('click', function (evt) {
   const key = evt.target.dataset ? evt.target.dataset.key : null;
   if (key) { openFrame(key); }
 });
-for (const b of document.querySelectorAll('.filters button')) {
-  b.addEventListener('click', function () { setFilter(b.dataset.filter); });
+for (const b of document.querySelectorAll('.filters button, .qchip')) {
+  b.addEventListener('click', function () {
+    // A second click on a pressed doubt counter goes back to the frames to review.
+    if (isQualityFilter(b.dataset.filter) && S.filter === b.dataset.filter) { setFilter('todo'); return; }
+    setFilter(b.dataset.filter);
+  });
 }
 el('route').addEventListener('change', function () {
   const target = el('route').value;
@@ -2119,6 +2542,14 @@ for (const key of ['site_group', 'encounter_id']) {
   });
 }
 
+// The button last pressed with the mouse or a finger; Tab moves the focus elsewhere and forgets it.
+let pointerButton = null;
+document.addEventListener('pointerdown', function (evt) {
+  if (evt.target && evt.target.closest) { pointerButton = evt.target.closest('button'); } else { pointerButton = null; }
+}, true);
+document.addEventListener('focusin', function (evt) {
+  if (evt.target !== pointerButton) { pointerButton = null; }
+});
 document.addEventListener('keydown', function (evt) {
   const tag = evt.target && evt.target.tagName ? evt.target.tagName.toLowerCase() : '';
   if (tag === 'input' || tag === 'select' || tag === 'textarea') {
@@ -2126,7 +2557,16 @@ document.addEventListener('keydown', function (evt) {
     return;
   }
   if (evt.metaKey || evt.ctrlKey || evt.altKey) { return; }
-  // Enter on a focused button or summary belongs to that control.
+  // Enter on the arrows or on "+ Riquadro" just pressed with the mouse still confirms, as the shortcut list says;
+  // the same buttons reached with Tab keep their own Enter.
+  const id = evt.target && evt.target.id ? evt.target.id : '';
+  const byPointer = evt.target === pointerButton;
+  if (evt.key === 'Enter' && byPointer && (id === 'prev' || id === 'next' || id === 'mPrev' || id === 'mNext' || id === 'draw')) {
+    evt.preventDefault();
+    confirmFrame();
+    return;
+  }
+  // Enter on any other focused button or summary belongs to that control.
   if (evt.key === 'Enter' && (tag === 'button' || tag === 'summary' || tag === 'a')) { return; }
   if (evt.key === 'ArrowLeft') { evt.preventDefault(); go(-1); }
   else if (evt.key === 'ArrowRight') { evt.preventDefault(); go(1); }
@@ -2174,7 +2614,7 @@ function start() {
   }
   el('reviewer').value = readLocal('nnslr-reviewer', '') || '';
   const savedFilter = readLocal('nnslr-review-filter', 'todo');
-  if (savedFilter === 'todo' || savedFilter === 'suspicious' || savedFilter === 'proposals' || savedFilter === 'all') {
+  if (savedFilter === 'todo' || savedFilter === 'suspicious' || savedFilter === 'proposals' || savedFilter === 'all' || isQualityFilter(savedFilter)) {
     S.filter = savedFilter;
   }
   S.showHints = readLocal('nnslr-show-hints', '1') !== '0';
@@ -2189,6 +2629,7 @@ function start() {
   renderRoutes();
   buildTimeline();
   S.currentKey = pickStartFrame();
+  if (api) { S.server = 'loading'; }
   render();
   scrollTimelineToCurrent();
   if (api) {

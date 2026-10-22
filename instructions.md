@@ -110,7 +110,29 @@ frameStatus(key), addManualBox(row, box, family, value), setField(key, value),
 changed(row), render(), loadServer(), unsavedKeys()
 ```
 
-Sono dettagli interni e possono cambiare. Verificarne l'esistenza e il comportamento prima di riutilizzarli. Il percorso normale rimane l'interfaccia con `+ Nuovo riquadro`, editor e conferma.
+Sono dettagli interni e possono cambiare. Verificarne l'esistenza e il comportamento prima di riutilizzarli. Il percorso normale rimane l'interfaccia con `+ Riquadro`, editor e conferma.
+
+### Segnali stabili per gli agenti (dal 22 ottobre 2026)
+
+La pagina espone il proprio stato con attributi che non cambiano il layout. Usarli al posto di colori, testi italiani e globali interne:
+
+| Dove | Attributo | Significato |
+| --- | --- | --- |
+| `body` | `data-frame-key` | Fotogramma mostrato |
+| `body` | `data-frame-status` | `todo`, `dirty`, `saving`, `error`, `done` |
+| `body` | `data-server` | `loading` finché `GET /reviews` non risponde, poi `ready`; `error` o `stale` (report rigenerato); `offline` per il file aperto senza server |
+| `body` | `data-unsaved` | Fotogrammi confermati non ancora salvati sul server (`0` = tutto salvato) |
+| `body` | `data-last-save-key`, `data-last-save-result`, `data-last-save-revision`, `data-save-count` | Ultimo salvataggio: `saving`, poi `ok` o `error`; `unchanged` se la conferma non ha inviato nulla; `withdrawn` dopo un ritiro; `need-reviewer` se manca il revisore |
+| `#stage` | `data-photo-key` | Chiave del fotogramma la cui foto è caricata (`error:<chiave>` se non si carica) |
+| `#boxList .box-row` | `data-index`, `data-detection-id`, `data-duplicate-of` | Riga di un riquadro; `.box-main` lo seleziona, `.box-del` lo elimina |
+| `#families`, `#familiesMore` | `[data-family]` | Tipo di cartello |
+| `#quickValues` | `[data-value]` | Velocità rapide; `data-value="unknown"` = numero non leggibile |
+| `#roads` | `[data-applicability]` | `own_road`, `other_road`, `unresolved` |
+| `#hintList` | `[data-hint-index]` | Pulsante “Usa” di una voce della seconda lettura |
+| `#confirm`, `#mConfirm` | `data-action="confirm"`, `data-save-state` | Usare `[data-action="confirm"]:visible`: sotto i 981 px è visibile solo quello della barra in basso |
+| `#withdraw` | `data-armed` | “Annulla conferma” vuole due clic: il primo lo arma (`true`), il secondo ritira |
+
+Anche `data-index` sui riquadri disegnati nella foto esiste: per la lista usare sempre `#boxList .box-row[...]`, meglio con `data-detection-id`, perché l'indice cambia dopo ogni eliminazione.
 
 Campi e valori incontrati:
 
@@ -166,19 +188,21 @@ Esempi effettivi della route: fine limite generale 50 proposta come 40; limiti 6
 Per ogni fotogramma già esaminato:
 
 1. Aprirlo con la timeline/navigazione, oppure con `openFrame(frame_key)` dopo avere verificato il client corrente.
-2. Attendere che l'immagine sia caricata e corrisponda al `preview_path` del fotogramma selezionato. **Il cambio dei metadati precede il caricamento della foto**: uno screenshot immediato ha mostrato per un istante la foto precedente con i riquadri nuovi. Attendere il caricamento, poi controllare visivamente; non usarlo come prova di un riquadro errato.
+2. Attendere `#stage[data-photo-key="<frame_key>"]` (oppure `error:<frame_key>`). Fino ad allora i riquadri del nuovo fotogramma restano nascosti: non compaiono più sulla foto precedente. Poi controllare visivamente.
 3. Preparare l'intera annotazione del fotogramma: conservare i riquadri validi, correggere etichette/coordinate, aggiungere cartelli mancanti e rimuovere falsi positivi e doppioni.
 4. Se si usano gli helper interni, passare attraverso lo stato dell'editor (`workOf`, `addManualBox`, `setField`, `changed`, `render`), non modificare SQLite o i report di pre-annotazione. Non azzerare i riquadri prima di aver stabilito l'intera annotazione sostitutiva.
-5. Premere il pulsante `#confirm` e attendere la risposta relativa **a quel frame**:
+5. Premere `[data-action="confirm"]:visible` e attendere `body[data-last-save-key="<frame_key>"][data-last-save-result="ok"]` (oppure `error`), che corrisponde alla risposta **a quel frame**:
 
    ```text
    POST /api/route/<route_id>/frame/<segment_index>/<output_index>
    ```
 
+   Su un fotogramma già confermato e non modificato il pulsante dice “Già confermato · avanti →”: non parte nessuna POST, `data-last-save-result` vale `unchanged` e la pagina passa al successivo.
+
 6. Verificare HTTP 200, `review.confirmed === true`, revisore, revisione e riquadri restituiti. Il client gestisce `run_id` e `base_revision`.
 7. Registrare localmente un audit sintetico con indice, `frame_key`, revisione e annotazioni salvate. Procedere in sequenza: l'interfaccia ha un solo fotogramma corrente.
 
-La conferma avanza al fotogramma successivo secondo il filtro. **Modificare un campo non equivale a salvarlo.** Un errore di rete o validazione lascia lavoro non salvato: correggere il motivo e verificare di nuovo. In caso di conflitto di revisione non forzare la sovrascrittura; rileggere lo stato del server e preservare il lavoro concorrente.
+La conferma avanza al fotogramma successivo secondo il filtro: dopo ogni conferma riaprire il prossimo per chiave e controllare `body[data-frame-key]`, invece di premere → o Invio. **Modificare un campo non equivale a salvarlo.** Un errore di rete o validazione lascia lavoro non salvato: correggere il motivo e verificare di nuovo. In caso di conflitto di revisione non forzare la sovrascrittura; rileggere lo stato del server e preservare il lavoro concorrente.
 
 ## 9. Verificare indipendentemente i salvataggi
 
@@ -194,8 +218,8 @@ La conferma avanza al fotogramma successivo secondo il filtro. **Modificare un c
    const verifyPage = await verifyContext.newPage();
    ```
 
-5. Aprire la route, attendere il caricamento delle revisioni dal server e verificare conteggi, assenza di avvisi e assenza di modifiche non salvate.
-6. Controllare immagini e annotazioni di casi rappresentativi, aprire l'editor e lo zoom, attivare/disattivare la seconda lettura, provare avanti/indietro e il filtro `Da rivedere`.
+5. Aprire la route, attendere `body[data-server="ready"]` e verificare conteggi, `body[data-unsaved="0"]` e assenza di avvisi in `#notices`.
+6. Controllare immagini e annotazioni di casi rappresentativi, aprire l'editor e lo zoom, attivare/disattivare la seconda lettura, provare avanti/indietro e il filtro `Da rivedere`. I contatori “Confermati con dubbi” (senza numero, con illeggibili, strada non indicata) sono filtri: usarli per ricontrollare i casi incerti.
 7. Non chiamare riuscita una route soltanto perché compare `0 sospetti`: è un controllo automatico, non una prova autonoma della qualità delle etichette. Riferire anche i casi illeggibili o di applicabilità irrisolta.
 
 ## 10. Risultato storico e passaggio al prossimo agente

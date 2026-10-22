@@ -11,7 +11,7 @@ one line per frame::
 ``box`` is in native image pixels. Unknown fields are ignored; a line that does
 not follow this form is skipped and counted, and so is a single sign that does
 not. The page shows hints with textContent only and never saves them: a hint
-becomes a box of the review only when the reviewer presses "Usa questo".
+becomes a box of the review only when the reviewer presses "Usa".
 
 A frame is "suspicious" when it is not confirmed yet and the model proposals,
 the hints and the confirmed neighbours disagree (rules a-d in

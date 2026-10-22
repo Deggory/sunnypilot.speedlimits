@@ -281,52 +281,196 @@ class ReviewApp:
         return summaries
 
 
-# Style of the route index and of the error pages: the same tokens, light and dark, as review.html.
+# Style of the route index and of the error pages: the same tokens, top bar and cards as the
+# review page. Light only, on white.
 INDEX_STYLE = """
-:root{--bg:#e9ecef;--surface:#fff;--surface-2:#f1f3f5;--fg:#16191d;--muted:#5a626c;--line:#cfd4da;
---ok:#1d7a4c;--sus:#8e3bbf;--hint:#0b6fc2;--sign-ring:#d1112b;--focus:#1f5fd6;color-scheme:light;
---font-ui:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
---font-data:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
-@media (prefers-color-scheme:dark){:root{--bg:#111317;--surface:#191c21;--surface-2:#22262c;--fg:#e8ebee;
---muted:#9ba4ae;--line:#2e333a;--ok:#41b97c;--sus:#c58af9;--hint:#5ab8ff;--sign-ring:#ef4b55;--focus:#7aa7ff;
-color-scheme:dark}}
-*{box-sizing:border-box}
-html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
-body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--font-ui);font-size:15px;line-height:1.45}
-:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
-.topbar{position:sticky;top:0;z-index:5;background:var(--surface);border-bottom:1px solid var(--line);
-padding:10px max(16px,env(safe-area-inset-right,0px)) 10px max(16px,env(safe-area-inset-left,0px))}
-.topbar-inner{display:flex;align-items:center;gap:10px;max-width:1100px;margin:0 auto}
-.brand-mark{width:30px;height:30px;border-radius:50%;background:#fff;border:4px solid var(--sign-ring);
-display:grid;place-items:center;flex:none;color:#111;font-weight:700;font-size:11px}
-h1{margin:0;font-size:18px;font-weight:600}
-.topnav{display:flex;gap:4px;margin-left:8px}
-.topnav a{padding:6px 12px;border-radius:999px;text-decoration:none;color:var(--muted);font-weight:500}
-.topnav a[aria-current]{background:var(--surface-2);color:var(--fg);border:1px solid var(--line)}
-.page{max-width:1100px;margin:0 auto;padding:16px max(16px,env(safe-area-inset-right,0px)) 32px
-max(16px,env(safe-area-inset-left,0px))}
-.lead{margin:0 0 16px;color:var(--muted);max-width:70ch}
-code{font-family:var(--font-data);font-size:13px;background:var(--surface-2);border:1px solid var(--line);
-border-radius:5px;padding:1px 5px;word-break:break-all}
-.cards{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));
-gap:12px}
-.card{display:flex;flex-direction:column;gap:8px;min-height:44px;background:var(--surface);border:1px solid var(--line);
-border-radius:10px;padding:14px 16px;color:inherit;text-decoration:none}
-.card:hover{border-color:var(--muted)}
-.card.done{border-color:var(--ok)}
-.route{font-family:var(--font-data);font-size:14px;font-weight:500;word-break:break-all}
-.progress-text{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
-.progress-text strong{color:var(--fg);font-weight:600}
-.bar{display:block;height:6px;border-radius:3px;background:var(--surface-2);border:1px solid var(--line);overflow:hidden}
-.bar span{display:block;height:100%;background:var(--ok)}
-.stats{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
-.stats .sus{color:var(--sus);font-weight:600}
-.stats .hint{color:var(--hint)}
-.open{font-weight:600;color:var(--focus)}
-.state{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:24px;max-width:720px}
-.state p{margin:0 0 8px;color:var(--muted)}
-.foot{margin:20px 0 0;font-size:12.5px;color:var(--muted)}
-.foot code{font-size:12px}
+:root {
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f5f5f7;
+  --fill: rgba(118, 118, 128, 0.12);
+  --fill-strong: rgba(118, 118, 128, 0.22);
+  --seg-on: #ffffff;
+  --fg: #1d1d1f;
+  --muted: #6e6e73;
+  --line: rgba(0, 0, 0, 0.08);
+  --bar: rgba(251, 251, 253, 0.78);
+  --stage: #0b0b0c;
+  --accent: #0071e3;
+  --button: #0071e3;
+  --on-accent: #ffffff;
+  --yellow: #f5b800;
+  --todo: #86868b;
+  --ok: #1f8a3b;
+  --ok-fill: #34c759;
+  --ok-tint: rgba(52, 199, 89, 0.14);
+  --warn: #b85000;
+  --warn-fill: #ff9f0a;
+  --warn-tint: rgba(255, 159, 10, 0.15);
+  --danger: #d70015;
+  --danger-fill: #ff3b30;
+  --danger-tint: rgba(255, 59, 48, 0.1);
+  --sus: #8944ab;
+  --sus-fill: #af52de;
+  --sus-tint: rgba(175, 82, 222, 0.1);
+  --hint: #0066cc;
+  --hint-tint: rgba(0, 113, 227, 0.07);
+  --focus: #0071e3;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.03), 0 6px 20px rgba(0, 0, 0, 0.05);
+  --card-border: rgba(0, 0, 0, 0.08);
+  --sign-face: #ffffff;
+  --sign-ink: #111111;
+  --sign-ring: #e3001b;
+  /* Overlay colours sit on the dark photo stage. */
+  --ov-speed: #ff5964;
+  --ov-cancel: #d4d9df;
+  --ov-other: #ffa94d;
+  --ov-none: #8a929c;
+  --ov-selected: #ffd60a;
+  --ov-hint: #64d2ff;
+  --ov-text: #fff3b0;
+  --ov-halo: #0d0f12;
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", "Segoe UI", Roboto, Arial, sans-serif;
+  --font-data: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --radius: 18px;
+  --control: 32px;
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+html, body { min-height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-size: 15px;
+  line-height: 1.45;
+  letter-spacing: -0.006em;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0 0 auto;
+  height: env(safe-area-inset-top, 0px);
+  z-index: 10;
+  background: var(--bar);
+}
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+
+/* Top bar: the same as on the review page, brand in the same place. */
+.topbar {
+  position: sticky;
+  top: env(safe-area-inset-top, 0px);
+  z-index: 5;
+  background: var(--bar);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  border-bottom: 1px solid var(--line);
+  padding-left: max(20px, env(safe-area-inset-left, 0px));
+  padding-right: max(20px, env(safe-area-inset-right, 0px));
+}
+.topbar-inner { display: flex; align-items: center; gap: 18px; height: 52px; max-width: 1600px; margin: 0 auto; }
+.brand { display: flex; align-items: center; gap: 10px; min-width: 0; color: inherit; text-decoration: none; flex: none; }
+.brand-mark {
+  width: 26px; height: 26px; border-radius: 50%;
+  background: var(--sign-face); border: 3.5px solid var(--sign-ring);
+  display: grid; place-items: center; flex: none;
+  color: var(--sign-ink); font-weight: 700; font-size: 10px; font-variant-numeric: tabular-nums;
+}
+.brand-name { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; white-space: nowrap; }
+.topnav { display: inline-flex; gap: 2px; background: var(--fill); border-radius: 9px; padding: 2px; flex: none; }
+.topnav a {
+  display: inline-flex; align-items: center; min-height: 28px; padding: 4px 14px; border-radius: 7px;
+  font-size: 13px; font-weight: 500; color: var(--fg); text-decoration: none; white-space: nowrap;
+}
+.topnav a:hover { background: var(--fill); }
+.topnav a[aria-current="page"] {
+  background: var(--seg-on); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(0, 0, 0, 0.04); font-weight: 600;
+}
+
+/* Page */
+.page {
+  max-width: 1600px;
+  margin: 0 auto;
+  padding-block: 40px 56px;
+  padding-left: max(20px, env(safe-area-inset-left, 0px));
+  padding-right: max(20px, env(safe-area-inset-right, 0px));
+}
+.page-head { margin: 0 0 28px; }
+.page-title { margin: 0; font-size: 34px; line-height: 1.12; font-weight: 700; letter-spacing: -0.022em; }
+.lead { margin: 8px 0 0; font-size: 17px; color: var(--muted); max-width: 62ch; }
+code { font-family: var(--font-data); font-size: 12.5px; background: var(--fill); border-radius: 6px; padding: 2px 6px; overflow-wrap: anywhere; }
+
+/* Route cards: the whole card is the link. */
+.cards {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 20px;
+}
+.card {
+  display: flex; flex-direction: column; height: 100%;
+  background: var(--surface); border: 1px solid var(--card-border); border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 22px 24px 20px; color: inherit; text-decoration: none;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.card:hover { transform: translateY(-2px); box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05), 0 14px 36px rgba(0, 0, 0, 0.1); }
+.route { font-family: var(--font-data); font-size: 12.5px; color: var(--muted); word-break: break-all; }
+.count { margin-top: 10px; font-size: 26px; line-height: 1.15; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.count .unit { color: var(--muted); font-weight: 500; }
+.bar { display: block; height: 4px; margin-top: 14px; border-radius: 2px; background: var(--fill); overflow: hidden; }
+.bar span { display: block; height: 100%; background: var(--ok-fill); border-radius: 2px; }
+/* Each figure keeps its words together; the dot in front of the first figure of a line is clipped. */
+.stats {
+  display: flex; flex-wrap: wrap; column-gap: 16px; row-gap: 2px; overflow: hidden;
+  margin-top: 12px; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums;
+}
+.stats span { margin-left: -16px; white-space: nowrap; }
+.stats span::before { content: "·"; display: inline-block; width: 16px; text-align: center; color: var(--muted); font-weight: 400; }
+.stats .sus { color: var(--sus); font-weight: 600; }
+.open { margin-top: 18px; font-size: 15px; font-weight: 600; color: var(--accent); }
+.open.again { color: var(--muted); font-weight: 500; }
+
+/* Empty index and error pages */
+.state-box {
+  background: var(--surface); border: 1px solid var(--card-border); border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 32px 28px; max-width: 720px; display: flex; flex-direction: column; gap: 12px;
+}
+.state-box.center { margin: 32px auto; }
+.state-box h1, .state-box h2 { margin: 0; font-size: 24px; line-height: 1.2; font-weight: 600; letter-spacing: -0.02em; }
+.state-box p { margin: 0; color: var(--muted); max-width: 62ch; }
+.state-box .code { font-size: 13px; }
+.back { align-self: flex-start; margin-top: 6px; color: var(--accent); font-weight: 500; text-decoration: none; }
+.back:hover { text-decoration: underline; }
+
+/* Technical details, out of the way */
+.foot { margin-top: 48px; font-size: 13px; color: var(--muted); }
+.foot summary { display: inline-flex; align-items: center; gap: 6px; padding: 4px 0; cursor: pointer; list-style: none; }
+.foot summary::-webkit-details-marker { display: none; }
+.foot summary::after { content: "›"; font-size: 16px; line-height: 1; transition: transform 0.2s ease; }
+.foot[open] summary::after { transform: rotate(90deg); }
+.foot summary:hover { color: var(--fg); }
+.foot p { margin: 8px 0 0; }
+
+@media (max-width: 640px) {
+  .brand-name { display: none; }
+  .page { padding-block: 28px 40px; }
+  .page-head { margin-bottom: 20px; }
+  .page-title { font-size: 28px; }
+  .lead { font-size: 15px; }
+  .cards { gap: 14px; }
+  .card { padding: 18px 20px; }
+  .state-box { padding: 24px 20px; }
+  .state-box.center { margin: 8px auto; }
+}
+@media (pointer: coarse) {
+  .topnav a { min-height: 36px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
 """
 
 
@@ -336,16 +480,22 @@ def _plural(count: int, one: str, many: str) -> str:
     return str(count) + ' ' + many
 
 
-def _page_head(title: str) -> list[str]:
+def _page_head(title: str, current: str = '') -> list[str]:
+    """Head and top bar of the server pages. current is 'route' on the route list, '' elsewhere."""
+    route_link = '<a href="/">Route</a>'
+    if current == 'route':
+        route_link = '<a href="/" aria-current="page">Route</a>'
     return [
         '<!doctype html><html lang="it"><head><meta charset="utf-8">',
         '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">',
-        '<meta name="color-scheme" content="light dark">',
+        '<meta name="color-scheme" content="light">',
         '<title>' + html.escape(title) + '</title>',
         '<style>' + INDEX_STYLE + '</style></head><body>',
-        '<header class="topbar"><div class="topbar-inner"><span class="brand-mark" aria-hidden="true">50</span>'
-        '<h1>Revisione cartelli</h1><nav class="topnav" aria-label="Sezioni">'
-        '<a href="/" aria-current="page">Revisione</a><a href="/pannello">Pannello</a></nav></div></header>',
+        '<header class="topbar"><div class="topbar-inner">'
+        '<a class="brand" href="/" title="Elenco delle route"><span class="brand-mark" aria-hidden="true">50</span>'
+        '<span class="brand-name">Revisione cartelli</span></a>'
+        '<nav class="topnav" aria-label="Sezioni">' + route_link + '<a href="/pannello">Pannello</a></nav>'
+        '</div></header>',
     ]
 
 
@@ -357,12 +507,13 @@ def render_panel(nonce: str) -> str:
 
 
 def render_index(summaries: list[dict], database: Path) -> str:
-    lines = _page_head('Revisione cartelli · Route')
+    lines = _page_head('Revisione cartelli · Route', 'route')
     lines.append('<main class="page">')
-    lines.append('<p class="lead">Route con un report di pre-annotazione. Ogni conferma viene salvata subito '
-                 'nel database del server.</p>')
+    lines.append('<div class="page-head"><h1 class="page-title">Route</h1>'
+                 '<p class="lead">Scegli una route da revisionare. Ogni conferma viene salvata subito '
+                 'sul server.</p></div>')
     if not summaries:
-        lines.append('<div class="state"><p>Nessun report di pre-annotazione. Prepara una route con '
+        lines.append('<div class="state-box"><h2>Nessuna route da revisionare</h2><p>Prepara una route con '
                      '<code>nnslr extract-frames</code> e <code>nnslr preannotate</code>, poi ricarica questa '
                      'pagina.</p></div>')
     else:
@@ -373,9 +524,16 @@ def render_index(summaries: list[dict], database: Path) -> str:
             percent = 0
             if total:
                 percent = round(confirmed * 100 / total)
+            # What opening the route means: start, carry on, or look again at a finished one.
             card_class = 'card'
-            if total and confirmed >= total:
+            action_class = 'open'
+            action = 'Riprendi →'
+            if confirmed == 0:
+                action = 'Inizia →'
+            elif total and confirmed >= total:
                 card_class = 'card done'
+                action_class = 'open again'
+                action = 'Ricontrolla →'
             suspicious = summary.get('suspicious_count', 0)
             hint_frames = summary.get('hint_frames', 0)
             stats = ['<span>' + _plural(total, 'fotogramma', 'fotogrammi') + '</span>',
@@ -385,25 +543,40 @@ def render_index(summaries: list[dict], database: Path) -> str:
             else:
                 stats.append('<span>0 sospetti</span>')
             if hint_frames:
-                stats.append('<span class="hint">' + str(hint_frames) + ' con seconda lettura</span>')
+                stats.append('<span>' + str(hint_frames) + ' con seconda lettura</span>')
             lines.append(
                 '<li><a class="' + card_class + '" href="' + html.escape(summary['url']) + '">'
                 + '<span class="route">' + html.escape(summary['route_id']) + '</span>'
-                + '<span class="progress-text"><strong>' + str(confirmed) + ' / ' + str(total)
-                + '</strong> confermati</span>'
+                + '<span class="count">' + str(confirmed) + ' di ' + str(total)
+                + ' <span class="unit">confermati</span></span>'
                 + '<span class="bar" aria-hidden="true"><span style="width:' + str(percent) + '%"></span></span>'
                 + '<span class="stats">' + ''.join(stats) + '</span>'
-                + '<span class="open">Apri la revisione →</span></a></li>')
+                + '<span class="' + action_class + '">' + action + '</span></a></li>')
         lines.append('</ul>')
-    lines.append('<p class="foot">Database delle revisioni: <code>' + html.escape(str(database)) + '</code></p>')
+    lines.append('<details class="foot"><summary>Dettagli tecnici</summary>'
+                 '<p>Database delle revisioni: <code>' + html.escape(str(database)) + '</code></p></details>')
     lines.append('</main></body></html>')
     return '\n'.join(lines)
 
 
 def render_problem(status: int, message: str) -> str:
-    lines = _page_head('Revisione cartelli')
-    lines.append('<main class="page"><div class="state"><p>' + html.escape(message) + '</p>'
-                 '<p>Codice HTTP ' + str(status) + '.</p></div></main></body></html>')
+    if status == 404:
+        title = 'Pagina non trovata'
+    elif status == 403:
+        title = 'Accesso negato'
+    else:
+        title = 'Errore'
+    lines = _page_head('Revisione cartelli · ' + title)
+    lines.append('<main class="page"><div class="state-box center">')
+    lines.append('<h1>' + html.escape(title) + '</h1>')
+    # "Pagina non trovata." under the title "Pagina non trovata" would only repeat it.
+    if message.rstrip('.') != title:
+        lines.append('<p>' + html.escape(message) + '</p>')
+    lines.append('<p class="code">Codice HTTP ' + str(status) + '</p>')
+    # Every 403 page (token missing or wrong, host not allowed) would come back here from the list.
+    if status != 403:
+        lines.append('<a class="back" href="/">← Elenco delle route</a>')
+    lines.append('</div></main></body></html>')
     return '\n'.join(lines)
 
 
@@ -845,7 +1018,7 @@ def serve_review(route: str | None = None, *, data_root: Path | None=None, host:
             print(f'Solo da questo computer. Da un altro: ssh -L {port}:127.0.0.1:{port} <server>, '
                   'oppure riavvia con --host 0.0.0.0', flush=True)
         print(f'Database revisioni: {db_path(root)}', flush=True)
-        print('Ogni “Conferma fotogramma” viene salvata subito nel database. Ctrl+C per fermare.', flush=True)
+        print('Ogni “Conferma” viene salvata subito nel database. Ctrl+C per fermare.', flush=True)
         try:
             server.serve_forever()
         except KeyboardInterrupt:
