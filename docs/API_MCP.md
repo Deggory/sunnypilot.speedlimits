@@ -1,0 +1,338 @@
+# API REST e server MCP della revisione cartelli
+
+Il sito di revisione (`nnslr review`, servizio `speedlimits-web`) si può usare anche senza browser:
+
+- **REST API** (`/api/v1/...`) per qualsiasi client HTTP: `curl`, uno script Python, un altro programma;
+- **server MCP** per Claude Code, Codex e gli altri client [Model Context Protocol](https://modelcontextprotocol.io), con due trasporti: **Streamable HTTP** su `/mcp` dello stesso servizio e **stdio** (`helpers/mcp.sh`, cioè `nnslr mcp`).
+
+Il server non contiene nessun modello e nessun agente: l'intelligenza artificiale gira sul computer del client. Il server dà soltanto strumenti per leggere fotogrammi e immagini, consultare proposte e revisioni e salvare conferme o correzioni.
+
+Le regole per **interpretare** i cartelli restano in [review_instructions.md](../review_instructions.md) (sezioni 4–5); qui c'è come si usano le interfacce.
+
+## 1. Architettura
+
+```
+                    ┌──────────────── speedlimits-web (nnslr review, ThreadingHTTPServer) ───────────────┐
+browser ──────────► │ pagina /route/..., /api/route/...  (cookie col token, come prima)                 │
+curl, Python ─────► │ /api/v1/...        (header Authorization: Bearer)  ─┐                             │
+Claude Code (HTTP)► │ /mcp  (header Authorization: Bearer) → SDK MCP ─────┤                             │
+                    └─────────────────────────────────────────────────────┼─────────────────────────────┘
+Claude Code (stdio, anche via ssh) → helpers/mcp.sh → SDK MCP ─────────────┤
+                                                                           ▼
+                        nnslr_tools.review_service (ReviewService: route, fotogrammi, immagini, salvataggi)
+                                                                           ▼
+                        nnslr_tools.review_db.save_frame_review()  →  data/annotations/review.sqlite
+                        (stesse validazioni dell'import, cronologia append-only, revisioni)
+```
+
+- `review_service.py` è il nucleo condiviso: ordine dei fotogrammi, filtri, sospetti, immagini, salvataggio. Usa solo la libreria standard (Pillow, se c'è, solo per ritagli e ridimensionamenti).
+- `review.py` (il sito) serve la pagina, la REST API e `/mcp`; `review_mcp.py` definisce gli strumenti MCP con l'SDK ufficiale `mcp` (2.x).
+- Pagina, REST e MCP passano tutti da `save_frame_review()`: stesse validazioni, stesso database, stesso controllo delle revisioni.
+- L'SDK MCP è una **dipendenza opzionale**: senza, il sito, la pagina e `/api/v1` funzionano; `/mcp` risponde 501 e `nnslr mcp` esce con un messaggio.
+- Il pannello (`/pannello`: prepara, importa, allena, aggiorna) **non** è esposto né in `/api/v1` né in MCP.
+
+## 2. Autenticazione e sicurezza
+
+- `/api/v1/...` e `/mcp` vogliono **sempre** il token, anche quando il sito ascolta solo su 127.0.0.1 (dove la pagina non lo chiede). Il token è `NNSLR_REVIEW_TOKEN`: sul server è nel `.env` del repository e in `/etc/speedlimits-web.env` (vedi [GUIDA.md](GUIDA.md), sezione 3). Su 127.0.0.1 senza `NNSLR_REVIEW_TOKEN` il server ne genera uno a caso e lo stampa all'avvio.
+- Il token va **in un header**: `Authorization: Bearer <token>` (oppure `X-Review-Token: <token>`). Il cookie della pagina non vale per l'API. Un `?token=` nell'indirizzo è rifiutato con 400 `token_in_url` (finirebbe in log e cronologie).
+- Senza token o con un token sbagliato: 401 `unauthorized` con `WWW-Authenticate: Bearer`.
+- Un header `Origin` diverso dal server stesso (o `Sec-Fetch-Site: cross-site`) → 403 `cross_origin`: un sito web aperto nel browser non può chiamare l'API o `/mcp` (protezione DNS rebinding richiesta dal trasporto MCP). I client da terminale non mandano `Origin`.
+- Sul sito in sola LAN locale (127.0.0.1) resta anche il controllo dell'header `Host`.
+- Corpo massimo 512 KiB (413), solo JSON (415), al massimo 100 riquadri per fotogramma.
+- Le immagini: l'anteprima è solo `images/NNNNNNNN.jpg` del report corrente; l'originale è solo il PNG estratto sotto `data/derived/frames/<route>/`, mai un link simbolico, mai un percorso con `..`, e con lo SHA-256 del report (409 `image_changed` se il file è cambiato).
+- Il server non scrive mai il token nei suoi messaggi. Non mettere il token in file versionati, resoconti o log: negli esempi sotto è sempre la variabile d'ambiente `NNSLR_REVIEW_TOKEN`.
+
+## 3. Provenienza: revisori umani e AI
+
+Ogni revisione salvata registra:
+
+| Campo | Valori | Dove |
+| --- | --- | --- |
+| `reviewer` | nome o sigla; per un'AI è salvato come `ai/<nome>` (es. `ai/Claude Code`) | DB, payload, cronologia |
+| `reviewer_kind` | `human` o `ai` | DB e cronologia (colonna nuova) |
+| `channel` | `web` (pagina), `rest` (`/api/v1`), `mcp` | DB e cronologia (colonna nuova) |
+| `label_basis` | `human_review` per le persone, `ai_review` per le AI | payload salvato |
+
+- **MCP salva sempre come `ai`**: il nome dato dal client diventa `ai/<nome>`, anche se fosse `cristianku`.
+- La **REST API** vuole `reviewer_kind` esplicito (`human` o `ai`). Un nome che inizia con `ai/` con `reviewer_kind: "human"` è rifiutato.
+- La pagina continua a salvare come `human` (canale `web`), come prima. Un agente che usa il browser resta riconoscibile solo dal nome che scrive nel campo Revisore: per le AI è meglio usare MCP o REST.
+- Un revisore AI **non modifica e non ritira** un fotogramma confermato da una persona: 409 `human_review_exists`, a meno di `override_human_review: true`, da usare solo se Cristian lo chiede per quel fotogramma.
+- **Import nel dataset invariato per le persone**: `nnslr import-annotations --from-db` importa solo le revisioni umane; quelle AI restano nel database e sono elencate in `skipped_ai_reviews` con un avviso. L'export JSONL della pagina le salta. Per usarle nel training bisognerà decidere esplicitamente una politica (per esempio farle riconfermare da una persona dalla pagina: la riconferma diventa `human`).
+- Il database passa da solo dalla versione 1 alla 2 alla prima apertura: le due colonne nuove vengono aggiunte e le revisioni già salvate (tutte dalla pagina) risultano `human`/`web`. Una versione vecchia di `nnslr` rifiuta poi di aprire il database (versione 2): aggiornare il codice prima di riavviare il servizio.
+
+## 4. REST API
+
+Base: `http://<server>:8765/api/v1`. Tutte le risposte sono JSON (tranne le immagini), con `Cache-Control: no-store`. Gli errori hanno sempre la forma:
+
+```json
+{"ok": false, "error": "revision_conflict", "message": "Questo fotogramma è stato salvato da un’altra pagina nel frattempo: ..."}
+```
+
+| Metodo e percorso | Cosa fa |
+| --- | --- |
+| `GET /api/v1` | Versione dell'API e se MCP è disponibile |
+| `GET /api/v1/schema` | Campi e valori ammessi per salvare, regole, codici di errore |
+| `GET /api/v1/routes` | Route con report: `run_id`, fotogrammi, confermati (umani/AI), mancanti, ritirati, sospetti, con proposte, con seconda lettura |
+| `GET /api/v1/routes/{route}` | Avanzamento: gli stessi conteggi, i sospetti con i motivi (`suspicious_limit`, default 100), i confermati con dubbi, il primo da rivedere |
+| `GET /api/v1/routes/{route}/frames?filter=&limit=&cursor=` | Fotogrammi in ordine (segmento, immagine), a pagine. `filter`: `unreviewed` (default), `reviewed`, `suspicious`, `with_proposals`, `all`; `limit` 1–200 (default 50); `cursor` = `next_cursor` della pagina prima |
+| `GET /api/v1/routes/{route}/next?filter=&after=` | Il prossimo fotogramma da fare, con tutto il dettaglio; `after` = chiave da cui proseguire (ricomincia dall'inizio una volta, `wrapped: true`) |
+| `GET /api/v1/routes/{route}/frames/{seg}/{img}` | Dettaglio di un fotogramma |
+| `GET /api/v1/routes/{route}/frames/{seg}/{img}/context?before=&after=` | I vicini (0–10 per parte, default 2) nell'ordine del report, anche oltre il confine del segmento |
+| `GET /api/v1/routes/{route}/frames/{seg}/{img}/image?variant=&crop=&long_side=` | L'immagine: `variant=preview` (JPEG del report, default) o `original` (PNG estratto); `crop=x1,y1,x2,y2` in pixel originali e `long_side=32..2048` richiedono Pillow sul server |
+| `GET /api/v1/routes/{route}/frames/{seg}/{img}/history` | Cronologia: ogni revisione con revisore, tipo, canale, ora e riquadri |
+| `POST /api/v1/routes/{route}/frames/{seg}/{img}/review` | Salva conferma, correzione o ritiro |
+
+Gli endpoint della pagina (`GET /api/routes`, `GET /api/route/{route}/reviews`, `POST /api/route/{route}/frame/{seg}/{img}`) restano identici, con cookie o `X-Review-Token` come prima. `GET /api/route/{route}/reviews` ora indica anche `reviewer_kind` e `channel` di ogni revisione.
+
+### Ordine, cursori e ripresa
+
+- L'ordine è quello della timeline della pagina: per segmento e poi per immagine. Gli indici non devono essere consecutivi (`0/0, 0/2, 0/5, 1/1, ...`): precedente e successivo sono i vicini in quest'ordine, anche tra segmenti diversi; `same_segment` dice se un vicino è nello stesso segmento.
+- Il cursore è opaco e contiene `run_id`, filtro e ultima chiave: una conferma fatta tra due pagine non sposta il resto. Con un report rigenerato il cursore dà 409 `stale_report`.
+- `next` con `filter=unreviewed` e senza `after` riparte sempre dal primo fotogramma non confermato, chiunque abbia confermato gli altri: dopo un'interruzione basta richiamarlo. Non ci sono lock: due revisori sullo stesso fotogramma si accorgono del conflitto al salvataggio (409).
+
+### Dettaglio di un fotogramma (esempio ridotto)
+
+```json
+{
+  "frame_key": "0/5", "segment_index": 0, "output_index": 5, "position": 2, "frame_count": 6,
+  "route_id": "00000001--abcdef1234", "run_id": "20261021T100000Z-0123abcd",
+  "status": "unreviewed", "revision": 0, "reviewer": null, "reviewer_kind": null,
+  "width": 1344, "height": 760,
+  "proposal_count": 1, "second_reading_count": 0, "suspicious": false, "suspicious_reasons": [],
+  "proposals": [{"detection_id": "0/5/0", "bbox_xyxy": [1, 2, 15, 20], "family": "maximum_speed",
+                 "value_kph": 30, "score": 0.8, "applicability": "unresolved", "...": "..."}],
+  "second_reading": [],
+  "review": null,
+  "previous_frame_key": "0/2", "next_frame_key": "1/1",
+  "image": {"preview_url": "/api/v1/routes/00000001--abcdef1234/frames/0/5/image?variant=preview",
+            "original_url": "/api/v1/routes/00000001--abcdef1234/frames/0/5/image?variant=original", "...": "..."},
+  "metadata": {"frame_sha256": "...", "camera_stream": "narrow_road", "model": {"...": "..."}, "...": "..."},
+  "save": {"run_id": "20261021T100000Z-0123abcd", "base_revision": 0}
+}
+```
+
+`status` è `unreviewed`, `confirmed` o `withdrawn` (conferma ritirata). `save` contiene esattamente i due valori da rimandare al salvataggio.
+
+### Salvare
+
+Corpo del `POST .../review`:
+
+| Campo | Obbligatorio | Significato |
+| --- | --- | --- |
+| `run_id` | sì | quello letto col fotogramma; diverso → 409 `stale_report`, assente → 400 `missing_run_id` |
+| `base_revision` | sì | la `revision` letta (0 se mai salvato); diversa → 409 `revision_conflict`, assente → 428 `base_revision_required` |
+| `reviewer` | sì | nome (max 100 caratteri, senza caratteri di controllo) |
+| `reviewer_kind` | sì | `human` o `ai` |
+| `confirmed` | sì | `true` salva i riquadri; `false` ritira la conferma |
+| `detections` | con `confirmed: true` | tutti i riquadri da tenere; `[]` = nessun cartello pertinente |
+| `site_group`, `encounter_id` | no | stringa o `null` |
+| `override_human_review` | no | vedi sezione 3 |
+
+Ogni riquadro:
+
+- per **tenere o correggere una proposta** basta `detection_id` più i campi che cambiano: gli altri sono copiati dalla proposta del report (per esempio `{"detection_id": "0/5/0", "applicability": "own_road"}`);
+- una proposta **non inclusa** viene registrata come scartata (falso positivo);
+- un **riquadro nuovo** non ha `detection_id` (il server assegna `manual-rest-1`, `manual-mcp-1`, ...) e ha `bbox_xyxy`, `family`, `value_kph`;
+- valori ammessi: `GET /api/v1/schema` e la tabella in [review_instructions.md](../review_instructions.md) sezione 9. `value_kph` è un intero 5–250 o `null` (numero non leggibile: mai inventarlo).
+
+Risposta:
+
+```json
+{"ok": true, "status": "confirmed", "confirmed_count": 12, "missing_count": 40,
+ "next_unreviewed_frame_key": "1/1",
+ "review": {"frame_key": "0/5", "revision": 1, "confirmed": true, "reviewer": "ai/Claude",
+            "reviewer_kind": "ai", "channel": "rest", "detections": ["..."], "...": "..."}}
+```
+
+### Esempi `curl`
+
+Il token resta nella variabile d'ambiente (sul server: `set -a; . ./.env; set +a`; altrove copiarlo a mano, senza salvarlo in file versionati):
+
+```sh
+export NNSLR_REVIEW_TOKEN=...            # non scriverlo in file versionati
+BASE=http://<IP del server>:8765/api/v1  # oppure http://127.0.0.1:8765/api/v1 sul server
+AUTH="Authorization: Bearer $NNSLR_REVIEW_TOKEN"
+ROUTE=0000011e--0c8825628a
+
+curl -sS -H "$AUTH" "$BASE/routes"
+curl -sS -H "$AUTH" "$BASE/routes/$ROUTE"                                   # avanzamento e sospetti
+curl -sS -H "$AUTH" "$BASE/routes/$ROUTE/frames?filter=suspicious&limit=20"
+curl -sS -H "$AUTH" "$BASE/routes/$ROUTE/next"                              # prossimo da rivedere
+curl -sS -H "$AUTH" "$BASE/routes/$ROUTE/frames/3/28/context?before=3&after=3"
+curl -sS -H "$AUTH" -o frame.jpg "$BASE/routes/$ROUTE/frames/3/28/image"
+curl -sS -H "$AUTH" -o sign.png "$BASE/routes/$ROUTE/frames/3/28/image?variant=original&crop=600,200,700,300&long_side=512"
+
+# Conferma: la proposta 3/28/0 vale 60 sulla nostra strada; nessun altro cartello.
+curl -sS -H "$AUTH" -H 'Content-Type: application/json' -X POST "$BASE/routes/$ROUTE/frames/3/28/review" -d '{
+  "run_id": "20261021T083422Z-2468e469", "base_revision": 0,
+  "reviewer": "Cristian", "reviewer_kind": "human", "confirmed": true,
+  "detections": [{"detection_id": "3/28/0", "value_kph": 60, "applicability": "own_road"}]}'
+
+# Nessun cartello pertinente (le proposte diventano falsi positivi):
+curl -sS -H "$AUTH" -H 'Content-Type: application/json' -X POST "$BASE/routes/$ROUTE/frames/3/29/review" -d '{
+  "run_id": "20261021T083422Z-2468e469", "base_revision": 0,
+  "reviewer": "Claude", "reviewer_kind": "ai", "confirmed": true, "detections": []}'
+
+curl -sS -H "$AUTH" "$BASE/routes/$ROUTE/frames/3/28/history"
+```
+
+### Esempio Python (solo libreria standard)
+
+```python
+import json, os, urllib.request
+
+BASE = 'http://127.0.0.1:8765/api/v1'
+HEADERS = {'Authorization': 'Bearer ' + os.environ['NNSLR_REVIEW_TOKEN']}
+
+def call(method, path, body=None):
+    data = None if body is None else json.dumps(body).encode()
+    request = urllib.request.Request(BASE + path, data=data, method=method,
+                                     headers={**HEADERS, 'Content-Type': 'application/json'})
+    with urllib.request.urlopen(request) as response:
+        return json.load(response)
+
+route = call('GET', '/routes')['routes'][0]['route_id']
+frame = call('GET', f'/routes/{route}/next')['frame']
+# ... guardare l'immagine: GET /routes/{route}/frames/{frame_key}/image ...
+saved = call('POST', f"/routes/{route}/frames/{frame['frame_key']}/review", {
+    **frame['save'], 'reviewer': 'Cristian', 'reviewer_kind': 'human', 'confirmed': True,
+    'detections': [{'detection_id': p['detection_id'], 'applicability': 'own_road'} for p in frame['proposals']]})
+```
+
+`urllib` solleva `HTTPError` per 4xx/5xx: il corpo dell'errore è il JSON con `error` e `message`.
+
+## 5. Server MCP
+
+### Strumenti
+
+| Strumento | Cosa fa | Scrive |
+| --- | --- | --- |
+| `list_routes` | Route e avanzamento | no |
+| `list_frames` | Fotogrammi con filtri e cursore, senza immagini | no |
+| `next_frame` | Prossimo fotogramma da rivedere (ripresa dopo interruzione, `after`) | no |
+| `get_frame` | Metadati, dimensioni, proposte, seconda lettura, sospetti, revisione salvata, `run_id`, `revision` | no |
+| `get_frame_image` | **Contenuto immagine MCP** (`type: image`, base64) più una riga JSON; anteprima JPEG o originale PNG, ritaglio e ingrandimento | no |
+| `get_frame_context` | Vicini prima e dopo; con `include_images` anche le immagini dei 4 più vicini | no |
+| `get_review_schema` | Campi, valori ammessi, regole, errori | no |
+| `save_frame_review` | Conferma, correzione, nessun cartello o ritiro (`confirmed: false`) | **sì** |
+| `get_review_progress` | Conteggi, sospetti con motivi, confermati con dubbi | no |
+| `get_review_history` | Cronologia del fotogramma | no |
+
+- Tutti gli strumenti hanno schema di input; quelli che restituiscono JSON hanno anche lo schema di output (`structuredContent`). Gli strumenti di lettura sono marcati `readOnlyHint`.
+- Gli elenchi non contengono immagini: il client chiede `get_frame_image` solo quando serve, e `get_frame_context` allega al massimo 4 immagini.
+- Gli errori arrivano come risultato con `isError: true` e testo `Error executing tool <nome>: {"error": ..., "status": ..., "message": ...}`, con gli stessi codici della REST API.
+- `save_frame_review` salva sempre come revisore AI (sezione 3). Con `NNSLR_MCP_READ_ONLY=1` (servizio) o `--read-only` (stdio) lo strumento non è offerto: utile per una **prova senza salvataggio**.
+- Il server MCP manda al client anche istruzioni brevi sul flusso e sulle regole (non inventare valori, salvare solo se autorizzati, rileggere dopo un 409).
+
+### Installare solo le dipendenze MCP
+
+Sul server, nella cartella del repository (aggiunge `mcp` 2.x e le sue dipendenze, niente GPU):
+
+```sh
+uv pip install --python .venv/bin/python -e ".[mcp]"       # .venv creato con uv (senza pip)
+# oppure: .venv/bin/python -m pip install -e ".[mcp]"
+```
+
+Poi `/mcp` è attivo dal prossimo avvio del sito (`systemctl restart speedlimits-web`, che fa Cristian; oppure `helpers/2_review.sh --stop` e di nuovo `helpers/2_review.sh`). `helpers/update.sh` non installa da solo l'extra `mcp`, ma non lo toglie. `GET /api/v1` dice `"mcp": true` quando è attivo. Per ritagli e ingrandimenti serve Pillow, già presente con l'extra `preannotate`.
+
+### Claude Code: Streamable HTTP (dal PC, verso il servizio)
+
+```sh
+export NNSLR_REVIEW_TOKEN=...      # lo stesso del sito
+claude mcp add --transport http nnslr-review http://<IP del server>:8765/mcp \
+  --header "Authorization: Bearer $NNSLR_REVIEW_TOKEN"
+claude mcp list                    # nnslr-review: ... (HTTP) - ✔ Connected
+```
+
+`claude mcp add` scrive il token in chiaro nella configurazione locale di Claude Code (`~/.claude.json`, non versionata). Per non scriverlo da nessuna parte usare un `.mcp.json` (nel proprio progetto, non in questo repository) con l'espansione delle variabili d'ambiente di Claude Code:
+
+```json
+{
+  "mcpServers": {
+    "nnslr-review": {
+      "type": "http",
+      "url": "http://<IP del server>:8765/mcp",
+      "headers": {"Authorization": "Bearer ${NNSLR_REVIEW_TOKEN}"}
+    }
+  }
+}
+```
+
+e avviare `claude` con `NNSLR_REVIEW_TOKEN` nell'ambiente.
+
+### Claude Code: stdio (sul server, o dal PC via ssh)
+
+```sh
+# sul server stesso
+claude mcp add nnslr-review -- ~/sunnypilot.speedlimits/helpers/mcp.sh
+# dal PC: Claude Code avvia il server MCP sul server attraverso ssh (chiave ssh senza prompt)
+claude mcp add nnslr-review -- ssh -T <utente>@<server> sunnypilot.speedlimits/helpers/mcp.sh
+# prova senza salvataggio
+claude mcp add nnslr-review-prova -- ssh -T <utente>@<server> sunnypilot.speedlimits/helpers/mcp.sh --read-only
+```
+
+Con stdio non serve token: chi può lanciare il comando sul server ha già accesso ai file. Il processo usa lo stesso database del servizio (SQLite in WAL, scritture serializzate e controllate con `base_revision`).
+
+### Usarlo
+
+In Claude Code gli strumenti si chiamano `mcp__nnslr-review__<nome>`. Claude Code chiede il permesso a ogni strumento la prima volta: è il punto in cui Cristian autorizza o no `save_frame_review`. Un esempio di richiesta:
+
+> Usa nnslr-review. Route 0000011e--0c8825628a, prova senza salvataggio: per i prossimi 5 fotogrammi da rivedere guarda l'immagine, chiedi i vicini se il cartello è lontano o ambiguo e dimmi cosa confermeresti.
+
+### Altri client MCP
+
+- Qualsiasi client che supporta **Streamable HTTP** con header personalizzati: URL `http://<IP del server>:8765/mcp`, header `Authorization: Bearer <token>`. Il server è senza sessione (`stateless`) e risponde in JSON; `GET /mcp` (stream dal server) non serve e risponde 405.
+- Qualsiasi client **stdio**: comando `ssh -T <utente>@<server> sunnypilot.speedlimits/helpers/mcp.sh` (oppure il percorso locale di `helpers/mcp.sh`).
+- **Codex** (`~/.codex/config.toml`), via stdio:
+
+  ```toml
+  [mcp_servers.nnslr-review]
+  command = "ssh"
+  args = ["-T", "<utente>@<server>", "sunnypilot.speedlimits/helpers/mcp.sh"]
+  ```
+
+  Le versioni di Codex che supportano Streamable HTTP accettano `url = "http://<IP del server>:8765/mcp"` con il token letto da una variabile d'ambiente (`bearer_token_env_var = "NNSLR_REVIEW_TOKEN"`): verificare il nome dell'opzione nella documentazione della versione installata.
+- **MCP Inspector**: `npx @modelcontextprotocol/inspector`, trasporto "Streamable HTTP", URL `/mcp`, header `Authorization`.
+
+## 6. Avvio e prove in locale, senza GPU
+
+Niente di questo usa la GPU, importa nel dataset o tocca il comma.
+
+```sh
+cd ~/sunnypilot.speedlimits
+# test automatici (dati sintetici in cartelle temporanee); i test con l'SDK MCP si saltano se manca
+.venv/bin/python -m pytest tests/review -q
+
+# un sito di prova su un'altra porta e un data root di prova, solo su 127.0.0.1
+export NNSLR_REVIEW_TOKEN=prova-locale-0123456789
+.venv/bin/nnslr review --data-root /tmp/nnslr-prova --port 8799
+curl -sS -H "Authorization: Bearer $NNSLR_REVIEW_TOKEN" http://127.0.0.1:8799/api/v1
+
+# il server MCP stdio sullo stesso data root (scrive solo su stderr fuori dal protocollo)
+.venv/bin/nnslr mcp --data-root /tmp/nnslr-prova --read-only
+```
+
+Un data root di prova si costruisce con le funzioni di `tests/review/review_helpers.py` (`make_report`). Non confermare fotogrammi reali per provare: usare `--read-only` o un data root di prova.
+
+## 7. Errori comuni
+
+| Sintomo | Causa e rimedio |
+| --- | --- |
+| 401 `unauthorized` | Token mancante o sbagliato, o mandato come cookie: usare `Authorization: Bearer $NNSLR_REVIEW_TOKEN`. |
+| 400 `token_in_url` | Il token era nell'indirizzo: spostarlo nell'header. |
+| 403 `cross_origin` | Richiesta da una pagina web di un'altra origine, o `Origin` impostato dal client: toglierlo. |
+| 403 `host_not_allowed` | Sito solo locale (127.0.0.1) chiamato con un altro nome host: usare `127.0.0.1` o un tunnel ssh. |
+| 404 `unknown_route` / `unknown_frame` | Route senza report o chiave inesistente: rileggere `GET /routes` o `list_frames`. |
+| 409 `stale_report` | Il report della route è stato rigenerato: rileggere il fotogramma (nuovo `run_id`) e rifare la revisione. |
+| 409 `revision_conflict` | Qualcuno ha salvato quel fotogramma nel frattempo: rileggerlo e decidere; non sovrascrivere senza autorizzazione. |
+| 409 `human_review_exists` | Un'AI prova a cambiare una conferma umana: non farlo, salvo richiesta esplicita (`override_human_review`). |
+| 409 `image_changed` | Il PNG originale non corrisponde al report: rigenerare il report. |
+| 428 `base_revision_required` | Manca `base_revision`: rimandare quella letta (0 se mai salvato). |
+| 400 `invalid_reviewer_kind` | Manca `reviewer_kind` (`human`/`ai`) in un salvataggio REST. |
+| 400 `illegal_speed`, `unknown_enum`, `invalid_bbox`, `value_family_mismatch` | Valore non ammesso: vedere `GET /api/v1/schema`. |
+| 501 `mcp_unavailable` | SDK MCP non installato: sezione 5, poi riavviare il sito. |
+| 501 `image_processing_unavailable` | `crop`/`long_side` senza Pillow sul server: chiedere l'immagine intera o installare Pillow. |
+| `nnslr mcp: the MCP SDK is not installed` | Come sopra, per stdio. |
+| Claude Code: `Failed to connect` (HTTP) | Controllare `curl -H "Authorization: Bearer ..." http://<server>:8765/api/v1` e che dica `"mcp": true`. |
+| Claude Code: `Failed to connect` (stdio via ssh) | `ssh -T <utente>@<server> sunnypilot.speedlimits/helpers/mcp.sh --help` deve funzionare senza password; niente nel profilo della shell deve scrivere su stdout. |
+| Il database non si apre con un `nnslr` vecchio (`schema version 2`) | Il database è già migrato: aggiornare il codice (`helpers/update.sh`). |

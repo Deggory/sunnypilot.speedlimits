@@ -110,6 +110,18 @@ systemctl stop speedlimits-web                       # spegne (riparte al prossi
 scripts/install_review_service.sh --uninstall     # toglie il servizio (il token resta)
 ```
 
+### API REST e MCP (revisione senza browser)
+
+Lo stesso servizio offre anche la **REST API** (`/api/v1/...`) e, con le dipendenze opzionali MCP, il server **MCP** su `/mcp`, per revisionare con `curl`, uno script o un'AI (Claude Code, Codex) che gira sul proprio computer. Tutto è in [API_MCP.md](API_MCP.md). In breve:
+
+- token **nell'header** `Authorization: Bearer <NNSLR_REVIEW_TOKEN>`, mai nell'indirizzo; serve anche su 127.0.0.1;
+- stesse regole e stesso database della pagina; il pannello (Prepara, Importa, Allena, Aggiorna) non è raggiungibile da API e MCP;
+- installare una volta le dipendenze MCP: `uv pip install --python .venv/bin/python -e ".[mcp]"`, poi riavviare il servizio (`systemctl restart speedlimits-web`);
+- MCP anche senza HTTP, via ssh: `helpers/mcp.sh` (con `--read-only` per una prova senza salvataggio; `NNSLR_MCP_READ_ONLY=1` nel servizio fa lo stesso su `/mcp`);
+- le revisioni di un'AI sono salvate come `ai/<nome>`, tipo `ai`: non cambiano le conferme di una persona e `helpers/3_train.sh` non le importa nel dataset (restano nel database, elencate come `skipped_ai_reviews`).
+
+Il database delle revisioni si aggiorna da solo alla versione 2 al primo avvio del codice nuovo (aggiunge tipo di revisore e canale; le revisioni già fatte restano "umane, dalla pagina"). Dopo, un `nnslr` vecchio non lo apre più.
+
 ## 4. Dove stanno le cose
 
 | Cosa | Dove |
@@ -139,6 +151,7 @@ scripts/install_review_service.sh --uninstall     # toglie il servizio (il token
 | `helpers/2_review.sh` | accende/spegne il sito di revisione, stampa il link | apre la porta 8765 sulla LAN, crea il token in `.env` |
 | `helpers/3_train.sh` | revisioni → dataset → modello | scrive il dataset, installa `.venv-gpu` la prima volta, GPU |
 | `helpers/update.sh` | aggiorna il codice e riavvia il sito | `git pull`, `.venv`, riavvio del servizio |
+| `helpers/mcp.sh` | server MCP (stdio) per Claude Code, Codex e altri client, anche via ssh ([API_MCP.md](API_MCP.md)) | legge le route; salva revisioni AI nel database (non con `--read-only`) |
 | `helpers/fetch_comma_segments.sh` | scarica i giri nuovi dal comma | rete, cartella condivisa dei video |
 | `scripts/install_review_service.sh` | installa/aggiorna/toglie il servizio `speedlimits-web` | systemd, `/etc/speedlimits-web.env`, `.env` |
 | `scripts/setup_v100_training_env.sh` | crea `.venv-gpu` (lo lancia anche `helpers/3_train.sh`) | installa pacchetti |
@@ -153,6 +166,7 @@ scripts/install_review_service.sh --uninstall     # toglie il servizio (il token
 | `la GPU 0 e' occupata` / pulsante "la GPU è occupata" | Sta girando un altro training (spesso `openpilot.distill`): aspetta che finisca. Da terminale `--force` parte lo stesso, più lenti tutti e due. |
 | `la porta 8765 e' gia' occupata` | C'è già un sito acceso (il servizio o un altro `nnslr review`): `helpers/2_review.sh` ristampa il link, `helpers/2_review.sh --stop` spegne quello acceso a mano. |
 | `Accesso negato: apri l'indirizzo con il token` | Apri il link con `?token=...` (sezione 3). |
+| API o MCP: `401 unauthorized`, `501 mcp_unavailable`, `409 ...` | Vedi [API_MCP.md](API_MCP.md), sezione 7. |
 | `su ... non ci sono ancora pesi stable` | `--continue` vuole un modello già pubblicato come stable: allena prima da zero. |
 | Una route resta "da collegare" | `link-videos` ha trovato un conflitto: vedi `data/logs/prepare/link-videos.json`. I segmenti con solo il log e senza `fcamera.hevc` (il fetch scarica solo il log dei primi e ultimi due) non sono un errore: non vengono collegati e sono elencati in `log_only`. |
 | Estrazione o pre-annotazione fallita | Il motivo è in `data/logs/prepare/<route>.log`. |

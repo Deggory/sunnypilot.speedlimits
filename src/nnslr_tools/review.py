@@ -4,6 +4,12 @@
 The server reads the pre-annotation reports (read-only) and writes the reviewed
 frames into the review database (:mod:`nnslr_tools.review_db`). It listens on
 127.0.0.1 by default; on any other address every request needs the access token.
+
+Besides the page it serves the REST API ``/api/v1`` and, when the optional MCP
+SDK is installed, the MCP Streamable HTTP endpoint ``/mcp``
+(:mod:`nnslr_tools.review_mcp`). Both use the operations of
+:mod:`nnslr_tools.review_service`, as the page does, and always need the token
+in a header (``Authorization: Bearer`` or ``X-Review-Token``), also on 127.0.0.1.
 """
 from __future__ import annotations
 
@@ -23,7 +29,8 @@ from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 from nnslr_tools.manifest import parse_route_id
 from nnslr_tools.preannotate import PreannotationError, _inside, resolve_data_root
-from nnslr_tools.review_hints import empty_stats, frame_sizes_of, load_hints, suspicious_frames
+from nnslr_tools.review_hints import empty_stats
+from nnslr_tools.review_service import ReviewService
 
 TOKEN_ENV = 'NNSLR_REVIEW_TOKEN'
 MAX_BODY_BYTES = 512 * 1024
@@ -32,6 +39,8 @@ MAX_BODY_BYTES = 512 * 1024
 REQUEST_TIMEOUT_SECONDS = 30
 MAX_CONNECTIONS = 64
 TOKEN_MESSAGE = 'Accesso negato: apri l’indirizzo con il token stampato all’avvio del server.'
+API_TOKEN_MESSAGE = ('Token mancante o errato: invialo nell’header "Authorization: Bearer <token>" '
+                     '(oppure "X-Review-Token"), mai nell’indirizzo.')
 DEFAULT_CSP = "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 
 
@@ -182,18 +191,27 @@ def lan_addresses() -> list[str]:
     return found
 
 
-class ReviewApp:
-    """State shared by the request threads: data root, review store, access token, report cache."""
+def _print_flush(text: str) -> None:
+    print(text, flush=True)
 
-    def __init__(self, root: Path, store, *, token: str | None, require_token: bool):
+
+class ReviewApp(ReviewService):
+    """State shared by the request threads: the review operations plus access token and panel.
+
+    ``api_token`` protects /api/v1 and /mcp. It is the page token when there is
+    one; on 127.0.0.1 without a page token it is NNSLR_REVIEW_TOKEN or a random one.
+    """
+
+    def __init__(self, root: Path, store, *, token: str | None, require_token: bool, api_token: str | None = None):
         from nnslr_tools.panel import Panel
-        self.root = root
-        self.store = store
+        super().__init__(root, store, log=_print_flush)
         self.token = token
         self.require_token = require_token
+        self.api_token = api_token or token
         self.cookie_name = 'nnslr_review'
-        self._reports = {}
-        self._reports_lock = threading.Lock()
+        self._mcp = None
+        self._mcp_failed = False
+        self._mcp_lock = threading.Lock()
         # [control-panel] - START
         self.panel = Panel(root)
         # [control-panel] - END
@@ -202,6 +220,36 @@ class ReviewApp:
         if self.token is None or not isinstance(supplied, str):
             return False
         return secrets.compare_digest(supplied.encode('utf-8'), self.token.encode('utf-8'))
+
+    def api_token_matches(self, supplied) -> bool:
+        if self.api_token is None or not isinstance(supplied, str):
+            return False
+        return secrets.compare_digest(supplied.encode('utf-8'), self.api_token.encode('utf-8'))
+
+    def mcp_bridge(self):
+        """The MCP Streamable HTTP bridge, started at the first /mcp request; None without the MCP SDK."""
+        with self._mcp_lock:
+            if self._mcp is None:
+                try:
+                    from nnslr_tools.review_mcp import HttpBridge, sdk_available
+                except ImportError:
+                    return None
+                if self._mcp_failed or not sdk_available():
+                    return None
+                try:
+                    self._mcp = HttpBridge(self, read_only=os.environ.get('NNSLR_MCP_READ_ONLY', '') == '1')
+                except Exception as exc:
+                    # An incompatible SDK must not take the site and /api/v1 down: /mcp answers 501.
+                    self._mcp_failed = True
+                    self.log(f'MCP non disponibile: {type(exc).__name__}: {terminal_text(exc)}')
+                    return None
+            return self._mcp
+
+    def close(self) -> None:
+        with self._mcp_lock:
+            if self._mcp is not None:
+                self._mcp.close()
+                self._mcp = None
 
     def host_allowed(self, host_header) -> bool:
         # With a token the cookie protects every request. Without one (loopback
@@ -219,33 +267,6 @@ class ReviewApp:
         elif ':' in name:
             name = name.rsplit(':', 1)[0]
         return is_loopback(name)
-
-    def report(self, route: str) -> tuple[Path, list[dict], dict]:
-        """Current report of a route: directory, frame rows, rows by frame_key. Run directories never change."""
-        directory = latest_report(self.root, route)
-        key = str(directory)
-        with self._reports_lock:
-            cached = self._reports.get(key)
-        if cached is None:
-            rows = report_rows(directory)
-            by_key = {}
-            for row in rows:
-                by_key[row.get('frame_key')] = row
-            cached = (rows, by_key)
-            with self._reports_lock:
-                self._reports[key] = cached
-        return directory, cached[0], cached[1]
-
-    def hints(self, route: str, rows: list[dict]) -> tuple[dict, dict]:
-        """Second-opinion hints of a route, read again at every call (the files may change)."""
-        return load_hints(self.root, route, frame_sizes_of(rows))
-
-    def suspicious(self, route: str, run_id: str, rows: list[dict], hints_by_frame: dict) -> dict:
-        """Suspicious frames of a route given the reviews confirmed so far."""
-        confirmed = {}
-        for review in self.store.reviews(route, run_id, confirmed_only=True):
-            confirmed[review['frame_key']] = review['payload'].get('detections', [])
-        return suspicious_frames(rows, hints_by_frame, confirmed, hints_available=bool(hints_by_frame))
 
     def route_links(self) -> list[dict]:
         """Every route with a report, for the route menu of the review page."""
@@ -584,6 +605,7 @@ def make_handler(app: ReviewApp):
     from nnslr_tools.annotations import strict_json_loads
     from nnslr_tools.panel import PanelError
     from nnslr_tools.review_db import ReviewRejected, db_path, public_review, save_frame_review
+    from nnslr_tools.review_service import review_schema
 
     class Handler(BaseHTTPRequestHandler):
         server_version = 'speedlimits-web'
@@ -596,6 +618,12 @@ def make_handler(app: ReviewApp):
 
         def do_POST(self):
             self._dispatch('POST')
+
+        def do_DELETE(self):
+            self._dispatch('DELETE')
+
+        def do_OPTIONS(self):
+            self._dispatch('OPTIONS')
 
         def log_message(self, *args):
             pass
@@ -611,7 +639,7 @@ def make_handler(app: ReviewApp):
                 self._problem(exc.status, exc.reason, exc.message, True)
             except Exception as exc:
                 self._problem(500, 'server_error', 'Errore interno del server: ' + type(exc).__name__ + '.',
-                              self.path.startswith('/api/'))
+                              self.path.startswith('/api/') or self.path.startswith('/mcp'))
 
         def _handle(self, method):
             parts = urlsplit(self.path)
@@ -621,6 +649,12 @@ def make_handler(app: ReviewApp):
                 self._problem(403, 'host_not_allowed', 'Nome host non consentito per questo server.', api)
                 return
             query = parse_qs(parts.query, keep_blank_values=True)
+            if path == '/mcp' or path == '/api/v1' or path.startswith('/api/v1/'):
+                self._external(method, path, query)
+                return
+            if method not in ('GET', 'POST'):
+                self._problem(405, 'method_not_allowed', 'Metodo non consentito.', api)
+                return
             if 'token' in query:
                 self._accept_token(method, path, query['token'][0], api)
                 return
@@ -712,6 +746,145 @@ def make_handler(app: ReviewApp):
                 self._send_image(match.group(1), match.group(2))
                 return
             self._problem(404, 'not_found', 'Pagina non trovata.', path.startswith('/api/'))
+
+        # ---------- REST API /api/v1 and MCP /mcp (token in a header, never a cookie) ----------
+
+        def _external(self, method, path, query):
+            if 'token' in query:
+                self._problem(400, 'token_in_url', API_TOKEN_MESSAGE, True)
+                return
+            # MCP transport rule: an Origin header that is not this server is refused (DNS rebinding).
+            if not self._same_origin():
+                self._problem(403, 'cross_origin', 'Richiesta da un’altra origine rifiutata.', True)
+                return
+            if not self._api_authorized():
+                self.close_connection = True
+                body = json.dumps({'ok': False, 'error': 'unauthorized', 'message': API_TOKEN_MESSAGE},
+                                  ensure_ascii=False).encode('utf-8')
+                self._send(401, 'application/json; charset=utf-8', body, DEFAULT_CSP,
+                           [('WWW-Authenticate', 'Bearer realm="nnslr-review"')])
+                return
+            if path == '/mcp':
+                self._mcp(method)
+                return
+            if method == 'POST':
+                self._api_post(path)
+            elif method == 'GET':
+                self._api_get(path, query)
+            else:
+                self._problem(405, 'method_not_allowed', 'Metodo non consentito.', True)
+
+        def _api_authorized(self):
+            supplied = self.headers.get('Authorization')
+            if isinstance(supplied, str) and supplied[:7].lower() == 'bearer ':
+                return app.api_token_matches(supplied[7:].strip())
+            return app.api_token_matches(self.headers.get('X-Review-Token'))
+
+        def _api_get(self, path, query):
+            values = {}
+            for name, items in query.items():
+                values[name] = items[0]
+            if path in ('/api/v1', '/api/v1/'):
+                self._json(200, {'ok': True, 'api': 'nnslr-review', 'version': 1,
+                                 'mcp': app.mcp_bridge() is not None, 'documentation': 'docs/API_MCP.md'})
+                return
+            if path == '/api/v1/schema':
+                self._json(200, review_schema())
+                return
+            if path == '/api/v1/routes':
+                self._json(200, {'routes': app.list_routes()})
+                return
+            match = re.fullmatch(r'/api/v1/routes/([^/]+)', path)
+            if match:
+                self._json(200, app.progress(match.group(1), suspicious_limit=values.get('suspicious_limit', 100)))
+                return
+            match = re.fullmatch(r'/api/v1/routes/([^/]+)/frames', path)
+            if match:
+                self._json(200, app.list_frames(match.group(1), frame_filter=values.get('filter'),
+                                                cursor=values.get('cursor'), limit=values.get('limit')))
+                return
+            match = re.fullmatch(r'/api/v1/routes/([^/]+)/next', path)
+            if match:
+                self._json(200, app.next_frame(match.group(1), frame_filter=values.get('filter'),
+                                               after=values.get('after')))
+                return
+            match = re.fullmatch(r'/api/v1/routes/([^/]+)/frames/([0-9]{1,9})/([0-9]{1,9})(/[a-z]+)?', path)
+            if match is None:
+                self._problem(404, 'not_found', 'Indirizzo dell’API non valido.', True)
+                return
+            route = match.group(1)
+            key = match.group(2) + '/' + match.group(3)
+            action = match.group(4)
+            if action is None:
+                self._json(200, app.get_frame(route, key))
+            elif action == '/context':
+                self._json(200, app.frame_context(route, key, before=values.get('before'), after=values.get('after')))
+            elif action == '/history':
+                self._json(200, app.history(route, key))
+            elif action == '/image':
+                image = app.image(route, key, variant=values.get('variant'), crop=values.get('crop'),
+                                  long_side=values.get('long_side'))
+                self._send(200, image['mime_type'], image['data'])
+            elif action == '/review':
+                self._problem(405, 'method_not_allowed', 'Usa POST per salvare un fotogramma.', True)
+            else:
+                self._problem(404, 'not_found', 'Indirizzo dell’API non valido.', True)
+
+        def _api_post(self, path):
+            match = re.fullmatch(r'/api/v1/routes/([^/]+)/frames/([0-9]{1,9})/([0-9]{1,9})/review', path)
+            if match is None:
+                self._problem(404, 'not_found', 'Indirizzo dell’API non valido.', True)
+                return
+            content_type = self.headers.get('Content-Type', '')
+            if content_type.split(';')[0].strip().lower() != 'application/json':
+                self._problem(415, 'unsupported_media_type', 'Sono accettati solo dati JSON.', True)
+                return
+            body = self._read_json()
+            key = match.group(2) + '/' + match.group(3)
+            self._json(200, app.save_review(match.group(1), key, body, client=self.client_address[0],
+                                            channel='rest'))
+
+        def _mcp(self, method):
+            bridge = app.mcp_bridge()
+            if bridge is None:
+                self._problem(501, 'mcp_unavailable', 'Server MCP non disponibile: installa le dipendenze '
+                                                      'opzionali con  pip install -e ".[mcp]"  e riavvia il server.',
+                              True)
+                return
+            if method != 'POST':
+                # Stateless JSON server: no server stream (GET) and no session to end (DELETE). The MCP
+                # transport lets a server answer both with 405.
+                body = json.dumps({'ok': False, 'error': 'method_not_allowed',
+                                   'message': 'Questo server MCP accetta solo POST.'}).encode('utf-8')
+                self._send(405, 'application/json; charset=utf-8', body, DEFAULT_CSP, [('Allow', 'POST')])
+                return
+            if self.headers.get('Transfer-Encoding') is not None:
+                raise ReviewRejected(411, 'length_required', 'Richiesta senza Content-Length.')
+            raw_length = self.headers.get('Content-Length')
+            if raw_length is None or not raw_length.strip().isdigit():
+                raise ReviewRejected(411, 'length_required', 'Richiesta senza Content-Length.')
+            length = int(raw_length)
+            if length > MAX_BODY_BYTES:
+                self.close_connection = True
+                raise ReviewRejected(413, 'too_large', 'Richiesta troppo grande (massimo 512 KiB).')
+            body = self.rfile.read(length)
+            headers = []
+            for name, value in self.headers.items():
+                # The token stays in this process: the MCP layer never sees it.
+                if name.lower() in ('authorization', 'x-review-token', 'cookie'):
+                    continue
+                headers.append((name, value))
+            status, response_headers, data = bridge.handle(method, headers, body, self.client_address,
+                                                           self.server.server_address)
+            extra = []
+            content_type = 'application/json'
+            for name, value in response_headers:
+                lowered = name.lower()
+                if lowered == 'content-type':
+                    content_type = value
+                elif lowered in ('mcp-session-id', 'mcp-protocol-version', 'allow'):
+                    extra.append((name, value))
+            self._send(status, content_type, data, DEFAULT_CSP, extra)
 
         def _route_or_none(self, route):
             # Unknown routes, malformed ids and paths outside the data root all end as 404.
@@ -953,7 +1126,11 @@ def create_review_server(root: Path, *, host: str = '127.0.0.1', port: int = 876
     if require_token and token is None:
         token = review_token()
     store = ReviewStore(db_path(root))
-    app = ReviewApp(root, store, token=token, require_token=require_token)
+    # /api/v1 and /mcp always need a token, also when the page on 127.0.0.1 does not.
+    api_token = token
+    if api_token is None:
+        api_token = review_token()
+    app = ReviewApp(root, store, token=token, require_token=require_token, api_token=api_token)
     if ':' in host:
         server = _ReviewServerIPv6((host, port), make_handler(app))
     else:
@@ -1018,9 +1195,18 @@ def serve_review(route: str | None = None, *, data_root: Path | None=None, host:
             print(f'Solo da questo computer. Da un altro: ssh -L {port}:127.0.0.1:{port} <server>, '
                   'oppure riavvia con --host 0.0.0.0', flush=True)
         print(f'Database revisioni: {db_path(root)}', flush=True)
+        if app.token is None and not token_from_env:
+            # Loopback without a page token: the API token is random and must be shown to be usable.
+            print(f'API REST /api/v1 e MCP /mcp: header "Authorization: Bearer {app.api_token}" '
+                  f'(fissalo con {TOKEN_ENV}).', flush=True)
+        else:
+            print(f'API REST /api/v1 e MCP /mcp: header "Authorization: Bearer <{TOKEN_ENV}>" (docs/API_MCP.md).',
+                  flush=True)
         print('Ogni “Conferma” viene salvata subito nel database. Ctrl+C per fermare.', flush=True)
         try:
             server.serve_forever()
         except KeyboardInterrupt:
             pass
+        finally:
+            app.close()
 # [preannotation] - END

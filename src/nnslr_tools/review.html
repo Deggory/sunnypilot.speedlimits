@@ -1026,6 +1026,7 @@ function fromServer(item) {
     review_state: item.confirmed ? 'reviewed' : 'pending',
     detections: clone(item.detections || []),
     reviewer: item.reviewer,
+    reviewer_kind: item.reviewer_kind || 'human',
     review_timestamp: item.review_timestamp,
     site_group: item.site_group,
     encounter_id: item.encounter_id,
@@ -1310,6 +1311,7 @@ async function confirmFrame() {
   const s = workOf(row);
   s.review_state = 'reviewed';
   s.reviewer = reviewer;
+  s.reviewer_kind = 'human';
   s.review_timestamp = new Date().toISOString();
   s.saved = false;
   s.error = null;
@@ -1418,9 +1420,12 @@ function exportJsonl() {
     }
   }
   const reviewed = [];
+  // Frames confirmed by an AI (API or MCP) are not human reviews: the backup leaves them out.
+  let aiReviewed = 0;
   for (const row of rows) {
     const s = S.edits[row.frame_key];
     if (!s || s.review_state !== 'reviewed') { continue; }
+    if (s.reviewer_kind === 'ai') { aiReviewed += 1; continue; }
     const detections = [];
     for (const d of s.detections) {
       const copy = Object.assign({}, d);
@@ -1456,7 +1461,8 @@ function exportJsonl() {
   a.download = 'annotations-' + payload.run_id + '.jsonl';
   a.click();
   setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
-  message.textContent = reviewed.length + (reviewed.length === 1 ? ' fotogramma esportato.' : ' fotogrammi esportati.');
+  message.textContent = reviewed.length + (reviewed.length === 1 ? ' fotogramma esportato.' : ' fotogrammi esportati.')
+    + (aiReviewed ? ' ' + aiReviewed + ' confermati da un’AI non esportati.' : '');
   message.className = 'save-msg ok';
 }
 

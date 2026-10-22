@@ -9,6 +9,12 @@ table that cannot be updated or deleted.
 ``nnslr import-annotations --from-db`` turns the confirmed frames back into the
 review JSONL lines the page export would write and imports them through the
 normal import path.
+
+Every review records who made it: ``reviewer_kind`` is ``human`` or ``ai`` and
+``channel`` is ``web`` (the review page), ``rest`` (``/api/v1``) or ``mcp``. A
+frame confirmed by an AI keeps ``label_basis = 'ai_review'`` in its payload and
+is never imported into a dataset by :func:`import_from_db`, which only takes
+human reviews (the import policy of ``label_basis = 'human_review'``).
 """
 from __future__ import annotations
 
@@ -33,7 +39,8 @@ from nnslr_tools.annotations import (
 from nnslr_tools.manifest import parse_route_id
 from speed_vision_core.types import MAX_VALUE_KPH, MIN_VALUE_KPH
 
-SCHEMA_VERSION = 1
+# Version 2 added reviewer_kind and channel to frame_reviews and frame_review_history.
+SCHEMA_VERSION = 2
 DB_RELATIVE_PATH = Path('annotations') / 'review.sqlite'
 
 # Fields the reviewer can change on a box: the label fields of the import plus
@@ -52,6 +59,12 @@ MAX_REVIEWER_LENGTH = 100
 # so a placeholder is enough to find which reviewed frames are already imported.
 PLACEHOLDER_SOURCE_HASH = '0' * 64
 
+REVIEWER_KINDS = ('human', 'ai')
+REVIEW_CHANNELS = ('web', 'rest', 'mcp')
+# Stored reviewer name of an AI review: "ai/<name>", so it never reads as a person.
+AI_REVIEWER_PREFIX = 'ai/'
+AI_LABEL_BASIS = 'ai_review'
+
 SCHEMA_STATEMENTS = (
     """CREATE TABLE IF NOT EXISTS schema_version (
         version INTEGER NOT NULL,
@@ -68,6 +81,8 @@ SCHEMA_STATEMENTS = (
         confirmed INTEGER NOT NULL CHECK (confirmed IN (0, 1)),
         revision INTEGER NOT NULL,
         updated_at TEXT NOT NULL,
+        reviewer_kind TEXT NOT NULL DEFAULT 'human' CHECK (reviewer_kind IN ('human', 'ai')),
+        channel TEXT NOT NULL DEFAULT 'web' CHECK (channel IN ('web', 'rest', 'mcp')),
         PRIMARY KEY (route_id, run_id, frame_key)
     )""",
     """CREATE TABLE IF NOT EXISTS frame_review_history (
@@ -80,7 +95,9 @@ SCHEMA_STATEMENTS = (
         reviewer TEXT NOT NULL,
         confirmed INTEGER NOT NULL CHECK (confirmed IN (0, 1)),
         saved_at TEXT NOT NULL,
-        client TEXT NOT NULL
+        client TEXT NOT NULL,
+        reviewer_kind TEXT NOT NULL DEFAULT 'human' CHECK (reviewer_kind IN ('human', 'ai')),
+        channel TEXT NOT NULL DEFAULT 'web' CHECK (channel IN ('web', 'rest', 'mcp'))
     )""",
     """CREATE INDEX IF NOT EXISTS frame_review_history_frame
         ON frame_review_history (route_id, run_id, frame_key)""",
@@ -90,6 +107,14 @@ SCHEMA_STATEMENTS = (
     """CREATE TRIGGER IF NOT EXISTS frame_review_history_no_delete
         BEFORE DELETE ON frame_review_history
         BEGIN SELECT RAISE(ABORT, 'frame_review_history is append-only'); END""",
+)
+
+# Columns added by schema version 2. A version 1 file gets them with ALTER TABLE:
+# its reviews were all saved by the review page as human reviews, which is what
+# the defaults say.
+VERSION_2_COLUMNS = (
+    ('reviewer_kind', "TEXT NOT NULL DEFAULT 'human' CHECK (reviewer_kind IN ('human', 'ai'))"),
+    ('channel', "TEXT NOT NULL DEFAULT 'web' CHECK (channel IN ('web', 'rest', 'mcp'))"),
 )
 
 # Italian text shown by the review page for each import-annotations reason code.
@@ -122,6 +147,10 @@ REASON_MESSAGES = {
     'contradictory_frame_labels': 'Il fotogramma risulta sia vuoto sia con riquadri.',
     'empty_dataset': 'Nessuna annotazione da salvare.',
 }
+
+HUMAN_REVIEW_EXISTS_MESSAGE = ('Questo fotogramma è già confermato da un revisore umano: un revisore AI non lo '
+                               'modifica né lo ritira senza override_human_review=true, da usare solo se il '
+                               'proprietario l’ha chiesto per questo fotogramma.')
 
 
 class ReviewRejected(ValueError):
@@ -193,12 +222,19 @@ class ReviewStore:
                     for statement in SCHEMA_STATEMENTS:
                         connection.execute(statement)
                     version = connection.execute('SELECT MAX(version) FROM schema_version').fetchone()[0]
-                    if version is None:
-                        connection.execute('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)',
-                                           (SCHEMA_VERSION, utc_now()))
-                    elif version > SCHEMA_VERSION:
+                    if version is not None and version > SCHEMA_VERSION:
                         raise ReviewStoreError(f'review database {self.path} has schema version {version}; '
                                                f'this nnslr understands up to {SCHEMA_VERSION}')
+                    for table in ('frame_reviews', 'frame_review_history'):
+                        present = set()
+                        for column in connection.execute(f'PRAGMA table_info({table})'):
+                            present.add(column['name'])
+                        for name, definition in VERSION_2_COLUMNS:
+                            if name not in present:
+                                connection.execute(f'ALTER TABLE {table} ADD COLUMN {name} {definition}')
+                    if version is None or version < SCHEMA_VERSION:
+                        connection.execute('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)',
+                                           (SCHEMA_VERSION, utc_now()))
                     connection.execute('COMMIT')
                 except BaseException:
                     connection.execute('ROLLBACK')
@@ -215,8 +251,12 @@ class ReviewStore:
 
     def save_review(self, *, route_id: str, run_id: str, frame_key: str, segment_index: int,
                     output_index: int, payload: dict, reviewer: str, client: str,
-                    base_revision: int | None = None) -> dict:
-        """Store a confirmed frame. The payload must already be validated."""
+                    base_revision: int | None = None, reviewer_kind: str = 'human', channel: str = 'web',
+                    protect_human: bool = False) -> dict:
+        """Store a confirmed frame. The payload must already be validated.
+
+        ``protect_human`` refuses (409) to change a frame a human confirmed.
+        """
         text = json.dumps(payload, sort_keys=True, separators=(',', ':'), allow_nan=False)
         now = utc_now()
         with self._write_lock:
@@ -224,20 +264,28 @@ class ReviewStore:
             try:
                 connection.execute('BEGIN IMMEDIATE')
                 try:
-                    current = _current_revision(connection, route_id, run_id, frame_key)
+                    existing = _select_review(connection, route_id, run_id, frame_key)
+                    current = 0
+                    if existing is not None:
+                        current = existing['revision']
                     _check_base_revision(base_revision, current)
+                    _check_human_review(protect_human, existing)
                     revision = current + 1
                     if current == 0:
                         connection.execute(
                             'INSERT INTO frame_reviews (route_id, run_id, frame_key, segment_index, output_index, '
-                            'payload, reviewer, confirmed, revision, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)',
-                            (route_id, run_id, frame_key, segment_index, output_index, text, reviewer, revision, now))
+                            'payload, reviewer, confirmed, revision, updated_at, reviewer_kind, channel) '
+                            'VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)',
+                            (route_id, run_id, frame_key, segment_index, output_index, text, reviewer, revision, now,
+                             reviewer_kind, channel))
                     else:
                         connection.execute(
                             'UPDATE frame_reviews SET payload = ?, reviewer = ?, confirmed = 1, revision = ?, '
-                            'updated_at = ? WHERE route_id = ? AND run_id = ? AND frame_key = ?',
-                            (text, reviewer, revision, now, route_id, run_id, frame_key))
-                    _append_history(connection, route_id, run_id, frame_key, revision, text, reviewer, 1, now, client)
+                            'updated_at = ?, reviewer_kind = ?, channel = ? '
+                            'WHERE route_id = ? AND run_id = ? AND frame_key = ?',
+                            (text, reviewer, revision, now, reviewer_kind, channel, route_id, run_id, frame_key))
+                    _append_history(connection, route_id, run_id, frame_key, revision, text, reviewer, 1, now, client,
+                                    reviewer_kind, channel)
                     saved = _select_review(connection, route_id, run_id, frame_key)
                     connection.execute('COMMIT')
                 except BaseException:
@@ -248,7 +296,8 @@ class ReviewStore:
         return saved
 
     def withdraw_review(self, *, route_id: str, run_id: str, frame_key: str, reviewer: str, client: str,
-                        base_revision: int | None = None) -> dict:
+                        base_revision: int | None = None, reviewer_kind: str = 'human', channel: str = 'web',
+                        protect_human: bool = False) -> dict:
         """Mark a saved frame as no longer confirmed; its last payload is kept."""
         now = utc_now()
         with self._write_lock:
@@ -256,20 +305,20 @@ class ReviewStore:
             try:
                 connection.execute('BEGIN IMMEDIATE')
                 try:
-                    row = connection.execute(
-                        'SELECT payload, revision FROM frame_reviews WHERE route_id = ? AND run_id = ? AND frame_key = ?',
-                        (route_id, run_id, frame_key)).fetchone()
-                    if row is None:
+                    existing = _select_review(connection, route_id, run_id, frame_key)
+                    if existing is None:
                         raise ReviewRejected(404, 'not_found',
                                              'Nessuna revisione salvata da annullare per questo fotogramma.')
-                    _check_base_revision(base_revision, row['revision'])
-                    revision = row['revision'] + 1
+                    _check_base_revision(base_revision, existing['revision'])
+                    _check_human_review(protect_human, existing)
+                    payload = json.dumps(existing['payload'], sort_keys=True, separators=(',', ':'), allow_nan=False)
+                    revision = existing['revision'] + 1
                     connection.execute(
-                        'UPDATE frame_reviews SET reviewer = ?, confirmed = 0, revision = ?, updated_at = ? '
-                        'WHERE route_id = ? AND run_id = ? AND frame_key = ?',
-                        (reviewer, revision, now, route_id, run_id, frame_key))
-                    _append_history(connection, route_id, run_id, frame_key, revision, row['payload'], reviewer, 0,
-                                    now, client)
+                        'UPDATE frame_reviews SET reviewer = ?, confirmed = 0, revision = ?, updated_at = ?, '
+                        'reviewer_kind = ?, channel = ? WHERE route_id = ? AND run_id = ? AND frame_key = ?',
+                        (reviewer, revision, now, reviewer_kind, channel, route_id, run_id, frame_key))
+                    _append_history(connection, route_id, run_id, frame_key, revision, payload, reviewer, 0,
+                                    now, client, reviewer_kind, channel)
                     saved = _select_review(connection, route_id, run_id, frame_key)
                     connection.execute('COMMIT')
                 except BaseException:
@@ -347,15 +396,6 @@ class ReviewStore:
         return result
 
 
-def _current_revision(connection: sqlite3.Connection, route_id: str, run_id: str, frame_key: str) -> int:
-    row = connection.execute(
-        'SELECT revision FROM frame_reviews WHERE route_id = ? AND run_id = ? AND frame_key = ?',
-        (route_id, run_id, frame_key)).fetchone()
-    if row is None:
-        return 0
-    return row[0]
-
-
 def _select_review(connection: sqlite3.Connection, route_id: str, run_id: str, frame_key: str) -> dict | None:
     row = connection.execute(
         'SELECT * FROM frame_reviews WHERE route_id = ? AND run_id = ? AND frame_key = ?',
@@ -374,12 +414,19 @@ def _check_base_revision(base_revision: int | None, current: int) -> None:
                              'ricarica la pagina per vedere la versione attuale.')
 
 
+def _check_human_review(protect_human: bool, existing: dict | None) -> None:
+    if protect_human and existing is not None and existing['confirmed'] and existing['reviewer_kind'] == 'human':
+        raise ReviewRejected(409, 'human_review_exists', HUMAN_REVIEW_EXISTS_MESSAGE)
+
+
 def _append_history(connection: sqlite3.Connection, route_id: str, run_id: str, frame_key: str, revision: int,
-                    payload: str, reviewer: str, confirmed: int, saved_at: str, client: str) -> None:
+                    payload: str, reviewer: str, confirmed: int, saved_at: str, client: str,
+                    reviewer_kind: str, channel: str) -> None:
     connection.execute(
         'INSERT INTO frame_review_history (route_id, run_id, frame_key, revision, payload, reviewer, confirmed, '
-        'saved_at, client) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        (route_id, run_id, frame_key, revision, payload, reviewer, confirmed, saved_at, client))
+        'saved_at, client, reviewer_kind, channel) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        (route_id, run_id, frame_key, revision, payload, reviewer, confirmed, saved_at, client, reviewer_kind,
+         channel))
 
 
 def _review_from_row(row: sqlite3.Row) -> dict:
@@ -394,6 +441,8 @@ def _review_from_row(row: sqlite3.Row) -> dict:
         'confirmed': row['confirmed'] == 1,
         'revision': row['revision'],
         'updated_at': row['updated_at'],
+        'reviewer_kind': row['reviewer_kind'],
+        'channel': row['channel'],
     }
 
 
@@ -407,6 +456,8 @@ def public_review(review: dict) -> dict:
         'confirmed': review['confirmed'],
         'revision': review['revision'],
         'reviewer': review['reviewer'],
+        'reviewer_kind': review['reviewer_kind'],
+        'channel': review['channel'],
         'updated_at': review['updated_at'],
         'review_timestamp': payload.get('review_timestamp'),
         'detections': payload.get('detections', []),
@@ -438,11 +489,14 @@ def _reviewed_detection(item, originals: dict):
     return detection
 
 
-def build_reviewed_frame(report_row: dict, body: dict, timestamp: str) -> dict:
+def build_reviewed_frame(report_row: dict, body: dict, timestamp: str, *, reviewer_kind: str = 'human',
+                         channel: str = 'web') -> dict:
     """The reviewed frame line, the same as the page's "Scarica revisioni JSONL" writes it.
 
     Frame identity, image, hashes and the original proposals come from the
     report on the server; the request only brings the reviewer's decisions.
+    A human review is exactly the line of the page; an AI review says so in
+    label_basis, reviewer_kind and review_channel.
     """
     originals = {}
     proposals = report_row.get('detections')
@@ -472,13 +526,24 @@ def build_reviewed_frame(report_row: dict, body: dict, timestamp: str) -> dict:
     frame['training_ready'] = False
     frame['review_state'] = 'reviewed'
     frame['label_basis'] = 'human_review'
+    if reviewer_kind == 'ai':
+        frame['label_basis'] = AI_LABEL_BASIS
+        frame['reviewer_kind'] = 'ai'
+        frame['review_channel'] = channel
     frame['source_proposals'] = copy.deepcopy(proposals)
     frame['detections'] = detections
     return frame
 
 
 def validate_reviewed_frame(frame: dict, root: Path) -> None:
-    """Apply the import-annotations rules to one reviewed frame; raise ReviewRejected(400)."""
+    """Apply the import-annotations rules to one reviewed frame; raise ReviewRejected(400).
+
+    An AI review goes through the same box and image rules: only its provenance
+    differs, and the gold rules accept no other provenance than human_review.
+    """
+    if frame.get('label_basis') == AI_LABEL_BASIS:
+        frame = dict(frame)
+        frame['label_basis'] = 'human_review'
     try:
         source_hash = hashlib.sha256(jsonl_bytes([frame])).hexdigest()
         rows = reviewed_frame_annotations(frame, source_hash, dataset_kind='gold', name='web review')
@@ -508,11 +573,58 @@ def _check_reviewer_text(reviewer) -> None:
                              'Il nome del revisore contiene caratteri non ammessi (di controllo o invisibili).')
 
 
+def _reviewer_kind(body: dict, channel: str, require_versioning: bool) -> str:
+    """'human' or 'ai'. The page may omit it (its reviews are human); /api/v1 must say it."""
+    if 'reviewer_kind' not in body and not require_versioning:
+        return 'human'
+    kind = body.get('reviewer_kind')
+    if kind not in REVIEWER_KINDS:
+        raise ReviewRejected(400, 'invalid_reviewer_kind',
+                             'reviewer_kind deve essere "human" (persona) oppure "ai" (Claude, Codex, altri modelli).')
+    return kind
+
+
+def _stored_reviewer(reviewer, kind: str):
+    """The reviewer name as stored: "ai/<name>" for an AI, never a bare name that reads as a person."""
+    if not isinstance(reviewer, str):
+        return reviewer
+    name = reviewer.strip()
+    if kind == 'ai':
+        if name and not name.lower().startswith(AI_REVIEWER_PREFIX):
+            name = AI_REVIEWER_PREFIX + name
+    elif name.lower().startswith(AI_REVIEWER_PREFIX):
+        raise ReviewRejected(400, 'invalid_reviewer',
+                             'Un nome che inizia con "ai/" indica un revisore AI: usa reviewer_kind "ai".')
+    _check_reviewer_text(name)
+    return name
+
+
+def _check_versioning(body: dict, run_id: str) -> None:
+    """Clients of /api/v1 and MCP must name the report and the revision they edited."""
+    if not isinstance(body.get('run_id'), str) or not body['run_id']:
+        raise ReviewRejected(400, 'missing_run_id',
+                             'Manca run_id: rileggi il fotogramma e invia il run_id del report che hai guardato.')
+    if body['run_id'] != run_id:
+        raise ReviewRejected(409, 'stale_report',
+                             'Il report di questa route è stato rigenerato: rileggi il fotogramma.')
+    if 'base_revision' not in body or body['base_revision'] is None:
+        raise ReviewRejected(428, 'base_revision_required',
+                             'Manca base_revision: invia la revision letta con il fotogramma (0 se non era salvato).')
+
+
 def save_frame_review(store: ReviewStore, root: Path, *, route_id: str, run_id: str, report_row: dict,
-                      body, client: str) -> dict:
-    """Handle one POST of the page: confirm (validated, stored) or withdraw a frame."""
+                      body, client: str, channel: str = 'web', require_versioning: bool = False) -> dict:
+    """Handle one save: confirm (validated, stored) or withdraw a frame.
+
+    The review page, /api/v1 and MCP all come here. ``channel`` records which one;
+    ``require_versioning`` (external clients) makes run_id and base_revision mandatory.
+    """
+    if channel not in REVIEW_CHANNELS:
+        raise ValueError(f'unknown review channel {channel!r}')
     if not isinstance(body, dict):
         raise ReviewRejected(400, 'invalid_schema', italian_message('invalid_schema', 'the request must be an object'))
+    if require_versioning:
+        _check_versioning(body, run_id)
     if body.get('run_id') != run_id:
         raise ReviewRejected(409, 'stale_report',
                              'Il report di questa route è stato rigenerato: ricarica la pagina.')
@@ -523,25 +635,35 @@ def save_frame_review(store: ReviewStore, root: Path, *, route_id: str, run_id: 
     if base_revision is not None:
         if type(base_revision) is not int or base_revision < 0:
             raise ReviewRejected(400, 'invalid_schema', italian_message('invalid_schema', 'base_revision'))
+    override = body.get('override_human_review', False)
+    if type(override) is not bool:
+        raise ReviewRejected(400, 'invalid_schema', italian_message('invalid_schema', 'override_human_review'))
     _check_reviewer_text(body.get('reviewer'))
+    kind = _reviewer_kind(body, channel, require_versioning)
+    reviewer = _stored_reviewer(body.get('reviewer'), kind)
+    # An AI never changes a human confirmation unless the owner asked for it.
+    protect_human = kind == 'ai' and not override
     frame_key = report_row['frame_key']
     if not confirmed:
-        reviewer = body.get('reviewer')
-        if not isinstance(reviewer, str) or not reviewer.strip():
+        if not isinstance(reviewer, str) or not reviewer:
             raise ReviewRejected(400, 'missing_provenance', italian_message('missing_provenance', 'reviewer'))
         return store.withdraw_review(route_id=route_id, run_id=run_id, frame_key=frame_key,
-                                     reviewer=reviewer.strip(), client=client, base_revision=base_revision)
+                                     reviewer=reviewer, client=client, base_revision=base_revision,
+                                     reviewer_kind=kind, channel=channel, protect_human=protect_human)
     if not isinstance(body.get('detections'), list):
         raise ReviewRejected(400, 'invalid_schema', italian_message('invalid_schema', 'detections must be a list'))
     if len(body['detections']) > MAX_DETECTIONS_PER_FRAME:
         raise ReviewRejected(400, 'too_many_boxes',
                              f'Troppi riquadri nel fotogramma (massimo {MAX_DETECTIONS_PER_FRAME}).')
-    frame = build_reviewed_frame(report_row, body, utc_now())
+    named = dict(body)
+    named['reviewer'] = reviewer
+    frame = build_reviewed_frame(report_row, named, utc_now(), reviewer_kind=kind, channel=channel)
     validate_reviewed_frame(frame, root)
     return store.save_review(route_id=route_id, run_id=run_id, frame_key=frame_key,
                              segment_index=frame['segment_index'], output_index=frame['output_index'],
                              payload=frame, reviewer=frame['reviewer'], client=client,
-                             base_revision=base_revision)
+                             base_revision=base_revision, reviewer_kind=kind, channel=channel,
+                             protect_human=protect_human)
 
 
 def _comparable(row: dict) -> dict:
@@ -619,6 +741,7 @@ def import_from_db(root: Path, output: Path, *, route: str | None = None, datase
         routes = store.route_ids()
     warnings = []
     selected = []
+    skipped_ai = []
     for route_id in routes:
         try:
             run_id = latest_report(root, route_id).name
@@ -626,11 +749,21 @@ def import_from_db(root: Path, output: Path, *, route: str | None = None, datase
             warnings.append(f'{route_id}: no current pre-annotation report ({exc}); its reviews were not imported')
             continue
         for review in store.reviews(route_id, run_id, confirmed_only=True):
+            # The dataset takes human reviews only; AI reviews stay in the database, listed.
+            if review['reviewer_kind'] == 'ai' or review['payload'].get('label_basis') == AI_LABEL_BASIS:
+                skipped_ai.append({'route_id': review['route_id'], 'run_id': review['run_id'],
+                                   'frame_key': review['frame_key'], 'reviewer': review['reviewer']})
+                continue
             selected.append(review)
         older = store.confirmed_count_in_other_runs(route_id, run_id)
         if older:
             warnings.append(f'{route_id}: {older} confirmed frames belong to older pre-annotation runs '
                             f'and were not imported')
+    if skipped_ai:
+        warnings.append(f'{len(skipped_ai)} frames confirmed by an AI reviewer were not imported: the dataset '
+                        f'takes human reviews only (see skipped_ai_reviews)')
+    if not selected and skipped_ai:
+        require(False, 'empty_dataset', 'only AI reviews in the review database; the dataset takes human reviews only')
     require(bool(selected), 'empty_dataset', 'no confirmed reviews in the review database')
     existing = _existing_frames(output)
     new_frames = []
@@ -654,13 +787,14 @@ def import_from_db(root: Path, output: Path, *, route: str | None = None, datase
     if not new_frames:
         return {'valid': True, 'source': 'review-db', 'imported_count': 0, 'imported_frame_count': 0,
                 'already_imported_frame_count': already_imported, 'changed_after_import': changed,
-                'errors': [], 'warnings': warnings, 'output': str(output)}
+                'skipped_ai_reviews': skipped_ai, 'errors': [], 'warnings': warnings, 'output': str(output)}
     report = import_review_sources([('review-db', jsonl_bytes(new_frames))], root, output,
                                    dataset_kind=dataset_kind)
     report['source'] = 'review-db'
     report['imported_frame_count'] = len(new_frames)
     report['already_imported_frame_count'] = already_imported
     report['changed_after_import'] = changed
+    report['skipped_ai_reviews'] = skipped_ai
     report['warnings'] = list(report.get('warnings', [])) + warnings
     return report
 

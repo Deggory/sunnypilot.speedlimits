@@ -4,13 +4,15 @@ Queste istruzioni servono a un agente che apre il sito di revisione, guarda i fo
 
 L'indirizzo del sito lo indica Cristian, oppure il sito è già aperto in Chrome. Non cercarlo da solo e non scriverlo nei resoconti.
 
+Un agente che ha a disposizione il **server MCP** della revisione (strumenti `list_routes`, `next_frame`, `get_frame_image`, `save_frame_review`, ...) o la **REST API** `/api/v1` non ha bisogno del browser: segue la sezione 10, oltre alle regole delle sezioni 1, 4, 5 e 8. Le regole per riconoscere i cartelli (sezioni 4–5) sono le stesse.
+
 ## 1. Regole prima di iniziare
 
 1. Se si lavora dal repository, leggere anche `AGENTS.md`. Un agente che ha solo il browser segue queste istruzioni e, nel dubbio, chiede a Cristian.
 2. Capire quale delle due attività è stata chiesta:
    - **prova senza salvataggio**: si guarda e si modifica, ma non si preme **Conferma**. Il browser ricorda le modifiche anche dopo una ricarica. Alla fine premere **Annulla modifiche** su ogni fotogramma toccato, finché non restano tacche arancioni;
    - **revisione con salvataggio**: si conferma. Solo se Cristian l'ha chiesto esplicitamente per quella route.
-3. Controllare il campo **Revisore** (in alto a destra). La pagina lo riempie da sola con l'ultimo nome usato in quel browser, quindi può contenere già `cristianku` o il nome di un'altra persona. Cancellarlo e scrivere un nome riconoscibile dell'agente, per esempio `Claude` o `ChatGPT`. Mai `cristianku` o altri nomi di persone. Ricontrollarlo dopo ogni ricarica.
+3. Controllare il campo **Revisore** (in alto a destra). La pagina lo riempie da sola con l'ultimo nome usato in quel browser, quindi può contenere già `cristianku` o il nome di un'altra persona. Cancellarlo e scrivere un nome riconoscibile dell'agente, per esempio `Claude` o `ChatGPT`. Mai `cristianku` o altri nomi di persone. Ricontrollarlo dopo ogni ricarica. La pagina registra ogni conferma come revisione umana: per questo un agente AI, quando può, usa MCP o la REST API (sezione 10), che la registrano come revisione AI (`ai/<nome>`).
 4. Non modificare né ritirare conferme già fatte da altri revisori, salvo richiesta esplicita che le comprenda.
    - Chi ha confermato un fotogramma si legge nella riga di stato in fondo al pannello: "Salvato ✓ · revisione N · <revisore>".
    - La pagina non si aggiorna da sola: le conferme fatte da altri dopo l'apertura compaiono solo ricaricando. Se altri possono lavorare sulla stessa route, ricaricare prima di iniziare e ogni tanto durante il lavoro.
@@ -182,7 +184,7 @@ Dentro **Altro valore** e **Note**, invece, **Invio** registra il valore e non c
 3. Guardare i contatori **Confermati con dubbi** e ricontrollare almeno alcuni di quei fotogrammi.
 4. Per gli agenti che possono fare richieste HTTP: `GET /api/route/<route_id>/reviews`, con la stessa sessione del browser, restituisce:
    - `confirmed_count`;
-   - la lista `reviews` (`frame_key`, `confirmed`, `reviewer`, `revision`, `detections`), comprese le conferme annullate (`confirmed: false`).
+   - la lista `reviews` (`frame_key`, `confirmed`, `reviewer`, `reviewer_kind`, `channel`, `revision`, `detections`), comprese le conferme annullate (`confirmed: false`). `reviewer_kind` è `human` o `ai`, `channel` è `web` (pagina), `rest` o `mcp`.
 
    Farla anche all'inizio, prima di confermare, e conservare `frame_key`, `reviewer`, `revision` e `confirmed`. Alla fine le voci di altri revisori devono avere la stessa `revision`.
 5. Riferire a Cristian:
@@ -272,3 +274,36 @@ Più indicazioni:
   Al massimo 100 riquadri per fotogramma; il nome del revisore al massimo 100 caratteri.
 - **Stato iniziale.** Il JSON dei fotogrammi è nello script `#payload` della pagina ed è grande: non stamparlo tutto, estrarre solo chiavi, `preview_path` e numero di proposte. Le revisioni non sono lì: leggerle con `GET /api/route/<route_id>/reviews` (sezione 8).
 - **Sessione.** Per una sessione lunga conservare lo stesso `context` (cookie) e registrare gli eventi `pageerror` e le risposte HTTP con stato ≥ 400, stampando solo stato e percorso, senza query string né token.
+
+## 10. Per agenti che usano MCP o la REST API
+
+Il server MCP (`/mcp` del sito, oppure `helpers/mcp.sh` via ssh) e la REST API `/api/v1` danno gli stessi dati della pagina senza browser. Configurazione, indirizzi ed errori sono in [docs/API_MCP.md](docs/API_MCP.md); qui c'è come lavorare.
+
+**Prima di iniziare**
+1. Capire, come nella sezione 1, se è una **prova senza salvataggio** o una **revisione con salvataggio** autorizzata da Cristian per quella route. In una prova non chiamare mai `save_frame_review` (REST: `POST .../review`); se disponibile, usare il server in sola lettura (`--read-only`), che non offre lo strumento.
+2. Il token, se serve (HTTP), lo configura Cristian nel client: non chiederlo nella conversazione e non scriverlo in file, resoconti, log o indirizzi.
+3. Le azioni del pannello non sono raggiungibili da MCP e API: non cercarle.
+
+**Per ogni fotogramma**
+1. `next_frame(route_id)` (REST: `GET /api/v1/routes/<route>/next`) dà il prossimo fotogramma non confermato, con le proposte del modello (`proposals`), la seconda lettura (`second_reading`), i motivi di sospetto (`suspicious_reasons`), l'eventuale revisione salvata, `run_id` e `revision`. Dopo un'interruzione basta richiamarlo: riparte da dove il lavoro si era fermato. Per andare avanti senza salvare (prova): `next_frame(route_id, after=<frame_key>)`.
+2. **Guardare l'immagine** con `get_frame_image` (REST: `.../image`). Proposte e seconda lettura sono solo indizi. Per un numero piccolo chiedere un ritaglio ingrandito: `variant` `original`, `crop` = il riquadro allargato di circa metà per lato, `long_side` 512. Prima di confermare "nessun cartello" guardare tutta l'immagine (sezione 4).
+3. Se il cartello è lontano, coperto, sfocato o ambiguo, `get_frame_context` (con `include_images` solo quando serve) mostra i fotogrammi vicini, anche nel segmento prima o dopo. I vicini aiutano a capire che cosa si sta guardando, ma il valore si scrive solo se si legge **in questo fotogramma** (sezione 5).
+4. Decidere i riquadri con i criteri della sezione 5, con i nomi della tabella "Valori ammessi" della sezione 9 (`get_review_schema` li elenca):
+   - tenere o correggere una proposta: il suo `detection_id` più i campi che cambiano, almeno `applicability`;
+   - falso positivo o doppione: non includerlo;
+   - cartello mancante: un riquadro nuovo senza `detection_id`, con `bbox_xyxy` in pixel dell'immagine originale, `family` e `value_kph`;
+   - numero non leggibile: `value_kph: null`; tipo non riconoscibile: `family: "unreadable"` con `notes`;
+   - nessun cartello pertinente: `detections: []`.
+5. **Salvare**, solo se autorizzati: `save_frame_review` con `run_id` e `base_revision` esattamente come letti (`frame.save`) e `reviewer` con il nome dell'agente (per esempio `Claude Code`): il server lo salva come `ai/Claude Code`, tipo `ai`. Con la REST API indicare anche `reviewer_kind: "ai"`. Mai il nome di una persona.
+6. Leggere l'esito:
+   - riuscito: `review.revision`, `confirmed_count`, `next_unreviewed_frame_key`;
+   - 409 `revision_conflict`: qualcuno ha salvato quel fotogramma nel frattempo. Rileggerlo con `get_frame`; non salvarci sopra senza autorizzazione;
+   - 409 `stale_report`: il report è stato rigenerato. Fermarsi e avvisare Cristian;
+   - 409 `human_review_exists`: il fotogramma è confermato da una persona. Lasciarlo com'è; `override_human_review: true` solo se Cristian lo chiede per quel fotogramma;
+   - 400: valore non ammesso, il messaggio dice quale. Correggere e riprovare.
+7. Annotarsi chiave, riquadri salvati e dubbi per il resoconto.
+
+**Alla fine**
+- `get_review_progress(route_id)` (REST: `GET /api/v1/routes/<route>`) dà i conteggi (anche `confirmed_by_ai` e `confirmed_by_human`), i sospetti con i motivi e i confermati con dubbi (`unknown_value`, `unreadable`, `unresolved_road`): servono per il resoconto della sezione 8, punto 5.
+- `get_review_history(route_id, frame_key)` mostra tutte le revisioni di un fotogramma, con revisore, tipo, canale e ora.
+- Le revisioni AI restano nel database e la pagina le mostra come confermate, ma `nnslr import-annotations --from-db` non le importa nel dataset: diventano dati di training solo dopo la conferma di una persona dalla pagina.

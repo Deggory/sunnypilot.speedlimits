@@ -29,37 +29,47 @@ def png(path: Path, value: int = 30) -> None:
     path.write_bytes(b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', header) + chunk(b'IDAT', pixels) + chunk(b'IEND', b''))
 
 
-def proposal(index: int) -> dict:
+def proposal(index: int, segment: int = 0) -> dict:
     return {'bbox_xyxy': [1, 2, 15, 20], 'class_id': 3, 'model_label': 'Speed limit 30km/h', 'score': 0.8,
             'family': 'maximum_speed', 'value_kph': 30, 'value_state': 'proposed', 'review_state': 'pending',
-            'applicability': 'unresolved', 'supplementary_panel': 'unknown', 'detection_id': f'0/{index}/0'}
+            'applicability': 'unresolved', 'supplementary_panel': 'unknown', 'detection_id': f'{segment}/{index}/0'}
 
 
-def make_report(root: Path, route: str = ROUTE, run_id: str = RUN_ID, count: int = 3) -> list[dict]:
-    """Frames 0 and 2 have one speed proposal, frame 1 none. Returns the report rows."""
+def make_report(root: Path, route: str = ROUTE, run_id: str = RUN_ID, count: int = 3, keys=None) -> list[dict]:
+    """Frames 0 and 2 have one speed proposal, frame 1 none. Returns the report rows.
+
+    ``keys`` [(segment, image), ...] replaces the frames 0/0 .. 0/<count-1>; the
+    frames with an even position in that list have a proposal.
+    """
+    if keys is None:
+        keys = []
+        for index in range(count):
+            keys.append((0, index))
+    count = len(keys)
     rows = []
-    for index in range(count):
-        image = root / 'derived/frames' / route / '0' / f'frame_{index:08d}.png'
-        png(image, (index * 40 + int(route[:8], 16)) % 256)
+    for ordinal in range(count):
+        segment, index = keys[ordinal]
+        image = root / 'derived/frames' / route / str(segment) / f'frame_{index:08d}.png'
+        png(image, (ordinal * 40 + segment + int(route[:8], 16)) % 256)
         detections = []
-        if index % 2 == 0:
-            detections.append(proposal(index))
+        if ordinal % 2 == 0:
+            detections.append(proposal(index, segment))
         rows.append({
-            'frame_key': f'0/{index}', 'route_id': route, 'segment_index': 0, 'output_index': index,
+            'frame_key': f'{segment}/{index}', 'route_id': route, 'segment_index': segment, 'output_index': index,
             'image_path': str(image.relative_to(root)), 'frame_sha256': hashlib.sha256(image.read_bytes()).hexdigest(),
             'camera_stream': 'narrow_road', 'requested_sample_fps': 1, 'start_s': None,
             'decoded_frame_index': None, 'capture_mono_ns': None, 'alignment_status': 'unresolved',
             'alignment_reason': 'legacy_manifest', 'capture_time_provenance': 'unknown', 'media_time_s': None,
             'media_time_provenance': 'unknown', 'source_video_sha256': None, 'source_log_sha256': None,
             'schema_version': 1, 'kind': 'preannotated_frame', 'run_id': run_id, 'width': WIDTH, 'height': HEIGHT,
-            'preview_path': f'images/{index:08d}.jpg', 'detections': detections, 'review_state': 'pending',
+            'preview_path': f'images/{ordinal:08d}.jpg', 'detections': detections, 'review_state': 'pending',
             'ground_truth': False, 'model': {'repository': 'synthetic'},
         })
     base = root / 'derived/preannotations' / route
     directory = base / run_id
     (directory / 'images').mkdir(parents=True)
-    for index in range(count):
-        (directory / 'images' / f'{index:08d}.jpg').write_bytes(b'jpeg preview')
+    for ordinal in range(count):
+        (directory / 'images' / f'{ordinal:08d}.jpg').write_bytes(b'jpeg preview')
     (directory / 'preannotations.jsonl').write_text(''.join(json.dumps(r) + '\n' for r in rows))
     (directory / 'run.json').write_text(json.dumps({'run_id': run_id, 'route_id': route}))
     write_review(directory, rows, run_id)
@@ -120,6 +130,7 @@ class RunningServer:
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(timeout=5)
+        self.app.close()
 
     def request(self, method: str, path: str, *, body=None, headers=None):
         connection = http.client.HTTPConnection('127.0.0.1', self.port, timeout=10)

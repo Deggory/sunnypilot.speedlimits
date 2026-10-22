@@ -1147,6 +1147,13 @@ def build_parser() -> argparse.ArgumentParser:
                                "access token (NNSLR_REVIEW_TOKEN or a random one, printed at start)")
     p_review.add_argument("--port", type=int, default=8765)
     p_review.set_defaults(func=_cmd_review)
+    p_mcp = sub.add_parser("mcp", help="MCP server (stdio) with the review tools, for Claude Code, Codex and other "
+                                       "MCP clients; needs the optional [mcp] dependencies. The review server "
+                                       "also serves MCP over HTTP at /mcp")
+    p_mcp.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+    p_mcp.add_argument("--read-only", action="store_true",
+                       help="read-only tools: save_frame_review is not offered (also NNSLR_MCP_READ_ONLY=1)")
+    p_mcp.set_defaults(func=_cmd_mcp)
     # [preannotation] - END
 
     # [reviewed-dataset] - START
@@ -1390,6 +1397,19 @@ def _cmd_review(args: argparse.Namespace) -> int:
     from nnslr_tools.review import serve_review
     serve_review(args.route, data_root=Path(args.data_root) if args.data_root else None,
                  host=args.host, port=args.port)
+    return 0
+
+
+def _cmd_mcp(args: argparse.Namespace) -> int:
+    from nnslr_tools.preannotate import resolve_data_root
+    from nnslr_tools.review_mcp import run_stdio, sdk_available
+    if not sdk_available():
+        print('nnslr mcp: the MCP SDK is not installed; run  .venv/bin/python -m pip install -e ".[mcp]"',
+              file=sys.stderr)
+        return 2
+    read_only = args.read_only or os.environ.get("NNSLR_MCP_READ_ONLY", "") == "1"
+    # stdout carries the MCP messages: everything else goes to stderr.
+    run_stdio(resolve_data_root(Path(args.data_root) if args.data_root else None), read_only=read_only)
     return 0
 # [preannotation] - END
 
