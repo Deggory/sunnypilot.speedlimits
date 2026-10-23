@@ -715,6 +715,8 @@ def review_schema() -> dict:
             'A frame without relevant signs is confirmed with detections [] (negative examples matter).',
             'Look at the image before saving; model proposals and the second reading are only hints. Save only '
             'when the owner authorized saving for this route.',
+            'A saved confirmation is final, by a person or by an AI (no second approval): the next dataset import '
+            'takes it as labels, with its provenance (an AI review stays "ai/<name>", label_basis ai_review).',
         ],
         'errors': {
             '400': 'invalid request or value not allowed (error tells which)',

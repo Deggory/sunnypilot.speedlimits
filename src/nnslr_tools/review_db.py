@@ -12,9 +12,10 @@ normal import path.
 
 Every review records who made it: ``reviewer_kind`` is ``human`` or ``ai`` and
 ``channel`` is ``web`` (the review page), ``rest`` (``/api/v1``) or ``mcp``. A
-frame confirmed by an AI keeps ``label_basis = 'ai_review'`` in its payload and
-is never imported into a dataset by :func:`import_from_db`, which only takes
-human reviews (the import policy of ``label_basis = 'human_review'``).
+frame confirmed by an AI keeps ``label_basis = 'ai_review'``, ``reviewer_kind``
+and ``review_channel`` in its payload; :func:`import_from_db` imports it like a
+human review, and the dataset rows keep that provenance. Only confirmed frames
+are imported: withdrawn reviews and unreviewed proposals never are.
 """
 from __future__ import annotations
 
@@ -27,7 +28,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from nnslr_tools.annotations import (
+    AI_REVIEWER_PREFIX,
     LABEL_KEYS,
+    REVIEW_CHANNELS,
     frame_identity,
     import_review_sources,
     jsonl_bytes,
@@ -60,9 +63,8 @@ MAX_REVIEWER_LENGTH = 100
 PLACEHOLDER_SOURCE_HASH = '0' * 64
 
 REVIEWER_KINDS = ('human', 'ai')
-REVIEW_CHANNELS = ('web', 'rest', 'mcp')
-# Stored reviewer name of an AI review: "ai/<name>", so it never reads as a person.
-AI_REVIEWER_PREFIX = 'ai/'
+# REVIEW_CHANNELS and AI_REVIEWER_PREFIX (the stored name of an AI review is "ai/<name>",
+# so it never reads as a person) come from annotations, which checks them in the dataset.
 AI_LABEL_BASIS = 'ai_review'
 
 SCHEMA_STATEMENTS = (
@@ -588,12 +590,8 @@ def build_reviewed_frame(report_row: dict, body: dict, timestamp: str, *, review
 def validate_reviewed_frame(frame: dict, root: Path) -> None:
     """Apply the import-annotations rules to one reviewed frame; raise ReviewRejected(400).
 
-    An AI review goes through the same box and image rules: only its provenance
-    differs, and the gold rules accept no other provenance than human_review.
+    An AI review goes through the same rules as a human one, with its own provenance.
     """
-    if frame.get('label_basis') == AI_LABEL_BASIS:
-        frame = dict(frame)
-        frame['label_basis'] = 'human_review'
     try:
         source_hash = hashlib.sha256(jsonl_bytes([frame])).hexdigest()
         rows = reviewed_frame_annotations(frame, source_hash, dataset_kind='gold', name='web review')
@@ -767,17 +765,37 @@ def _import_state(rows: list[dict], existing_frames: dict) -> str:
     return 'imported'
 
 
+def _dataset_line(review: dict) -> dict:
+    """The review JSONL line of one confirmed frame, as the page export writes it.
+
+    An AI review stays an AI review: if the database row and its payload disagree,
+    the line says ai_review, never human_review.
+    """
+    payload = review['payload']
+    if review['reviewer_kind'] != 'ai' and payload.get('label_basis') != AI_LABEL_BASIS:
+        return payload
+    line = dict(payload)
+    line['label_basis'] = AI_LABEL_BASIS
+    line['reviewer_kind'] = 'ai'
+    if line.get('review_channel') not in REVIEW_CHANNELS:
+        line['review_channel'] = review['channel']
+    return line
+
+
 def import_from_db(root: Path, output: Path, *, route: str | None = None, dataset_kind: str = 'gold',
                    store: ReviewStore | None = None) -> dict:
     """Import the confirmed frames of each route's current report from the review database.
 
     The frames become the same JSONL lines the page export writes and go through
     import_review_sources, so validation, archive and output files are those of
-    a JSONL import. Frames already in the dataset with the same boxes and labels
-    are skipped, so running it again imports only what is new. A frame already
-    in the dataset whose boxes or labels changed after the import (box added,
-    removed, drawn again or relabelled) is not applied, because the canonical
-    dataset is append-only, and is listed under changed_after_import.
+    a JSONL import. Frames confirmed by a person and by an AI reviewer (REST API
+    or MCP) are both imported; AI rows keep label_basis ai_review, reviewer
+    "ai/<name>" and their channel. Frames already in the dataset with the same
+    boxes and labels are skipped, so running it again imports only what is new.
+    A frame already in the dataset whose boxes or labels changed after the
+    import (box added, removed, drawn again or relabelled) is not applied,
+    because the canonical dataset is append-only, and is listed under
+    changed_after_import.
     """
     from nnslr_tools.preannotate import PreannotationError
     from nnslr_tools.review import latest_report
@@ -791,7 +809,6 @@ def import_from_db(root: Path, output: Path, *, route: str | None = None, datase
         routes = store.route_ids()
     warnings = []
     selected = []
-    skipped_ai = []
     for route_id in routes:
         try:
             run_id = latest_report(root, route_id).name
@@ -799,32 +816,26 @@ def import_from_db(root: Path, output: Path, *, route: str | None = None, datase
             warnings.append(f'{route_id}: no current pre-annotation report ({exc}); its reviews were not imported')
             continue
         for review in store.reviews(route_id, run_id, confirmed_only=True):
-            # The dataset takes human reviews only; AI reviews stay in the database, listed.
-            if review['reviewer_kind'] == 'ai' or review['payload'].get('label_basis') == AI_LABEL_BASIS:
-                skipped_ai.append({'route_id': review['route_id'], 'run_id': review['run_id'],
-                                   'frame_key': review['frame_key'], 'reviewer': review['reviewer']})
-                continue
             selected.append(review)
         older = store.confirmed_count_in_other_runs(route_id, run_id)
         if older:
             warnings.append(f'{route_id}: {older} confirmed frames belong to older pre-annotation runs '
                             f'and were not imported')
-    if skipped_ai:
-        warnings.append(f'{len(skipped_ai)} frames confirmed by an AI reviewer were not imported: the dataset '
-                        f'takes human reviews only (see skipped_ai_reviews)')
-    if not selected and skipped_ai:
-        require(False, 'empty_dataset', 'only AI reviews in the review database; the dataset takes human reviews only')
     require(bool(selected), 'empty_dataset', 'no confirmed reviews in the review database')
     existing = _existing_frames(output)
     new_frames = []
+    new_ai_frames = 0
     already_imported = 0
     changed = []
     for review in selected:
-        rows = reviewed_frame_annotations(review['payload'], PLACEHOLDER_SOURCE_HASH,
+        line = _dataset_line(review)
+        rows = reviewed_frame_annotations(line, PLACEHOLDER_SOURCE_HASH,
                                           dataset_kind=dataset_kind, name='review database')
         state = _import_state(rows, existing)
         if state == 'new':
-            new_frames.append(review['payload'])
+            new_frames.append(line)
+            if line.get('label_basis') == AI_LABEL_BASIS:
+                new_ai_frames = new_ai_frames + 1
         elif state == 'imported':
             already_imported = already_imported + 1
         else:
@@ -836,15 +847,15 @@ def import_from_db(root: Path, output: Path, *, route: str | None = None, datase
                         f'the canonical dataset is append-only (see changed_after_import)')
     if not new_frames:
         return {'valid': True, 'source': 'review-db', 'imported_count': 0, 'imported_frame_count': 0,
-                'already_imported_frame_count': already_imported, 'changed_after_import': changed,
-                'skipped_ai_reviews': skipped_ai, 'errors': [], 'warnings': warnings, 'output': str(output)}
+                'imported_ai_frame_count': 0, 'already_imported_frame_count': already_imported,
+                'changed_after_import': changed, 'errors': [], 'warnings': warnings, 'output': str(output)}
     report = import_review_sources([('review-db', jsonl_bytes(new_frames))], root, output,
                                    dataset_kind=dataset_kind)
     report['source'] = 'review-db'
     report['imported_frame_count'] = len(new_frames)
+    report['imported_ai_frame_count'] = new_ai_frames
     report['already_imported_frame_count'] = already_imported
     report['changed_after_import'] = changed
-    report['skipped_ai_reviews'] = skipped_ai
     report['warnings'] = list(report.get('warnings', [])) + warnings
     return report
 

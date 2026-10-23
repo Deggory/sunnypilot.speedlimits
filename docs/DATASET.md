@@ -77,7 +77,13 @@ inputs are archived by SHA-256 under `annotations/imports/`.
 Every imported object preserves reviewer, timezone-aware review timestamp,
 notes, proposal source/score, original proposal/model and source-review hash.
 These fields record the review assertion; the tool does not authenticate the
-reviewer's identity. A browser export is not dataset truth until import passes.
+reviewer's identity. `provenance.label_basis` says who confirmed the frame:
+`human_review` (a person) or `ai_review` (an AI reviewer through the REST API or
+MCP: reviewer `ai/<name>`, `provenance.reviewer_kind: ai` and
+`provenance.review_channel` `rest`, `mcp` or `web`). Both are confirmed reviews
+and both go into gold; an AI confirmation needs no second, human approval.
+Automatic `model_review` labels stay training-candidate only. A browser export
+is not dataset truth until import passes.
 Legacy browser confirmations lacking reviewer/time must be reconfirmed.
 
 ## Validation
@@ -225,7 +231,10 @@ Import the confirmed frames into the canonical dataset on the LXC:
 
 Validation, the source archive under `annotations/imports/` and the output file
 are the same as for a JSONL import. Only the confirmed frames of each route's
-current report are taken. Frames already in the dataset with the same boxes and
+current report are taken, confirmed by a person or by an AI reviewer (REST API,
+MCP); AI frames keep their provenance and are counted in
+`imported_ai_frame_count`. Withdrawn confirmations and unreviewed proposals are
+never taken. Confirming a frame never imports or trains by itself. Frames already in the dataset with the same boxes and
 labels are skipped, so the command can be repeated after every review session.
 The comparison is per frame: a frame already in the dataset that was changed
 after its import (a box added, deleted, drawn again or relabelled) is not

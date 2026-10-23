@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from nnslr_tools.review_db import ReviewStore, db_path, import_from_db, save_frame_review
+from nnslr_tools.review_db import ReviewStore, db_path, save_frame_review
 from review_helpers import OTHER_ROUTE, ROUTE, RUN_ID, TOKEN, RunningServer, json_of, make_report, page_body
 
 # Frames on three segments with gaps: 0/0 0/2 0/5 | 1/1 1/3 | 3/0. Even positions have a proposal.
@@ -416,29 +416,6 @@ def test_bad_requests_are_structured_json(api):
     assert index['version'] == 1 and isinstance(index['mcp'], bool)
 
 
-def test_ai_reviews_are_not_imported_into_the_dataset(tmp_path):
-    rows = make_report(tmp_path)
-    store = ReviewStore(db_path(tmp_path))
-    save_frame_review(store, tmp_path, route_id=ROUTE, run_id=RUN_ID, report_row=rows[0],
-                      body=ai_body(), client='test', channel='mcp', require_versioning=True)
-    output = tmp_path / 'objects.jsonl'
-    with pytest.raises(ValueError, match='only AI reviews'):
-        import_from_db(tmp_path, output, store=store)
-    payload = store.review(ROUTE, RUN_ID, '0/0')['payload']
-    assert payload['label_basis'] == 'ai_review' and payload['reviewer'] == 'ai/Claude'
-    assert payload['reviewer_kind'] == 'ai' and payload['review_channel'] == 'mcp'
-    save_frame_review(store, tmp_path, route_id=ROUTE, run_id=RUN_ID, report_row=rows[1],
-                      body=page_body(rows[1]), client='test')
-    report = import_from_db(tmp_path, output, store=store)
-    assert report['valid'] and report['imported_frame_count'] == 1
-    assert report['skipped_ai_reviews'] == [{'route_id': ROUTE, 'run_id': RUN_ID, 'frame_key': '0/0',
-                                             'reviewer': 'ai/Claude'}]
-    assert any('AI reviewer' in warning for warning in report['warnings'])
-    for line in output.read_text().splitlines():
-        record = json.loads(line)
-        assert record['output_index'] == 1 and record['provenance']['label_basis'] == 'human_review'
-
-
 def test_version_1_database_is_migrated_in_place(tmp_path):
     path = db_path(tmp_path)
     path.parent.mkdir(parents=True)
@@ -518,19 +495,20 @@ print('ok')
     assert result.stdout.strip().endswith('ok')
 
 
-def test_review_page_marks_ai_reviews_and_offers_approval(api):
-    """The page shows AI confirmations apart (filter, striped ticks) and approves them as human reviews."""
+def test_review_page_shows_ai_reviews_as_final(api):
+    """The page shows where an AI confirmation comes from (filter, striped ticks, save line), asks no approval."""
     server, root, rows = api
     assert save(server, ROUTE, '0/0', ai_body())[0] == 200
     status, response, page = server.request('GET', f'/route/{ROUTE}/')
     assert status == 200
     page = page.decode()
-    assert 'data-filter="ai"' in page and 'id="tlToggle"' in page
-    assert "Approva (AI)" in page and 'frameReviewerKind' in page
+    assert 'data-filter="ai"' in page and 'id="tlToggle"' in page and 'frameReviewerKind' in page
+    assert 'Approva' not in page and 'approv' not in page.lower()
+    assert "' (AI' + (via ? ' · ' + via : '') + ')'" in page
     reviews = json_of(server.request('GET', f'/api/route/{ROUTE}/reviews')[2])['reviews']
-    assert reviews[0]['reviewer_kind'] == 'ai'
-    # The approval is the page's normal save of the same boxes: it becomes a human review.
-    body = page_body(rows['0/0'], drop_proposals=True, base_revision=1)
+    assert reviews[0]['reviewer_kind'] == 'ai' and reviews[0]['channel'] == 'rest'
+    # A person may still correct it from the page: the correction is a human review.
+    body = page_body(rows['0/0'], value_kph=50, base_revision=1)
     status, response, data = server.post_frame(ROUTE, '0/0', body)
     assert status == 200, data
     review = ReviewStore(db_path(root)).review(ROUTE, RUN_ID, '0/0')

@@ -1,6 +1,6 @@
 # Istruzioni per l'agente che revisiona i cartelli
 
-Queste istruzioni servono a un agente che apre il sito di revisione, guarda i fotogrammi delle route e conferma i cartelli di velocità. Valgono sia per un agente che lavora dentro Chrome con l'estensione di Claude o di ChatGPT, sia per un agente che pilota il browser con Playwright. Descrivono il sito nella versione del **22 ottobre 2026**.
+Queste istruzioni servono a un agente che apre il sito di revisione, guarda i fotogrammi delle route e conferma i cartelli di velocità. Valgono sia per un agente che lavora dentro Chrome con l'estensione di Claude o di ChatGPT, sia per un agente che pilota il browser con Playwright. Descrivono il sito nella versione del **23 ottobre 2026**.
 
 L'indirizzo del sito lo indica Cristian, oppure il sito è già aperto in Chrome. Non cercarlo da solo e non scriverlo nei resoconti.
 
@@ -11,7 +11,7 @@ Un agente che ha a disposizione il **server MCP** della revisione (strumenti `li
 1. Se si lavora dal repository, leggere anche `AGENTS.md`. Un agente che ha solo il browser segue queste istruzioni e, nel dubbio, chiede a Cristian.
 2. Capire quale delle due attività è stata chiesta:
    - **prova senza salvataggio**: si guarda e si modifica, ma non si preme **Conferma**. Il browser ricorda le modifiche anche dopo una ricarica. Alla fine premere **Annulla modifiche** su ogni fotogramma toccato, finché non restano tacche arancioni;
-   - **revisione con salvataggio**: si conferma. Solo se Cristian l'ha chiesto esplicitamente per quella route.
+   - **revisione con salvataggio**: si conferma. Solo se Cristian l'ha chiesto esplicitamente per quella route. Ogni conferma salvata è definitiva, anche quella di un agente AI: nessuno la riapprova e al prossimo import diventa un dato di training.
 3. Controllare il campo **Revisore** (in alto a destra). La pagina lo riempie da sola con l'ultimo nome usato in quel browser, quindi può contenere già `cristianku` o il nome di un'altra persona. Cancellarlo e scrivere un nome riconoscibile dell'agente, per esempio `Claude` o `ChatGPT`. Mai `cristianku` o altri nomi di persone. Ricontrollarlo dopo ogni ricarica. La pagina registra ogni conferma come revisione umana: per questo un agente AI, quando può, usa MCP o la REST API (sezione 10), che la registrano come revisione AI (`ai/<nome>`).
 4. Non modificare né ritirare conferme già fatte da altri revisori, salvo richiesta esplicita che le comprenda.
    - Chi ha confermato un fotogramma si legge nella riga di stato in fondo al pannello: "Salvato ✓ · revisione N · <revisore>".
@@ -26,7 +26,7 @@ Un agente che ha a disposizione il **server MCP** della revisione (strumenti `li
 2. La pagina iniziale **Route** elenca le route con un report. Ogni card mostra "N di M confermati", i sospetti e un'azione: **Inizia →**, **Riprendi →** o **Ricontrolla →**. Aprire la route indicata da Cristian.
 3. Lavorare con la **pagina** larga almeno 1000 px. Con il pannello laterale dell'estensione aperto la pagina è più stretta della finestra: allargare la finestra.
 
-   Sotto i 981 px la pagina passa al layout da telefono: sotto la foto vengono subito i cartelli; timeline, legenda e "Confermati con dubbi" sono chiusi sotto il pulsante **Timeline** (lo stato aperto/chiuso resta nel browser). Il pulsante Conferma diventa la barra fissa in basso, tra ‹ e ›, e dice cosa salva in breve: **Conferma · 60**, **Nessun cartello**, **Approva · 60**, **Avanti →** (cioè "Già confermato · avanti →") o **Salvataggio…**.
+   Sotto i 981 px la pagina passa al layout da telefono: sotto la foto vengono subito i cartelli; timeline, legenda e "Confermati con dubbi" sono chiusi sotto il pulsante **Timeline** (lo stato aperto/chiuso resta nel browser). Il pulsante Conferma diventa la barra fissa in basso, tra ‹ e ›, e dice cosa salva in breve: **Conferma · 60**, **Nessun cartello**, **Avanti →** (cioè "Già confermato · avanti →") o **Salvataggio…**.
 4. Se in fondo al pannello compare **"Revisioni non lette dal server"** o **"Il report di questa route è stato rigenerato: ricarica la pagina"**, fermarsi: ricaricare la pagina e, se resta, avvisare Cristian.
 5. La pagina della route riapre con il filtro e il fotogramma usati l'ultima volta in quel browser. All'inizio scegliere il filtro **Da rivedere**.
 
@@ -38,7 +38,7 @@ Un agente che ha a disposizione il **server MCP** della revisione (strumenti `li
   - **Da rivedere**: i fotogrammi non ancora confermati;
   - **Sospetti**: modello e seconda lettura non sono d'accordo, oppure un fotogramma vicino ha un cartello (confermato o visto dalla seconda lettura) e questo non ha niente. Il motivo è nella riga viola **Sospetto: …**. Un fotogramma confermato non è mai sospetto, ma una conferma può rendere sospetti i vicini, quindi il numero dei sospetti non scende sempre;
   - **Con proposte**: il modello ha proposto almeno un riquadro;
-  - **AI · N**: i fotogrammi confermati da un revisore AI (REST API o MCP) e non ancora approvati da una persona. Su questi il pulsante dice **Approva (AI) · …** e la riga di stato "Confermato da ai/<nome> (AI)"; approvare salva il fotogramma com'è come revisione umana, e solo allora entra nel dataset. Un agente AI non approva mai: è un compito di Cristian.
+  - **AI · N**: i fotogrammi confermati da un revisore AI (REST API o MCP). La conferma AI è definitiva come quella di una persona ed entra nel dataset al prossimo import, senza approvazione. La pagina ne mostra solo la provenienza: stato **Confermato · AI**, tacca a righe e riga di stato "Salvato ✓ · revisione N · ai/<nome> (AI · MCP)" (o "· REST"). Il pulsante dice **Già confermato · avanti →** come per gli altri confermati. Una persona può correggerla dalla pagina: la correzione diventa una revisione umana.
 - Il contatore "N di M confermati · K sospetti".
 - Il campo **Revisore**.
 
@@ -48,7 +48,7 @@ Un agente che ha a disposizione il **server MCP** della revisione (strumenti `li
   - riquadri azzurri tratteggiati con etichette come `60?`: sono la seconda lettura, solo un aiuto.
 - **La barra sotto la foto**:
   - le frecce **‹ ›** con la posizione nel filtro, per esempio `62 / 68`;
-  - lo stato del fotogramma: Da rivedere, Da confermare, Da riconfermare, Salvataggio…, Confermato, Non salvato;
+  - lo stato del fotogramma: Da rivedere, Da confermare, Da riconfermare, Salvataggio…, Confermato (Confermato · AI se l'ha confermato un revisore AI), Non salvato;
   - "Segmento X · immagine Y · N proposte";
   - **+ Riquadro**, **Elimina** (elimina il riquadro selezionato) e l'interruttore **Seconda lettura**.
 - **La timeline**: una riga di tacche per segmento ("seg 2", "seg 3"…), una tacca per immagine, in ordine.
@@ -57,7 +57,7 @@ Un agente che ha a disposizione il **server MCP** della revisione (strumenti `li
   - I colori:
     - verde: confermato;
     - verde con la parte alta gialla: confermato con un cartello senza numero o illeggibile;
-    - verde a righe: confermato da un revisore AI, da approvare;
+    - verde a righe: confermato da un revisore AI (REST API o MCP);
     - viola: sospetto;
     - giallo: con proposte o seconda lettura;
     - arancione: modificato, da confermare;
@@ -208,7 +208,7 @@ La pagina espone il proprio stato con attributi che non cambiano il layout. Conv
 | --- | --- | --- |
 | `body` | `data-frame-key` | Fotogramma mostrato (`segmento/immagine`) |
 | `body` | `data-frame-status` | `todo`, `dirty`, `saving`, `error`, `done` |
-| `body` | `data-frame-reviewer-kind` | Chi ha la conferma sul server: `human`, `ai` (da approvare), vuoto se non confermato |
+| `body` | `data-frame-reviewer-kind` | Chi ha la conferma sul server: `human`, `ai` (revisore AI, conferma definitiva come `human`), vuoto se non confermato |
 | `body` | `data-server` | `loading` finché le revisioni non arrivano dal server, poi `ready`; `error` o `stale` (report rigenerato); `offline` per la pagina aperta senza server |
 | `body` | `data-unsaved` | Fotogrammi confermati non ancora salvati (`0` = tutto salvato) |
 | `body` | `data-last-save-key`, `data-last-save-result`, `data-last-save-revision`, `data-save-count` | Ultimo salvataggio. Il risultato vale `saving`, poi `ok` o `error`; `unchanged` se la conferma non ha inviato niente; `withdrawn` dopo un ritiro; `need-reviewer` se manca il revisore |
@@ -297,7 +297,7 @@ Il server MCP (`/mcp` del sito, oppure `helpers/mcp.sh` via ssh) e la REST API `
    - cartello mancante: un riquadro nuovo senza `detection_id`, con `bbox_xyxy` in pixel dell'immagine originale, `family` e `value_kph`;
    - numero non leggibile: `value_kph: null`; tipo non riconoscibile: `family: "unreadable"` con `notes`;
    - nessun cartello pertinente: `detections: []`.
-5. **Salvare**, solo se autorizzati: `save_frame_review` con `run_id` e `base_revision` esattamente come letti (`frame.save`) e `reviewer` con il nome dell'agente (per esempio `Claude Code`): il server lo salva come `ai/Claude Code`, tipo `ai`. Con la REST API indicare anche `reviewer_kind: "ai"`. Mai il nome di una persona.
+5. **Salvare**, solo se autorizzati e dopo aver guardato l'immagine: la conferma è definitiva e diventa un dato di training al prossimo import, senza un'altra approvazione. Usare `save_frame_review` con `run_id` e `base_revision` esattamente come letti (`frame.save`) e `reviewer` con il nome dell'agente (per esempio `Claude Code`): il server lo salva come `ai/Claude Code`, tipo `ai`. Con la REST API indicare anche `reviewer_kind: "ai"`. Mai il nome di una persona.
 6. Leggere l'esito:
    - riuscito: `review.revision`, `confirmed_count`, `next_unreviewed_frame_key`;
    - 409 `revision_conflict`: qualcuno ha salvato quel fotogramma nel frattempo. Rileggerlo con `get_frame`; non salvarci sopra senza autorizzazione;
@@ -309,4 +309,4 @@ Il server MCP (`/mcp` del sito, oppure `helpers/mcp.sh` via ssh) e la REST API `
 **Alla fine**
 - `get_review_progress(route_id)` (REST: `GET /api/v1/routes/<route>`) dà i conteggi (anche `confirmed_by_ai` e `confirmed_by_human`), i sospetti con i motivi e i confermati con dubbi (`unknown_value`, `unreadable`, `unresolved_road`): servono per il resoconto della sezione 8, punto 5.
 - `get_review_history(route_id, frame_key)` mostra tutte le revisioni di un fotogramma, con revisore, tipo, canale e ora.
-- Le revisioni AI restano nel database e la pagina le mostra come confermate, ma `nnslr import-annotations --from-db` non le importa nel dataset: diventano dati di training solo dopo la conferma di una persona dalla pagina.
+- Le conferme AI sono definitive: non c'è una seconda approvazione di una persona. `nnslr import-annotations --from-db` le importa nel dataset come quelle umane, con la provenienza (`reviewer` `ai/<nome>`, `label_basis` `ai_review`, canale `rest` o `mcp`). Non importa i fotogrammi mai confermati, le conferme ritirate e le proposte del modello. Salvare non importa e non allena: import e training restano comandi separati che lancia Cristian, mai l'agente.

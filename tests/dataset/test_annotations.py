@@ -184,6 +184,61 @@ def test_canonical_schema_vocabulary_matches_validator():
     schema=json.loads((Path(__file__).parents[2]/'schemas/annotation.schema.json').read_text())
     assert set(schema['required'])==FIELDS and set(schema['properties'])==FIELDS
     assert all(set(schema['properties'][k]['enum'])==values for k,values in ENUMS.items())
+
+
+def ai(row, channel='mcp'):
+    """The same reviewed frame confirmed by an AI reviewer through the REST API or MCP."""
+    row.update(reviewer='ai/Claude',label_basis='ai_review',reviewer_kind='ai',review_channel=channel)
+    return row
+
+
+def test_ai_review_is_a_gold_review_and_keeps_its_provenance(tmp_path,capsys):
+    rows=[ai(reviewed(tmp_path)),reviewed(tmp_path,"00000002--abcdef1234",negative=True)]
+    code,out=invoke(capsys,'import-annotations',str(write(tmp_path,rows)),'--data-root',str(tmp_path))
+    assert code==0,out.err+out.out
+    records=[json.loads(s) for s in (tmp_path/'annotations/objects.jsonl').read_text().splitlines()]
+    machine=[r for r in records if r['route_id']=="00000001--abcdef1234"]
+    person=[r for r in records if r['route_id']=="00000002--abcdef1234"]
+    assert machine and all(r['reviewer']=='ai/Claude' and r['schema_version']==1 for r in machine)
+    assert all({k:r['provenance'][k] for k in ('label_basis','reviewer_kind','review_channel')}
+               =={'label_basis':'ai_review','reviewer_kind':'ai','review_channel':'mcp'} for r in machine)
+    assert person and all(r['provenance']['label_basis']=='human_review' and 'reviewer_kind' not in r['provenance']
+                          for r in person)
+    code,out=invoke(capsys,'validate-dataset','--data-root',str(tmp_path))
+    assert code==0,out.err+out.out
+    jsonschema=pytest.importorskip('jsonschema')
+    schema=json.loads((Path(__file__).parents[2]/'schemas/annotation.schema.json').read_text())
+    for record in records:
+        jsonschema.validate(record,schema)
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(dict(machine[0],reviewer='Anna'),schema)
+
+
+@pytest.mark.parametrize('change,reason',[
+    (dict(review_channel=None),'missing_provenance'),
+    (dict(reviewer_kind='human'),'missing_provenance'),
+    (dict(reviewer='Claude'),'reviewer_kind_mismatch'),
+    (dict(review_state='pending'),'unreviewed_proposal'),
+    (dict(kind='preannotated_frame'),'unreviewed_proposal'),
+])
+def test_ai_review_needs_its_provenance_and_a_confirmation(tmp_path,capsys,change,reason):
+    row=ai(reviewed(tmp_path));row.update(change)
+    code,out=invoke(capsys,'import-annotations',str(write(tmp_path,[row])),'--data-root',str(tmp_path))
+    assert code!=0 and reason in out.out
+    assert not (tmp_path/'annotations/objects.jsonl').exists()
+
+
+def test_ai_label_basis_in_a_canonical_row_needs_an_ai_reviewer(tmp_path,capsys):
+    code,out=invoke(capsys,'import-annotations',str(write(tmp_path,[ai(reviewed(tmp_path))])),'--data-root',str(tmp_path))
+    assert code==0,out.err+out.out
+    from nnslr_tools.annotations import load_jsonl,validate_dataset
+    rows=load_jsonl(tmp_path/'annotations/objects.jsonl')
+    assert validate_dataset(rows,tmp_path)['valid']
+    assert validate_dataset(rows,tmp_path,dataset_kind='training-candidate')['valid']
+    forged=[dict(r,reviewer='test-human') for r in rows]
+    assert validate_dataset(forged,tmp_path)['errors'][0]['reason']=='reviewer_kind_mismatch'
+    unlabelled=[dict(r,provenance=dict(r['provenance'],review_channel='email')) for r in rows]
+    assert validate_dataset(unlabelled,tmp_path)['errors'][0]['reason']=='missing_provenance'
 # [reviewed-dataset] - END
 
 # [dataset-review] - START

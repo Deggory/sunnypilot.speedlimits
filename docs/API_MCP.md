@@ -49,15 +49,18 @@ Ogni revisione salvata registra:
 | Campo | Valori | Dove |
 | --- | --- | --- |
 | `reviewer` | nome o sigla; per un'AI è salvato come `ai/<nome>` (es. `ai/Claude Code`) | DB, payload, cronologia |
-| `reviewer_kind` | `human` o `ai` | DB e cronologia (colonna nuova) |
-| `channel` | `web` (pagina), `rest` (`/api/v1`), `mcp` | DB e cronologia (colonna nuova) |
-| `label_basis` | `human_review` per le persone, `ai_review` per le AI | payload salvato |
+| `reviewer_kind` | `human` o `ai` | DB e cronologia (colonna nuova); per le AI anche payload e `provenance` del dataset |
+| `channel` | `web` (pagina), `rest` (`/api/v1`), `mcp` | DB e cronologia (colonna nuova); per le AI anche payload (`review_channel`) e `provenance.review_channel` del dataset |
+| `label_basis` | `human_review` per le persone, `ai_review` per le AI | payload salvato e `provenance` del dataset |
 
 - **MCP salva sempre come `ai`**: il nome dato dal client diventa `ai/<nome>`, anche se fosse `cristianku`.
 - La **REST API** vuole `reviewer_kind` esplicito (`human` o `ai`). Un nome che inizia con `ai/` con `reviewer_kind: "human"` è rifiutato.
-- La pagina continua a salvare come `human` (canale `web`), come prima. Un agente che usa il browser resta riconoscibile solo dal nome che scrive nel campo Revisore: per le AI è meglio usare MCP o REST. Le revisioni salvate così da un'AI si riclassificano con `nnslr review-reclassify-ai --reviewer Codex --reviewer ChatGPT` (prima `--dry-run`): ogni fotogramma riceve una nuova revisione `ai/<nome>`, tipo `ai`, `label_basis` `ai_review`, con gli stessi riquadri e la stessa ora di revisione, e la cronologia lo registra. Così compaiono nel filtro **AI** della pagina, da approvare.
+- La pagina continua a salvare come `human` (canale `web`), come prima. Un agente che usa il browser resta riconoscibile solo dal nome che scrive nel campo Revisore: per le AI è meglio usare MCP o REST. Le revisioni salvate così da un'AI si riclassificano con `nnslr review-reclassify-ai --reviewer Codex --reviewer ChatGPT` (prima `--dry-run`): ogni fotogramma riceve una nuova revisione `ai/<nome>`, tipo `ai`, `label_basis` `ai_review`, con gli stessi riquadri e la stessa ora di revisione, e la cronologia lo registra. Così compaiono nel filtro **AI** della pagina ed entrano nel dataset come revisioni AI, non come umane.
 - Un revisore AI **non modifica e non ritira** un fotogramma confermato da una persona: 409 `human_review_exists`, a meno di `override_human_review: true`, da usare solo se Cristian lo chiede per quel fotogramma.
-- **Import nel dataset invariato per le persone**: `nnslr import-annotations --from-db` importa solo le revisioni umane; quelle AI restano nel database e sono elencate in `skipped_ai_reviews` con un avviso. L'export JSONL della pagina le salta. Per usarle nel training bisognerà decidere esplicitamente una politica (per esempio farle riconfermare da una persona dalla pagina: la riconferma diventa `human`).
+- **Una conferma AI è definitiva**: nessuna persona deve riapprovarla. `nnslr import-annotations --from-db` (cioè `helpers/3_train.sh` o **Importa** nel pannello) importa i fotogrammi confermati da persone e da AI, anche quelli salvati prima di questa regola. Nel dataset le righe AI restano riconoscibili: `reviewer` `ai/<nome>`, `provenance.label_basis` `ai_review`, `provenance.reviewer_kind` `ai`, `provenance.review_channel` `rest`, `mcp` (o `web` per quelle riclassificate); un riquadro aggiunto dall'AI ha `proposal_source` `ai_review`. Il report dell'import conta i fotogrammi AI nuovi in `imported_ai_frame_count`. Le righe umane restano identiche a prima.
+- Non entrano mai nel dataset i fotogrammi mai confermati, le conferme ritirate (`confirmed: false`) e le proposte del modello. Le revisioni automatiche `model_review` restano solo `training-candidate`.
+- L'export JSONL della pagina include anche le conferme AI, con `label_basis` `ai_review`, `reviewer_kind` e `review_channel`.
+- Confermare non avvia niente: import e training restano comandi separati ed espliciti.
 - Il database passa da solo dalla versione 1 alla 2 alla prima apertura: le due colonne nuove vengono aggiunte e le revisioni già salvate (tutte dalla pagina) risultano `human`/`web`. Una versione vecchia di `nnslr` rifiuta poi di aprire il database (versione 2): aggiornare il codice prima di riavviare il servizio.
 
 ## 4. REST API

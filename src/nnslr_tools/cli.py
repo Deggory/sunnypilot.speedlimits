@@ -1150,7 +1150,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_reclassify = sub.add_parser(
         "review-reclassify-ai",
         help="mark the reviews saved by the named reviewers (AI agents that used the review page, e.g. Codex) "
-             "as AI reviews: new revision, reviewer ai/<name>, never imported as human reviews")
+             "as AI reviews: new revision, reviewer ai/<name>, imported as AI reviews (label_basis ai_review), "
+             "never as human ones")
     p_reclassify.add_argument("--reviewer", action="append", required=True,
                               help="reviewer name exactly as stored, e.g. Codex; repeat for more names")
     p_reclassify.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
@@ -1174,7 +1175,8 @@ def build_parser() -> argparse.ArgumentParser:
     # [model-review] - END
     p_import.add_argument("--from-db", action="store_true",
                           help="import the confirmed frames saved by 'nnslr review' in <data-root>/annotations/review.sqlite "
-                               "(current report of each route; frames already imported are skipped)")
+                               "(current report of each route; frames already imported are skipped). Human and AI "
+                               "confirmations are both imported; AI rows keep reviewer ai/<name> and label_basis ai_review")
     p_import.add_argument("--route", help="with --from-db: only this route")
     p_import.set_defaults(func=_cmd_dataset)
     p_validate = sub.add_parser("validate-dataset", help="validate reviewed labels, images, hashes and capture provenance")
@@ -1196,7 +1198,8 @@ def build_parser() -> argparse.ArgumentParser:
     # [model-review] - START
     for _parser in (p_import, p_validate, p_splits):
         _parser.add_argument("--dataset-kind", choices=("gold", "training-candidate"), default="gold",
-                             help="gold: human review only; training-candidate: human + model review (default: gold)")
+                             help="gold: confirmed reviews, by a person or by an AI reviewer (REST API, MCP); "
+                                  "training-candidate: those + model review (default: gold)")
     # [model-review] - END
     # [training-baseline] - START
     p_train = sub.add_parser(

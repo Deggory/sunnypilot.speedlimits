@@ -1,13 +1,15 @@
 # Istruzioni per gli agenti
 
 - Prima di agire, leggere e applicare anche `/Users/cristianku/Gitlab/codex-contexts/AGENTS.md`. Se non è leggibile, segnalarlo senza inventarne il contenuto.
-- Per revisionare i cartelli tramite l'interfaccia web, leggere [review_instructions.md](review_instructions.md): descrive accesso con Playwright, controllo delle immagini, annotazioni, salvataggio e verifica indipendente sul server.
+- Per revisionare i cartelli, dalla pagina web o con MCP/REST API, leggere [review_instructions.md](review_instructions.md): descrive accesso con Playwright, MCP e REST (sezione 10), controllo delle immagini, annotazioni, salvataggio e verifica indipendente sul server.
 - Distinguere una prova del programma da una revisione reale. Salvare conferme nel database soltanto quando Cristian ha autorizzato la revisione con salvataggio. Non confermare immagini non esaminate.
+- Una conferma salvata via REST API o MCP è definitiva: non esiste una seconda approvazione umana, e al prossimo import entra nel dataset di training come revisione AI (`ai/<nome>`, `label_basis` `ai_review`). Salvare non importa e non allena: import e training restano operazioni separate, che l'agente non lancia senza richiesta esplicita.
 - Lavorare su `main`, preservando le modifiche esistenti. Non creare branch o worktree senza richiesta esplicita. Commit e push richiedono autorizzazione.
 - La revisione autorizza le annotazioni richieste, non modifiche al codice del servizio, installazioni, riavvii, importazioni nel dataset, addestramenti o deployment.
 - Gli aggiornamenti e le installazioni sul comma li esegue Cristian: non modificare o riavviare il dispositivo senza richiesta esplicita per quella specifica operazione.
 - Non accendere mai `serverone-ai`, nemmeno indirettamente. Non usare Bonsai o worker RX6800; non contattare il worker V100 finché Cristian non ne comunica nuovamente la disponibilità.
 - Non inserire token, cookie o credenziali nei file versionati, nei resoconti o nei log condivisi.
+- Mai GitHub Actions: build, test e pubblicazione solo sul server. Non creare, ripristinare o riattivare niente in `.github/workflows/` e non trattare un push come qualcosa che avvia una build.
 
 ## Helper scripts e punti di ingresso
 

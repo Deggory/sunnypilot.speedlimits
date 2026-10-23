@@ -98,8 +98,12 @@ def page_body(row: dict, *, reviewer: str = 'Cristian', value_kph=None, drop_pro
     return body
 
 
-def page_export_row(row: dict, body: dict, review_timestamp: str) -> dict:
-    """What "Scarica revisioni JSONL" writes for the same frame (mirrors the export in review.html)."""
+def page_export_row(row: dict, body: dict, review_timestamp: str, *, reviewer_kind: str = 'human',
+                    channel: str | None = None) -> dict:
+    """What "Scarica revisioni JSONL" writes for the same frame (mirrors the export in review.html).
+
+    A frame an AI confirmed keeps its provenance: label_basis ai_review, reviewer_kind and review_channel.
+    """
     detections = []
     for item in body['detections']:
         detection = copy.deepcopy(item)
@@ -116,6 +120,8 @@ def page_export_row(row: dict, body: dict, review_timestamp: str) -> dict:
                     kind='reviewed_frame', ground_truth=False, training_ready=False, review_state='reviewed',
                     label_basis='human_review', source_proposals=copy.deepcopy(row['detections']),
                     detections=detections)
+    if reviewer_kind == 'ai':
+        exported.update(label_basis='ai_review', reviewer_kind='ai', review_channel=channel)
     return exported
 
 

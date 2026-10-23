@@ -43,7 +43,8 @@ get_frame_context(...) when the sign is far, covered, blurred or ambiguous -> sa
 Model proposals and the second reading are hints, not truth. Never invent a speed: unreadable number
 -> value_kph null. Call get_review_schema for the allowed values and the rules.
 Save only when the owner has authorized saving for this route; otherwise only read. Your saves are
-recorded as an AI review (reviewer stored as "ai/<name>"), never as a person. Send run_id and
+recorded as an AI review (reviewer stored as "ai/<name>"), never as a person, and are final: no person
+approves them again, the next dataset import takes them as labels. Send run_id and
 base_revision exactly as read; on a 409 conflict read the frame again instead of overwriting."""
 
 
@@ -355,8 +356,9 @@ def build_server(service, *, client: str, read_only: bool = False):
                                                                          'only when the owner asked for it.')] = False,
         ) -> SaveResult:
             """Confirm or correct one frame, after looking at its image. Only when the owner authorized saving
-            for this route. Same validation as the review page; 409 means the frame changed or the report was
-            rebuilt: read it again."""
+            for this route. The confirmation is final (no human approval follows) and becomes a training label
+            at the next dataset import. Same validation as the review page; 409 means the frame changed or the
+            report was rebuilt: read it again."""
             return call(tools.save_frame_review, route_id, frame_key, run_id=run_id, base_revision=base_revision,
                         reviewer=reviewer, detections=detections, confirmed=confirmed, site_group=site_group,
                         encounter_id=encounter_id, override_human_review=override_human_review)

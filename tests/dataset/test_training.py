@@ -9,7 +9,7 @@ from nnslr_tools.training import prepare_detector_training, prepare_reader_train
 from test_annotations import invoke, reviewed, write
 
 
-def _training_fixture(root, capsys):
+def _training_fixture(root, capsys, *, ai=False):
     source_rows = []
     for index in range(8):
         row = reviewed(root, f"{index + 1:08x}--abcdef1234", index=index, negative=index == 0)
@@ -17,6 +17,10 @@ def _training_fixture(root, capsys):
             value = 30 if index % 2 else 50
             row["detections"][0]["value_kph"] = value
             row["source_proposals"][0]["value_kph"] = value
+        if ai and index != 1:
+            # Confirmed by an AI reviewer through the REST API or MCP; frame 1 stays a human review.
+            row.update(reviewer="ai/Claude", label_basis="ai_review", reviewer_kind="ai",
+                       review_channel="rest" if index % 2 else "mcp")
         source_rows.append(row)
 
     source = write(root, source_rows)
@@ -75,6 +79,28 @@ def test_prepare_reader_training_follows_hash_bound_latest_pointer(tmp_path, cap
     assert plan["counts_by_split"]["train"] == 2
     assert plan["counts_by_split"]["validation"] == 2
     assert "torch" not in sys.modules
+
+
+def test_training_plans_load_ai_reviewed_labels(tmp_path, capsys):
+    dataset, frozen, latest = _training_fixture(tmp_path, capsys, ai=True)
+    rows = load_jsonl(dataset)
+    assert {r["provenance"]["label_basis"] for r in rows} == {"ai_review", "human_review"}
+
+    reader = prepare_reader_training(dataset, latest, tmp_path)
+    assert reader["trainable"] is True
+    assert reader["classes"] == ["maximum_speed:30", "maximum_speed:50"]
+    assert reader["counts_by_split"]["train"] == 2 and reader["counts_by_split"]["validation"] == 2
+    ai_ids = {r["annotation_id"] for r in rows if r["provenance"]["label_basis"] == "ai_review"}
+    assert len(ai_ids & {r["annotation_id"] for r in reader["records"]}) >= 3
+    detector = prepare_detector_training(dataset, latest, tmp_path)
+    assert detector["trainable"] is True
+    detector_ids = set()
+    for frame in detector["frames"]:
+        detector_ids.update(frame["annotation_ids"])
+    assert ai_ids & detector_ids
+    assert "torch" not in sys.modules
+    code, out = invoke(capsys, "build-splits", "--data-root", str(tmp_path))
+    assert code == 0, out.err + out.out
 
 
 def test_train_dry_run_uses_latest_pointer_without_gpu_stack(tmp_path, capsys):

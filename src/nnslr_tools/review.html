@@ -254,7 +254,7 @@ input::placeholder { color: var(--muted); }
 .tl-ticks button.error { background: var(--danger-fill); }
 .tl-ticks button.done { background: var(--ok-fill); }
 .tl-ticks button.done.unsure { background: linear-gradient(var(--yellow) 0 6px, var(--ok-fill) 6px); }
-/* Confirmed by an AI (REST API or MCP): striped until a person approves it. */
+/* Confirmed by an AI (REST API or MCP): striped, so the provenance stays visible. */
 .tl-ticks button.done.ai { background: repeating-linear-gradient(135deg, var(--ok-fill) 0 3px, var(--ai-stripe) 3px 6px); }
 .tl-ticks button.done.ai.unsure { background: linear-gradient(var(--yellow) 0 6px, transparent 6px), repeating-linear-gradient(135deg, var(--ok-fill) 0 3px, var(--ai-stripe) 3px 6px); }
 .tl-ticks button.cur { box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--fg); }
@@ -512,7 +512,7 @@ details[open] summary::after { transform: rotate(90deg); }
       <button type="button" data-filter="suspicious" aria-pressed="false" title="Il modello e la seconda lettura non sono d’accordo">Sospetti</button>
       <button type="button" data-filter="proposals" aria-pressed="false" title="Con proposte del modello">Con proposte</button>
       <button type="button" data-filter="all" aria-pressed="false">Tutti</button>
-      <button type="button" data-filter="ai" aria-pressed="false" title="Confermati da un revisore AI: da verificare e approvare" hidden>AI</button>
+      <button type="button" data-filter="ai" aria-pressed="false" title="Confermati da un revisore AI (REST API o MCP)" hidden>AI</button>
     </div>
     <div class="progress" aria-live="polite">
       <div class="progress-text" id="progressText"></div>
@@ -991,7 +991,8 @@ function frameStatus(key) {
   if (s.saved === false) { return 'dirty'; }
   return 'todo';
 }
-// Confirmed on the server by an AI reviewer (REST API or MCP) and not changed here: a person still has to approve it.
+// Confirmed on the server by an AI reviewer (REST API or MCP) and not changed here. The confirmation is final,
+// like a person's: this only shows where it comes from (filter, striped tick, save line).
 function aiConfirmed(key) {
   const s = S.edits[key];
   return Boolean(api && s && s.reviewer_kind === 'ai' && frameStatus(key) === 'done' && sameAsServer(s));
@@ -1071,6 +1072,7 @@ function fromServer(item) {
     detections: clone(item.detections || []),
     reviewer: item.reviewer,
     reviewer_kind: item.reviewer_kind || 'human',
+    channel: item.channel,
     review_timestamp: item.review_timestamp,
     site_group: item.site_group,
     encounter_id: item.encounter_id,
@@ -1171,7 +1173,7 @@ function setFilter(filter) {
   if (target === null) {
     if (filter === 'suspicious') { S.filterNote = 'Nessun fotogramma sospetto da rivedere.'; }
     else if (isQualityFilter(filter)) { S.filterNote = 'Nessun fotogramma confermato con questo dubbio.'; }
-    else if (filter === 'ai') { S.filterNote = 'Nessun fotogramma confermato da un’AI da approvare.'; }
+    else if (filter === 'ai') { S.filterNote = 'Nessun fotogramma confermato da un’AI.'; }
     else { S.filterNote = 'Nessun fotogramma corrisponde a questo filtro.'; }
     render();
     return;
@@ -1340,9 +1342,9 @@ async function confirmFrame() {
   if (!row) { return; }
   const key = row.frame_key;
   if (S.inFlight.has(key)) { return; }
-  // Already on the server and not changed since: Conferma moves on, it does not sign the frame again.
-  // A frame an AI confirmed is the exception: confirming it is the person's approval, saved as a human review.
-  if (api && frameStatus(key) === 'done' && sameAsServer(S.edits[key]) && !aiConfirmed(key)) {
+  // Already on the server and not changed since: Conferma moves on, it does not sign the frame again
+  // (a frame an AI confirmed too: that confirmation is final).
+  if (api && frameStatus(key) === 'done' && sameAsServer(S.edits[key])) {
     S.lastSave = { key: key, result: 'unchanged', revision: S.edits[key].revision || 0 };
     go(1);
     if (S.currentKey === key) {
@@ -1380,10 +1382,9 @@ async function confirmFrame() {
   S.notice = null;
   store();
   render();
-  const approved = S.edits[key].base && S.edits[key].base.reviewer_kind === 'ai' && sameAsServer(S.edits[key]);
   const ok = await send(key);
   if (ok && S.currentKey === key) {
-    advanceAfterConfirm(key, (approved ? 'Approvato ' : 'Salvato ') + key + ' alle ' + timeNow() + '.');
+    advanceAfterConfirm(key, 'Salvato ' + key + ' alle ' + timeNow() + '.');
   }
 }
 async function withdrawFrame() {
@@ -1467,12 +1468,9 @@ function exportJsonl() {
     }
   }
   const reviewed = [];
-  // Frames confirmed by an AI (API or MCP) are not human reviews: the backup leaves them out.
-  let aiReviewed = 0;
   for (const row of rows) {
     const s = S.edits[row.frame_key];
     if (!s || s.review_state !== 'reviewed') { continue; }
-    if (s.reviewer_kind === 'ai') { aiReviewed += 1; continue; }
     const detections = [];
     for (const d of s.detections) {
       const copy = Object.assign({}, d);
@@ -1493,6 +1491,12 @@ function exportJsonl() {
       source_proposals: row.detections,
       detections: detections
     });
+    // A frame an AI confirmed keeps its provenance (label_basis, reviewer_kind, channel), as the server stores it.
+    if (s.reviewer_kind === 'ai') {
+      line.label_basis = 'ai_review';
+      line.reviewer_kind = 'ai';
+      line.review_channel = s.channel;
+    }
     reviewed.push(line);
   }
   if (reviewed.length === 0) {
@@ -1508,8 +1512,7 @@ function exportJsonl() {
   a.download = 'annotations-' + payload.run_id + '.jsonl';
   a.click();
   setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
-  message.textContent = reviewed.length + (reviewed.length === 1 ? ' fotogramma esportato.' : ' fotogrammi esportati.')
-    + (aiReviewed ? ' ' + aiReviewed + ' confermati da un’AI non esportati.' : '');
+  message.textContent = reviewed.length + (reviewed.length === 1 ? ' fotogramma esportato.' : ' fotogrammi esportati.');
   message.className = 'save-msg ok';
 }
 
@@ -1977,7 +1980,7 @@ function renderProgress() {
     if (reasonsOf(row.frame_key).length > 0) { suspicious += 1; }
     if (aiConfirmed(row.frame_key)) { byAi += 1; }
   }
-  // The AI filter appears only when there is something to approve (or while it is the filter in use).
+  // The AI filter appears only when an AI confirmed some frames (or while it is the filter in use).
   const aiButton = document.querySelector('.filters button[data-filter="ai"]');
   aiButton.textContent = 'AI · ' + byAi;
   aiButton.hidden = byAi === 0 && S.filter !== 'ai';
@@ -2114,7 +2117,8 @@ function saveText(key, s) {
   }
   if (status === 'saving') { return ['Salvataggio in corso…', '']; }
   if (status === 'done' && aiConfirmed(key)) {
-    return ['Confermato da ' + (s.reviewer || 'un’AI') + ' (AI) · revisione ' + s.revision + ': controlla e premi Approva.', 'warn'];
+    const via = s.channel === 'mcp' ? 'MCP' : s.channel === 'rest' ? 'REST' : '';
+    return ['Salvato ✓ · revisione ' + s.revision + ' · ' + (s.reviewer || 'un’AI') + ' (AI' + (via ? ' · ' + via : '') + ')', 'ok'];
   }
   if (status === 'done') {
     return ['Salvato ✓ · revisione ' + s.revision + (s.reviewer ? ' · ' + s.reviewer : ''), 'ok'];
@@ -2209,10 +2213,7 @@ function render() {
     mobileLabel = 'Nessun cartello';
   }
   let already = false;
-  if (aiConfirmed(key)) {
-    label = 'Approva (AI) · ' + (names.length > 0 ? names.join(' · ') : 'nessun cartello');
-    mobileLabel = 'Approva · ' + (names.length > 0 ? names.join(' · ') : 'nessuno');
-  } else if (status === 'done' && api && sameAsServer(S.edits[key])) {
+  if (status === 'done' && api && sameAsServer(S.edits[key])) {
     label = 'Già confermato · avanti →';
     mobileLabel = 'Avanti →';
     already = true;

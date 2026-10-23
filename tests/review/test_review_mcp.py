@@ -13,7 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from nnslr_tools.review_db import ReviewRejected, ReviewStore, db_path
+from nnslr_tools.annotations import load_jsonl
+from nnslr_tools.review_db import ReviewRejected, ReviewStore, db_path, import_from_db
 from nnslr_tools.review_mcp import MAX_CONTEXT_IMAGES, ReviewTools
 from nnslr_tools.review_service import ReviewService
 from review_helpers import ROUTE, RUN_ID, TOKEN, RunningServer, json_of, make_report, page_body
@@ -256,6 +257,11 @@ def test_claude_style_client_over_streamable_http(http_server):
     # The page sees the same database.
     reviews = json_of(server.request('GET', f'/api/route/{ROUTE}/reviews', headers={'X-Review-Token': TOKEN})[2])
     assert reviews['confirmed_count'] == 1 and reviews['reviews'][0]['reviewer_kind'] == 'ai'
+    # The confirmation made over MCP is final: the import takes it as it is, as an AI review.
+    report = import_from_db(root, root / 'objects.jsonl')
+    assert report['imported_frame_count'] == 1 and report['imported_ai_frame_count'] == 1
+    for record in load_jsonl(root / 'objects.jsonl'):
+        assert record['reviewer'] == 'ai/Claude Code' and record['provenance']['review_channel'] == 'mcp'
 
 
 def test_read_only_environment_hides_the_save_tool_over_http(tmp_path, monkeypatch):

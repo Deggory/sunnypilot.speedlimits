@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 
 from nnslr_tools import cli
+from nnslr_tools.annotations import load_jsonl
 from nnslr_tools.review_db import ReviewStore, db_path, import_from_db, save_frame_review
 from review_helpers import ROUTE, RUN_ID, make_report, page_body
 
@@ -52,7 +53,13 @@ def test_reclassify_codex_reviews_as_ai(tmp_path, capsys):
     # Running it again changes nothing.
     code, report = run(capsys, tmp_path, '--reviewer', 'Codex')
     assert report['reviewers']['Codex']['frames'] == 0 and store.review(ROUTE, RUN_ID, '0/0')['revision'] == 2
-    # The import takes only the human review now.
+    # The import takes both, the reclassified frame as an AI review (channel web).
     result = import_from_db(tmp_path, tmp_path / 'objects.jsonl', store=store)
-    assert result['imported_frame_count'] == 1
-    assert [r['frame_key'] for r in result['skipped_ai_reviews']] == ['0/0']
+    assert result['imported_frame_count'] == 2 and result['imported_ai_frame_count'] == 1
+    for record in load_jsonl(tmp_path / 'objects.jsonl'):
+        provenance = record['provenance']
+        if record['output_index'] == 0:
+            assert record['reviewer'] == 'ai/Codex' and provenance['label_basis'] == 'ai_review'
+            assert provenance['review_channel'] == 'web'
+        else:
+            assert record['reviewer'] == 'Cristian' and provenance['label_basis'] == 'human_review'

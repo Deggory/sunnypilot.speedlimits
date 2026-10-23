@@ -1,5 +1,5 @@
 {
-  "$comment": "[reviewed-dataset] - START: Schema structure. Dataset validator additionally checks image files/hashes, pixel bounds, cross-row identity/timing and explicit review. [reviewed-dataset] - END [model-review] - START: schema_version 1 = human_review provenance (unchanged v1 semantics); schema_version 2 = model_review provenance with review_model, review_model_version, review_model_sha256 and confidence (training-candidate datasets only; gold rejects model review). [model-review] - END",
+  "$comment": "[reviewed-dataset] - START: Schema structure. Dataset validator additionally checks image files/hashes, pixel bounds, cross-row identity/timing and explicit review. [reviewed-dataset] - END [model-review] - START: schema_version 1 = reviewed provenance: human_review (a person) or ai_review (an AI reviewer: reviewer \"ai/<name>\", provenance reviewer_kind \"ai\" and review_channel; accepted in gold like human_review); schema_version 2 = model_review provenance with review_model, review_model_version, review_model_sha256 and confidence (training-candidate datasets only; gold rejects model review). [model-review] - END",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "allOf": [
@@ -19,7 +19,10 @@
           "provenance": {
             "properties": {
               "label_basis": {
-                "const": "human_review"
+                "enum": [
+                  "ai_review",
+                  "human_review"
+                ]
               }
             }
           }
@@ -70,6 +73,40 @@
               "review_model_sha256",
               "confidence"
             ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "provenance": {
+            "properties": {
+              "label_basis": {
+                "const": "ai_review"
+              }
+            },
+            "required": [
+              "label_basis"
+            ]
+          }
+        },
+        "required": [
+          "provenance"
+        ]
+      },
+      "then": {
+        "properties": {
+          "provenance": {
+            "required": [
+              "label_basis",
+              "source_review_sha256",
+              "reviewer_kind",
+              "review_channel"
+            ]
+          },
+          "reviewer": {
+            "pattern": "^[Aa][Ii]/"
           }
         }
       }
@@ -187,8 +224,16 @@
         },
         "label_basis": {
           "enum": [
+            "ai_review",
             "human_review",
             "model_review"
+          ]
+        },
+        "review_channel": {
+          "enum": [
+            "mcp",
+            "rest",
+            "web"
           ]
         },
         "review_model": {
@@ -202,6 +247,9 @@
         "review_model_version": {
           "minLength": 1,
           "type": "string"
+        },
+        "reviewer_kind": {
+          "const": "ai"
         },
         "source_review_sha256": {
           "pattern": "^[0-9a-f]{64}$",

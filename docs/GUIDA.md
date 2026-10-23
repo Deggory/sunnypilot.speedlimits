@@ -130,7 +130,7 @@ Lo stesso servizio offre anche la **REST API** (`/api/v1/...`) e, con le dipende
 - stesse regole e stesso database della pagina; il pannello (Prepara, Importa, Allena, Aggiorna) non è raggiungibile da API e MCP;
 - installare una volta le dipendenze MCP e riavviare il sito: `helpers/setup_mcp.sh --restart` (sezione "Installazione locale per MCP" qui sotto);
 - MCP anche senza HTTP, via ssh: `helpers/mcp.sh` (con `--read-only` per una prova senza salvataggio; `NNSLR_MCP_READ_ONLY=1` nel servizio fa lo stesso su `/mcp`);
-- le revisioni di un'AI sono salvate come `ai/<nome>`, tipo `ai`: non cambiano le conferme di una persona e `helpers/3_train.sh` non le importa nel dataset (restano nel database, elencate come `skipped_ai_reviews`).
+- le revisioni di un'AI sono salvate come `ai/<nome>`, tipo `ai`, e non cambiano le conferme di una persona. Sono definitive come quelle di una persona: `helpers/3_train.sh` le importa nel dataset senza un'altra approvazione, con la provenienza AI (`ai/<nome>`, `label_basis` `ai_review`, canale). Confermare non importa e non allena: import e training si lanciano a parte.
 
 #### Installazione locale per MCP
 

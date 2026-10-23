@@ -20,6 +20,12 @@ SCHEMA_VERSION = 1
 MODEL_SCHEMA_VERSION = 2
 DATASET_KINDS = ('gold', 'training-candidate')
 # [model-review] - END
+# A reviewed frame is confirmed by a person (human_review) or by an AI reviewer through
+# the REST API or MCP (ai_review, reviewer "ai/<name>"). Both are reviews; model_review
+# (automatic, training-candidate only) is not.
+REVIEW_LABEL_BASES = ('human_review', 'ai_review')
+AI_REVIEWER_PREFIX = 'ai/'
+REVIEW_CHANNELS = ('web', 'rest', 'mcp')
 ENUMS = {
     "sign_family": {"maximum_speed", "cancellation", "zone", "variable_display", "other_sign", "not_a_sign", "unreadable", "road_marking"},
     "value_state": {"read", "unreadable", "unknown", "not_applicable"},
@@ -175,7 +181,11 @@ def validate_annotation(row: dict, root: Path, *, dataset_kind: str = 'gold') ->
         require(row['reviewer'] == 'codex/' + provenance['review_model'], "reviewer_model_mismatch", row['reviewer'])
     else:
         require(isinstance(provenance, dict) and _hash(provenance.get('source_review_sha256'))
-                and provenance.get('label_basis') == 'human_review', "missing_provenance", "review source")
+                and provenance.get('label_basis') in REVIEW_LABEL_BASES, "missing_provenance", "review source")
+        if provenance['label_basis'] == 'ai_review':
+            require(provenance.get('reviewer_kind') == 'ai' and provenance.get('review_channel') in REVIEW_CHANNELS,
+                    "missing_provenance", "ai review: reviewer_kind and review_channel")
+            require(row['reviewer'].lower().startswith(AI_REVIEWER_PREFIX), "reviewer_kind_mismatch", row['reviewer'])
     # [model-review] - END
     require(row['decoded_frame_index'] is None or row['source_video_sha256'] is not None,
             "missing_provenance", "decoded index needs source video hash")
@@ -282,10 +292,15 @@ def _canonical(frame: dict, detection: dict | None, original: dict | None, sourc
     identity = [*frame_identity(frame_key), object_id]
     # [model-review] - START
     model = frame.get('label_basis') == 'model_review'
-    provenance = {'label_basis': 'model_review' if model else 'human_review', 'source_review_sha256': source_hash,
+    ai = frame.get('label_basis') == 'ai_review'
+    provenance = {'label_basis': 'model_review' if model else 'ai_review' if ai else 'human_review',
+                  'source_review_sha256': source_hash,
                   'original_proposal': original, 'source_model': frame.get('model'), 'run_id': frame.get('run_id')}
     if model:
         provenance.update({k: frame.get(k) for k in ('review_model', 'review_model_version', 'review_model_sha256', 'confidence')})
+    if ai:
+        # Who confirmed it and through which channel; a human row keeps exactly its old provenance.
+        provenance.update({'reviewer_kind': 'ai', 'review_channel': frame.get('review_channel')})
     # [model-review] - END
     return {
         'schema_version': MODEL_SCHEMA_VERSION if model else SCHEMA_VERSION,
@@ -297,7 +312,7 @@ def _canonical(frame: dict, detection: dict | None, original: dict | None, sourc
         'applicability': d.get('applicability', 'unresolved'), 'supplementary_panel': d.get('supplementary_panel', 'unknown'),
         'visibility': d.get('visibility', 'unknown'), 'occlusion': d.get('occlusion', 'unknown'),
         'temporary': d.get('temporary'), 'variable_display': d.get('variable_display'),
-        'proposal_source': 'preannotation:' + str(frame.get('run_id')) if original else 'model_review' if model else 'human',
+        'proposal_source': 'preannotation:' + str(frame.get('run_id')) if original else 'model_review' if model else 'ai_review' if ai else 'human',
         'proposal_score': original.get('score') if original else None,
         'review_state': 'rejected' if rejected else 'accepted' if negative or unchanged else 'corrected',
         'notes': d.get('notes', frame.get('notes', '')),
@@ -313,13 +328,15 @@ def reviewed_frame_annotations(frame: dict, source_hash: str, *, dataset_kind: s
 
     Used by import-annotations for every reviewed-frame line and by the review
     server before it stores a confirmed frame, so both apply the same rules.
+    A frame an AI confirmed (ai_review) is a review like a person's; a frame
+    nobody confirmed (a model proposal, review_state pending) never is.
     """
     if dataset_kind == 'gold':
         require(frame.get('kind') == 'reviewed_frame' and frame.get('review_state') == 'reviewed'
-                and frame.get('label_basis') == 'human_review', 'unreviewed_proposal', name)
+                and frame.get('label_basis') in REVIEW_LABEL_BASES, 'unreviewed_proposal', name)
     else:
         require(frame.get('kind') == 'reviewed_frame' and frame.get('review_state') == 'reviewed'
-                and frame.get('label_basis') in ('human_review', 'model_review'), 'unreviewed_proposal', name)
+                and frame.get('label_basis') in REVIEW_LABEL_BASES + ('model_review',), 'unreviewed_proposal', name)
         if frame.get('label_basis') == 'model_review':
             for field in ('review_model', 'review_model_version'):
                 require(isinstance(frame.get(field), str) and bool(frame[field].strip()), 'missing_provenance', field)
@@ -327,6 +344,9 @@ def reviewed_frame_annotations(frame: dict, source_hash: str, *, dataset_kind: s
             confidence = frame.get('confidence')
             require(type(confidence) in (int, float) and not isinstance(confidence, bool)
                     and math.isfinite(confidence) and 0 <= confidence <= 1, 'invalid_confidence', str(confidence))
+    if frame.get('label_basis') == 'ai_review':
+        require(frame.get('reviewer_kind') == 'ai' and frame.get('review_channel') in REVIEW_CHANNELS,
+                'missing_provenance', name + ': ai review needs reviewer_kind "ai" and review_channel')
     require(isinstance(frame.get('route_id'), str) and isinstance(frame.get('camera_stream'), str)
             and _integer(frame.get('segment_index')) and _integer(frame.get('output_index')),
             'invalid_identity', 'reviewed frame')
