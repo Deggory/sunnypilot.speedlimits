@@ -157,5 +157,18 @@ class RunningServer:
         return self.request('POST', f'/api/route/{route}/frame/{frame_key}', body=body, headers=headers)
 
 
+# [site-login] - START
+ADMIN = 'admin'
+PASSWORD = 'correct horse battery'
+
+
+def sign_in(server) -> dict:
+    """Creates the administrator of a server on the LAN (setup code = TOKEN) and returns the Cookie header
+    of its session."""
+    token = server.app.auth.setup(TOKEN, ADMIN, PASSWORD, 'test')
+    return {'Cookie': f'{server.app.cookie_name}={token}'}
+# [site-login] - END
+
+
 def json_of(data: bytes):
     return json.loads(data.decode('utf-8'))

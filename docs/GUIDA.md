@@ -76,9 +76,20 @@ scripts/install_review_service.sh                 # installa, avvia e stampa il 
 
 Il servizio ascolta su `0.0.0.0:8765`, riparte da solo se cade e a ogni boot. Rilanciare l'installazione non fa danni: riscrive il servizio solo se `deploy/speedlimits-web.service` è cambiato e non tocca il token.
 
-### Il token per entrare dal browser
+### Entrare dal browser: nome e password
 
-Sulla LAN ogni richiesta vuole il token di accesso. Il posto dove cercarlo è il file **`.env` del repository** (`~/sunnypilot.speedlimits/.env`), riga `NNSLR_REVIEW_TOKEN=...`:
+Sulla LAN il sito chiede di accedere con **nome e password** (pagine, pannello e immagini). La **prima visita** crea l'amministratore: la pagina chiede il **codice di configurazione**, che è il token di accesso del server, poi il nome e la password (almeno 12 caratteri). Da lì in poi il token non apre più il sito nel browser: serve solo come chiave dell'API `/api/v1`, di MCP e degli agenti che lo mandano nell'header `X-Review-Token`.
+
+- La pagina **Account** (in alto) mostra chi è connesso, fa uscire (anche da tutti i browser) e cambia la password; dopo il cambio gli altri browser devono accedere di nuovo.
+- Una sessione dura 7 giorni senza uso, 30 in tutto. 5 tentativi sbagliati da un indirizzo lo bloccano per 15 minuti.
+- I file dell'accesso sono nella cartella dati, `web/auth/` (`admin.json`, `sessions.json`, permessi 600; la password è salvata solo come hash scrypt).
+- **Password dimenticata**: `systemctl stop speedlimits-web`, sposta via `data/web/auth/admin.json` (cartella dati del servizio), `systemctl start speedlimits-web`: la visita successiva chiede di nuovo il codice di configurazione.
+- I vecchi link con `?token=...` non aprono più il sito: portano alla pagina di accesso.
+- Avviato a mano solo su `127.0.0.1` (senza `--host 0.0.0.0`) il sito resta aperto a questo computer senza accesso, come prima.
+
+### Il token (codice di configurazione e chiave dell'API)
+
+Il posto dove cercarlo è il file **`.env` del repository** (`~/sunnypilot.speedlimits/.env`), riga `NNSLR_REVIEW_TOKEN=...`:
 
 ```sh
 grep NNSLR_REVIEW_TOKEN ~/sunnypilot.speedlimits/.env
@@ -87,10 +98,9 @@ grep NNSLR_REVIEW_TOKEN ~/sunnypilot.speedlimits/.env
 - `.env` è in `.gitignore`: non finisce mai in git né su GitHub. Ha permessi 600 (lo legge solo root).
 - Lo crea la prima volta chi serve per primo: `helpers/2_review.sh` o `scripts/install_review_service.sh`. L'installazione del servizio usa il token già presente in `.env`; se non c'è, ne crea uno e lo scrive in `.env`.
 - Il servizio systemd lo legge da una sua copia, `/etc/speedlimits-web.env` (permessi 600); ogni installazione rimette in `.env` lo stesso valore.
-- Il **link già pronto** (`http://<IP del server>:8765/?token=...`) lo stampano l'installazione, `helpers/2_review.sh` e `helpers/update.sh`.
-- Dopo la **prima apertura** del link il browser tiene il token in un cookie: da lì in poi basta `http://<IP del server>:8765/` (e `/pannello`).
+- L'indirizzo del sito (`http://<IP del server>:8765/`) lo stampano l'installazione, `helpers/2_review.sh` e `helpers/update.sh`, senza il token.
 
-Il link contiene il token: non condividerlo. Per cambiarlo: scrivi il nuovo valore (almeno 16 caratteri tra lettere, cifre, `-` e `_`) in `/etc/speedlimits-web.env`, poi `scripts/install_review_service.sh` (lo copia in `.env`) e `systemctl restart speedlimits-web`.
+Il token non va condiviso: chi lo ha può creare l'amministratore finché non esiste e usa l'API. Per cambiarlo: scrivi il nuovo valore (almeno 16 caratteri tra lettere, cifre, `-` e `_`) in `/etc/speedlimits-web.env`, poi `scripts/install_review_service.sh` (lo copia in `.env`) e `systemctl restart speedlimits-web`.
 
 ### Aggiornare il codice
 
@@ -191,7 +201,7 @@ Il database delle revisioni si aggiorna da solo alla versione 2 al primo avvio d
 | `servono almeno 5 route (o luoghi) indipendenti revisionate` | Prepara e revisiona altre route, poi rilancia `helpers/3_train.sh`. |
 | `la GPU 0 e' occupata` / pulsante "la GPU è occupata" | Sta girando un altro training (spesso `openpilot.distill`): aspetta che finisca. Da terminale `--force` parte lo stesso, più lenti tutti e due. |
 | `la porta 8765 e' gia' occupata` | C'è già un sito acceso (il servizio o un altro `nnslr review`): `helpers/2_review.sh` ristampa il link, `helpers/2_review.sh --stop` spegne quello acceso a mano. |
-| `Accesso negato: apri l'indirizzo con il token` | Apri il link con `?token=...` (sezione 3). |
+| `Accesso richiesto: ricarica la pagina e accedi` | La sessione è finita (7 giorni senza uso, uscita, password cambiata): ricarica e accedi con nome e password (sezione 3). |
 | API o MCP: `401 unauthorized`, `501 mcp_unavailable`, `409 ...` | Vedi [API_MCP.md](API_MCP.md), sezione 7. |
 | `su ... non ci sono ancora pesi stable` | `--continue` vuole un modello già pubblicato come stable: allena prima da zero. |
 | Una route resta "da collegare" | `link-videos` ha trovato un conflitto: vedi `data/logs/prepare/link-videos.json`. I segmenti con solo il log e senza `fcamera.hevc` (il fetch scarica solo il log dei primi e ultimi due) non sono un errore: non vengono collegati e sono elencati in `log_only`. |

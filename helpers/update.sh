@@ -14,8 +14,7 @@
 # only the web server (KillMode=process). Full procedure: docs/GUIDA.md.
 #
 # Usage: helpers/update.sh [--no-link]
-# --no-link: do not print the link with the token at the end (the panel uses it, so the
-#            token never lands in its log).
+# --no-link: do not print the address of the site at the end (the panel uses it: its log stays short).
 # -h, --help: this help.
 
 set -euo pipefail

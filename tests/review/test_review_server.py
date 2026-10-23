@@ -5,7 +5,7 @@ import pytest
 
 from nnslr_tools.review_db import ReviewStore, db_path
 from review_helpers import (OTHER_ROUTE, ROUTE, RUN_ID, TOKEN, RunningServer, json_of, make_report,
-                            page_body)
+                            page_body, sign_in)
 
 
 @pytest.fixture
@@ -57,49 +57,53 @@ def test_loopback_needs_no_token_and_index_lists_routes_with_counts(loopback, tm
     assert first['confirmed_count'] == 1 and first['suspicious_count'] == 1
 
 
-def test_token_required_wrong_token_refused_and_cookie_accepted(tokened):
+def test_without_a_session_pages_show_the_sign_in_and_calls_are_refused(tokened):
     server, root, rows = tokened
-    for path in ['/', '/api/routes', f'/route/{ROUTE}/', f'/route/{ROUTE}/images/00000000.jpg',
-                 f'/api/route/{ROUTE}/reviews']:
+    # [site-login] - START
+    for path in ['/', f'/route/{ROUTE}/', '/pannello', '/account']:
         status, response, data = server.request('GET', path)
-        assert status == 403, path
-    status, response, data = server.request('GET', '/', headers=cookie_header(server, 'wrong-token-000000000000'))
-    assert status == 403
-    status, response, data = server.request('GET', '/?token=wrong-token')
-    assert status == 403 and response.getheader('Set-Cookie') is None
-    status, response, data = server.request('GET', f'/route/{ROUTE}/?token={TOKEN}')
-    assert status == 303
-    assert response.getheader('Location') == f'/route/{ROUTE}/'
-    cookie = response.getheader('Set-Cookie')
-    assert cookie.startswith(f'{server.app.cookie_name}={TOKEN};')
-    assert 'HttpOnly' in cookie and 'SameSite=Strict' in cookie and 'Path=/' in cookie
-    status, response, data = server.request('GET', f'/route/{ROUTE}/', headers=cookie_header(server))
+        assert status in (200, 401) and b'id="form-login"' in data and b'"server": true' not in data, path
+    for path in ['/api/routes', f'/route/{ROUTE}/images/00000000.jpg', f'/api/route/{ROUTE}/reviews']:
+        status, response, data = server.request('GET', path)
+        assert status == 401, path
+    # The access token in a cookie (the old way) opens nothing any more.
+    assert server.request('GET', '/api/routes', headers=cookie_header(server))[0] == 401
+    # An old link with ?token=: back to the same address without it, and no cookie.
+    for supplied in ('wrong-token', TOKEN):
+        status, response, data = server.request('GET', f'/route/{ROUTE}/?token={supplied}')
+        assert status == 303 and response.getheader('Location') == f'/route/{ROUTE}/'
+        assert response.getheader('Set-Cookie') is None
+    session = sign_in(server)
+    status, response, data = server.request('GET', f'/route/{ROUTE}/', headers=session)
     assert status == 200 and b'"server": true' in data
-    status, response, data = server.request('GET', f'/route/{ROUTE}/images/00000000.jpg', headers=cookie_header(server))
+    status, response, data = server.request('GET', f'/route/{ROUTE}/images/00000000.jpg', headers=session)
     assert status == 200 and data == b'jpeg preview'
+    # Agents: the access token in a header, as for /api/v1.
     status, response, data = server.request('GET', '/api/routes', headers={'X-Review-Token': TOKEN})
     assert status == 200 and json_of(data)['routes'][0]['route_id'] == ROUTE
     status, response, data = server.post_frame(ROUTE, '0/0', page_body(rows[0]))
-    assert status == 403
-    status, response, data = server.post_frame(ROUTE, '0/0', page_body(rows[0]), headers=cookie_header(server))
+    assert status == 401
+    status, response, data = server.post_frame(ROUTE, '0/0', page_body(rows[0]), headers=session)
     assert status == 200, data
+    # [site-login] - END
 
 
 def test_cookies_of_other_web_apps_do_not_hide_the_review_cookie(tokened):
     server, root, rows = tokened
     # Cookies of other apps on the same host come first and are not all valid for SimpleCookie.
     foreign = 'prefs={"theme":"dark"}; abc; path=x; Secure; =empty; other=a b\\c'
-    status, response, data = server.request('GET', '/', headers={
-        'Cookie': f'{foreign}; {server.app.cookie_name}={TOKEN}'})
+    session = sign_in(server)['Cookie'].split('=', 1)[1]
+    status, response, data = server.request('GET', '/api/routes', headers={
+        'Cookie': f'{foreign}; {server.app.cookie_name}={session}'})
     assert status == 200
     status, response, data = server.post_frame(ROUTE, '0/0', page_body(rows[0]), headers={
-        'Cookie': f'{foreign}; {server.app.cookie_name}={TOKEN}; later=1'})
+        'Cookie': f'{foreign}; {server.app.cookie_name}={session}; later=1'})
     assert status == 200, data
-    status, response, data = server.request('GET', '/', headers={
+    status, response, data = server.request('GET', '/api/routes', headers={
         'Cookie': f'{foreign}; {server.app.cookie_name}=wrong-token-000000000000'})
-    assert status == 403
-    status, response, data = server.request('GET', '/', headers={'Cookie': f'{foreign}; nnslr_review={TOKEN}'})
-    assert status == 403
+    assert status == 401
+    status, response, data = server.request('GET', '/api/routes', headers={'Cookie': f'{foreign}; nnslr_review={session}'})
+    assert status == 401
 
 
 def test_idle_connections_are_closed_and_their_number_is_bounded(report, monkeypatch):
@@ -124,13 +128,13 @@ def test_idle_connections_are_closed_and_their_number_is_bounded(report, monkeyp
         assert idle[1].recv(1) == b''
         status = None
         deadline = time.monotonic() + 5
-        while status != 403 and time.monotonic() < deadline:
+        while status != 401 and time.monotonic() < deadline:
             try:
-                status = server.request('GET', '/')[0]
+                status = server.request('GET', '/api/routes')[0]
             except (ConnectionError, OSError):
                 time.sleep(0.05)
-        assert status == 403
-        assert server.request('GET', '/', headers=cookie_header(server))[0] == 200
+        assert status == 401
+        assert server.request('GET', '/api/routes', headers=sign_in(server))[0] == 200
     finally:
         for connection in idle:
             connection.close()

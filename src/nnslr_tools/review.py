@@ -3,7 +3,9 @@
 
 The server reads the pre-annotation reports (read-only) and writes the reviewed
 frames into the review database (:mod:`nnslr_tools.review_db`). It listens on
-127.0.0.1 by default; on any other address every request needs the access token.
+127.0.0.1 by default; on any other address a browser signs in as the administrator
+(:mod:`nnslr_tools.review_auth`, name and password; the first visit creates it with
+the access token as setup code), and agents send the access token in a header.
 
 Besides the page it serves the REST API ``/api/v1`` and, when the optional MCP
 SDK is installed, the MCP Streamable HTTP endpoint ``/mcp``
@@ -29,6 +31,9 @@ from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 from nnslr_tools.manifest import parse_route_id
 from nnslr_tools.preannotate import PreannotationError, _inside, resolve_data_root
+# [site-login] - START
+from nnslr_tools.review_auth import SESSION_MAX_SECONDS, AdminAuth, auth_dir
+# [site-login] - END
 from nnslr_tools.review_hints import empty_stats
 from nnslr_tools.review_service import ReviewService
 
@@ -38,7 +43,14 @@ MAX_BODY_BYTES = 512 * 1024
 # MAX_CONNECTIONS are open at once, so idle clients cannot use up threads.
 REQUEST_TIMEOUT_SECONDS = 30
 MAX_CONNECTIONS = 64
-TOKEN_MESSAGE = 'Accesso negato: apri l’indirizzo con il token stampato all’avvio del server.'
+# [site-login] - START
+LOGIN_MESSAGE = 'Accesso richiesto: ricarica la pagina e accedi con nome e password.'
+# Sign-in calls that work without a session, and all of them.
+PUBLIC_AUTH_ROUTES = ('/api/auth/login', '/api/auth/setup/check', '/api/auth/setup')
+AUTH_ROUTES = PUBLIC_AUTH_ROUTES + ('/api/auth/logout', '/api/auth/logout-all', '/api/auth/password')
+# The pages a browser opens: without a session they show the sign-in page instead.
+PAGE_RE = re.compile(r'/(index\.html|pannello|account|route/[^/]+(/(index\.html)?)?)?')
+# [site-login] - END
 API_TOKEN_MESSAGE = ('Token mancante o errato: invialo nell’header "Authorization: Bearer <token>" '
                      '(oppure "X-Review-Token"), mai nell’indirizzo.')
 DEFAULT_CSP = "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
@@ -209,6 +221,10 @@ class ReviewApp(ReviewService):
         self.require_token = require_token
         self.api_token = api_token or token
         self.cookie_name = 'nnslr_review'
+        # [site-login] - START
+        # On the LAN a browser signs in; the access token is the setup code of the first visit.
+        self.auth = AdminAuth(auth_dir(root), token) if require_token else None
+        # [site-login] - END
         self._mcp = None
         self._mcp_failed = False
         self._mcp_lock = threading.Lock()
@@ -466,6 +482,46 @@ code { font-family: var(--font-data); font-size: 12.5px; background: var(--fill)
 .back { align-self: flex-start; margin-top: 6px; color: var(--accent); font-weight: 500; text-decoration: none; }
 .back:hover { text-decoration: underline; }
 
+/* [site-login] - START */
+/* Sign-in card and account forms. A hidden step stays hidden even where a rule sets display. */
+.auth-card [hidden], .auth-form[hidden] { display: none !important; }
+.auth-card {
+  max-width: 440px; margin: 24px auto; background: var(--surface); border: 1px solid var(--card-border);
+  border-radius: var(--radius); box-shadow: var(--shadow); padding: 28px 28px 24px; display: flex; flex-direction: column; gap: 12px;
+}
+.auth-head { display: flex; align-items: center; justify-content: center; position: relative; min-height: 24px; }
+.auth-back {
+  position: absolute; left: 0; top: -4px; width: 32px; height: 32px; border-radius: 50%; border: 0;
+  background: var(--fill); color: var(--fg); font: inherit; font-size: 20px; line-height: 1; cursor: pointer;
+}
+.auth-steps { display: flex; gap: 6px; }
+.auth-steps span { width: 7px; height: 7px; border-radius: 50%; background: var(--fill-strong); }
+.auth-steps span.on { background: var(--accent); }
+.auth-title { margin: 0; text-align: center; font-size: 28px; line-height: 1.15; font-weight: 700; letter-spacing: -0.02em; }
+.auth-sub { margin: 0 0 6px; text-align: center; color: var(--muted); }
+.auth-form { display: flex; flex-direction: column; gap: 12px; }
+.field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 500; color: var(--muted); }
+.field input {
+  font: inherit; font-size: 16px; color: var(--fg); background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: 10px; padding: 10px 12px; min-height: 44px;
+}
+.field input:focus { outline: 2px solid var(--focus); outline-offset: 0; background: var(--surface); }
+.note { margin: 0; font-size: 13px; color: var(--muted); }
+.auth-error { color: var(--danger); font-size: 14px; }
+.auth-error:empty, .auth-ok:empty { display: none; }
+.auth-ok { color: var(--ok); font-size: 14px; }
+.auth-foot { text-align: center; }
+.buttons { display: flex; flex-wrap: wrap; gap: 10px; }
+.button {
+  appearance: none; font: inherit; font-size: 15px; font-weight: 600; min-height: 44px; padding: 10px 18px;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--fill); color: var(--fg); cursor: pointer;
+}
+.button.primary { background: var(--button); border-color: var(--button); color: var(--on-accent); }
+.button.danger { color: var(--danger); background: var(--danger-tint); border-color: transparent; }
+.button:disabled { opacity: 0.5; cursor: default; }
+.state-box + .state-box { margin-top: 20px; }
+/* [site-login] - END */
+
 /* Technical details, out of the way */
 .foot { margin-top: 48px; font-size: 13px; color: var(--muted); }
 .foot summary { display: inline-flex; align-items: center; gap: 6px; padding: 4px 0; cursor: pointer; list-style: none; }
@@ -502,10 +558,14 @@ def _plural(count: int, one: str, many: str) -> str:
 
 
 def _page_head(title: str, current: str = '') -> list[str]:
-    """Head and top bar of the server pages. current is 'route' on the route list, '' elsewhere."""
+    """Head and top bar of the server pages. current is 'route' on the route list, 'account' on the
+    account page, '' elsewhere."""
     route_link = '<a href="/">Route</a>'
     if current == 'route':
         route_link = '<a href="/" aria-current="page">Route</a>'
+    # [site-login] - START
+    account_link = '<a href="/account"' + (' aria-current="page"' if current == 'account' else '') + '>Account</a>'
+    # [site-login] - END
     return [
         '<!doctype html><html lang="it"><head><meta charset="utf-8">',
         '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">',
@@ -515,7 +575,8 @@ def _page_head(title: str, current: str = '') -> list[str]:
         '<header class="topbar"><div class="topbar-inner">'
         '<a class="brand" href="/" title="Elenco delle route"><span class="brand-mark" aria-hidden="true">50</span>'
         '<span class="brand-name">Revisione cartelli</span></a>'
-        '<nav class="topnav" aria-label="Sezioni">' + route_link + '<a href="/pannello">Pannello</a></nav>'
+        '<nav class="topnav" aria-label="Sezioni">' + route_link + '<a href="/pannello">Pannello</a>'
+        + account_link + '</nav>'
         '</div></header>',
     ]
 
@@ -525,6 +586,26 @@ def render_panel(nonce: str) -> str:
     """The control panel page; it loads its data from /api/panel/status."""
     return files('nnslr_tools').joinpath('panel.html').read_text().replace('__NNSLR_NONCE__', nonce)
 # [control-panel] - END
+
+
+# [site-login] - START
+def render_login(nonce: str) -> str:
+    """The sign-in page (also the first visit, which creates the administrator)."""
+    page = files('nnslr_tools').joinpath('login.html').read_text()
+    return page.replace('__NNSLR_STYLE__', INDEX_STYLE).replace('__NNSLR_NONCE__', nonce)
+
+
+def render_account(nonce: str, signed_in_browser: bool) -> str:
+    """The account page: who is signed in, sign out, change the password."""
+    lines = _page_head('Revisione cartelli · Account', 'account')
+    if not signed_in_browser:
+        lines.append('<main class="page"><div class="state-box center"><h1>Account</h1><p>Questo sito è avviato '
+                     'solo per questo computer (127.0.0.1): non chiede di accedere. Sulla rete di casa (servizio '
+                     '<code>speedlimits-web</code>) si entra con nome e password.</p></div></main></body></html>')
+        return '\n'.join(lines)
+    lines.append(files('nnslr_tools').joinpath('account.html').read_text().replace('__NNSLR_NONCE__', nonce))
+    return '\n'.join(lines)
+# [site-login] - END
 
 
 def render_index(summaries: list[dict], database: Path) -> str:
@@ -655,50 +736,139 @@ def make_handler(app: ReviewApp):
             if method not in ('GET', 'POST'):
                 self._problem(405, 'method_not_allowed', 'Metodo non consentito.', api)
                 return
+            # [site-login] - START
             if 'token' in query:
-                self._accept_token(method, path, query['token'][0], api)
+                # An old link with ?token=: the token no longer opens the site in a browser (it is the
+                # setup code of the first visit); drop it from the address, the sign-in page follows.
+                self._redirect(self._clean_target(path), None)
                 return
             if not self._authorized():
-                self._problem(403, 'token_required', TOKEN_MESSAGE, api)
+                self._public(method, path, api)
                 return
+            # [site-login] - END
             if method == 'POST':
                 self._post(path)
             else:
                 self._get(path)
 
+        # [site-login] - START
+        @staticmethod
+        def _clean_target(path):
+            # Our own paths only, never "//host" or a backslash.
+            if not re.fullmatch(r'/[A-Za-z0-9._/-]*', path) or path.startswith('//'):
+                return '/'
+            return path
+
         def _authorized(self):
+            """A browser signed in as the administrator, or an agent with the access token in a header
+            (X-Review-Token, as for /api/v1: a page cannot make another site send it)."""
             if not app.require_token:
                 return True
             if app.token_matches(self.headers.get('X-Review-Token')):
                 return True
+            return self._session() is not None
+
+        def _session(self):
+            """The session token of this request when it is signed in, otherwise None."""
+            if app.auth is None:
+                return None
             # Plain "name=value; name=value" split: the browser also sends the
             # cookies of other web apps on this host (any port), and a value our
             # parser does not like must not hide the review cookie.
             for raw in self.headers.get_all('Cookie', []):
                 for part in raw.split(';'):
                     name, separator, value = part.strip().partition('=')
-                    if not separator:
-                        continue
-                    if name.strip() == app.cookie_name and app.token_matches(value.strip()):
-                        return True
-            return False
+                    if separator and name.strip() == app.cookie_name and app.auth.session_valid(value.strip()):
+                        return value.strip()
+            return None
 
-        def _accept_token(self, method, path, supplied, api):
-            # Clean target: our own paths only, never "//host" or a backslash.
-            target = path
-            if not re.fullmatch(r'/[A-Za-z0-9._/-]*', target) or target.startswith('//'):
-                target = '/'
-            if not app.require_token:
-                self._redirect(target, None)
+        def _session_cookie(self, token):
+            parts = [app.cookie_name + '=' + token, 'Path=/', 'HttpOnly', 'SameSite=Strict',
+                     'Max-Age=' + str(SESSION_MAX_SECONDS)]
+            origin = (self.headers.get('Origin') or '').strip().lower()
+            proto = (self.headers.get('X-Forwarded-Proto') or '').strip().lower()
+            if origin.startswith('https://') or proto == 'https':
+                parts.append('Secure')
+            return '; '.join(parts)
+
+        def _expired_cookie(self):
+            return app.cookie_name + '=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0'
+
+        def _auth_state(self):
+            if app.auth is None:
+                return {'configured': False, 'signed_in': True, 'local': True}
+            signed_in = self._session() is not None
+            state = {'configured': app.auth.configured(), 'signed_in': signed_in, 'local': False}
+            if signed_in:
+                state['user'] = app.auth.username()
+                state['sessions'] = app.auth.sessions_count()
+            return state
+
+        def _public(self, method, path, api):
+            """A request without a session: the sign-in page (in place of any page), and the sign-in calls."""
+            if method == 'GET' and not api and PAGE_RE.fullmatch(path):
+                nonce = secrets.token_urlsafe(18)
+                csp = ("default-src 'none'; script-src 'nonce-" + nonce + "'; style-src 'unsafe-inline'; "
+                       "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+                self._send(200 if path in ('/', '/index.html') else 401, 'text/html; charset=utf-8',
+                           render_login(nonce).encode('utf-8'), csp)
                 return
-            if method != 'GET' or not app.token_matches(supplied):
-                self._problem(403, 'invalid_token',
-                              'Token non valido: usa l’indirizzo stampato all’avvio del server.', api)
+            if method == 'GET' and path == '/api/auth/state':
+                self._json(200, self._auth_state())
                 return
-            cookie = app.cookie_name + '=' + app.token + '; Path=/; HttpOnly; SameSite=Strict'
-            self._redirect(target, cookie)
+            if method == 'POST' and path in PUBLIC_AUTH_ROUTES:
+                self._post(path)
+                return
+            self._problem(401, 'login_required', LOGIN_MESSAGE, api)
+
+        def _auth_post(self, path, body):
+            if app.auth is None:
+                self._problem(404, 'not_found', 'Su 127.0.0.1 il sito non chiede di accedere.', True)
+                return
+            if not isinstance(body, dict):
+                raise ReviewRejected(400, 'invalid_json', 'Serve un oggetto JSON.')
+            address = self.client_address[0]
+            if path == '/api/auth/setup/check':
+                app.auth.check_setup_code(body.get('code'), address)
+                self._json(200, {'ok': True})
+            elif path == '/api/auth/setup':
+                token = app.auth.setup(body.get('code'), body.get('user'), body.get('password'), address)
+                self._json(200, {'ok': True}, [('Set-Cookie', self._session_cookie(token))])
+            elif path == '/api/auth/login':
+                token = app.auth.login(body.get('user'), body.get('password'), address)
+                print('Sito: amministratore entrato', flush=True)
+                self._json(200, {'ok': True}, [('Set-Cookie', self._session_cookie(token))])
+            elif path == '/api/auth/password':
+                session = self._session()
+                if session is None:
+                    self._problem(401, 'login_required', LOGIN_MESSAGE, True)
+                    return
+                token = app.auth.change_password(session, body.get('current'), body.get('password'), address)
+                # Every other browser is signed out: this one, with its new session, is the only one.
+                state = {'configured': True, 'signed_in': True, 'local': False, 'user': app.auth.username(),
+                         'sessions': 1}
+                self._json(200, {'ok': True, 'state': state}, [('Set-Cookie', self._session_cookie(token))])
+            else:
+                app.auth.logout(self._session(), everywhere=path == '/api/auth/logout-all')
+                self._json(200, {'ok': True}, [('Set-Cookie', self._expired_cookie())])
+        # [site-login] - END
 
         def _get(self, path):
+            # [site-login] - START
+            if path == '/api/auth/state':
+                self._json(200, self._auth_state())
+                return
+            if path == '/account':
+                nonce = secrets.token_urlsafe(18)
+                csp = ("default-src 'none'; script-src 'nonce-" + nonce + "'; style-src 'unsafe-inline'; "
+                       "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+                self._send(200, 'text/html; charset=utf-8',
+                           render_account(nonce, app.auth is not None).encode('utf-8'), csp)
+                return
+            if path in AUTH_ROUTES:
+                self._problem(405, 'method_not_allowed', 'Usa POST.', True)
+                return
+            # [site-login] - END
             if path == '/' or path == '/index.html':
                 page = render_index(app.route_summaries(), db_path(app.root))
                 self._send(200, 'text/html; charset=utf-8', page.encode('utf-8'),
@@ -950,6 +1120,19 @@ def make_handler(app: ReviewApp):
                              'confirmed_count': confirmed, 'reviews': reviews, 'suspicious': suspicious})
 
         def _post(self, path):
+            # [site-login] - START
+            if path in AUTH_ROUTES:
+                # Same protections as saving a frame: same origin, JSON only (no form can send it).
+                if not self._same_origin():
+                    self._problem(403, 'cross_origin', 'Richiesta da un’altra origine rifiutata.', True)
+                    return
+                content_type = self.headers.get('Content-Type', '')
+                if content_type.split(';')[0].strip().lower() != 'application/json':
+                    self._problem(415, 'unsupported_media_type', 'Sono accettati solo dati JSON.', True)
+                    return
+                self._auth_post(path, self._read_json())
+                return
+            # [site-login] - END
             # [control-panel] - START
             run = re.fullmatch(r'/api/panel/run/([a-z_]+)', path)
             stop = re.fullmatch(r'/api/panel/job/([0-9a-z_-]+)/stop', path)
@@ -1066,9 +1249,9 @@ def make_handler(app: ReviewApp):
             self.end_headers()
             self.wfile.write(body)
 
-        def _json(self, status, payload):
+        def _json(self, status, payload, extra=None):
             body = json.dumps(payload, ensure_ascii=False, allow_nan=False).encode('utf-8')
-            self._send(status, 'application/json; charset=utf-8', body)
+            self._send(status, 'application/json; charset=utf-8', body, DEFAULT_CSP, extra)
 
         def _problem(self, status, reason, message, api):
             if api:
@@ -1171,12 +1354,10 @@ def serve_review(route: str | None = None, *, data_root: Path | None=None, host:
     token_from_env = bool(os.environ.get(TOKEN_ENV))
     with server:
         port = server.server_port
+        # [site-login] - START
+        # The address alone: on the LAN the browser signs in (the token is the setup code of the first visit).
         suffix = ''
-        if app.require_token:
-            if token_from_env:
-                suffix = '?token=<' + TOKEN_ENV + '>'
-            else:
-                suffix = '?token=' + app.token
+        # [site-login] - END
         path = '/'
         if route is not None:
             path = '/route/' + route + '/'
@@ -1186,11 +1367,16 @@ def serve_review(route: str | None = None, *, data_root: Path | None=None, host:
             print(f'  {base}{path}{suffix}', flush=True)
         if route is not None:
             print(f'Elenco di tutte le route: {_base_urls(host, port)[0]}/{suffix}', flush=True)
-        if app.require_token and token_from_env:
-            print(f'Il token è quello di {TOKEN_ENV} (per il servizio: /etc/speedlimits-web.env) '
-                  'e non viene stampato.', flush=True)
+        # [site-login] - START
+        if app.require_token and app.auth.configured():
+            print(f'Accedi come amministratore ({app.auth.username()}).', flush=True)
+        elif app.require_token and token_from_env:
+            print(f'Prima visita: crea l’amministratore con il codice di configurazione, cioè il token di '
+                  f'{TOKEN_ENV} (per il servizio: /etc/speedlimits-web.env), che non viene stampato.', flush=True)
         elif app.require_token:
-            print(f'Il token resta valido finché il server è acceso (fissalo con {TOKEN_ENV}).', flush=True)
+            print(f'Prima visita: crea l’amministratore con questo codice di configurazione: {app.token} '
+                  f'(vale finché il server è acceso; fissalo con {TOKEN_ENV}).', flush=True)
+        # [site-login] - END
         else:
             print(f'Solo da questo computer. Da un altro: ssh -L {port}:127.0.0.1:{port} <server>, '
                   'oppure riavvia con --host 0.0.0.0', flush=True)

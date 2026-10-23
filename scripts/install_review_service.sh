@@ -255,7 +255,7 @@ install_service() {
     say "[prova] scriverei $UNIT_FILE con questo contenuto:"
     render_unit
     say "[prova] poi: systemctl daemon-reload; systemctl enable --now $SERVICE_NAME.service"
-    say "[prova] alla fine stamperei gli indirizzi da aprire (http://<IP>:$PORT/?token=...)."
+    say "[prova] alla fine stamperei gli indirizzi da aprire (http://<IP>:$PORT/) e come entrare la prima volta."
     return 0
   fi
 
@@ -319,13 +319,16 @@ install_service() {
   fi
 
   say ""
-  say "Apri nel browser (l'indirizzo contiene il token: non condividerlo):"
+  # [site-login] - START
+  say "Apri nel browser:"
   local address
   while IFS= read -r address; do
-    say "  http://$address:$PORT/?token=$token"
+    say "  http://$address:$PORT/"
   done < <(lan_ips)
-  say "Dopo la prima visita il token resta in un cookie e sparisce dalla barra degli indirizzi."
-  say "Per rileggere il token: grep NNSLR_REVIEW_TOKEN $REPO_ENV   (oppure helpers/2_review.sh ristampa il link)"
+  say "Si entra con nome e password. La prima visita crea l'amministratore con il codice di configurazione:"
+  say "e' il token NNSLR_REVIEW_TOKEN (grep NNSLR_REVIEW_TOKEN $REPO_ENV). Non condividerlo: e' anche la chiave"
+  say "dell'API /api/v1 e di MCP."
+  # [site-login] - END
 }
 
 if [ "$MODE" = "uninstall" ]; then

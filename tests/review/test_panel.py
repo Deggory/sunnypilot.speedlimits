@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from nnslr_tools.panel import Panel, PanelError
-from review_helpers import ROUTE, TOKEN, RunningServer, json_of, make_report
+from review_helpers import ROUTE, TOKEN, RunningServer, json_of, make_report, sign_in
 
 REPO = Path(__file__).resolve().parents[2]
 FAKE_PREPARE = '#!/usr/bin/env bash\necho "prepare $*"\necho "data root $NNSLR_DATA_ROOT"\nsleep "${FAKE_SLEEP:-0}"\n'
@@ -291,14 +291,13 @@ def test_panel_actions_refuse_other_origins_forms_and_unknown_actions(served):
     assert served.app.panel.jobs() == []
 
 
-def test_panel_needs_the_token_like_the_rest_of_the_site(root, checkout):
+def test_panel_needs_the_sign_in_like_the_rest_of_the_site(root, checkout):
     server = RunningServer(root, token=TOKEN, require_token=True)
     server.app.panel = Panel(root, repo=checkout)
     try:
         for path in ['/pannello', '/api/panel/status']:
-            assert server.request('GET', path)[0] == 403, path
-        assert server.request('POST', '/api/panel/run/prepare', body={})[0] == 403
-        cookie = {'Cookie': f'{server.app.cookie_name}={TOKEN}'}
-        assert server.request('GET', '/api/panel/status', headers=cookie)[0] == 200
+            assert server.request('GET', path)[0] == 401, path
+        assert server.request('POST', '/api/panel/run/prepare', body={})[0] == 401
+        assert server.request('GET', '/api/panel/status', headers=sign_in(server))[0] == 200
     finally:
         server.close()

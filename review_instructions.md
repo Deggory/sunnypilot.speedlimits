@@ -17,12 +17,12 @@ Un agente che ha a disposizione il **server MCP** della revisione (strumenti `li
    - Chi ha confermato un fotogramma si legge nella riga di stato in fondo al pannello: "Salvato ✓ · revisione N · <revisore>".
    - La pagina non si aggiorna da sola: le conferme fatte da altri dopo l'apertura compaiono solo ricaricando. Se altri possono lavorare sulla stessa route, ricaricare prima di iniziare e ogni tanto durante il lavoro.
 5. Nel **Pannello** non premere nessun pulsante (Prepara, Importa, Allena, Aggiorna il codice): hanno effetti reali sul server. Non riavviare il server, non toccare il comma, non importare nel dataset, non avviare training.
-6. Il link di accesso contiene un token. Non copiarlo in file, resoconti, screenshot o log.
+6. Il nome, la password e il token di accesso non vanno mai copiati in file, resoconti, screenshot o log.
 7. Non confermare mai un fotogramma senza averlo guardato davvero. Non accettare in blocco le proposte del modello.
 
 ## 2. Accesso
 
-1. Aprire l'indirizzo ricevuto. Se compare **Accesso negato**, serve il link con il token: chiederlo a Cristian. Dopo la prima apertura il browser tiene un cookie e basta l'indirizzo senza token.
+1. Aprire l'indirizzo ricevuto (`http://<IP del server>:8765/`). Il sito chiede **nome e password**: nel Chrome di Cristian di solito è già connesso. Un agente con Playwright non usa la password: manda il token di accesso nell'header `X-Review-Token` di ogni richiesta (`browser.newContext({extraHTTPHeaders: {'X-Review-Token': process.env.NNSLR_REVIEW_TOKEN}})`), con il token configurato da Cristian nell'ambiente, mai nell'indirizzo. Se compare la pagina di accesso o **Accesso richiesto**, chiedere a Cristian.
 2. La pagina iniziale **Route** elenca le route con un report. Ogni card mostra "N di M confermati", i sospetti e un'azione: **Inizia →**, **Riprendi →** o **Ricontrolla →**. Aprire la route indicata da Cristian.
 3. Lavorare con la **pagina** larga almeno 1000 px. Con il pannello laterale dell'estensione aperto la pagina è più stretta della finestra: allargare la finestra.
 

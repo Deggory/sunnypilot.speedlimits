@@ -197,11 +197,13 @@ cd ~/sunnypilot.speedlimits && .venv/bin/nnslr review --host 0.0.0.0
 ```
 
 It prints one address per LAN interface, for example
-`http://10.10.10.213:8765/?token=...`; open it in the browser on the Mac. The
-first visit stores the token in an HttpOnly, SameSite=Strict cookie and removes
-it from the address bar. Without that cookie (or an `X-Review-Token` header)
-every page, image and API call answers 403. The token is new at every start
-unless `NNSLR_REVIEW_TOKEN` is set (at least 16 letters, digits, `-` or `_`).
+`http://10.10.10.213:8765/`; open it in the browser on the Mac and sign in with
+the administrator's name and password. The first visit creates the administrator
+with the token as setup code (`src/nnslr_tools/review_auth.py`); the session is
+an HttpOnly, SameSite=Strict cookie. Without a session (or the token in an
+`X-Review-Token` header) every page shows the sign-in page and every image and
+API call answers 401. The token is new at every start unless `NNSLR_REVIEW_TOKEN`
+is set (at least 16 letters, digits, `-` or `_`).
 Without `--host` the server listens on 127.0.0.1 only and needs no token
 (`ssh -L 8765:127.0.0.1:8765 openpilot-distill` from the Mac). The start page
 lists every route with a pre-annotation report: frames, frames with proposals

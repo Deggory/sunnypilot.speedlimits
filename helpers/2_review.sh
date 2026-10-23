@@ -80,11 +80,16 @@ token() {
   echo "$value"
 }
 
+# [site-login] - START
+# $1, the token, is not printed: the browser signs in with name and password; the token is only the
+# setup code of the first visit (and the key of the API), and it stays in .env.
 print_lan_link() {
-  echo "Apri dal PC:  http://$(server_ip):$PORT/?token=$1"
-  echo "Pannello:     http://$(server_ip):$PORT/pannello  (dopo la prima apertura del link sopra)"
-  echo "(il link resta lo stesso anche dopo un riavvio; il token e' in $REPO_ENV)"
+  echo "Apri dal PC:  http://$(server_ip):$PORT/"
+  echo "Pannello:     http://$(server_ip):$PORT/pannello"
+  echo "Si entra con nome e password. La prima visita crea l'amministratore con il codice di"
+  echo "configurazione: e' il token NNSLR_REVIEW_TOKEN di $REPO_ENV (grep NNSLR_REVIEW_TOKEN $REPO_ENV)."
 }
+# [site-login] - END
 
 print_local_link() {
   echo "Dal PC apri prima il tunnel (lascia aperto quel terminale):"
