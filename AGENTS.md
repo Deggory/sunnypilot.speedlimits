@@ -1,6 +1,6 @@
 # Istruzioni per gli agenti
 
-- Prima di agire, leggere e applicare anche `/Users/cristianku/Gitlab/codex-contexts/AGENTS.md`. Se non è leggibile, segnalarlo senza inventarne il contenuto.
+- Sul Mac di Cristian, prima di agire, leggere e applicare anche `/Users/cristianku/Gitlab/codex-contexts/AGENTS.md`; se lì non è leggibile, segnalarlo senza inventarne il contenuto. Sul server (il container dove girano i siti) quel file non esiste: non cercarlo e non segnalarlo.
 - Per revisionare i cartelli, dalla pagina web o con MCP/REST API, leggere [review_instructions.md](review_instructions.md): descrive accesso con Playwright, MCP e REST (sezione 10), controllo delle immagini, annotazioni, salvataggio e verifica indipendente sul server.
 - Distinguere una prova del programma da una revisione reale. Salvare conferme nel database soltanto quando Cristian ha autorizzato la revisione con salvataggio. Non confermare immagini non esaminate.
 - Una conferma salvata via REST API o MCP è definitiva: non esiste una seconda approvazione umana, e al prossimo import entra nel dataset di training come revisione AI (`ai/<nome>`, `label_basis` `ai_review`). Salvare non importa e non allena: import e training restano operazioni separate, che l'agente non lancia senza richiesta esplicita.
