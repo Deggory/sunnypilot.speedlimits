@@ -13,7 +13,7 @@ A proposal of 24 October 2026, to discuss: nothing here is implemented yet. It s
 
 ## The student
 
-1. **Look at the whole scene.** A backbone with FPN runs on the image scaled down to about 768 × 480, once per frame, and is shared by everything after it. It gives two things:
+1. **Look at the whole scene.** A backbone with FPN runs on the frame of the main road camera (1344 × 760 on the comma four), scaled down, once per frame, and is shared by everything after it. It gives two things:
    - the boxes of the signs, at several scales because distant ones are small;
    - the features of the scene: roads, ramps, gantries.
 2. **Read and place each sign.** For each box found:
@@ -32,14 +32,19 @@ A proposal of 24 October 2026, to discuss: nothing here is implemented yet. It s
 
 The scaled-down image is only used to **find** the signs and to understand the scene. **Reading** always uses the original pixels of the box.
 
-The reason is the comma's budget. The full 1928 × 1208 frame has about 6× more pixels than 768 × 480, and the driving model already uses most of the device; openpilot's own driving model also works on a reduced image.
+The reason is the comma's budget: the driving model already uses most of the device, and openpilot's own driving model also works on a reduced image. The full 1344 × 760 frame has about 2.8× the pixels of 768 × 480.
 
-The risk is the distant sign: 20 px wide at full resolution, it becomes about 8 px at 768, and the finder can miss it. There are three ways around this:
+The risk is the distant sign. The median sign is about 20 px wide in the frame; today's detector shrinks the frame to 320 px, which brings it to about 5 px, and 768 px would bring it to about 11 px. There are three ways around this:
 - a second pass at full resolution on the band of the image where the signs are (above the road, around the horizon), which costs far less than the whole frame;
 - running the finder a few times a second instead of 20 times;
 - once a sign is found, following it with the tracker and cropping it at full resolution.
 
 The size that is enough is measured, not guessed: how many signs of each size are found at 640, 768 and 1024 pixels, with and without the full-resolution band (step 3 of the plan).
+
+## Cameras and devices
+
+- The comma four records two road cameras, both 1344 × 760: the main road camera (`fcamera.hevc`) and the wide-angle one (`ecamera.hevc`). We use the main one: its narrower view gives each sign more pixels. The wide one may help later at the moment of passing, when a sign at the side has left the main view.
+- The comma 3X has three cameras (main road, wide road, driver), and its road cameras record 1928 × 1208 with another sensor and lens. A network trained on comma four frames does not work on a 3X by itself. To make it work, every frame is converted into a common "standard camera" from the device's calibration, so a sign at 100 m has the same size on every device (openpilot does this for its driving model); training uses variations of size and colour; and drives recorded with a 3X are added when available.
 
 ## The teacher
 
@@ -54,7 +59,7 @@ The test stays human: a route reviewed entirely by hand, never used for training
 
 | Step | What | Why |
 |---|---|---|
-| 1. Data | Crops of the signs at full resolution (1928 × 1208); one test route reviewed entirely by hand; "Another" cases collected on purpose (ramps, parallel roads, exits), proposed by GPS and map; the link "Apply previous" makes between boxes kept as tracks; split by place (GPS) as well as by route | The frames are stored at 1344 × 760 today, and a distant sign is 5–8 px at the detector; there are only 125 "Another" against 1463 "Ours"; human labels cover about 121 frames |
+| 1. Data | Route 0000012d reviewed entirely by hand as the test; split by place instead of by route; "Another" cases collected on purpose (ramps, parallel roads, exits), proposed by GPS and map; the link "Apply previous" makes between boxes kept as tracks; later, drives on roads never driven before | 75–100% of every route runs on the same roads as another route, so a split by route does not test new roads; there are only 125 "Another" against 1463 "Ours"; human labels cover few frames |
 | 2. Experiment B | On the boxes already reviewed: today's reader against crop + position + scene, with reading and "whom it applies to" measured apart on the human test, and "Unclear" taught as abstain | It tells whether context teaches "whom it applies to" without hurting the reading, before building the rest |
 | 3. Detector | Boxes found automatically, at several scales and at higher resolution in the upper part of the image; missed signs counted by size | A sign that is not found cannot be recovered later |
 | 4. Time and state | Tracks, "passed or not" and the limit state on whole routes; time with a wrong limit on the screen measured | The limit must stay valid when the sign is out of sight |
@@ -71,7 +76,9 @@ strata, a local model, agrees on these points:
 
 It added two points, both taken: "Unclear" should be taught as abstain rather than dropped, and 125 "Another" are too few for a network alone, so that case also needs geometry, rules and targeted collection. It wanted experiment B only after the detector. B deliberately uses reviewed boxes, so it measures context without detector errors, and it stays first.
 
-## Open decisions
+## Decisions taken (24 October 2026)
 
-- "Ours" stays "our carriageway"; a lane label comes later, for gantries with different values per lane.
-- Which route is reviewed entirely by hand for the test.
+- **Test.** Route 0000012d is reviewed entirely by hand: about 800 frames with proposals and 200+ signs, on motorway and in town. The final test also needs drives on new roads.
+- **Split by place.** Areas of about 300 m. Every frame in an area goes to the same partition, whatever route it comes from. The test areas are those of the test route, and frames of any route within about 150 m of them are kept out of training (the buffer). strata asked for 250–500 m areas with a 100–200 m buffer and 150–250 test signs.
+- **"Ours".** The sign is meant for the traffic on the carriageway we drive on, in our direction, whatever the lane. **"Another"** is an exit ramp, a side road, a parallel road or the opposite direction. The network decides which applies; the label only fixes what the answer means. A lane label comes later, if gantries with different values per lane show up.
+- **"Unclear"** is taught as "abstain", not dropped.
