@@ -270,6 +270,6 @@ def build_splits(rows: list[dict], root: Path, *, seed: int = 0, output: Path | 
     # [model-review] - END
     return {'valid': True, 'dataset_kind': dataset_kind, 'dataset_sha256': report['dataset_sha256'], 'split_sha256': digest,
             'split_path': str(target.relative_to(root)) if target.is_relative_to(root) else str(target),
-            'policy': POLICY, 'counts': payload['counts'], 'human_reviewed_counts': human,
+            'policy': payload['policy'], 'counts': payload['counts'], 'human_reviewed_counts': human,
             'routes': payload['routes'], 'warnings': report['warnings']}
 # [reviewed-dataset] - END
