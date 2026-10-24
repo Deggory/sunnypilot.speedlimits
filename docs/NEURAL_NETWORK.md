@@ -65,6 +65,22 @@ Measured on the test areas of route 0000012d, which no training sees. 35% of tho
 
 Its validation loss was best at epoch 8 of 20: after that it memorised the training images. Training now stops after 5 epochs without improvement.
 
+**Cutter comparison (`scripts/run_detector_sizes.sh 2026-10-24_1452`)**
+
+All three sizes use small default boxes (the smallest is 0.02 of the image side), 10% of the sign-free frames per epoch, and the best epoch chosen by validation recall. Scores are at the cutter's low threshold (0.1), on the 80 test signs.
+
+| Input | Signs found | < 12 px | 12–20 px | 20–40 px | ≥ 40 px | Hand-reviewed | Boxes per frame |
+|---|---|---|---|---|---|---|---|
+| 320 × 320, default boxes 0.2 (the run above) | 6% | 0% | 0% | 0% | 42% | | |
+| 320 × 320 | 38% | 11% | 19% | 58% | 92% | 48% | 80 |
+| 640 × 360 | 62% | 17% | 61% | 89% | 92% | 78% | 237 |
+| **960 × 544** | **79%** | **44%** | **81%** | **100%** | 92% | **96%** | **42** |
+
+- **960 × 544 is the cutter in use** (Models tab). The small default boxes alone take 320 × 320 from 6% to 38%, and the larger input takes it to 79%.
+- **Cost:** on the V100, 11.1, 11.3 and 13.3 ms per frame, which says little about the comma; 960 × 544 has about 5× the pixels of 320 × 320.
+- **Every box goes to the classifier, and almost all are junk.** Dropping them is the classifier's job.
+- **Still hard:** signs under 12 px. The next steps are the full-resolution band and more drives.
+
 **Reader (same run)**
 
 | | Right answers |
