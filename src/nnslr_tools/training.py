@@ -22,6 +22,7 @@ from typing import Any
 
 from nnslr_tools import tracking
 from nnslr_tools.checkpoints import atomic_torch_save, model_weights, stable_weights, torch_load
+from nnslr_tools.progress import report as report_progress
 from nnslr_tools.annotations import load_jsonl, validate_dataset
 from nnslr_tools.splits import validate_splits
 
@@ -746,7 +747,13 @@ def train_detector(
             train_seen = 0
             # The step time includes the wait for the batch, like distill's step_time.
             step_start = time.perf_counter()
+            batch_count = len(train_loader)
+            batch_index = 0
             for images, targets in train_loader:
+                # Where the training is, batch by batch, for the panel of the review site.
+                batch_index += 1
+                report_progress("detector", epoch * batch_count + batch_index, config.epochs * batch_count,
+                                f"epoch {epoch_number} of {config.epochs}, batch {batch_index} of {batch_count}")
                 images = [img.to(device, non_blocking=True) for img in images]
                 targets = move_targets(targets)
                 optimizer.zero_grad(set_to_none=True)
@@ -1067,7 +1074,13 @@ def train_reader(
             train_correct = 0
             # The step time includes the wait for the batch, like distill's step_time.
             step_start = time.perf_counter()
+            batch_count = len(train_loader)
+            batch_index = 0
             for inputs, targets in train_loader:
+                # Where the training is, batch by batch, for the panel of the review site.
+                batch_index += 1
+                report_progress("reader", epoch * batch_count + batch_index, config.epochs * batch_count,
+                                f"epoch {epoch_number} of {config.epochs}, batch {batch_index} of {batch_count}")
                 inputs = inputs.to(device, non_blocking=True)
                 targets = targets.to(device, non_blocking=True)
                 optimizer.zero_grad(set_to_none=True)

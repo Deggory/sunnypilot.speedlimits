@@ -37,7 +37,7 @@ const resizing = computed(() => state.drag?.kind === 'resize' && state.drag.svg 
 <template>
   <div class="stage" id="stage" :data-photo-key="loaded?.key ?? ''">
     <svg ref="scene" id="scene" :class="{drawing: state.drawing, dragging: resizing}" xmlns="http://www.w3.org/2000/svg"
-         aria-label="Fotogramma con i riquadri dei cartelli" :viewBox="'0 0 ' + row.width + ' ' + row.height"
+         aria-label="Frame with the boxes of the signs" :viewBox="'0 0 ' + row.width + ' ' + row.height"
          @pointerdown="onPointerDown($event, 'scene')" @pointermove="onPointerMove($event, 'scene')"
          @pointerup="finishDrag($event, 'scene')" @pointercancel="finishDrag($event, 'scene')"
          @touchstart="onTouchStart($event, 'scene')" @click="onSceneClick">
@@ -70,6 +70,6 @@ const resizing = computed(() => state.drag?.kind === 'resize' && state.drag.svg 
       <rect id="draft" :visibility="state.draft ? 'visible' : 'hidden'" :x="state.draft?.x" :y="state.draft?.y"
             :width="state.draft?.width" :height="state.draft?.height"></rect>
     </svg>
-    <div class="stage-hint" id="stageHint" :hidden="!state.drawing"><span>Trascina sull’immagine per disegnare il riquadro</span></div>
+    <div class="stage-hint" id="stageHint" :hidden="!state.drawing"><span>Drag on the image to draw the box</span></div>
   </div>
 </template>

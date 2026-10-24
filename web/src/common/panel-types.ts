@@ -1,4 +1,4 @@
-// GET /api/panel/status (nnslr_tools.panel.Panel.status): the control pages (Panoramica, Prepara, Allena).
+// GET /api/panel/status (nnslr_tools.panel.Panel.status): the control pages (Overview, Prepare, Train).
 
 export type ActionName = 'fetch' | 'prepare' | 'dataset' | 'train' | 'train_continue' | 'update';
 export type JobState = 'running' | 'ok' | 'failed' | 'interrupted';
@@ -37,7 +37,7 @@ export interface JobProgress {
   steps: JobStep[];
   /** 0-100 when known from steps, epochs or finished routes; null otherwise (never a guess). */
   percent: number | null;
-  /** e.g. "detector · epoca 5 di 20", "2 di 5 route pronte", "12 segmenti scaricati". */
+  /** e.g. "detector · epoch 5 of 20", "2 of 5 routes ready". */
   detail: string;
   last_line: string;
   /** Training only: the curves of the detector and of the reader, one point per epoch done. */
@@ -129,11 +129,75 @@ export interface Preparation {
   working: RouteProgress[];
 }
 
+/** What is in the gold dataset (data/annotations/objects.jsonl), its split and the last import. */
+export interface DatasetFamily {
+  /** sign_family of the objects: maximum_speed, variable_display, cancellation, zone, other_sign, ... */
+  key: string;
+  /** English label for the page. */
+  label: string;
+  count: number;
+}
+
+export interface DatasetRoute {
+  route: string;
+  frames: number;
+  objects: number;
+  /** Objects that are speed signs (maximum_speed, variable_display, zone, cancellation). */
+  speed_signs: number;
+  human: number;
+  ai: number;
+}
+
+export interface DatasetSummary {
+  frames: number;
+  objects: number;
+  routes: number;
+  families: DatasetFamily[];
+  /** Objects confirmed by a person / by an AI reviewer. */
+  human: number;
+  ai: number;
+  per_route: DatasetRoute[];
+  /** ISO time of the last change of the dataset file, or null. */
+  changed_at: string | null;
+  split: {
+    /** train, validation, test, route-held-out, hard-negative: objects in each. */
+    counts: Record<string, number>;
+    made_at: string | null;
+    warnings: string[];
+  } | null;
+  last_import: {
+    at: string | null;
+    new_frames: number;
+    already: number;
+    /** Confirmed frames changed after their import, not applied (the dataset is append-only). */
+    changed_after_import: number;
+    warnings: string[];
+  } | null;
+}
+
+/** A choice of where a training starts (POST /api/panel/run/train with {"start": key}). */
+export interface TrainingStart {
+  /** 'imagenet' | 'random' | 'stable' | 'run:<name>' */
+  key: string;
+  label: string;
+  description: string;
+  available: boolean;
+  /** Why it is not available ('' when it is). */
+  reason: string;
+  /** The suggested choice. */
+  default: boolean;
+}
+
 export interface PanelStatus {
   available: boolean;
   actions_enabled: boolean;
   routes: RouteRow[];
+  /** The next step in Italian, for the terminal (route_status); the page shows next_step_text. */
   next_step: string;
+  /** The next step in one English sentence, for the hero card of the Overview. */
+  next_step_text: string;
+  /** The dataset is current and a training can start. */
+  all_ready: boolean;
   next_action: 'prepare' | 'review' | 'train' | 'fetch' | null;
   reviewed_routes: number;
   min_routes: number;
@@ -142,6 +206,8 @@ export interface PanelStatus {
   system: SystemInfo;
   actions: Record<ActionName, ActionState>;
   preparation: Preparation | null;
+  dataset: DatasetSummary | null;
+  training_starts: TrainingStart[];
 }
 
 /** POST /api/panel/run/<action> */

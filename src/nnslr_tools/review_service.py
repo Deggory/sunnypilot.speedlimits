@@ -5,7 +5,7 @@ images). The reports stay read-only; every save goes through
 :func:`nnslr_tools.review_db.save_frame_review`, so the page, REST and MCP apply
 the same checks and write the same SQLite database. Errors are
 :class:`~nnslr_tools.review_db.ReviewRejected` with an HTTP status, a reason
-code and an Italian message; the HTTP layer and the MCP tools only translate them.
+code and an English message; the HTTP layer and the MCP tools only translate them.
 
 Frames are ordered by (segment, image) as on the page timeline. Indices need
 not be consecutive: "previous" and "next" are the neighbours in that order,
@@ -44,7 +44,7 @@ DETECTION_FAMILIES = ('maximum_speed', 'cancellation', 'zone', 'variable_display
                       'other_sign', 'unreadable', 'not_a_sign')
 VALUE_FAMILIES = ('maximum_speed', 'cancellation', 'zone', 'variable_display', 'road_marking_candidate')
 FRAME_KEY_PATTERN = re.compile(r'([0-9]{1,9})/([0-9]{1,9})')
-UNKNOWN_ROUTE_MESSAGE = 'Route sconosciuta o senza report di pre-annotazione.'
+UNKNOWN_ROUTE_MESSAGE = 'Unknown route, or route without a pre-annotation report.'
 
 
 def frame_key_of(value) -> str:
@@ -53,8 +53,8 @@ def frame_key_of(value) -> str:
         match = FRAME_KEY_PATTERN.fullmatch(value.strip())
         if match is not None:
             return str(int(match.group(1))) + '/' + str(int(match.group(2)))
-    raise ReviewRejected(400, 'invalid_frame_key', 'Chiave del fotogramma non valida: usa "<segmento>/<immagine>", '
-                                                   'per esempio "3/28".')
+    raise ReviewRejected(400, 'invalid_frame_key', 'Invalid frame key: use "<segment>/<image>", '
+                                                   'for example "3/28".')
 
 
 def _bounded(value, name: str, minimum: int, maximum: int, default: int) -> int:
@@ -63,7 +63,7 @@ def _bounded(value, name: str, minimum: int, maximum: int, default: int) -> int:
     if isinstance(value, str) and value.strip().isdigit():
         value = int(value.strip())
     if type(value) is not int or value < minimum or value > maximum:
-        raise ReviewRejected(400, 'invalid_parameter', f'{name} deve essere un intero tra {minimum} e {maximum}.')
+        raise ReviewRejected(400, 'invalid_parameter', f'{name} must be an integer between {minimum} and {maximum}.')
     return value
 
 
@@ -71,7 +71,7 @@ def _choice(value, name: str, choices: tuple, default: str) -> str:
     if value is None or value == '':
         return default
     if value not in choices:
-        raise ReviewRejected(400, 'invalid_parameter', f'{name} deve essere uno tra: ' + ', '.join(choices) + '.')
+        raise ReviewRejected(400, 'invalid_parameter', f'{name} must be one of: ' + ', '.join(choices) + '.')
     return value
 
 
@@ -128,7 +128,7 @@ class RouteSnapshot:
 
     def row(self, key: str) -> dict:
         if key not in self.position:
-            raise ReviewRejected(404, 'unknown_frame', 'Fotogramma non presente nel report di questa route.')
+            raise ReviewRejected(404, 'unknown_frame', 'Frame not in the report of this route.')
         return self.by_key[key]
 
 
@@ -326,12 +326,12 @@ class ReviewService:
             data = json.loads(base64.urlsafe_b64decode(padded.encode('ascii')).decode('utf-8'))
             run_id, saved_filter, key = data['run_id'], data['filter'], data['after']
         except (ValueError, TypeError, KeyError, UnicodeError) as exc:
-            raise ReviewRejected(400, 'invalid_cursor', 'Cursore non valido: richiedi di nuovo la prima pagina.') from exc
+            raise ReviewRejected(400, 'invalid_cursor', 'Invalid cursor: request the first page again.') from exc
         if run_id != snapshot.run_id:
-            raise ReviewRejected(409, 'stale_report', 'Il report di questa route è stato rigenerato: '
-                                                      'richiedi di nuovo la prima pagina.')
+            raise ReviewRejected(409, 'stale_report', 'The report of this route was rebuilt: '
+                                                      'request the first page again.')
         if saved_filter != frame_filter or key not in snapshot.position:
-            raise ReviewRejected(400, 'invalid_cursor', 'Cursore non valido per questo filtro.')
+            raise ReviewRejected(400, 'invalid_cursor', 'Invalid cursor for this filter.')
         return snapshot.position[key]
 
     def list_frames(self, route, *, frame_filter=None, cursor=None, limit=None) -> dict:
@@ -500,14 +500,14 @@ class ReviewService:
         directory, rows, by_key = self.known_report(route)
         row = by_key.get(key)
         if row is None:
-            raise ReviewRejected(404, 'unknown_frame', 'Fotogramma non presente nel report di questa route.')
+            raise ReviewRejected(404, 'unknown_frame', 'Frame not in the report of this route.')
         if variant == 'preview':
             preview = row.get('preview_path')
             path = None
             if isinstance(preview, str):
                 path = public_file(directory, '/' + preview)
             if path is None:
-                raise ReviewRejected(404, 'image_not_found', 'Anteprima del fotogramma non trovata.')
+                raise ReviewRejected(404, 'image_not_found', 'Frame preview not found.')
             return path, 'image/jpeg', row
         relative = row.get('image_path')
         frames = self.root / 'derived' / 'frames' / route
@@ -521,10 +521,10 @@ class ReviewService:
             if candidate.is_symlink() or not resolved.is_file():
                 raise ValueError('image_path')
         except (PreannotationError, ValueError, OSError) as exc:
-            raise ReviewRejected(404, 'image_not_found', 'Immagine originale del fotogramma non trovata.') from exc
+            raise ReviewRejected(404, 'image_not_found', 'Original frame image not found.') from exc
         if sha256_of(resolved) != row.get('frame_sha256'):
-            raise ReviewRejected(409, 'image_changed', 'L’immagine originale è cambiata dopo l’estrazione: '
-                                                       'rigenera il report.')
+            raise ReviewRejected(409, 'image_changed', 'The original image changed after the extraction: '
+                                                       'rebuild the report.')
         return resolved, 'image/png', row
 
     def image(self, route, frame_key, *, variant=None, crop=None, long_side=None) -> dict:
@@ -549,13 +549,13 @@ class ReviewService:
             from PIL import Image
         except ImportError as exc:
             raise ReviewRejected(501, 'image_processing_unavailable',
-                                 'Ritaglio e ridimensionamento richiedono Pillow sul server '
-                                 '(pip install Pillow): chiedi l’immagine intera.') from exc
+                                 'Cropping and resizing need Pillow on the server '
+                                 '(pip install Pillow): ask for the whole image.') from exc
         try:
             with Image.open(path) as opened:
                 picture = opened.convert('RGB')
         except OSError as exc:
-            raise ReviewRejected(409, 'invalid_image', 'L’immagine del fotogramma non si può leggere.') from exc
+            raise ReviewRejected(409, 'invalid_image', 'The frame image cannot be read.') from exc
         scale_x = picture.width / row['width']
         scale_y = picture.height / row['height']
         if box is not None:
@@ -588,14 +588,14 @@ class ReviewService:
                 if isinstance(value, bool) or not isinstance(value, (int, float)):
                     valid = False
         if not valid:
-            raise ReviewRejected(400, 'invalid_crop', 'crop deve essere [x1, y1, x2, y2] in pixel dell’immagine originale.')
+            raise ReviewRejected(400, 'invalid_crop', 'crop must be [x1, y1, x2, y2] in pixels of the original image.')
         x1 = max(0, min(int(round(crop[0])), width))
         y1 = max(0, min(int(round(crop[1])), height))
         x2 = max(0, min(int(round(crop[2])), width))
         y2 = max(0, min(int(round(crop[3])), height))
         if x2 - x1 < MIN_CROP_SIDE or y2 - y1 < MIN_CROP_SIDE:
-            raise ReviewRejected(400, 'invalid_crop', f'Il ritaglio deve stare nell’immagine ({width}×{height}) '
-                                                      f'e misurare almeno {MIN_CROP_SIDE} pixel per lato.')
+            raise ReviewRejected(400, 'invalid_crop', f'The crop must be inside the image ({width}×{height}) '
+                                                      f'and at least {MIN_CROP_SIDE} pixels on each side.')
         return [x1, y1, x2, y2]
 
     # ---------- saving ----------
@@ -612,7 +612,7 @@ class ReviewService:
         directory, rows, by_key = self.known_report(route)
         report_row = by_key.get(key)
         if report_row is None:
-            raise ReviewRejected(404, 'unknown_frame', 'Fotogramma non presente nel report di questa route.')
+            raise ReviewRejected(404, 'unknown_frame', 'Frame not in the report of this route.')
         if isinstance(body, dict) and isinstance(body.get('detections'), list):
             body = dict(body)
             body['detections'] = _with_detection_ids(body['detections'], channel)

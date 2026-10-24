@@ -28,7 +28,7 @@ def test_training_in_the_detector_counts_its_epochs():
                               'bundle': 'todo'}
     # 2 + 2 + 6 + 3 done, and 5 of 20 epochs of the detector's 40.
     assert result['percent'] == 23.0
-    assert result['detail'] == 'detector · epoca 5 di 20'
+    assert result['detail'] == 'detector · epoch 5 of 20'
     assert result['last_line'].startswith('detector epoch 5/20')
     assert result['curves'] == {'detector': {'epochs': 20, 'points': [
         {'epoch': 5, 'train_loss': 0.5, 'val_loss': 0.6, 'seconds': 40}]}}
@@ -56,6 +56,20 @@ def test_a_failed_step_is_marked_and_a_finished_job_is_complete():
 def test_preparation_uses_its_own_count_and_fetch_counts_segments():
     prepared = progress('prepare', 'running', '== a. collego i video\n== b+c. 3 route da preparare\n',
                         {'percent': 40, 'routes_done': 1, 'routes_total': 3, 'working': []})
-    assert prepared['percent'] == 40.0 and prepared['detail'] == '1 di 3 route pronte'
+    assert prepared['percent'] == 40.0 and prepared['detail'] == '1 of 3 routes ready'
     fetched = progress('fetch', 'running', 'r1 sul comma: 0 1. Salto:. Scarico: 0 1\n== r1--0 -> /x\n')
-    assert fetched['percent'] is None and fetched['detail'] == '1 segmento scaricato · r1'
+    assert fetched['percent'] is None and fetched['detail'] == '1 segment downloaded · r1'
+
+
+def test_the_progress_inside_the_current_step_comes_from_the_last_report():
+    from nnslr_tools.job_progress import with_step_progress
+    running = progress('train', 'running', TRAIN_LOG)
+    inside = with_step_progress(running, 'train', {'task': 'detector', 'done': 50, 'total': 200, 'text': 'epoch 3 of 20'})
+    assert inside['step_progress'] == {'done': 50, 'total': 200, 'percent': 25.0, 'text': 'epoch 3 of 20'}
+    # 13 of 100 done before the detector, and a quarter of its 40.
+    assert inside['percent'] == 23.0
+    other = with_step_progress(running, 'train', {'task': 'validate', 'done': 1, 'total': 2})
+    assert other['step_progress'] is None and other['percent'] == running['percent']
+    setup = progress('train', 'running', '== a. importo\n== b. controllo\n== c. ambiente GPU\n')
+    assert with_step_progress(setup, 'train', None, 'Downloading torch (900 MB)')['step_progress']['text'] == \
+        'Downloading torch (900 MB)'

@@ -116,7 +116,7 @@ class ReviewTools:
     def save_frame_review(self, route_id, frame_key, *, run_id, base_revision, reviewer, detections,
                           confirmed=True, site_group=None, encounter_id=None, override_human_review=False) -> dict:
         if self.read_only:
-            raise ReviewRejected(403, 'read_only', 'Server MCP in sola lettura: salvataggi disattivati.')
+            raise ReviewRejected(403, 'read_only', 'Read-only MCP server: saving is disabled.')
         body = {'run_id': run_id, 'base_revision': base_revision, 'reviewer': reviewer, 'reviewer_kind': 'ai',
                 'confirmed': confirmed, 'detections': detections, 'site_group': site_group,
                 'encounter_id': encounter_id, 'override_human_review': override_human_review}
@@ -311,7 +311,7 @@ def build_server(service, *, client: str, read_only: bool = False):
                                long_side)
         content = [TextContent(type='text', text=json.dumps(context))]
         for item in images:
-            content.append(TextContent(type='text', text=f'Fotogramma {item["frame_key"]} '
+            content.append(TextContent(type='text', text=f'Frame {item["frame_key"]} '
                                                          f'(offset {item["offset"]}):'))
             content.append(image_content(item['image']))
         return CallToolResult(content=content, structured_content=context)

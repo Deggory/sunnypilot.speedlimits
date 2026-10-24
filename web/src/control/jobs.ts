@@ -1,10 +1,12 @@
 // The jobs of the control pages: their state in words, their times, which job a tab shows, the work started
 // from a terminal.
+import {shortWhen} from '../common/format';
 import type {ActionName, Activity, Job, JobState, PanelStatus} from '../common/panel-types';
+import type {IconName} from '../components/icons/shapes';
 
 /** State of a job: label and pill class. */
 export const JOB_STATE: Record<JobState, [label: string, kind: string]> = {
-  running: ['in corso', 'run'], ok: ['finito', 'ok'], failed: ['fallito', 'bad'], interrupted: ['interrotto', 'warn'],
+  running: ['running', 'run'], ok: ['done', 'ok'], failed: ['failed', 'bad'], interrupted: ['interrupted', 'warn'],
 };
 
 /** The group of each action (nnslr_tools.panel.ACTIONS): a terminal activity of the same group is that work. */
@@ -12,7 +14,12 @@ export const ACTION_GROUP: Record<ActionName, string> = {
   fetch: 'fetch', prepare: 'prepare', dataset: 'train', train: 'train', train_continue: 'train', update: 'update',
 };
 
-/** The actions whose jobs the Prepara and Allena tabs show. */
+/** The icon of each action, on its button. */
+export const ACTION_ICON: Record<ActionName, IconName> = {
+  fetch: 'download', prepare: 'prepare', dataset: 'import', train: 'train', train_continue: 'train', update: 'update',
+};
+
+/** The actions whose jobs the Prepare and Train tabs show. */
 export const PREPARE_ACTIONS: ActionName[] = ['fetch', 'prepare'];
 export const TRAIN_ACTIONS: ActionName[] = ['dataset', 'train', 'train_continue'];
 
@@ -33,15 +40,10 @@ export function startedAt(job: Job): Date | null {
 
 const pad = (value: number): string => String(value).padStart(2, '0');
 
-/** "18:55" today, otherwise "23/10 18:55", in the browser's time. */
+/** "18:55" today, otherwise "23 Oct 18:55", in the browser's time. */
 export function startedWhen(job: Job): string {
   const start = startedAt(job);
-  if (start === null) return job.started;
-  const now = new Date();
-  const today = start.getFullYear() === now.getFullYear() && start.getMonth() === now.getMonth()
-    && start.getDate() === now.getDate();
-  return (today ? '' : pad(start.getDate()) + '/' + pad(start.getMonth() + 1) + ' ')
-    + pad(start.getHours()) + ':' + pad(start.getMinutes());
+  return start === null ? job.started : shortWhen(start);
 }
 
 /** "42 s", "12 min 03 s", "2 h 05 min". */
@@ -53,10 +55,10 @@ export function elapsedText(ms: number): string {
   return Math.floor(minutes / 60) + ' h ' + pad(minutes % 60) + ' min';
 }
 
-/** A rough remaining time, in whole minutes: "meno di un minuto", "40 min", "1 h 10 min". */
+/** A rough remaining time, in whole minutes: "less than a minute", "40 min", "1 h 10 min". */
 export function roughText(ms: number): string {
   const minutes = Math.round(ms / 60000);
-  if (minutes < 1) return 'meno di un minuto';
+  if (minutes < 1) return 'less than a minute';
   if (minutes < 60) return minutes + ' min';
   return Math.floor(minutes / 60) + ' h' + (minutes % 60 ? ' ' + (minutes % 60) + ' min' : '');
 }

@@ -13,11 +13,11 @@ const running = computed(() => props.job?.state === 'running');
 const summary = computed(() => {
   const job = props.job;
   if (job === null) return '';
-  const parts = ['Partito alle ' + startedWhen(job)];
+  const parts = ['Started ' + startedWhen(job)];
   if (job.state === 'running' && job.progress.percent !== null) parts.push(Math.floor(job.progress.percent) + '%');
   if (job.progress.detail) parts.push(job.progress.detail);
   const step = failedStep(job);
-  if (step) parts.push('fermo al passo ' + step);
+  if (step) parts.push('stopped at ' + step);
   return parts.join(' · ');
 });
 const emit = defineEmits<{close: []}>();
@@ -32,7 +32,7 @@ async function poll(id: string): Promise<void> {
     const data = await api<LogChunk>('/api/panel/job/' + id + '/log?offset=' + offset);
     if (props.job?.id !== id) return;
     if (data.text) {
-      if (offset === 0 && data.offset - data.text.length > 0) text.value = '… (inizio tagliato)\n';
+      if (offset === 0 && data.offset - data.text.length > 0) text.value = '… (start cut)\n';
       text.value += data.text;
       if (follow.value) {
         await nextTick();
@@ -71,15 +71,15 @@ onBeforeUnmount(() => {
   <section class="sheet" :class="{open: job !== null}" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
     <div class="sheet-grabber" aria-hidden="true"></div>
     <div class="sheet-head">
-      <div class="grow"><h2 id="sheet-title">{{ job?.label ?? 'Dettagli' }}</h2><p class="sheet-sub">{{ summary }}</p></div>
+      <div class="grow"><h2 id="sheet-title">{{ job?.label ?? 'Details' }}</h2><p class="sheet-sub">{{ summary }}</p></div>
       <span v-if="job" class="pill" :class="JOB_STATE[job.state][1]">{{ JOB_STATE[job.state][0] }}</span>
-      <button class="btn small" type="button" :aria-pressed="follow" @click="follow = !follow">Segui</button>
-      <button class="btn small" type="button" @click="emit('close')">Chiudi</button>
+      <button class="btn small" type="button" :aria-pressed="follow" @click="follow = !follow">Follow</button>
+      <button class="btn small" type="button" @click="emit('close')">Close</button>
     </div>
     <div class="sheet-body">
       <JobSteps v-if="job && job.progress.steps.length > 1" :steps="job.progress.steps"/>
-      <h3 class="sheet-section">Registro</h3>
-      <pre ref="pre" class="term" tabindex="0" aria-label="Registro del lavoro">{{ text }}</pre>
+      <h3 class="sheet-section">Log</h3>
+      <pre ref="pre" class="term" tabindex="0" aria-label="Log of the job">{{ text }}</pre>
     </div>
   </section>
 </template>

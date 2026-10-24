@@ -17,7 +17,7 @@ export function storedTheme(): Theme {
   return 'dark';
 }
 
-/** True when the page shows the dark palette now (Automatico follows the system). */
+/** True when the page shows the dark palette now (Automatic follows the system). */
 export function isDark(): boolean {
   const theme = root.dataset['theme'];
   if (theme === 'light') return false;

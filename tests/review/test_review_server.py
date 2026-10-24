@@ -40,7 +40,8 @@ def cookie_header(server, value=TOKEN):
 def test_loopback_needs_no_token_and_index_lists_routes_with_counts(loopback, tmp_path):
     server, root, rows = loopback
     make_report(root, route=OTHER_ROUTE, count=2)
-    status, response, data = server.request('GET', '/')
+    # The route list is /routes (the home page is the Overview).
+    status, response, data = server.request('GET', '/routes')
     assert status == 200
     page = data.decode()
     assert ROUTE in page and OTHER_ROUTE in page and '/route/' + ROUTE + '/' in page
@@ -200,9 +201,9 @@ def test_saved_reviews_are_returned_for_the_page(loopback):
 
 @pytest.mark.parametrize('change,reason,text', [
     ({'value_kph': 0}, 'illegal_speed', 'km/h'),
-    ({'bbox_xyxy': [1, 2, 99, 20]}, 'invalid_bbox', 'Riquadro'),
-    ({'family': 'advertisement'}, 'unknown_enum', 'Valore non ammesso'),
-    ({'value_kph': 50, 'family': 'other_sign'}, 'value_family_mismatch', 'tipo di cartello'),
+    ({'bbox_xyxy': [1, 2, 99, 20]}, 'invalid_bbox', 'Invalid box'),
+    ({'family': 'advertisement'}, 'unknown_enum', 'Value not allowed'),
+    ({'value_kph': 50, 'family': 'other_sign'}, 'value_family_mismatch', 'type of sign'),
 ])
 def test_invalid_detection_is_rejected_with_italian_message(loopback, change, reason, text):
     server, root, rows = loopback
@@ -219,7 +220,7 @@ def test_invalid_detection_is_rejected_with_italian_message(loopback, change, re
 def test_missing_reviewer_and_bad_body_are_rejected(loopback):
     server, root, rows = loopback
     status, response, data = server.post_frame(ROUTE, '0/0', page_body(rows[0], reviewer='  '))
-    assert status == 400 and 'revisore' in json_of(data)['message']
+    assert status == 400 and 'reviewer' in json_of(data)['message']
     status, response, data = server.post_frame(ROUTE, '0/0', b'{"run_id": NaN}')
     assert status == 400 and json_of(data)['error'] == 'invalid_json'
     status, response, data = server.post_frame(ROUTE, '0/0', b'[1, 2]')
@@ -258,7 +259,7 @@ def test_reviewer_with_control_characters_or_too_long_is_rejected(loopback, caps
     for reviewer in ['\x1b[2J\x1b[31mPWNED\x1b[0m', 'Cristian\nSalvato: falso', 'x' * 101, 'a‮b']:
         status, response, data = server.post_frame(ROUTE, '0/0', page_body(rows[0], reviewer=reviewer))
         assert status == 400, reviewer
-        assert json_of(data)['error'] == 'invalid_reviewer' and 'revisore' in json_of(data)['message']
+        assert json_of(data)['error'] == 'invalid_reviewer' and 'reviewer' in json_of(data)['message']
     assert ReviewStore(db_path(root)).review(ROUTE, RUN_ID, '0/0') is None
     status, response, data = server.post_frame(ROUTE, '0/0', page_body(rows[0], reviewer='  Zoë Rossi  '))
     assert status == 200, data
@@ -275,7 +276,7 @@ def test_reviewer_with_control_characters_or_too_long_is_rejected(loopback, caps
 def test_stale_report_and_concurrent_edit_conflicts(loopback):
     server, root, rows = loopback
     status, response, data = server.post_frame(ROUTE, '0/0', page_body(rows[0], run_id='20200101T000000Z-00000000'))
-    assert status == 409 and 'rigenerato' in json_of(data)['message']
+    assert status == 409 and 'rebuilt' in json_of(data)['message']
     assert server.post_frame(ROUTE, '0/0', page_body(rows[0], base_revision=0))[0] == 200
     status, response, data = server.post_frame(ROUTE, '0/0', page_body(rows[0], base_revision=0))
     assert status == 409 and json_of(data)['error'] == 'revision_conflict'

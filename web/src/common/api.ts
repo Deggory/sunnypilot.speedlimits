@@ -18,13 +18,13 @@ export async function api<T>(path: string, options: RequestInit = {}, signIn = f
   const response = await fetch(path, {credentials: 'same-origin', cache: 'no-store', ...options});
   if (response.status === 401 && !signIn) {
     location.replace('/');
-    throw new ApiError('Sessione finita.', 401);
+    throw new ApiError('Session ended: sign in again.', 401);
   }
   let data: unknown;
   try {
     data = await response.json();
   } catch {
-    data = {message: 'Risposta non valida dal server (HTTP ' + response.status + ').'};
+    data = {message: 'Unreadable answer from the server (HTTP ' + response.status + ').'};
   }
   if (!response.ok) {
     const problem = data as Problem;

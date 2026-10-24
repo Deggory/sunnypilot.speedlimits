@@ -184,17 +184,17 @@ def test_rules_on_real_frames(tmp_path):
     result = suspicious_frames(rows, hints, {}, hints_available=True)
     assert result == {
         # a) the second reading is sure of a limit, the model proposes nothing
-        '3/25': [{'rule': 'a', 'text': 'seconda lettura vede un limite illeggibile, il modello niente'}],
-        '3/26': [{'rule': 'a', 'text': 'seconda lettura vede 60, il modello niente'}],
+        '3/25': [{'rule': 'a', 'text': 'second reading sees an unreadable limit, the model nothing'}],
+        '3/26': [{'rule': 'a', 'text': 'second reading sees 60, the model nothing'}],
         # c) both read a value, never the same
-        '3/27': [{'rule': 'c', 'text': 'seconda lettura vede 60, il modello 40'}],
-        '3/28': [{'rule': 'c', 'text': 'seconda lettura vede 60, il modello 40'}],
-        '3/29': [{'rule': 'c', 'text': 'seconda lettura vede 60, il modello 40 e 80'}],
+        '3/27': [{'rule': 'c', 'text': 'second reading sees 60, the model 40'}],
+        '3/28': [{'rule': 'c', 'text': 'second reading sees 60, the model 40'}],
+        '3/29': [{'rule': 'c', 'text': 'second reading sees 60, the model 40 and 80'}],
         # d) the previous frame has a sure hint, this one nothing at all
-        '3/30': [{'rule': 'd', 'text': 'nel fotogramma precedente la seconda lettura vede 60, qui niente'}],
+        '3/30': [{'rule': 'd', 'text': 'in the previous frame the second reading sees 60, here nothing'}],
         # b) the model proposes a limit, the second reading sees nothing
-        '3/32': [{'rule': 'b', 'text': 'il modello vede 40, la seconda lettura niente'}],
-        '3/33': [{'rule': 'b', 'text': 'il modello vede 40, la seconda lettura niente'}],
+        '3/32': [{'rule': 'b', 'text': 'the model sees 40, the second reading nothing'}],
+        '3/33': [{'rule': 'b', 'text': 'the model sees 40, the second reading nothing'}],
     }
 
 
@@ -210,7 +210,7 @@ def test_confirmed_frames_are_never_suspicious_and_feed_rule_d(tmp_path):
     confirmed = {'3/27': [], '3/32': [{'family': 'maximum_speed', 'value_kph': 40}]}
     result = suspicious_frames(rows, hints, confirmed, hints_available=True)
     assert '3/27' not in result and '3/32' not in result
-    assert reasons(result, '3/31') == [('d', 'nel fotogramma successivo c’è un cartello confermato (40), qui niente')]
+    assert reasons(result, '3/31') == [('d', 'the next frame has a confirmed sign (40), here nothing')]
     # A confirmed neighbour without a speed box does not make a frame suspicious.
     confirmed = {'3/32': [{'family': 'other_sign', 'value_kph': None}]}
     result = suspicious_frames(rows, hints, confirmed, hints_available=True)
@@ -243,9 +243,9 @@ def test_rule_a_only_for_sure_hints_and_speed_proposals():
     result = suspicious_frames(rows, hints, {}, hints_available=True)
     assert '0/0' not in result and '0/1' not in result and '0/5' not in result
     # other_sign and the road number OCR are no speed proposal of the model.
-    assert reasons(result, '0/2') == [('a', 'seconda lettura vede zona 30, il modello niente')]
-    assert reasons(result, '0/3') == [('a', 'seconda lettura vede numero a terra 60, il modello niente')]
-    assert reasons(result, '0/4') == [('a', 'seconda lettura vede fine zona e fine limite 60, il modello niente')]
+    assert reasons(result, '0/2') == [('a', 'second reading sees zone 30, the model nothing')]
+    assert reasons(result, '0/3') == [('a', 'second reading sees number on the road 60, the model nothing')]
+    assert reasons(result, '0/4') == [('a', 'second reading sees end of zone and end of limit 60, the model nothing')]
 
 
 def test_rule_c_needs_values_with_nothing_in_common():
@@ -255,7 +255,7 @@ def test_rule_c_needs_values_with_nothing_in_common():
              '0/2': [hint(value=50)]}
     result = suspicious_frames(rows, hints, {}, hints_available=True)
     assert '0/0' not in result and '0/2' not in result
-    assert reasons(result, '0/1') == [('c', 'seconda lettura vede 50, il modello 40')]
+    assert reasons(result, '0/1') == [('c', 'second reading sees 50, the model 40')]
 
 
 def test_rule_d_crosses_to_the_adjacent_segment_only():
@@ -264,12 +264,12 @@ def test_rule_d_crosses_to_the_adjacent_segment_only():
     hints = {'2/1': [hint(value=80, confidence='medium')]}
     result = suspicious_frames(rows, hints, confirmed, hints_available=True)
     assert reasons(result, '2/0') == [
-        ('d', 'nel fotogramma precedente c’è un cartello confermato (zona 30), qui niente'),
-        ('d', 'nel fotogramma successivo c’è un cartello confermato (…), qui niente'.replace('(…)', '(fine limite)'))
-    ] or reasons(result, '2/0')[0][1].startswith('nel fotogramma precedente')
+        ('d', 'the previous frame has a confirmed sign (zone 30), here nothing'),
+        ('d', 'the next frame has a confirmed sign (…), here nothing'.replace('(…)', '(end of limit)'))
+    ] or reasons(result, '2/0')[0][1].startswith('the previous frame')
     # 2/1 is confirmed without boxes: it hides its own hint from rule d; segment 4 is not next to 2.
-    assert reasons(result, '2/0') == [('d', 'nel fotogramma precedente c’è un cartello confermato (zona 30), qui niente')]
-    assert reasons(result, '4/0') == [('d', 'nel fotogramma successivo c’è un cartello confermato (fine limite), qui niente')]
+    assert reasons(result, '2/0') == [('d', 'the previous frame has a confirmed sign (zone 30), here nothing')]
+    assert reasons(result, '4/0') == [('d', 'the next frame has a confirmed sign (end of limit), here nothing')]
     assert '1/59' not in result and '5/0' not in result
 
 
@@ -277,6 +277,6 @@ def test_neighbour_hint_and_malformed_rows_do_not_break_the_rules():
     rows = [synthetic('0/0'), synthetic('0/1'), {'frame_key': None}, 'not a row', synthetic('0/2', 'bad detections')]
     hints = {'0/1': [hint(value=50, confidence='medium')]}
     result = suspicious_frames(copy.deepcopy(rows), hints, {}, hints_available=True)
-    assert reasons(result, '0/0') == [('d', 'nel fotogramma successivo la seconda lettura vede 50, qui niente')]
-    assert reasons(result, '0/1') == [('a', 'seconda lettura vede 50, il modello niente')]
-    assert reasons(result, '0/2') == [('d', 'nel fotogramma precedente la seconda lettura vede 50, qui niente')]
+    assert reasons(result, '0/0') == [('d', 'in the next frame the second reading sees 50, here nothing')]
+    assert reasons(result, '0/1') == [('a', 'second reading sees 50, the model nothing')]
+    assert reasons(result, '0/2') == [('d', 'in the previous frame the second reading sees 50, here nothing')]

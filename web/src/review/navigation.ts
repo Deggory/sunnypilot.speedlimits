@@ -49,10 +49,10 @@ function nextAfterConfirm(key: string): string | null {
 export function advanceAfterConfirm(key: string, savedText: string): void {
   const next = nextAfterConfirm(key);
   if (next === null) {
-    state.notice = {key, text: savedText + ' Non restano fotogrammi da rivedere con questo filtro.', error: false};
+    state.notice = {key, text: savedText + ' No frames left to review with this filter.', error: false};
     return;
   }
-  state.notice = {key: next, text: savedText + ' Ecco il prossimo.', error: false};
+  state.notice = {key: next, text: savedText + ' Here is the next one.', error: false};
   openFrame(next);
 }
 
@@ -69,10 +69,10 @@ export function setFilter(filter: Filter): void {
   const target = report.rows.slice(start + 1).find((item) => matchesFilter(item, filter))
     ?? report.rows.slice(0, Math.max(start, 0)).find((item) => matchesFilter(item, filter));
   if (target === undefined) {
-    if (filter === 'suspicious') state.filterNote = 'Nessun fotogramma sospetto da rivedere.';
-    else if (isQualityFilter(filter)) state.filterNote = 'Nessun fotogramma confermato con questo dubbio.';
-    else if (filter === 'ai') state.filterNote = 'Nessun fotogramma confermato da un’AI.';
-    else state.filterNote = 'Nessun fotogramma corrisponde a questo filtro.';
+    if (filter === 'suspicious') state.filterNote = 'No suspicious frame to review.';
+    else if (isQualityFilter(filter)) state.filterNote = 'No confirmed frame with this doubt.';
+    else if (filter === 'ai') state.filterNote = 'No frame confirmed by an AI.';
+    else state.filterNote = 'No frame matches this filter.';
     return;
   }
   openFrame(target.frame_key);

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Revisione cartelli: one route's frames, the boxes the model proposed, the reviewer's confirmation of each
+// The sign review: one route's frames, the boxes the model proposed, the reviewer's confirmation of each
 // frame. Served by the review server (every confirmation saved in its database) or written by write_review as
 // a static index.html that works offline (payload "server": false, confirmations kept in this browser, JSONL
 // export). The state lives in store.ts; the plain modules of web/src/review change it (navigation, edits,
@@ -71,8 +71,8 @@ onBeforeUnmount(() => {
   <div class="page">
     <div id="stateBox" class="state-box" :hidden="hasFrames">
       <template v-if="!hasFrames">
-        <h2>Questo report non ha fotogrammi</h2>
-        <p>Scegli un’altra route in alto, oppure rigenera la pre-annotazione.</p>
+        <h2>This report has no frames</h2>
+        <p>Choose another route above, or run the pre-annotation again.</p>
       </template>
     </div>
     <div id="workspace" class="workspace" :class="{'tl-open': state.timelineOpen}" :hidden="!hasFrames">

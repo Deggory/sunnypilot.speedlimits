@@ -1,14 +1,17 @@
 <script setup lang="ts">
-// A job, live: name and state, the big percent (or "in corso" with a moving bar when the server does not
+// A job, live: name and state, the big percent (or "running" with a moving bar when the server does not
 // know it), the steps, what it is doing, the time it has been running (ticking) and, when the percent is
-// known, about how long is left; Ferma and Dettagli (the log in the sheet). A finished job shows how it ended.
+// known, about how long is left; Stop and Details (the log in the sheet); while it runs, the machine in small
+// under the buttons. A finished job shows how it ended.
 import {computed} from 'vue';
-import type {Job} from '../common/panel-types';
+import type {Job, SystemInfo} from '../common/panel-types';
+import Icon from '../components/Icon.vue';
 import {useNow} from '../composables/now';
 import JobSteps from './JobSteps.vue';
 import {elapsedText, failedStep, JOB_STATE, roughText, startedAt, startedWhen} from './jobs';
+import MiniMachine from './MiniMachine.vue';
 
-const props = defineProps<{job: Job; heading?: string | undefined}>();
+const props = defineProps<{job: Job; heading?: string | undefined; system?: SystemInfo | null | undefined}>();
 defineEmits<{details: [job: Job]; stop: [job: Job]}>();
 const now = useNow();
 
@@ -24,22 +27,22 @@ const elapsed = computed(() => {
   const start = startedAt(props.job);
   return start === null ? null : now.value - start.getTime();
 });
-/** From the time so far and the percent: only when the percent is known and past 3%, and only "circa". */
+/** From the time so far and the percent: only when the percent is known and past 3%, and only "about". */
 const eta = computed(() => {
   const value = percent.value;
   if (!running.value || value === null || value <= 3 || value >= 100 || elapsed.value === null || elapsed.value <= 0) return '';
-  return 'circa ' + roughText(elapsed.value * (100 - value) / value) + ' alla fine';
+  return 'about ' + roughText(elapsed.value * (100 - value) / value) + ' left';
 });
 const when = computed(() => {
-  const at = 'Partito alle ' + startedWhen(props.job);
-  if (running.value) return elapsed.value === null ? at : at + ' · da ' + elapsedText(elapsed.value);
-  if (props.job.state === 'failed' && props.job.code !== null) return at + ' · codice ' + props.job.code;
+  const at = 'Started ' + startedWhen(props.job);
+  if (running.value) return elapsed.value === null ? at : at + ' · for ' + elapsedText(elapsed.value);
+  if (props.job.state === 'failed' && props.job.code !== null) return at + ' · exit code ' + props.job.code;
   return at;
 });
 const ended = computed((): string => {
-  if (props.job.state === 'ok') return 'Finito';
-  if (props.job.state === 'failed') return 'Fallito';
-  if (props.job.state === 'interrupted') return 'Interrotto';
+  if (props.job.state === 'ok') return 'Done';
+  if (props.job.state === 'failed') return 'Failed';
+  if (props.job.state === 'interrupted') return 'Interrupted';
   return '';
 });
 const stoppedAt = computed(() => props.job.state === 'failed' ? failedStep(props.job) : '');
@@ -65,7 +68,7 @@ const barKind = computed(() => ({ok: 'ok', failed: 'bad', interrupted: 'warn', r
     <div class="jp-body">
       <div class="jp-main">
         <div class="jp-figure">
-          <span v-if="running && percent === null" class="jp-big jp-big-word">in corso</span>
+          <span v-if="running && percent === null" class="jp-big jp-big-word">running</span>
           <span v-else-if="running" class="jp-big">{{ percentText }}<small>%</small></span>
           <span v-else class="jp-big jp-big-word" :class="state[1]">{{ ended }}<template v-if="job.state === 'ok'"> ✓</template></span>
           <span v-if="eta" class="jp-eta">{{ eta }}</span>
@@ -73,17 +76,18 @@ const barKind = computed(() => ({ok: 'ok', failed: 'bad', interrupted: 'warn', r
         <div class="jp-bar" :class="[barKind, {indeterminate: running && percent === null}]" role="progressbar"
              :aria-label="job.label" aria-valuemin="0" aria-valuemax="100"
              :aria-valuenow="percent === null ? undefined : Math.floor(percent)"
-             :aria-valuetext="percent === null ? 'in corso, avanzamento non noto' : undefined"><span
+             :aria-valuetext="percent === null ? 'running, progress unknown' : undefined"><span
           :style="percent === null ? undefined : {width: percent + '%'}"></span></div>
         <p v-if="job.progress.detail" class="jp-detail">{{ job.progress.detail }}</p>
-        <p v-if="stoppedAt" class="jp-stopped">Si è fermato al passo <strong>{{ stoppedAt }}</strong>.</p>
+        <p v-if="stoppedAt" class="jp-stopped">It stopped at the step <strong>{{ stoppedAt }}</strong>.</p>
         <p v-if="job.progress.last_line" class="jp-line" :class="{bad: job.state === 'failed'}"
            :title="job.progress.last_line">{{ job.progress.last_line }}</p>
         <slot></slot>
         <div class="jp-actions">
-          <button class="btn small" type="button" @click="$emit('details', job)">Dettagli</button>
-          <button v-if="running && job.stoppable" class="btn small danger" type="button" @click="$emit('stop', job)">Ferma</button>
+          <button class="btn small" type="button" @click="$emit('details', job)"><Icon name="details"/>Details</button>
+          <button v-if="running && job.stoppable" class="btn small danger" type="button" @click="$emit('stop', job)"><Icon name="stop"/>Stop</button>
         </div>
+        <MiniMachine v-if="running && system" :system="system"/>
       </div>
       <JobSteps v-if="steps.length" :steps="steps"/>
     </div>

@@ -26,10 +26,12 @@ from pathlib import Path
 from nnslr_tools.review_hints import empty_stats
 
 # The tabs of the site: (key of the current page, address, label). Account is the icon at the right.
-SITE_TABS = (('overview', '/panoramica', 'Panoramica'), ('route', '/', 'Route'), ('prepare', '/prepara', 'Prepara'),
-             ('train', '/allena', 'Allena'))
-# The tabs that are one Vue app (web/src/control), by address: the app shows the tab of the address.
-CONTROL_TABS = {'/panoramica': 'overview', '/prepara': 'prepare', '/allena': 'train'}
+SITE_TABS = (('overview', '/', 'Overview'), ('prepare', '/prepare', 'Prepare'), ('train', '/train', 'Train'))
+# The tabs that are one Vue app (web/src/control), by address: the app shows the tab of the address. The
+# route list (/routes) is reached from the Overview.
+CONTROL_TABS = {'/': 'overview', '/prepare': 'prepare', '/train': 'train'}
+# Earlier addresses of these pages, kept working.
+OLD_ADDRESSES = {'/panoramica': '/', '/pannello': '/', '/stato': '/', '/prepara': '/prepare', '/allena': '/train'}
 # Dark (the default) or the choice kept in this browser, applied before the first paint
 # (web/src/common/theme.ts changes it).
 THEME_HEAD = ('<script nonce="{nonce}">try{{var t=localStorage.getItem(\'nnslr-theme\');'
@@ -40,16 +42,16 @@ THEME_HEAD = ('<script nonce="{nonce}">try{{var t=localStorage.getItem(\'nnslr-t
 ACCOUNT_MENU = (
     '<div class="account-menu" id="account-menu" data-current="{current}">'
     '<button class="icon-btn account-btn" type="button" id="account-btn" aria-haspopup="dialog" aria-expanded="false"'
-    ' aria-controls="account-pop" aria-label="Account e impostazioni" title="Account">'
+    ' aria-controls="account-pop" aria-label="Account and settings" title="Account">'
     '<svg viewBox="0 0 20 20" aria-hidden="true">'
     '<circle cx="10" cy="7" r="3.4" fill="none" stroke="currentColor" stroke-width="1.8"/>'
     '<path d="M3.6 17.2c.9-3.1 3.4-4.8 6.4-4.8s5.5 1.7 6.4 4.8" fill="none" stroke="currentColor"'
     ' stroke-width="1.8" stroke-linecap="round"/></svg></button>'
-    '<div class="account-pop" id="account-pop" role="dialog" aria-label="Account e impostazioni" hidden></div></div>')
+    '<div class="account-pop" id="account-pop" role="dialog" aria-label="Account and settings" hidden></div></div>')
 LIVE = ('<span class="live" role="status"><span class="dot" id="live-dot"></span>'
-        '<span id="live-text">connessione…</span></span>')
+        '<span id="live-text">connecting…</span></span>')
 # Groups of the route list, in this order: the work in progress first, finished routes last.
-ROUTE_GROUPS = (('doing', 'In corso'), ('todo', 'Da iniziare'), ('done', 'Completate'))
+ROUTE_GROUPS = (('doing', 'In progress'), ('todo', 'To start'), ('done', 'Done'))
 
 
 def asset(name: str) -> str:
@@ -76,12 +78,12 @@ def top_bar(current: str = '', *, live: bool = False, signed_in: bool = True) ->
     The sign-in page (signed_in=False) shows only the brand."""
     end = bar_end(current) if signed_in else ''
     bar = ('<header class="topbar"><div class="topbar-inner">'
-           '<a class="brand" href="/" title="Elenco delle route"><span class="brand-mark" aria-hidden="true">50</span>'
+           '<a class="brand" href="/" title="Overview"><span class="brand-mark" aria-hidden="true">50</span>'
            '<span class="brand-name">Speed limits</span></a>' + (LIVE if live else '') + end + '</div>')
     if signed_in:
         tabs = ''.join('<a href="' + href + '"' + (' aria-current="page"' if key == current else '') + '>'
                        + label + '</a>' for key, href, label in SITE_TABS)
-        bar += '<nav class="tabs" aria-label="Sezioni">' + tabs + '</nav>'
+        bar += '<nav class="tabs" aria-label="Sections">' + tabs + '</nav>'
     return bar + '</header>'
 
 
@@ -139,16 +141,17 @@ def render_account(nonce: str, signed_in_browser: bool) -> str:
     if signed_in_browser:
         return fill(asset('account.html'), nonce, 'account', 'account')
     return simple_page('Account', 'account', nonce,
-                       '<main class="page"><div class="card state-box center"><h1>Account</h1><p>Questo sito è '
-                       'avviato solo per questo computer (127.0.0.1): non chiede di accedere. Sulla rete di casa '
-                       '(servizio <code>speedlimits-web</code>) si entra con nome e password.</p></div></main>')
+                       '<main class="page"><div class="card state-box center"><h1>Account</h1><p>This site was '
+                       'started for this computer only (127.0.0.1): it does not ask you to sign in. On the home '
+                       'network (service <code>speedlimits-web</code>) you sign in with a name and a password.</p>'
+                       '</div></main>')
 # [site-login] - END
 
 
 def simple_page(title: str, current: str, nonce: str, main: str) -> str:
     """A page without a template of its own: the frame, the content, the script of the Account menu."""
     return '\n'.join([
-        '<!doctype html><html lang="it"><head><meta charset="utf-8">',
+        '<!doctype html><html lang="en"><head><meta charset="utf-8">',
         '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">',
         '<meta name="color-scheme" content="light dark">',
         THEME_HEAD.format(nonce=nonce),
@@ -182,25 +185,25 @@ def _route_row(summary: dict) -> str:
     percent = round(confirmed * 100 / total) if total else 0
     state = route_state(confirmed, total)
     # What opening the route means: carry on (the one obvious action), start, or look again at a finished one.
-    action_class, action = {'doing': ('btn small primary open', 'Riprendi →'),
-                            'todo': ('btn small open', 'Inizia →'),
-                            'done': ('btn small open again', 'Ricontrolla')}[state]
+    action_class, action = {'doing': ('btn small primary open', 'Resume →'),
+                            'todo': ('btn small open', 'Start →'),
+                            'done': ('btn small open again', 'Check again')}[state]
     suspicious = summary.get('suspicious_count', 0)
     hint_frames = summary.get('hint_frames', 0)
-    stats = ['<span>' + _plural(total, 'fotogramma', 'fotogrammi') + '</span>',
-             '<span>' + str(summary['frames_with_proposals']) + ' con proposte</span>']
+    stats = ['<span>' + _plural(total, 'frame', 'frames') + '</span>',
+             '<span>' + str(summary['frames_with_proposals']) + ' with proposals</span>']
     if suspicious:
-        stats.append('<span class="sus">' + _plural(suspicious, 'sospetto', 'sospetti') + '</span>')
+        stats.append('<span class="sus">' + _plural(suspicious, 'suspicious', 'suspicious') + '</span>')
     else:
-        stats.append('<span>0 sospetti</span>')
+        stats.append('<span>0 suspicious</span>')
     if hint_frames:
-        stats.append('<span>' + str(hint_frames) + ' con seconda lettura</span>')
+        stats.append('<span>' + str(hint_frames) + ' with second reading</span>')
     route = html.escape(summary['route_id'])
     return ('<li><a class="card-row ' + state + '" href="' + html.escape(summary['url']) + '">'
             + '<span class="state-icon" aria-hidden="true">' + ('✓' if state == 'done' else '') + '</span>'
             + '<span class="route" title="' + route + '">' + route + '</span>'
-            + '<span class="count">' + str(confirmed) + ' di ' + str(total)
-            + ' <span class="unit">confermati</span></span>'
+            + '<span class="count">' + str(confirmed) + ' of ' + str(total)
+            + ' <span class="unit">confirmed</span></span>'
             + '<span class="bar" aria-hidden="true"><span style="width:' + str(percent) + '%"></span></span>'
             + '<span class="stats">' + ''.join(stats) + '</span>'
             + '<span class="' + action_class + '">' + action + '</span></a></li>')
@@ -209,13 +212,13 @@ def _route_row(summary: dict) -> str:
 def render_index(summaries: list[dict], database: Path, nonce: str = '') -> str:
     """The route list, grouped: in progress, to start, done."""
     main = ['<main class="page">',
-            '<header class="page-head"><h1 class="page-title">Route</h1>'
-            '<p class="page-sub">Scegli una route da revisionare. Ogni conferma viene salvata subito '
-            'sul server.</p></header>']
+            '<header class="page-head"><h1 class="page-title">Routes</h1>'
+            '<p class="page-sub">Choose a route to review. Every confirmation is saved on the server '
+            'at once.</p></header>']
     if not summaries:
-        main.append('<div class="card state-box"><h2>Nessuna route da revisionare</h2><p>Prepara una route con '
-                    '<code>nnslr extract-frames</code> e <code>nnslr preannotate</code>, poi ricarica questa '
-                    'pagina.</p></div>')
+        main.append('<div class="card state-box"><h2>No routes to review</h2><p>Prepare a route with '
+                    '<code>nnslr extract-frames</code> and <code>nnslr preannotate</code>, then reload this '
+                    'page.</p></div>')
     grouped: dict[str, list[dict]] = {key: [] for key, _ in ROUTE_GROUPS}
     for summary in summaries:
         grouped[route_state(summary['confirmed_count'], summary['frame_count'])].append(summary)
@@ -227,23 +230,23 @@ def render_index(summaries: list[dict], database: Path, nonce: str = '') -> str:
                     + ' <span class="n">' + str(len(grouped[key])) + '</span></h2><ul class="cards">')
         main.extend(_route_row(summary) for summary in grouped[key])
         main.append('</ul></section>')
-    main.append('<details class="foot"><summary>Dettagli tecnici</summary>'
-                '<p>Database delle revisioni: <code>' + html.escape(str(database)) + '</code></p></details>')
+    main.append('<details class="foot"><summary>Technical details</summary>'
+                '<p>Review database: <code>' + html.escape(str(database)) + '</code></p></details>')
     main.append('</main>')
-    return simple_page('Route', 'route', nonce, '\n'.join(main))
+    return simple_page('Routes', '', nonce, '\n'.join(main))
 
 
 def render_problem(status: int, message: str, nonce: str = '') -> str:
     """An error page (404, 403, ...)."""
-    title = {404: 'Pagina non trovata', 403: 'Accesso negato'}.get(status, 'Errore')
+    title = {404: 'Page not found', 403: 'Access denied'}.get(status, 'Error')
     main = ['<main class="page"><div class="card state-box center">',
-            '<p class="code">Codice HTTP ' + str(status) + '</p>',
+            '<p class="code">HTTP code ' + str(status) + '</p>',
             '<h1>' + html.escape(title) + '</h1>']
-    # "Pagina non trovata." under the title "Pagina non trovata" would only repeat it.
+    # "Page not found." under the title "Page not found" would only repeat it.
     if message.rstrip('.') != title:
         main.append('<p>' + html.escape(message) + '</p>')
     # Every 403 page (token missing or wrong, host not allowed) would come back here from the list.
     if status != 403:
-        main.append('<a class="btn back" href="/">← Elenco delle route</a>')
+        main.append('<a class="btn back" href="/routes">← All routes</a>')
     main.append('</div></main>')
     return simple_page(title, '', nonce, '\n'.join(main))

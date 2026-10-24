@@ -1,14 +1,14 @@
 <!doctype html>
-<html lang="it">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 __NNSLR_THEME__
-<title>Revisione cartelli</title>
+<title>Sign review</title>
 <style>
 __NNSLR_SHARED_CSS__
-/* Revisione cartelli (web/src/review/ReviewApp.vue): patterns built from the shared tokens. */
+/* The sign review (web/src/review/ReviewApp.vue): patterns built from the shared tokens. */
 :root {
   --control: 36px;
   --inspector: 384px;
@@ -155,7 +155,7 @@ input::placeholder { color: var(--placeholder); }
 .btn.tint:hover:not(:disabled) { background: var(--rev-soft); }
 .btn.primary.already, .btn.primary.already:hover:not(:disabled) { background: var(--ok-soft); border-color: var(--ok); color: var(--ok); box-shadow: none; }
 .btn.primary:disabled { opacity: 1; background: var(--accent-soft); border-color: var(--tab-on-ring); color: var(--tab-on-fg); }
-/* Conferma: the label shortens, the Enter key cap stays. */
+/* Confirm: the label shortens, the Enter key cap stays. */
 .btn.confirm { min-width: 0; gap: 10px; }
 .btn-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .keycap { flex: none; font-size: 12px; line-height: 18px; padding: 0 6px; color: inherit; background: rgba(255, 255, 255, 0.18); border: 0; }
@@ -351,7 +351,7 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
 .status-actions { display: flex; gap: 10px; flex: none; }
 .confirm-area { display: flex; flex-direction: column; gap: 6px; }
 .confirm-area .btn.primary { width: 100%; min-height: 48px; font-size: 15.5px; }
-/* Keyboard shortcuts, right under Conferma; hidden on touch screens. */
+/* Keyboard shortcuts, right under Confirm; hidden on touch screens. */
 .keys { margin: 4px 0 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 12px; font-size: 12px; color: var(--muted); line-height: 1.9; }
 .keys span { white-space: nowrap; }
 .state-box {
@@ -377,7 +377,7 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
     overflow-y: auto; overscroll-behavior: contain; scroll-padding-bottom: 170px;
     background: var(--surface); border: 0; border-left: 1px solid var(--line); border-radius: 0; box-shadow: none;
   }
-  /* No box selected: the list takes the free height, "Altro" sits with the confirm block at the bottom. */
+  /* No box selected: the list takes the free height, "More" sits with the confirm block at the bottom. */
   .panel:not(.editing) > section:first-child { flex: 1 0 auto; }
   .panel .confirm-section {
     position: sticky; bottom: 0; z-index: 2; margin-top: auto; padding: 10px 20px 14px;
@@ -386,7 +386,7 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
   .panel .confirm-section.quiet .status-line { min-height: 0; }
 }
 @media (min-width: 641px) {
-  /* "+ Riquadro" and "Annulla" take the same width: the bar never re-wraps while drawing. */
+  /* "+ Box" and "Cancel" take the same width: the bar never re-wraps while drawing. */
   #draw { min-width: 7.5em; }
 }
 @media (min-width: 981px) and (max-width: 1400px) {

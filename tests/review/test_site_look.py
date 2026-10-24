@@ -25,7 +25,7 @@ def served(tmp_path):
     server.close()
 
 
-PAGES = [('/', 'Route'), ('/panoramica', 'Panoramica'), ('/prepara', 'Prepara'), ('/allena', 'Allena'),
+PAGES = [('/', 'Overview'), ('/prepare', 'Prepare'), ('/train', 'Train'), ('/routes', None),
          ('/account', None), (f'/route/{ROUTE}/', None), ('/nonexistent', None)]
 
 
@@ -46,12 +46,12 @@ def test_every_page_has_the_shared_look_the_account_menu_and_its_script(served, 
     assert '__NNSLR_' not in page.replace('"server": false', '')
     tabs = re.search(r'<nav class="tabs".*?</nav>', page, re.S)
     if tab is not None:
-        assert tabs and re.findall(r'>([^<]+)</a>', tabs.group(0)) == ['Panoramica', 'Route', 'Prepara', 'Allena']
+        assert tabs and re.findall(r'>([^<]+)</a>', tabs.group(0)) == ['Overview', 'Prepare', 'Train']
         assert f'aria-current="page">{tab}</a>' in tabs.group(0)
 
 
 def test_control_page_reads_the_panel_status(served):
-    page = served.request('GET', '/panoramica')[2].decode()
+    page = served.request('GET', '/')[2].decode()
     script = asset('js/control.js')
     assert script in page and '/api/panel/status' in script and 'cores' in script and 'gpu-procs' in script
 

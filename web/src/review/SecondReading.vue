@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// "Seconda lettura": what another model saw in the frame, one row per sign, with "Usa" to turn it into a box.
+// "Second reading": what another model saw in the frame, one row per sign, with "Use" to turn it into a box.
 // Only on the frames the second opinion has looked at.
 import {computed} from 'vue';
 import {releaseFocus} from './dom';
@@ -16,8 +16,8 @@ const stats = statsLine();
 
 <template>
   <section id="hintSection" :hidden="hints.length === 0">
-    <div class="section-head"><h2>Seconda lettura</h2></div>
-    <p class="hint-intro">Un altro modello ha guardato il fotogramma. Usala solo se lo vedi anche tu.</p>
+    <div class="section-head"><h2>Second reading</h2></div>
+    <p class="hint-intro">Another model looked at the frame. Use it only if you see it too.</p>
     <div class="hint-list" id="hintList">
       <div v-for="item in rows" :key="item.index" class="hint-row">
         <div class="hint-text">
@@ -28,9 +28,9 @@ const stats = statsLine();
           </div>
           <p v-if="item.note" class="hint-note">{{ item.note }}</p>
         </div>
-        <button v-if="item.used" type="button" class="btn small tint" :data-hint-index="item.index" disabled>Già usato</button>
+        <button v-if="item.used" type="button" class="btn small tint" :data-hint-index="item.index" disabled>Already used</button>
         <button v-else type="button" class="btn small tint" :data-hint-index="item.index" :aria-label="item.useLabel"
-                @click="useHint(item.index); releaseFocus($event)">Usa</button>
+                @click="useHint(item.index); releaseFocus($event)">Use</button>
       </div>
     </div>
     <p class="hint-stats" id="hintStats">{{ hints.length === 0 ? '' : stats }}</p>

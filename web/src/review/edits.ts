@@ -98,7 +98,7 @@ export function addManualBox(row: FrameRow, box: Box, family: string, value: num
   changed(row);
 }
 
-/** "Usa": the sign of the second reading becomes a box of the frame. */
+/** "Use": the sign of the second reading becomes a box of the frame. */
 export function useHint(index: number): void {
   const row = currentRow();
   if (!row) return;
@@ -109,7 +109,7 @@ export function useHint(index: number): void {
   addManualBox(row, [...hint.box], family, value);
 }
 
-/** Physical site or encounter of the frame (under "Altro"); empty: none. */
+/** Physical site or encounter of the frame (under "More"); empty: none. */
 export function setFrameField(row: FrameRow, key: 'site_group' | 'encounter_id', value: string): void {
   const trimmed = value.trim();
   workOf(row)[key] = trimmed === '' ? null : trimmed;

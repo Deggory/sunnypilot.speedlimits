@@ -99,13 +99,13 @@ export function aiConfirmed(key: string): boolean {
 export function statusLabel(key: string): string {
   const status = frameStatus(key);
   const s = state.edits[key];
-  if (status === 'done' && aiConfirmed(key)) return 'Confermato · AI';
-  if (status === 'done') return 'Confermato';
-  if (status === 'saving') return 'Salvataggio…';
-  if (status === 'error') return s && s.error ? 'Non salvato' : 'In attesa';
-  if (status === 'dirty') return s && s.server_confirmed ? 'Da riconfermare' : 'Da confermare';
-  if (reasonsOf(key).length > 0) return 'Sospetto';
-  return 'Da rivedere';
+  if (status === 'done' && aiConfirmed(key)) return 'Confirmed · AI';
+  if (status === 'done') return 'Confirmed';
+  if (status === 'saving') return 'Saving…';
+  if (status === 'error') return s && s.error ? 'Not saved' : 'Waiting';
+  if (status === 'dirty') return s && s.server_confirmed ? 'To confirm again' : 'To confirm';
+  if (reasonsOf(key).length > 0) return 'Suspicious';
+  return 'To review';
 }
 
 export interface Doubts {

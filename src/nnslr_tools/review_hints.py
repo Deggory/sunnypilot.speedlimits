@@ -244,19 +244,19 @@ def frame_sizes_of(rows: list[dict]) -> dict:
 # ---------- suspicious frames ----------
 
 def _join_words(words: list[str]) -> str:
-    """'a', 'a e b', 'a, b e c'."""
+    """'a', 'a and b', 'a, b and c'."""
     if not words:
         return ''
     if len(words) == 1:
         return words[0]
-    return ', '.join(words[:-1]) + ' e ' + words[-1]
+    return ', '.join(words[:-1]) + ' and ' + words[-1]
 
 
-UNREADABLE_LIMIT = 'un limite illeggibile'
+UNREADABLE_LIMIT = 'an unreadable limit'
 
 
 def _unique(words: list[str]) -> list[str]:
-    """Words without repetitions; "un limite illeggibile" only when nothing better was read."""
+    """Words without repetitions; "an unreadable limit" only when nothing better was read."""
     result = []
     for word in words:
         if word not in result:
@@ -273,7 +273,7 @@ def _with_value(word: str, value) -> str:
 
 
 def hint_words(hint: dict) -> str:
-    """Short Italian description of a hint: '60', 'fine limite 60', 'zona 30', ..."""
+    """Short English description of a hint: '60', 'end of limit 60', 'zone 30', ..."""
     kind = hint['type']
     value = hint['value_kph']
     if kind == 'maximum_speed':
@@ -281,21 +281,21 @@ def hint_words(hint: dict) -> str:
             return UNREADABLE_LIMIT
         return str(value)
     elif kind == 'cancellation':
-        return _with_value('fine limite', value)
+        return _with_value('end of limit', value)
     elif kind == 'zone':
-        return _with_value('zona', value)
+        return _with_value('zone', value)
     elif kind == 'zone_end':
-        return _with_value('fine zona', value)
+        return _with_value('end of zone', value)
     elif kind == 'variable_display':
-        return _with_value('display variabile', value)
+        return _with_value('variable display', value)
     elif kind == 'road_marking':
-        return _with_value('numero a terra', value)
+        return _with_value('number on the road', value)
     else:
-        return 'un cartello incerto'
+        return 'an uncertain sign'
 
 
 def box_words(detection: dict) -> str:
-    """Short Italian description of a speed box (model proposal or confirmed box)."""
+    """Short English description of a speed box (model proposal or confirmed box)."""
     family = detection.get('family')
     value = detection.get('value_kph')
     if family == 'maximum_speed':
@@ -303,11 +303,11 @@ def box_words(detection: dict) -> str:
             return UNREADABLE_LIMIT
         return str(value)
     elif family == 'cancellation':
-        return _with_value('fine limite', value)
+        return _with_value('end of limit', value)
     elif family == 'zone':
-        return _with_value('zona', value)
+        return _with_value('zone', value)
     else:
-        return _with_value('display variabile', value)
+        return _with_value('variable display', value)
 
 
 def speed_boxes(detections) -> list[dict]:
@@ -370,17 +370,17 @@ def _neighbours(frames: list[dict], position: int) -> list[tuple[str, dict]]:
     if position > 0:
         previous = frames[position - 1]
         if previous['segment'] == current['segment'] or previous['segment'] == current['segment'] - 1:
-            found.append(('precedente', previous))
+            found.append(('previous', previous))
     if position + 1 < len(frames):
         following = frames[position + 1]
         if following['segment'] == current['segment'] or following['segment'] == current['segment'] + 1:
-            found.append(('successivo', following))
+            found.append(('next', following))
     return found
 
 
 def suspicious_frames(rows: list[dict], hints_by_frame: dict, confirmed: dict, *,
                       hints_available: bool) -> dict:
-    """{frame_key: [{'rule': 'a'..'d', 'text': Italian reason}, ...]} of the suspicious frames.
+    """{frame_key: [{'rule': 'a'..'d', 'text': English reason}, ...]} of the suspicious frames.
 
     ``confirmed`` maps the confirmed frames to their reviewed detections.
     Confirmed frames are never suspicious. ``hints_available`` tells whether
@@ -404,16 +404,16 @@ def suspicious_frames(rows: list[dict], hints_by_frame: dict, confirmed: dict, *
             words = []
             for hint in sure:
                 words.append(hint_words(hint))
-            reasons.append({'rule': 'a', 'text': 'seconda lettura vede ' + _join_words(_unique(words))
-                            + ', il modello niente'})
+            reasons.append({'rule': 'a', 'text': 'second reading sees ' + _join_words(_unique(words))
+                            + ', the model nothing'})
 
         # b) The model proposes a speed sign, the second reading sees nothing at all.
         if proposals and not hints and hints_available:
             words = []
             for proposal in proposals:
                 words.append(box_words(proposal))
-            reasons.append({'rule': 'b', 'text': 'il modello vede ' + _join_words(_unique(words))
-                            + ', la seconda lettura niente'})
+            reasons.append({'rule': 'b', 'text': 'the model sees ' + _join_words(_unique(words))
+                            + ', the second reading nothing'})
 
         # c) Both read a value and no value is the same.
         hint_values = _values(hints)
@@ -424,8 +424,8 @@ def suspicious_frames(rows: list[dict], hints_by_frame: dict, confirmed: dict, *
                 if value in model_values:
                     common = True
             if not common:
-                reasons.append({'rule': 'c', 'text': 'seconda lettura vede ' + _value_words(hint_values)
-                                + ', il modello ' + _value_words(model_values)})
+                reasons.append({'rule': 'c', 'text': 'second reading sees ' + _value_words(hint_values)
+                                + ', the model ' + _value_words(model_values)})
 
         # d) A neighbour has a confirmed speed box or a fairly sure hint, this frame has neither proposal nor hint.
         if not proposals and not hints:
@@ -436,8 +436,8 @@ def suspicious_frames(rows: list[dict], hints_by_frame: dict, confirmed: dict, *
                         words = []
                         for box in boxes:
                             words.append(box_words(box))
-                        reasons.append({'rule': 'd', 'text': 'nel fotogramma ' + side + ' c’è un cartello confermato ('
-                                        + _join_words(_unique(words)) + '), qui niente'})
+                        reasons.append({'rule': 'd', 'text': 'the ' + side + ' frame has a confirmed sign ('
+                                        + _join_words(_unique(words)) + '), here nothing'})
                     # A reviewed neighbour takes precedence over unreviewed hints,
                     # even when its confirmed box list is intentionally empty.
                     continue
@@ -446,8 +446,8 @@ def suspicious_frames(rows: list[dict], hints_by_frame: dict, confirmed: dict, *
                     words = []
                     for hint in neighbour_sure:
                         words.append(hint_words(hint))
-                    reasons.append({'rule': 'd', 'text': 'nel fotogramma ' + side + ' la seconda lettura vede '
-                                    + _join_words(_unique(words)) + ', qui niente'})
+                    reasons.append({'rule': 'd', 'text': 'in the ' + side + ' frame the second reading sees '
+                                    + _join_words(_unique(words)) + ', here nothing'})
 
         if reasons:
             result[key] = reasons

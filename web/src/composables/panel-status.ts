@@ -1,4 +1,4 @@
-// GET /api/panel/status every 4 s, for the control pages (Panoramica, Prepara, Allena), and the live dot of the top bar
+// GET /api/panel/status every 4 s, for the control pages (Overview, Prepare, Train), and the live dot of the top bar
 // (#live-dot, #live-text, rendered by pages.py outside the Vue app).
 import {onBeforeUnmount, onMounted, shallowRef} from 'vue';
 import {api, messageOf} from '../common/api';
@@ -28,9 +28,9 @@ export function usePanelStatus(onUpdate?: (status: PanelStatus) => void) {
       const answer = await api<PanelStatus>('/api/panel/status');
       status.value = answer;
       onUpdate?.(answer);
-      showLive('aggiornato ' + clock(), true);
+      showLive('updated ' + clock(), true);
     } catch (error) {
-      showLive('non raggiungibile: ' + messageOf(error), false);
+      showLive('unreachable: ' + messageOf(error), false);
     }
   }
   onMounted(() => {

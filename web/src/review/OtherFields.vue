@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// "Altro": physical site and encounter of the frame, the JSONL export, where the reviews are kept, what the
+// "More": physical site and encounter of the frame, the JSONL export, where the reviews are kept, what the
 // proposals are.
 import {setFrameField} from './edits';
 import {exportJsonl} from './export';
@@ -9,38 +9,37 @@ import type {FrameEdit, FrameRow} from './types';
 
 defineProps<{row: FrameRow; work: FrameEdit}>();
 
-const SERVER_NOTE = 'Ogni conferma viene salvata nel database del server. Se il salvataggio non riesce, il fotogramma '
-  + 'resta segnato “non salvato” e viene ritentato; nel frattempo le modifiche restano in questo browser. Il JSONL '
-  + 'resta disponibile come copia di sicurezza. Un frame senza riquadri non è automaticamente un esempio negativo: '
-  + 'va controllato e confermato.';
-const OFFLINE_NOTE = 'Le modifiche sono salvate in questo browser. Esporta il JSONL per conservarle fuori dal browser; '
-  + 'il file originale delle proposte resta invariato. Un frame senza riquadri non è automaticamente un esempio '
-  + 'negativo: va controllato e confermato.';
+const SERVER_NOTE = 'Every confirmation is saved in the server’s database. If a save fails, the frame stays marked '
+  + '“not saved” and is tried again; meanwhile the changes stay in this browser. The JSONL stays available as a backup '
+  + 'copy. A frame without boxes is not a negative example by itself: it has to be checked and confirmed.';
+const OFFLINE_NOTE = 'The changes are saved in this browser. Export the JSONL to keep them outside the browser; the '
+  + 'original file of the proposals stays as it is. A frame without boxes is not a negative example by itself: it has '
+  + 'to be checked and confirmed.';
 
 </script>
 
 <template>
   <section>
     <details>
-      <summary>Altro</summary>
+      <summary>More</summary>
       <div class="stack">
         <!-- The frame's own physical site and encounter, else the report's. -->
-        <label>Sito fisico
+        <label>Physical site
           <input v-fill="work.site_group ?? row.site_group ?? ''" type="text" id="site_group"
-                 placeholder="Stesso identificativo nelle altre route" autocomplete="off" @change="setFrameField(row, 'site_group', ($event.target as HTMLInputElement).value)">
+                 placeholder="Same identifier in the other routes" autocomplete="off" @change="setFrameField(row, 'site_group', ($event.target as HTMLInputElement).value)">
         </label>
-        <label>Incontro
+        <label>Encounter
           <input v-fill="work.encounter_id ?? row.encounter_id ?? ''" type="text" id="encounter_id"
-                 placeholder="Stesso identificativo nei frame vicini" autocomplete="off" @change="setFrameField(row, 'encounter_id', ($event.target as HTMLInputElement).value)">
+                 placeholder="Same identifier in the nearby frames" autocomplete="off" @change="setFrameField(row, 'encounter_id', ($event.target as HTMLInputElement).value)">
         </label>
         <div class="row">
-          <button type="button" class="btn small" id="export" @click="exportJsonl">Scarica revisioni JSONL</button>
+          <button type="button" class="btn small" id="export" @click="exportJsonl">Download reviews (JSONL)</button>
           <span :class="state.exportMessage ? 'save-msg ' + (state.exportMessage.ok ? 'ok' : 'error') : 'save-msg'"
                 id="exportMsg" role="status">{{ state.exportMessage?.text }}</span>
         </div>
         <p id="storageNote">{{ report.apiBase ? SERVER_NOTE : OFFLINE_NOTE }}</p>
-        <p>Proposte di cartelli da un modello addestrato in Vietnam e numeri sull’asfalto da OCR verificato con segmentazione della strada. Modelli non validati sulle strade svizzere. Conferma solo ciò che riesci a vedere. Il numero proposto non è il limite applicabile alla vettura.</p>
-        <p>Lascia sconosciuto ciò che non puoi verificare. L’istante di passaggio resta non annotato. Ogni revisione viene controllata con le regole di import-annotations prima di entrare nel dataset.</p>
+        <p>Sign proposals come from a model trained in Vietnam, and the numbers on the road from OCR checked with road segmentation. The models are not validated on Swiss roads. Confirm only what you can see. The proposed number is not the limit that applies to the car.</p>
+        <p>Leave unknown what you cannot check. The moment of passing stays unannotated. Every review is checked against the rules of import-annotations before it enters the dataset.</p>
       </div>
     </details>
   </section>

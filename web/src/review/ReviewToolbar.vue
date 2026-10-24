@@ -2,6 +2,7 @@
 // The one-row bar on top: brand, route picker, filters, route progress, reviewer name and the Account menu
 // (none in the offline report, which has no account).
 import {computed, useTemplateRef, watch} from 'vue';
+import {thousands} from '../common/format';
 import AccountMenu from '../components/AccountMenu.vue';
 import {writeLocal} from './dom';
 import {routeCounts} from './current';
@@ -16,10 +17,10 @@ interface FilterButton {
   title?: string;
 }
 const FILTERS: readonly FilterButton[] = [
-  {filter: 'todo', label: 'Da rivedere', title: 'Non ancora confermati'},
-  {filter: 'suspicious', label: 'Sospetti', title: 'Il modello e la seconda lettura non sono d’accordo'},
-  {filter: 'proposals', label: 'Con proposte', title: 'Con proposte del modello'},
-  {filter: 'all', label: 'Tutti'},
+  {filter: 'todo', label: 'To review', title: 'Not confirmed yet'},
+  {filter: 'suspicious', label: 'Suspicious', title: 'The model and the second reading disagree'},
+  {filter: 'proposals', label: 'With proposals', title: 'With proposals of the model'},
+  {filter: 'all', label: 'All'},
 ];
 
 const header = useTemplateRef<HTMLElement>('header');
@@ -33,7 +34,7 @@ const options = computed(() => {
     value: String(route.url || ''), text: String(route.route_id || ''), selected: route.route_id === report.routeId,
   }));
   if (!list.some((option) => option.selected)) {
-    list.unshift({value: '', text: report.routeId ? report.routeId : 'Report locale', selected: true});
+    list.unshift({value: '', text: report.routeId ? report.routeId : 'Local report', selected: true});
   }
   return list;
 });
@@ -62,7 +63,7 @@ watch(() => state.reviewerFocus, () => reviewerInput.value?.focus(), {flush: 'sy
 <template>
   <header ref="header" class="topbar">
     <div class="topbar-inner">
-      <a class="brand" id="brand" :href="online ? '/' : undefined" :title="online ? 'Elenco delle route' : undefined"><span class="brand-mark" aria-hidden="true">50</span><span class="brand-name">Speed limits</span></a>
+      <a class="brand" id="brand" :href="online ? '/' : undefined" :title="online ? 'Overview' : undefined"><span class="brand-mark" aria-hidden="true">50</span><span class="brand-name">Speed limits</span></a>
       <div class="route-pick">
         <label for="route" class="sr-only">Route</label>
         <select id="route" :disabled="report.routes.length <= 1" @change="changeRoute">
@@ -70,27 +71,27 @@ watch(() => state.reviewerFocus, () => reviewerInput.value?.focus(), {flush: 'sy
                   :selected="option.selected">{{ option.text }}</option>
         </select>
       </div>
-      <div class="filters" role="group" aria-label="Quali fotogrammi mostrare">
+      <div class="filters" role="group" aria-label="Which frames to show">
         <button v-for="item in FILTERS" :key="item.filter" type="button" :data-filter="item.filter"
                 :aria-pressed="state.filter === item.filter" :title="item.title"
                 @click="pickFilter(item.filter)">{{ item.label }}</button>
         <!-- Only when an AI confirmed some frames (or while it is the filter in use). -->
         <button type="button" data-filter="ai" :aria-pressed="state.filter === 'ai'"
-                title="Confermati da un revisore AI (REST API o MCP)"
+                title="Confirmed by an AI reviewer (REST API or MCP)"
                 :hidden="counts.byAi === 0 && state.filter !== 'ai'" @click="pickFilter('ai')">AI · {{ counts.byAi }}</button>
       </div>
       <div class="progress" aria-live="polite">
         <div class="progress-text" id="progressText">
-          <template v-if="counts.total === 0">Nessun fotogramma</template>
-          <template v-else><strong>{{ counts.done }} di {{ counts.total }}</strong> confermati<template v-if="counts.suspicious > 0 || report.routeHasHints"> · <span :class="{sus: counts.suspicious > 0}">{{ counts.suspicious === 1 ? '1 sospetto' : counts.suspicious + ' sospetti' }}</span></template></template>
+          <template v-if="counts.total === 0">No frames</template>
+          <template v-else><strong>{{ thousands(counts.done) }} of {{ thousands(counts.total) }}</strong> confirmed<template v-if="counts.suspicious > 0 || report.routeHasHints"> · <span :class="{sus: counts.suspicious > 0}">{{ thousands(counts.suspicious) }} suspicious</span></template></template>
         </div>
         <div class="progress-bar"><span id="progressBar" :style="{width: barWidth}"></span></div>
       </div>
       <span class="progress-short" id="progressShort" aria-hidden="true">{{ counts.done }}/{{ counts.total }}</span>
       <div class="reviewer">
-        <label for="reviewer" class="sr-only">Revisore</label>
+        <label for="reviewer" class="sr-only">Reviewer</label>
         <input ref="reviewerInput" type="text" id="reviewer" :class="{need: state.reviewerNeeded}" maxlength="100"
-               placeholder="Revisore" autocomplete="name" spellcheck="false" :value="state.reviewer" @input="typed">
+               placeholder="Reviewer" autocomplete="name" spellcheck="false" :value="state.reviewer" @input="typed">
       </div>
       <div class="account-menu" id="account-menu" data-current="false" :hidden="!online"><AccountMenu v-if="online"/></div>
     </div>

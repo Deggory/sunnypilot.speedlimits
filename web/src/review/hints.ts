@@ -1,4 +1,4 @@
-// "Seconda lettura" in the panel: what another model saw in the frame, one row per sign, with "Usa" to turn
+// "Second reading" in the panel: what another model saw in the frame, one row per sign, with "Use" to turn
 // it into a box. Only on the frames the second opinion has looked at. The rows as data for SecondReading.vue.
 import {confidenceLabel, familyForHint, hasValue, hintTypeOf, sideLabel} from './catalog';
 import {overlap, sameBox} from './geometry';
@@ -6,16 +6,16 @@ import {report} from './store';
 import type {FrameEdit, Hint} from './types';
 
 export interface HintRow {
-  /** The index of the first reading of the group in the frame's hints ("Usa" takes that one). */
+  /** The index of the first reading of the group in the frame's hints ("Use" takes that one). */
   index: number;
   text: string;
   confidence: string;
   confidenceText: string;
-  /** "lettura A · a destra", or empty. */
+  /** "reading A · on the right", or empty. */
   sub: string;
   note: string;
   used: boolean;
-  /** The accessible name of "Usa". */
+  /** The accessible name of "Use". */
   useLabel: string;
 }
 
@@ -53,8 +53,8 @@ function hintRow(hints: readonly Hint[], group: readonly number[], work: FrameEd
     if (pass && !passes.includes(pass)) passes.push(pass);
   }
   const parts: string[] = [];
-  if (passes.length === 1) parts.push('lettura ' + passes[0]);
-  if (passes.length > 1) parts.push('letture ' + passes.join(' e '));
+  if (passes.length === 1) parts.push('reading ' + passes[0]);
+  if (passes.length > 1) parts.push('readings ' + passes.join(' and '));
   if (h.side) parts.push(sideLabel(h.side));
   return {
     index: i,
@@ -64,7 +64,7 @@ function hintRow(hints: readonly Hint[], group: readonly number[], work: FrameEd
     sub: parts.join(' · '),
     note: h.note ?? '',
     used: alreadyUsed(work, h),
-    useLabel: 'Usa questo: ' + text + (h.pass ? ' (lettura ' + h.pass + ')' : ''),
+    useLabel: 'Use this: ' + text + (h.pass ? ' (reading ' + h.pass + ')' : ''),
   };
 }
 
@@ -72,14 +72,14 @@ export function hintRows(hints: readonly Hint[], work: FrameEdit): HintRow[] {
   return groupReadings(hints).map((group) => hintRow(hints, group, work)).filter((row) => row !== null);
 }
 
-/** "Seconda lettura su 148 fotogrammi di questa route · 2 voci scartate perché non valide." */
+/** "Second reading on 148 frames of this route · 2 entries dropped as invalid." */
 export function statsLine(): string {
   const stats = report.hintStats;
   if (!stats) return '';
-  let line = 'Seconda lettura su ' + stats.frames + (stats.frames === 1 ? ' fotogramma' : ' fotogrammi')
-    + ' di questa route';
+  let line = 'Second reading on ' + stats.frames + (stats.frames === 1 ? ' frame' : ' frames')
+    + ' of this route';
   const skipped = (stats.skipped_lines || 0) + (stats.skipped_signs || 0) + (stats.skipped_files || 0);
-  if (skipped === 1) line += ' · 1 voce scartata perché non valida';
-  if (skipped > 1) line += ' · ' + skipped + ' voci scartate perché non valide';
+  if (skipped === 1) line += ' · 1 entry dropped as invalid';
+  if (skipped > 1) line += ' · ' + skipped + ' entries dropped as invalid';
   return line + '.';
 }

@@ -1,4 +1,4 @@
-// Keyboard shortcuts: ← → frame, Invio conferma, N new box, H second reading, Canc remove, Esc cancel.
+// Keyboard shortcuts: ← → frame, Enter confirm, N new box, H second reading, Del (or Backspace) remove, Esc cancel.
 import {onBeforeUnmount, onMounted} from 'vue';
 import {confirmFrame} from './confirm';
 import {cancelAll, removeSelected, toggleDrawing, toggleHints} from './edits';

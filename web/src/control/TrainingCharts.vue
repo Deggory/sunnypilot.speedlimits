@@ -39,16 +39,15 @@ function best(curve: TrainingCurve, pick: (point: EpochPoint) => number | undefi
   }
   return found;
 }
-// Italian decimals: a comma.
-const loss = (value: number): string => (value >= 10 ? value.toFixed(1) : value >= 1 ? value.toFixed(2) : value.toFixed(3)).replace('.', ',');
-const lossAxis = (value: number): string => value === 0 ? '0' : Number(value.toPrecision(3)).toString().replace('.', ',');
-const percent = (value: number): string => (Math.round(value * 10) / 10).toString().replace('.', ',') + '%';
+const loss = (value: number): string => value >= 10 ? value.toFixed(1) : value >= 1 ? value.toFixed(2) : value.toFixed(3);
+const lossAxis = (value: number): string => value === 0 ? '0' : Number(value.toPrecision(3)).toString();
+const percent = (value: number): string => (Math.round(value * 10) / 10).toString() + '%';
 const percentAxis = (value: number): string => Math.round(value) + '%';
 
 function lossSeries(curve: TrainingCurve): ChartSeries[] {
   return [
     {key: 'train', label: 'train', color: TRAIN, values: column(curve, (point) => point.train_loss)},
-    {key: 'val', label: 'validazione', color: VAL, values: column(curve, (point) => point.val_loss)},
+    {key: 'val', label: 'validation', color: VAL, values: column(curve, (point) => point.val_loss)},
   ];
 }
 const detectorBest = computed(() => hasPoints(detector.value) ? best(detector.value, (point) => point.val_loss, false) : null);
@@ -75,7 +74,7 @@ const left = computed(() => {
   const curve = currentCurve.value;
   if (!running.value || curve === null || perEpoch.value === null) return '';
   const epochsLeft = curve.epochs - lastEpoch.value;
-  return epochsLeft > 0 ? 'fine del ' + current.value + ' circa fra ' + roughText(epochsLeft * perEpoch.value * 1000) : '';
+  return epochsLeft > 0 ? 'the ' + current.value + ' ends in about ' + roughText(epochsLeft * perEpoch.value * 1000) : '';
 });
 /** Still in the steps before the first network. */
 const beforeEpochs = computed(() => running.value && ['import', 'split', 'gpu_env', 'checks']
@@ -90,69 +89,69 @@ const tables = computed(() => (['detector', 'reader'] as Net[]).flatMap((net) =>
 
 <template>
   <section class="card training" aria-labelledby="training-title">
-    <h2 id="training-title">Andamento dell’allenamento</h2>
+    <h2 id="training-title">How the training is going</h2>
     <div v-if="!hasAny" class="training-wait">
       <svg viewBox="0 0 48 32" aria-hidden="true"><path d="M3 27h42M3 27V4" fill="none" stroke="currentColor" stroke-width="1.5"
         stroke-linecap="round"/><path d="M7 9c6 2 9 9 15 12s12 2 21 3" fill="none" stroke="currentColor" stroke-width="2"
         stroke-linecap="round" stroke-dasharray="2 4"/></svg>
-      <p><strong>Le curve compaiono alla fine della prima epoca.</strong><span v-if="beforeEpochs">Prima il training importa le revisioni,
-        controlla il dataset e prepara la GPU: qualche minuto.</span></p>
+      <p><strong>The curves appear at the end of the first epoch.</strong><span v-if="beforeEpochs">First the training imports the reviews,
+        checks the dataset and prepares the GPU: a few minutes.</span></p>
     </div>
     <template v-else>
       <div class="tiles">
         <div class="tile">
-          <span class="tile-label">{{ running ? 'Epoca' : 'Epoche fatte' }}</span>
-          <span class="tile-value">{{ lastEpoch }}<small> di {{ currentCurve?.epochs ?? '–' }}</small></span>
-          <span class="tile-note">{{ current === null ? '' : current + (running ? ', in corso' : '') }}</span>
+          <span class="tile-label">{{ running ? 'Epoch' : 'Epochs done' }}</span>
+          <span class="tile-value">{{ lastEpoch }}<small> of {{ currentCurve?.epochs ?? '–' }}</small></span>
+          <span class="tile-note">{{ current === null ? '' : current + (running ? ', running' : '') }}</span>
         </div>
         <div v-if="detectorBest" class="tile">
-          <span class="tile-label">Miglior loss di validazione</span>
+          <span class="tile-label">Best validation loss</span>
           <span class="tile-value">{{ loss(detectorBest.value) }}</span>
-          <span class="tile-note">detector, epoca {{ detectorBest.epoch }}</span>
+          <span class="tile-note">detector, epoch {{ detectorBest.epoch }}</span>
         </div>
         <div v-if="readerBestAccuracy" class="tile">
-          <span class="tile-label">Miglior accuratezza di validazione</span>
+          <span class="tile-label">Best validation accuracy</span>
           <span class="tile-value">{{ percent(readerBestAccuracy.value * 100) }}</span>
-          <span class="tile-note">reader, epoca {{ readerBestAccuracy.epoch }}</span>
+          <span class="tile-note">reader, epoch {{ readerBestAccuracy.epoch }}</span>
         </div>
         <div v-if="perEpoch !== null" class="tile">
-          <span class="tile-label">Tempo per epoca</span>
+          <span class="tile-label">Time per epoch</span>
           <span class="tile-value">{{ elapsedText(perEpoch * 1000) }}</span>
-          <span class="tile-note">{{ left || (current + ', media delle ultime epoche') }}</span>
+          <span class="tile-note">{{ left || (current + ', mean of the last epochs') }}</span>
         </div>
       </div>
 
       <div class="net">
-        <h3>{{ NET_NAME.detector }}<span>trova i cartelli nel fotogramma · loss, più bassa è meglio</span></h3>
-        <LineChart v-if="hasPoints(detector)" title="Loss del detector" :series="lossSeries(detector)" :epochs="detector.epochs"
-                   :format="lossAxis" :best="detectorBest ? {series: 'val', epoch: detectorBest.epoch, label: 'migliore'} : null"
+        <h3>{{ NET_NAME.detector }}<span>finds the signs in the frame · loss, lower is better</span></h3>
+        <LineChart v-if="hasPoints(detector)" title="Detector loss" :series="lossSeries(detector)" :epochs="detector.epochs"
+                   :format="lossAxis" :best="detectorBest ? {series: 'val', epoch: detectorBest.epoch, label: 'best'} : null"
                    :running="isRunning('detector')"/>
-        <p v-else class="net-wait">Le curve del detector compaiono alla fine della sua prima epoca.</p>
+        <p v-else class="net-wait">The detector’s curves appear at the end of its first epoch.</p>
       </div>
 
       <div class="net">
-        <h3>{{ NET_NAME.reader }}<span>legge il limite sul cartello · accuratezza, più alta è meglio, e loss</span></h3>
+        <h3>{{ NET_NAME.reader }}<span>reads the limit on the sign · accuracy, higher is better, and loss</span></h3>
         <div v-if="hasPoints(reader)" class="net-charts">
-          <LineChart title="Accuratezza del reader" :top="100" :format="percentAxis" :epochs="reader.epochs"
+          <LineChart title="Reader accuracy" :top="100" :format="percentAxis" :epochs="reader.epochs"
                      :series="[{key: 'train', label: 'train', color: TRAIN, values: column(reader, (point) => point.train_accuracy, 100)},
-                               {key: 'val', label: 'validazione', color: VAL, values: column(reader, (point) => point.val_accuracy, 100)}]"
-                     :best="readerBestAccuracy ? {series: 'val', epoch: readerBestAccuracy.epoch, label: 'migliore'} : null"
+                               {key: 'val', label: 'validation', color: VAL, values: column(reader, (point) => point.val_accuracy, 100)}]"
+                     :best="readerBestAccuracy ? {series: 'val', epoch: readerBestAccuracy.epoch, label: 'best'} : null"
                      :running="isRunning('reader')"/>
-          <LineChart title="Loss del reader" :series="lossSeries(reader)" :epochs="reader.epochs" :format="lossAxis"
-                     :best="readerBestLoss ? {series: 'val', epoch: readerBestLoss.epoch, label: 'migliore'} : null"
+          <LineChart title="Reader loss" :series="lossSeries(reader)" :epochs="reader.epochs" :format="lossAxis"
+                     :best="readerBestLoss ? {series: 'val', epoch: readerBestLoss.epoch, label: 'best'} : null"
                      :running="isRunning('reader')"/>
         </div>
-        <p v-else class="net-wait">{{ running ? 'Il reader parte dopo il detector: le sue curve compaiono alla fine della sua prima epoca.'
-          : 'Il reader non è arrivato alla prima epoca.' }}</p>
+        <p v-else class="net-wait">{{ running ? 'The reader starts after the detector: its curves appear at the end of its first epoch.'
+          : 'The reader did not reach its first epoch.' }}</p>
       </div>
 
       <details class="chart-table">
-        <summary>Valori per epoca</summary>
+        <summary>Values per epoch</summary>
         <div v-for="table in tables" :key="table.net" class="table-wrap">
           <table>
             <caption>{{ NET_NAME[table.net] }}</caption>
-            <thead><tr><th class="num">Epoca</th><th class="num">Loss train</th><th class="num">Loss val</th>
-              <template v-if="table.net === 'reader'"><th class="num">Acc. train</th><th class="num">Acc. val</th></template><th class="num">Tempo</th></tr></thead>
+            <thead><tr><th class="num">Epoch</th><th class="num">Train loss</th><th class="num">Val loss</th>
+              <template v-if="table.net === 'reader'"><th class="num">Train acc.</th><th class="num">Val acc.</th></template><th class="num">Time</th></tr></thead>
             <tbody>
               <tr v-for="point in table.rows" :key="point.epoch">
                 <td class="num">{{ point.epoch }}</td>

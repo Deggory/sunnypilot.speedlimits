@@ -26,7 +26,7 @@ export async function call<T>(method: 'GET' | 'POST', url: string, body?: unknow
   try {
     response = await fetch(url, options);
   } catch {
-    throw new SaveError('server non raggiungibile.', true);
+    throw new SaveError('server unreachable.', true);
   }
   let result: unknown = null;
   try {
@@ -36,7 +36,7 @@ export async function call<T>(method: 'GET' | 'POST', url: string, body?: unknow
   }
   if (!response.ok) {
     const problem = result as Problem | null;
-    throw new SaveError(problem && problem.message ? problem.message : 'errore HTTP ' + response.status + '.',
+    throw new SaveError(problem && problem.message ? problem.message : 'HTTP error ' + response.status + '.',
       response.status >= 500);
   }
   return result as T;
@@ -115,7 +115,7 @@ export async function loadServer(): Promise<void> {
   try {
     const body = await call<ReviewsAnswer>('GET', apiBase + '/reviews');
     if (body.run_id !== report.runId) {
-      state.serverWarning = 'Il report di questa route è stato rigenerato: ricarica la pagina.';
+      state.serverWarning = 'The report of this route was made again: reload the page.';
       state.server = 'stale';
       return;
     }
@@ -151,8 +151,8 @@ export async function loadServer(): Promise<void> {
     store();
     void retryUnsaved(true);
   } catch (error) {
-    state.serverWarning = 'Revisioni non lette dal server: ' + messageOf(error)
-      + ' Le modifiche restano in questo browser.';
+    state.serverWarning = 'Reviews not read from the server: ' + messageOf(error)
+      + ' The changes stay in this browser.';
     state.server = 'error';
   }
 }

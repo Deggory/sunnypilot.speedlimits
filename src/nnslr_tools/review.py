@@ -32,7 +32,7 @@ from nnslr_tools.preannotate import PreannotationError, _inside, resolve_data_ro
 # [site-login] - START
 from nnslr_tools.review_auth import SESSION_MAX_SECONDS, AdminAuth, auth_dir
 # [site-login] - END
-from nnslr_tools.pages import (CONTROL_TABS, render_account, render_control, render_index, render_login,
+from nnslr_tools.pages import (CONTROL_TABS, OLD_ADDRESSES, render_account, render_control, render_index, render_login,
                                render_problem, render_review)
 from nnslr_tools.review_service import ReviewService
 
@@ -43,15 +43,15 @@ MAX_BODY_BYTES = 512 * 1024
 REQUEST_TIMEOUT_SECONDS = 30
 MAX_CONNECTIONS = 64
 # [site-login] - START
-LOGIN_MESSAGE = 'Accesso richiesto: ricarica la pagina e accedi con nome e password.'
+LOGIN_MESSAGE = 'Sign-in required: reload the page and sign in with your name and password.'
 # Sign-in calls that work without a session, and all of them.
 PUBLIC_AUTH_ROUTES = ('/api/auth/login', '/api/auth/setup/check', '/api/auth/setup')
 AUTH_ROUTES = PUBLIC_AUTH_ROUTES + ('/api/auth/logout', '/api/auth/logout-all', '/api/auth/password')
 # The pages a browser opens: without a session they show the sign-in page instead.
-PAGE_RE = re.compile(r'/(index\.html|panoramica|prepara|allena|pannello|stato|account|route/[^/]+(/(index\.html)?)?)?')
+PAGE_RE = re.compile(r'/(index\.html|routes|prepare|train|panoramica|prepara|allena|pannello|stato|account|route/[^/]+(/(index\.html)?)?)?')
 # [site-login] - END
-API_TOKEN_MESSAGE = ('Token mancante o errato: invialo nell’header "Authorization: Bearer <token>" '
-                     '(oppure "X-Review-Token"), mai nell’indirizzo.')
+API_TOKEN_MESSAGE = ('Missing or wrong token: send it in the header "Authorization: Bearer <token>" '
+                     '(or "X-Review-Token"), never in the address.')
 DEFAULT_CSP = "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 
 
@@ -333,7 +333,7 @@ def make_handler(app: ReviewApp):
             except PanelError as exc:
                 self._problem(exc.status, exc.reason, exc.message, True)
             except Exception as exc:
-                self._problem(500, 'server_error', 'Errore interno del server: ' + type(exc).__name__ + '.',
+                self._problem(500, 'server_error', 'Internal server error: ' + type(exc).__name__ + '.',
                               self.path.startswith('/api/') or self.path.startswith('/mcp'))
 
         def _handle(self, method):
@@ -341,14 +341,14 @@ def make_handler(app: ReviewApp):
             path = unquote(parts.path)
             api = path.startswith('/api/')
             if not app.host_allowed(self.headers.get('Host')):
-                self._problem(403, 'host_not_allowed', 'Nome host non consentito per questo server.', api)
+                self._problem(403, 'host_not_allowed', 'Host name not allowed for this server.', api)
                 return
             query = parse_qs(parts.query, keep_blank_values=True)
             if path == '/mcp' or path == '/api/v1' or path.startswith('/api/v1/'):
                 self._external(method, path, query)
                 return
             if method not in ('GET', 'POST'):
-                self._problem(405, 'method_not_allowed', 'Metodo non consentito.', api)
+                self._problem(405, 'method_not_allowed', 'Method not allowed.', api)
                 return
             # [site-login] - START
             if 'token' in query:
@@ -437,10 +437,10 @@ def make_handler(app: ReviewApp):
 
         def _auth_post(self, path, body):
             if app.auth is None:
-                self._problem(404, 'not_found', 'Su 127.0.0.1 il sito non chiede di accedere.', True)
+                self._problem(404, 'not_found', 'On 127.0.0.1 the site does not ask you to sign in.', True)
                 return
             if not isinstance(body, dict):
-                raise ReviewRejected(400, 'invalid_json', 'Serve un oggetto JSON.')
+                raise ReviewRejected(400, 'invalid_json', 'A JSON object is required.')
             address = self.client_address[0]
             if path == '/api/auth/setup/check':
                 app.auth.check_setup_code(body.get('code'), address)
@@ -480,10 +480,10 @@ def make_handler(app: ReviewApp):
                            render_account(nonce, app.auth is not None).encode('utf-8'), csp)
                 return
             if path in AUTH_ROUTES:
-                self._problem(405, 'method_not_allowed', 'Usa POST.', True)
+                self._problem(405, 'method_not_allowed', 'Use POST.', True)
                 return
             # [site-login] - END
-            if path == '/' or path == '/index.html':
+            if path in ('/routes', '/index.html'):
                 nonce = secrets.token_urlsafe(18)
                 page = render_index(app.route_summaries(), db_path(app.root), nonce)
                 self._send(200, 'text/html; charset=utf-8', page.encode('utf-8'),
@@ -502,8 +502,8 @@ def make_handler(app: ReviewApp):
                 self._send(200, 'text/html; charset=utf-8', render_control(nonce, CONTROL_TABS[path]).encode('utf-8'),
                            csp)
                 return
-            if path in ('/pannello', '/stato'):
-                self._redirect('/panoramica', None)
+            if path in OLD_ADDRESSES:
+                self._redirect(OLD_ADDRESSES[path], None)
                 return
             if path == '/api/panel/status':
                 self._json(200, app.panel.status())
@@ -519,7 +519,7 @@ def make_handler(app: ReviewApp):
                 self._send_reviews(match.group(1))
                 return
             if re.fullmatch(r'/api/route/[^/]+/frame/[^/]+/[^/]+', path):
-                self._problem(405, 'method_not_allowed', 'Usa POST per salvare un fotogramma.', True)
+                self._problem(405, 'method_not_allowed', 'Use POST to save a frame.', True)
                 return
             match = re.fullmatch(r'/route/([^/]+)', path)
             if match:
@@ -535,7 +535,7 @@ def make_handler(app: ReviewApp):
             if match:
                 self._send_image(match.group(1), match.group(2))
                 return
-            self._problem(404, 'not_found', 'Pagina non trovata.', path.startswith('/api/'))
+            self._problem(404, 'not_found', 'Page not found.', path.startswith('/api/'))
 
         # ---------- REST API /api/v1 and MCP /mcp (token in a header, never a cookie) ----------
 
@@ -545,7 +545,7 @@ def make_handler(app: ReviewApp):
                 return
             # MCP transport rule: an Origin header that is not this server is refused (DNS rebinding).
             if not self._same_origin():
-                self._problem(403, 'cross_origin', 'Richiesta da un’altra origine rifiutata.', True)
+                self._problem(403, 'cross_origin', 'Request from another origin refused.', True)
                 return
             if not self._api_authorized():
                 self.close_connection = True
@@ -562,7 +562,7 @@ def make_handler(app: ReviewApp):
             elif method == 'GET':
                 self._api_get(path, query)
             else:
-                self._problem(405, 'method_not_allowed', 'Metodo non consentito.', True)
+                self._problem(405, 'method_not_allowed', 'Method not allowed.', True)
 
         def _api_authorized(self):
             supplied = self.headers.get('Authorization')
@@ -600,7 +600,7 @@ def make_handler(app: ReviewApp):
                 return
             match = re.fullmatch(r'/api/v1/routes/([^/]+)/frames/([0-9]{1,9})/([0-9]{1,9})(/[a-z]+)?', path)
             if match is None:
-                self._problem(404, 'not_found', 'Indirizzo dell’API non valido.', True)
+                self._problem(404, 'not_found', 'Invalid API address.', True)
                 return
             route = match.group(1)
             key = match.group(2) + '/' + match.group(3)
@@ -616,18 +616,18 @@ def make_handler(app: ReviewApp):
                                   long_side=values.get('long_side'))
                 self._send(200, image['mime_type'], image['data'])
             elif action == '/review':
-                self._problem(405, 'method_not_allowed', 'Usa POST per salvare un fotogramma.', True)
+                self._problem(405, 'method_not_allowed', 'Use POST to save a frame.', True)
             else:
-                self._problem(404, 'not_found', 'Indirizzo dell’API non valido.', True)
+                self._problem(404, 'not_found', 'Invalid API address.', True)
 
         def _api_post(self, path):
             match = re.fullmatch(r'/api/v1/routes/([^/]+)/frames/([0-9]{1,9})/([0-9]{1,9})/review', path)
             if match is None:
-                self._problem(404, 'not_found', 'Indirizzo dell’API non valido.', True)
+                self._problem(404, 'not_found', 'Invalid API address.', True)
                 return
             content_type = self.headers.get('Content-Type', '')
             if content_type.split(';')[0].strip().lower() != 'application/json':
-                self._problem(415, 'unsupported_media_type', 'Sono accettati solo dati JSON.', True)
+                self._problem(415, 'unsupported_media_type', 'Only JSON data is accepted.', True)
                 return
             body = self._read_json()
             key = match.group(2) + '/' + match.group(3)
@@ -637,26 +637,26 @@ def make_handler(app: ReviewApp):
         def _mcp(self, method):
             bridge = app.mcp_bridge()
             if bridge is None:
-                self._problem(501, 'mcp_unavailable', 'Server MCP non disponibile: installa le dipendenze '
-                                                      'opzionali con  pip install -e ".[mcp]"  e riavvia il server.',
+                self._problem(501, 'mcp_unavailable', 'MCP server not available: install the optional '
+                                                      'dependencies with  pip install -e ".[mcp]"  and restart the server.',
                               True)
                 return
             if method != 'POST':
                 # Stateless JSON server: no server stream (GET) and no session to end (DELETE). The MCP
                 # transport lets a server answer both with 405.
                 body = json.dumps({'ok': False, 'error': 'method_not_allowed',
-                                   'message': 'Questo server MCP accetta solo POST.'}).encode('utf-8')
+                                   'message': 'This MCP server only accepts POST.'}).encode('utf-8')
                 self._send(405, 'application/json; charset=utf-8', body, DEFAULT_CSP, [('Allow', 'POST')])
                 return
             if self.headers.get('Transfer-Encoding') is not None:
-                raise ReviewRejected(411, 'length_required', 'Richiesta senza Content-Length.')
+                raise ReviewRejected(411, 'length_required', 'Request without Content-Length.')
             raw_length = self.headers.get('Content-Length')
             if raw_length is None or not raw_length.strip().isdigit():
-                raise ReviewRejected(411, 'length_required', 'Richiesta senza Content-Length.')
+                raise ReviewRejected(411, 'length_required', 'Request without Content-Length.')
             length = int(raw_length)
             if length > MAX_BODY_BYTES:
                 self.close_connection = True
-                raise ReviewRejected(413, 'too_large', 'Richiesta troppo grande (massimo 512 KiB).')
+                raise ReviewRejected(413, 'too_large', 'Request too large (at most 512 KiB).')
             body = self.rfile.read(length)
             headers = []
             for name, value in self.headers.items():
@@ -682,7 +682,7 @@ def make_handler(app: ReviewApp):
                 parse_route_id(route)
                 app.report(route)
             except (PreannotationError, ValueError, OSError):
-                self._problem(404, 'unknown_route', 'Route sconosciuta o senza report di pre-annotazione.',
+                self._problem(404, 'unknown_route', 'Unknown route, or route without a pre-annotation report.',
                               False)
                 return None
             return route
@@ -691,7 +691,7 @@ def make_handler(app: ReviewApp):
             try:
                 directory, rows, by_key = app.report(route)
             except (PreannotationError, ValueError, OSError):
-                self._problem(404, 'unknown_route', 'Route sconosciuta o senza report di pre-annotazione.', False)
+                self._problem(404, 'unknown_route', 'Unknown route, or route without a pre-annotation report.', False)
                 return
             hints_by_frame, hint_stats = app.hints(route, rows)
             suspicious = app.suspicious(route, directory.name, rows, hints_by_frame)
@@ -707,11 +707,11 @@ def make_handler(app: ReviewApp):
             try:
                 directory, rows, by_key = app.report(route)
             except (PreannotationError, ValueError, OSError):
-                self._problem(404, 'unknown_route', 'Route sconosciuta o senza report di pre-annotazione.', False)
+                self._problem(404, 'unknown_route', 'Unknown route, or route without a pre-annotation report.', False)
                 return
             path = public_file(directory, name)
             if path is None:
-                self._problem(404, 'not_found', 'Immagine non trovata.', False)
+                self._problem(404, 'not_found', 'Image not found.', False)
                 return
             self.send_response(200)
             self.send_header('Content-Type', mimetypes.guess_type(path.name)[0] or 'application/octet-stream')
@@ -726,7 +726,7 @@ def make_handler(app: ReviewApp):
             try:
                 directory, rows, by_key = app.report(route)
             except (PreannotationError, ValueError, OSError):
-                self._problem(404, 'unknown_route', 'Route sconosciuta o senza report di pre-annotazione.', True)
+                self._problem(404, 'unknown_route', 'Unknown route, or route without a pre-annotation report.', True)
                 return
             reviews = []
             confirmed = 0
@@ -744,11 +744,11 @@ def make_handler(app: ReviewApp):
             if path in AUTH_ROUTES:
                 # Same protections as saving a frame: same origin, JSON only (no form can send it).
                 if not self._same_origin():
-                    self._problem(403, 'cross_origin', 'Richiesta da un’altra origine rifiutata.', True)
+                    self._problem(403, 'cross_origin', 'Request from another origin refused.', True)
                     return
                 content_type = self.headers.get('Content-Type', '')
                 if content_type.split(';')[0].strip().lower() != 'application/json':
-                    self._problem(415, 'unsupported_media_type', 'Sono accettati solo dati JSON.', True)
+                    self._problem(415, 'unsupported_media_type', 'Only JSON data is accepted.', True)
                     return
                 self._auth_post(path, self._read_json())
                 return
@@ -759,15 +759,17 @@ def make_handler(app: ReviewApp):
             if run or stop:
                 # Same protections as saving a frame: same origin, JSON only (no form can send it).
                 if not self._same_origin():
-                    self._problem(403, 'cross_origin', 'Richiesta da un’altra origine rifiutata.', True)
+                    self._problem(403, 'cross_origin', 'Request from another origin refused.', True)
                     return
                 content_type = self.headers.get('Content-Type', '')
                 if content_type.split(';')[0].strip().lower() != 'application/json':
-                    self._problem(415, 'unsupported_media_type', 'Sono accettati solo dati JSON.', True)
+                    self._problem(415, 'unsupported_media_type', 'Only JSON data is accepted.', True)
                     return
-                self._read_json()
+                body = self._read_json()
                 if run:
-                    job = app.panel.start(run.group(1))
+                    # The only option: where a training starts ({"start": key}, checked by Panel.start).
+                    options = {'start': body['start']} if isinstance(body, dict) and isinstance(body.get('start'), str) else None
+                    job = app.panel.start(run.group(1), options)
                     print(f'Pannello: avviata {job["label"]} ({job["id"]})', flush=True)
                     self._json(200, {'ok': True, **job})
                 else:
@@ -776,14 +778,14 @@ def make_handler(app: ReviewApp):
             # [control-panel] - END
             match = re.fullmatch(r'/api/route/([^/]+)/frame/([0-9]{1,9})/([0-9]{1,9})', path)
             if match is None:
-                self._problem(404, 'not_found', 'Indirizzo di salvataggio non valido.', True)
+                self._problem(404, 'not_found', 'Invalid save address.', True)
                 return
             if not self._same_origin():
-                self._problem(403, 'cross_origin', 'Richiesta da un’altra origine rifiutata.', True)
+                self._problem(403, 'cross_origin', 'Request from another origin refused.', True)
                 return
             content_type = self.headers.get('Content-Type', '')
             if content_type.split(';')[0].strip().lower() != 'application/json':
-                self._problem(415, 'unsupported_media_type', 'Sono accettati solo dati JSON.', True)
+                self._problem(415, 'unsupported_media_type', 'Only JSON data is accepted.', True)
                 return
             body = self._read_json()
             route = match.group(1)
@@ -791,11 +793,11 @@ def make_handler(app: ReviewApp):
             try:
                 directory, rows, by_key = app.report(route)
             except (PreannotationError, ValueError, OSError):
-                self._problem(404, 'unknown_route', 'Route sconosciuta o senza report di pre-annotazione.', True)
+                self._problem(404, 'unknown_route', 'Unknown route, or route without a pre-annotation report.', True)
                 return
             report_row = by_key.get(frame_key)
             if report_row is None:
-                self._problem(404, 'unknown_frame', 'Fotogramma non presente nel report di questa route.', True)
+                self._problem(404, 'unknown_frame', 'Frame not in the report of this route.', True)
                 return
             review = save_frame_review(app.store, app.root, route_id=route, run_id=directory.name,
                                        report_row=report_row, body=body, client=self.client_address[0])
@@ -833,21 +835,21 @@ def make_handler(app: ReviewApp):
 
         def _read_json(self):
             if self.headers.get('Transfer-Encoding') is not None:
-                raise ReviewRejected(411, 'length_required', 'Richiesta senza Content-Length.')
+                raise ReviewRejected(411, 'length_required', 'Request without Content-Length.')
             raw_length = self.headers.get('Content-Length')
             if raw_length is None or not raw_length.strip().isdigit():
-                raise ReviewRejected(411, 'length_required', 'Richiesta senza Content-Length.')
+                raise ReviewRejected(411, 'length_required', 'Request without Content-Length.')
             length = int(raw_length)
             if length > MAX_BODY_BYTES:
                 self.close_connection = True
-                raise ReviewRejected(413, 'too_large', 'Revisione troppo grande (massimo 512 KiB).')
+                raise ReviewRejected(413, 'too_large', 'Review too large (at most 512 KiB).')
             raw = self.rfile.read(length)
             if len(raw) != length:
-                raise ReviewRejected(400, 'invalid_json', 'Richiesta incompleta.')
+                raise ReviewRejected(400, 'invalid_json', 'Incomplete request.')
             try:
                 return strict_json_loads(raw.decode('utf-8'))
             except (UnicodeDecodeError, ValueError, TypeError) as exc:
-                raise ReviewRejected(400, 'invalid_json', 'Dati JSON non validi.') from exc
+                raise ReviewRejected(400, 'invalid_json', 'Invalid JSON data.') from exc
 
         def _security_headers(self, csp):
             self.send_header('Cache-Control', 'no-store')

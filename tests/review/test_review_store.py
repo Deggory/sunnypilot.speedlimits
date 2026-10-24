@@ -67,7 +67,7 @@ def test_report_image_changed_since_extraction_is_rejected(tmp_path):
     with pytest.raises(ReviewRejected) as caught:
         save_frame_review(store, tmp_path, route_id=ROUTE, run_id=RUN_ID, report_row=rows[0],
                           body=page_body(rows[0]), client='test')
-    assert caught.value.reason == 'hash_mismatch' and 'estrazione' in caught.value.message
+    assert caught.value.reason == 'hash_mismatch' and 'extraction' in caught.value.message
 
 
 def test_two_threads_saving_at_once_lose_nothing(tmp_path):

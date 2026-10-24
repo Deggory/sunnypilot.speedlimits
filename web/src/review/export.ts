@@ -1,4 +1,4 @@
-// "Scarica revisioni JSONL": the confirmed frames as reviewed_frame lines, the same line the server stores
+// "Download reviews (JSONL)": the confirmed frames as reviewed_frame lines, the same line the server stores
 // (review_db.build_reviewed_frame). Offline it is the only way to keep the review; with the server, a backup.
 import {report, state} from './store';
 import type {Detection, FrameRow} from './types';
@@ -28,7 +28,7 @@ export function exportJsonl(): void {
     return s && s.review_state === 'reviewed' ? [{row, s}] : [];
   });
   if (confirmed.some(({s}) => !s.reviewer || !s.review_timestamp)) {
-    say('Riconferma le vecchie revisioni per registrarne revisore e data.', false);
+    say('Confirm the old reviews again to record their reviewer and date.', false);
     return;
   }
   const lines = confirmed.map(({row, s}) => {
@@ -57,7 +57,7 @@ export function exportJsonl(): void {
     return JSON.stringify(line);
   });
   if (lines.length === 0) {
-    say('Conferma almeno un fotogramma prima di esportare.', false);
+    say('Confirm at least one frame before exporting.', false);
     return;
   }
   const url = URL.createObjectURL(new Blob([lines.join('\n') + '\n'], {type: 'application/x-ndjson'}));
@@ -67,5 +67,5 @@ export function exportJsonl(): void {
   link.download = 'annotations-' + report.runId + '.jsonl';
   link.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-  say(lines.length + (lines.length === 1 ? ' fotogramma esportato.' : ' fotogrammi esportati.'), true);
+  say(lines.length + (lines.length === 1 ? ' frame exported.' : ' frames exported.'), true);
 }

@@ -8,11 +8,11 @@ import Bar from '../components/Bar.vue';
 
 const props = defineProps<{row: RouteRow}>();
 
-// State of a route: label, pill classes, and a prefix dropped on phones ("pronta da importare" -> "da importare").
+// State of a route: label, pill classes, and a prefix dropped on phones ("ready to import" -> "to import").
 const STATE: Record<RouteState, [label: string, kind: string, prefix?: string]> = {
-  collegare: ['da collegare', 'todo'], estrarre: ['da estrarre', 'todo'], preannotare: ['da pre-annotare', 'todo'],
-  revisionare: ['da revisionare', 'muted hollow'], importare: ['da importare', 'ok hollow', 'pronta '],
-  pronta: ['nel dataset', 'ok'],
+  collegare: ['to link', 'todo'], estrarre: ['to extract', 'todo'], preannotare: ['to pre-annotate', 'todo'],
+  revisionare: ['to review', 'muted hollow'], importare: ['to import', 'ok hollow', 'ready '],
+  pronta: ['in the dataset', 'ok'],
 };
 
 const state = computed(() => STATE[props.row.state]);
@@ -34,7 +34,7 @@ const reviewed = computed(() => props.row.report_frames ? Math.min(100, props.ro
     <td v-else class="none">–</td>
     <td class="num">{{ thousands(row.objects) }}</td>
     <td><span class="pill" :class="state[1]"><span v-if="state[2]" class="pill-long">{{ state[2] }}</span>{{ state[0] }}</span><span
-      v-if="row.state === 'importare'" class="note">{{ thousands(row.new_reviews) }} fotogrammi nuovi</span><span
-      v-if="late > 0" class="note">{{ late }} {{ late === 1 ? 'segmento arrivato' : 'segmenti arrivati' }} dopo, non usati</span></td>
+      v-if="row.state === 'importare'" class="note">{{ thousands(row.new_reviews) }} new frames</span><span
+      v-if="late > 0" class="note">{{ late }} {{ late === 1 ? 'segment' : 'segments' }} arrived later, not used</span></td>
   </tr>
 </template>

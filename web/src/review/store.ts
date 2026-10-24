@@ -36,7 +36,7 @@ export const report: Report = {
 let hintsByFrame: Record<string, Hint[]> = {};
 let rowIndex = new Map<string, number>();
 
-/** The export of "Scarica revisioni JSONL": its message under the button. */
+/** The export of "Download reviews (JSONL)": its message under the button. */
 export interface ExportMessage {
   text: string;
   ok: boolean;
@@ -66,7 +66,7 @@ export interface ReviewState {
   reviewerNeeded: boolean;
   /** Counts the requests to put the focus on the reviewer field. */
   reviewerFocus: number;
-  /** The "Altro valore" field holds a number out of range. */
+  /** The "Other value" field holds a number out of range. */
   valueError: boolean;
   exportMessage: ExportMessage | null;
   /** Frames being sent to the server now. */
@@ -75,7 +75,7 @@ export interface ReviewState {
   storageWarning: string;
   serverWarning: string;
   retrying: boolean;
-  /** The frame whose "Annulla conferma" was pressed once: the second press withdraws. */
+  /** The frame whose "Withdraw confirmation" was pressed once: the second press withdraws. */
   withdrawArmed: string | null;
   saveCount: number;
   lastSave: LastSave | null;
@@ -150,7 +150,7 @@ export function store(): void {
     localStorage.setItem(report.storageKey, JSON.stringify(state.edits));
     state.storageWarning = '';
   } catch {
-    state.storageWarning = 'Salvataggio nel browser non disponibile: scarica il JSONL prima di chiudere.';
+    state.storageWarning = 'Saving in this browser is not available: download the JSONL before closing.';
   }
 }
 
@@ -161,7 +161,7 @@ export function restore(): void {
     if (!isRecord(saved)) throw new Error('Invalid review storage');
     state.edits = saved as Record<string, FrameEdit>;
   } catch {
-    state.storageWarning = 'Revisioni precedenti non recuperabili dal browser. Esporta il JSONL prima di chiudere.';
+    state.storageWarning = 'Earlier reviews cannot be read back from this browser. Export the JSONL before closing.';
   }
   state.reviewer = readLocal('nnslr-reviewer', '') || '';
   const savedFilter = readLocal('nnslr-review-filter', 'todo');

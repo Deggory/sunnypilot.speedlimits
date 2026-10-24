@@ -51,15 +51,15 @@ const noValue = computed(() => hasValueField.value
 const road = computed(() => props.detection?.applicability || 'unresolved');
 
 const SELECT_CHOICES: Record<SelectField, [string, string][]> = {
-  visibility: [['unknown', 'Da valutare'], ['clear', 'Chiara'], ['partial', 'Parziale'], ['poor', 'Scarsa']],
-  occlusion: [['unknown', 'Da valutare'], ['none', 'Assente'], ['partial', 'Parziale'], ['heavy', 'Forte']],
-  supplementary_panel: [['unknown', 'Da valutare'], ['none', 'Assente'], ['present', 'Presente'],
-    ['unresolved', 'Non risolto']],
+  visibility: [['unknown', 'To assess'], ['clear', 'Clear'], ['partial', 'Partial'], ['poor', 'Poor']],
+  occlusion: [['unknown', 'To assess'], ['none', 'None'], ['partial', 'Partial'], ['heavy', 'Heavy']],
+  supplementary_panel: [['unknown', 'To assess'], ['none', 'None'], ['present', 'Present'],
+    ['unresolved', 'Unresolved']],
 };
 const SELECT_LABELS: Record<SelectField, string> = {
-  visibility: 'Visibilità', occlusion: 'Occlusione', supplementary_panel: 'Pannello sotto',
+  visibility: 'Visibility', occlusion: 'Occlusion', supplementary_panel: 'Panel below',
 };
-const BOOLEAN_LABELS: Record<BooleanField, string> = {temporary: 'Temporaneo', variable_display: 'Display variabile'};
+const BOOLEAN_LABELS: Record<BooleanField, string> = {temporary: 'Temporary', variable_display: 'Variable display'};
 
 function selectValue(key: SelectField): string {
   return props.detection?.[key] ?? 'unknown';
@@ -93,10 +93,10 @@ function booleanChanged(key: BooleanField, event: Event): void {
 
 <template>
   <section id="editor" :hidden="detection === null">
-    <div class="section-head"><h2 id="editorTitle">Riquadro {{ state.selected + 1 }}</h2></div>
+    <div class="section-head"><h2 id="editorTitle">Box {{ state.selected + 1 }}</h2></div>
     <div class="zoom-wrap">
       <svg ref="zoom" id="zoom" :class="{dragging: resizing}" xmlns="http://www.w3.org/2000/svg"
-           preserveAspectRatio="xMidYMid meet" aria-label="Ingrandimento del riquadro selezionato" :viewBox="viewBox"
+           preserveAspectRatio="xMidYMid meet" aria-label="Zoom of the selected box" :viewBox="viewBox"
            @pointerdown="onPointerDown($event, 'zoom')" @pointermove="onPointerMove($event, 'zoom')"
            @pointerup="finishDrag($event, 'zoom')" @pointercancel="finishDrag($event, 'zoom')"
            @touchstart="onTouchStart($event, 'zoom')">
@@ -112,41 +112,41 @@ function booleanChanged(key: BooleanField, event: Event): void {
         </g>
       </svg>
     </div>
-    <p class="evidence" id="evidence">{{ detection?.model_label ? 'Proposta del modello: ' + detection.model_label : 'Riquadro aggiunto a mano.' }}</p>
+    <p class="evidence" id="evidence">{{ detection?.model_label ? 'Model proposal: ' + detection.model_label : 'Box added by hand.' }}</p>
     <!-- The signs are always there: a number makes the box a speed limit, "?" means the number cannot be read. -->
-    <div class="signs" id="quickValues" role="group" aria-label="Velocità">
+    <div class="signs" id="quickValues" role="group" aria-label="Speed">
       <button v-for="value in QUICK_VALUES" :key="value" type="button" :class="value >= 100 ? 'sign wide' : 'sign'"
               :aria-pressed="detection?.value_kph === value" :data-value="value" :aria-label="value + ' km/h'"
               @click="setValue(value); releaseFocus($event)">{{ value }}</button>
-      <button type="button" class="sign unknown" :aria-pressed="noValue" data-value="unknown" title="Numero non leggibile"
-              aria-label="Numero non leggibile" @click="setValue(null); releaseFocus($event)">?</button>
+      <button type="button" class="sign unknown" :aria-pressed="noValue" data-value="unknown" title="Number not readable"
+              aria-label="Number not readable" @click="setValue(null); releaseFocus($event)">?</button>
     </div>
     <div id="valueBlock" class="value-line" :hidden="!hasValueField">
-      <label for="value">Altro valore</label>
+      <label for="value">Other value</label>
       <input v-fill="detection?.value_kph === null || detection?.value_kph === undefined ? '' : String(detection.value_kph)"
              type="number" id="value" min="5" max="250" step="1" inputmode="numeric" placeholder="–" @change="valueChanged">
       <span>km/h</span>
     </div>
-    <p class="field-error" id="valueError" :hidden="!state.valueError">Scrivi un numero intero tra 5 e 250, oppure lascia vuoto se non si legge.</p>
-    <p class="field-label">Tipo</p>
-    <div class="chips" id="families" role="group" aria-label="Tipo di cartello">
+    <p class="field-error" id="valueError" :hidden="!state.valueError">Type a whole number from 5 to 250, or leave it empty if it cannot be read.</p>
+    <p class="field-label">Type</p>
+    <div class="chips" id="families" role="group" aria-label="Sign type">
       <button v-for="family in usual" :key="family.id" type="button" class="chip"
               :aria-pressed="detection?.family === family.id" :data-family="family.id"
               @click="setFamily(family.id); releaseFocus($event)">{{ family.label }}</button>
     </div>
-    <div class="chips minor" id="familiesMore" role="group" aria-label="Altri tipi">
+    <div class="chips minor" id="familiesMore" role="group" aria-label="Other types">
       <button v-for="family in minor" :key="family.id" type="button" class="chip"
               :aria-pressed="detection?.family === family.id" :data-family="family.id"
-              :title="family.id === 'not_a_sign' ? 'Resta come esempio negativo; per togliere un riquadro sbagliato usa ✕' : undefined"
+              :title="family.id === 'not_a_sign' ? 'Stays as a negative example; to remove a wrong box use ✕' : undefined"
               @click="setFamily(family.id); releaseFocus($event)">{{ family.label }}</button>
     </div>
-    <p class="field-label">Strada</p>
-    <div class="segmented" id="roads" role="group" aria-label="Su quale strada vale">
+    <p class="field-label">Road</p>
+    <div class="segmented" id="roads" role="group" aria-label="Which road it applies to">
       <button v-for="item in ROADS" :key="item.id" type="button" :aria-pressed="road === item.id"
               :data-applicability="item.id" @click="setField('applicability', item.id); releaseFocus($event)">{{ item.label }}</button>
     </div>
     <details>
-      <summary>Dettagli del cartello</summary>
+      <summary>Sign details</summary>
       <div class="grid2">
         <label v-for="key in SELECT_FIELDS" :key="key">{{ SELECT_LABELS[key] }}
           <select :id="key" v-fill="selectValue(key)" @change="selectChanged(key, $event)">
@@ -155,12 +155,12 @@ function booleanChanged(key: BooleanField, event: Event): void {
         </label>
         <label v-for="key in BOOLEAN_FIELDS" :key="key">{{ BOOLEAN_LABELS[key] }}
           <select :id="key" v-fill="booleanValue(key)" @change="booleanChanged(key, $event)">
-            <option value="unknown">Non determinato</option>
-            <option value="true">Sì</option>
+            <option value="unknown">Not determined</option>
+            <option value="true">Yes</option>
             <option value="false">No</option>
           </select>
         </label>
-        <label>Note
+        <label>Notes
           <input v-fill="detection?.notes ?? ''" type="text" id="notes" autocomplete="off"
                  @change="setField('notes', ($event.target as HTMLInputElement).value)">
         </label>

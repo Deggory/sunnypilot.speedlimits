@@ -12,20 +12,20 @@ import re
 # Steps of the import and of the training, with their weight in the whole (they add up to 100): the
 # detector and the reader are most of a training.
 TRAIN_STEPS = (
-    ('import', 'Importa le revisioni', 2),
-    ('split', 'Controlla il dataset e fissa lo split', 2),
-    ('gpu_env', 'Prepara l’ambiente GPU', 6),
-    ('checks', 'Controlli e prova della GPU', 3),
-    ('detector', 'Allena il detector', 40),
-    ('reader', 'Allena il reader', 30),
-    ('evaluate', 'Valuta su route mai viste', 7),
-    ('export', 'Errori difficili ed export ONNX', 6),
-    ('bundle', 'Prepara e verifica il pacchetto', 4),
+    ('import', 'Import the reviews', 2),
+    ('split', 'Check the dataset and fix the split', 2),
+    ('gpu_env', 'Set up the GPU environment', 6),
+    ('checks', 'Checks and GPU smoke test', 3),
+    ('detector', 'Train the detector', 40),
+    ('reader', 'Train the reader', 30),
+    ('evaluate', 'Evaluate on unseen routes', 7),
+    ('export', 'Hard examples and ONNX export', 6),
+    ('bundle', 'Package and verify the bundle', 4),
 )
 DATASET_STEPS = TRAIN_STEPS[:2]
-PREPARE_STEPS = (('link', 'Collega i video', 5), ('frames', 'Estrae i fotogrammi e propone i cartelli', 95))
-FETCH_STEPS = (('fetch', 'Scarica i giri dal comma', 100),)
-UPDATE_STEPS = (('update', 'Aggiorna il codice e riavvia il sito', 100),)
+PREPARE_STEPS = (('link', 'Link the videos', 5), ('frames', 'Extract the frames and propose the signs', 95))
+FETCH_STEPS = (('fetch', 'Download the drives from the comma', 100),)
+UPDATE_STEPS = (('update', 'Update the code and restart the site', 100),)
 STEPS = {'fetch': FETCH_STEPS, 'prepare': PREPARE_STEPS, 'dataset': DATASET_STEPS, 'train': TRAIN_STEPS,
          'train_continue': TRAIN_STEPS, 'update': UPDATE_STEPS}
 
@@ -128,10 +128,38 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
         percent = float(preparation['percent'])
 
     if epoch is not None and epoch[0] == current and state == 'running':
-        detail = epoch[0] + ' · epoca ' + str(epoch[1]) + ' di ' + str(epoch[2])
+        detail = epoch[0] + ' · epoch ' + str(epoch[1]) + ' of ' + str(epoch[2])
     elif action == 'prepare' and preparation is not None and preparation.get('routes_total'):
-        detail = str(preparation['routes_done']) + ' di ' + str(preparation['routes_total']) + ' route pronte'
+        detail = str(preparation['routes_done']) + ' of ' + str(preparation['routes_total']) + ' routes ready'
     elif action == 'fetch' and (fetched or route):
-        detail = (str(fetched) + (' segmento scaricato' if fetched == 1 else ' segmenti scaricati')
+        detail = (str(fetched) + (' segment downloaded' if fetched == 1 else ' segments downloaded')
                   + (' · ' + route if route and state == 'running' else ''))
     return {'steps': rows, 'percent': percent, 'detail': detail, 'last_line': last_line(text), 'curves': curves}
+
+
+# The tasks that report their own progress (nnslr_tools.progress) and the step they belong to.
+TASK_STEPS = {'import': 'import', 'validate': 'split', 'split': 'split', 'detector': 'detector',
+              'reader': 'reader', 'evaluate': 'evaluate', 'hard_examples': 'export', 'export': 'export'}
+
+
+def with_step_progress(result: dict, action: str, record: dict | None, setup_line: str = '') -> dict:
+    """Adds 'step_progress' ({'done', 'total', 'percent', 'text'}) for the current step of a running job:
+    from the last report of a command (when it belongs to that step) or, while the GPU environment is
+    made, the last line of its log. With a count, the job's percent counts it too."""
+    current = next((step['key'] for step in result['steps'] if step['state'] == 'current'), None)
+    if current is None:
+        return result
+    step_progress = None
+    if record is not None and TASK_STEPS.get(record.get('task')) == current and record.get('total'):
+        done, total = int(record['done']), int(record['total'])
+        step_progress = {'done': done, 'total': total, 'percent': round(min(done, total) * 100 / total, 1),
+                         'text': str(record.get('text') or '')}
+        steps = STEPS.get(action, ())
+        if action in ('train', 'train_continue', 'dataset') and steps:
+            weights = {key: weight for key, _, weight in steps}
+            reached = sum(weights[step['key']] for step in result['steps'] if step['state'] == 'done')
+            result = {**result, 'percent': round((reached + weights[current] * min(done, total) / total) * 100
+                                                 / sum(weights.values()), 1)}
+    elif current == 'gpu_env' and setup_line:
+        step_progress = {'done': 0, 'total': 0, 'percent': None, 'text': setup_line[:200]}
+    return {**result, 'step_progress': step_progress}

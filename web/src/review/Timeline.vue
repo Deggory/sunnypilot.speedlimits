@@ -2,6 +2,7 @@
 // The timeline card: one row of ticks per segment, coloured by the state of each frame, and the counters of
 // the confirmed frames that still carry a doubt (each one a filter). On a phone the card folds under its title.
 import {computed, nextTick} from 'vue';
+import {thousands} from '../common/format';
 import {writeLocal} from './dom';
 import {routeCounts} from './current';
 import {aiConfirmed, doubtsOf, frameStatus, proposalsOf, reasonsOf, statusLabel} from './frames';
@@ -45,16 +46,16 @@ function tickClass(row: FrameRow): string {
 }
 
 function tickLabel(row: FrameRow): string {
-  return 'Segmento ' + row.segment_index + ' · immagine ' + row.output_index + ' · '
+  return 'Segment ' + row.segment_index + ' · image ' + row.output_index + ' · '
     + statusLabel(row.frame_key).toLowerCase();
 }
 
-/** "120/720 confermati · 3 AI · 2 sospetti": the title of the folded card on a phone. */
+/** "120/720 confirmed · 3 AI · 2 suspicious": the title of the folded card on a phone. */
 const summary = computed(() => {
   const {done, suspicious, byAi, total} = routeCounts.value;
-  let text = done + '/' + total + ' confermati';
-  if (byAi > 0) text += ' · ' + byAi + ' AI';
-  if (suspicious > 0) text += ' · ' + suspicious + (suspicious === 1 ? ' sospetto' : ' sospetti');
+  let text = thousands(done) + '/' + thousands(total) + ' confirmed';
+  if (byAi > 0) text += ' · ' + thousands(byAi) + ' AI';
+  if (suspicious > 0) text += ' · ' + thousands(suspicious) + ' suspicious';
   return text;
 });
 
@@ -79,9 +80,9 @@ const chips = computed<Chip[]>(() => {
     if (doubts.road > 0) road += 1;
   }
   return [
-    {id: 'qUnknown', filter: 'unknown', count: unknown, label: 'senza numero', warn: true},
-    {id: 'qUnreadable', filter: 'unreadable', count: unreadable, label: 'con illeggibili', warn: true},
-    {id: 'qRoad', filter: 'road', count: road, label: 'strada non indicata', warn: false},
+    {id: 'qUnknown', filter: 'unknown', count: unknown, label: 'without a number', warn: true},
+    {id: 'qUnreadable', filter: 'unreadable', count: unreadable, label: 'with unreadable signs', warn: true},
+    {id: 'qRoad', filter: 'road', count: road, label: 'road not set', warn: false},
   ];
 });
 
@@ -111,16 +112,16 @@ function tickClicked(event: MouseEvent): void {
     <button type="button" class="tl-toggle" id="tlToggle" :aria-expanded="state.timelineOpen" aria-controls="timeline"
             @click="toggle"><span class="tl-title">Timeline</span><span class="tl-sub" id="tlSub">{{ summary }}</span></button>
     <div class="legend">
-      <span><i class="l-done"></i>confermato</span>
-      <span><i class="l-ai"></i>da AI</span>
-      <span><i class="l-unsure"></i>confermato con dubbi</span>
-      <span><i class="l-sus"></i>sospetto</span>
-      <span><i class="l-has"></i>con proposte o 2ª lettura</span>
-      <span><i class="l-none"></i>niente proposto</span>
-      <span><i class="l-dirty"></i>da confermare</span>
-      <span><i class="l-error"></i>non salvato</span>
+      <span><i class="l-done"></i>confirmed</span>
+      <span><i class="l-ai"></i>by AI</span>
+      <span><i class="l-unsure"></i>confirmed with doubts</span>
+      <span><i class="l-sus"></i>suspicious</span>
+      <span><i class="l-has"></i>with proposals or 2nd reading</span>
+      <span><i class="l-none"></i>nothing proposed</span>
+      <span><i class="l-dirty"></i>to confirm</span>
+      <span><i class="l-error"></i>not saved</span>
     </div>
-    <div class="timeline" id="timeline" aria-label="Tutti i fotogrammi della route" :style="{'--tl-cols': columns}"
+    <div class="timeline" id="timeline" aria-label="All the frames of the route" :style="{'--tl-cols': columns}"
          @click="tickClicked">
       <div v-for="(segment, i) in segments" :key="i" class="tl-seg">
         <span class="tl-label">seg {{ segment.segment }}</span>
@@ -130,8 +131,8 @@ function tickClicked(event: MouseEvent): void {
         </div>
       </div>
     </div>
-    <div class="quality" role="group" aria-label="Dubbi nei fotogrammi confermati">
-      <span class="quality-label">Confermati con dubbi:</span>
+    <div class="quality" role="group" aria-label="Doubts in the confirmed frames">
+      <span class="quality-label">Confirmed with doubts:</span>
       <button v-for="chip in chips" :key="chip.id" type="button" :class="chipClass(chip)" :id="chip.id"
               :data-filter="chip.filter" :data-count="chip.count" :aria-pressed="state.filter === chip.filter"
               @click="pickFilter(chip.filter)">{{ chip.count }} {{ chip.label }}</button>

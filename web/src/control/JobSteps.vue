@@ -3,11 +3,11 @@
 import type {JobStep} from '../common/panel-types';
 
 defineProps<{steps: JobStep[]}>();
-const STATE_TEXT: Record<JobStep['state'], string> = {done: 'fatto', current: 'in corso', todo: 'da fare', failed: 'fallito'};
+const STATE_TEXT: Record<JobStep['state'], string> = {done: 'done', current: 'running', todo: 'to do', failed: 'failed'};
 </script>
 
 <template>
-  <ol class="jp-steps" aria-label="Passi">
+  <ol class="jp-steps" aria-label="Steps">
     <li v-for="(step, index) in steps" :key="step.key" :class="step.state" :aria-current="step.state === 'current' ? 'step' : undefined">
       <span class="jp-mark" aria-hidden="true"><svg v-if="step.state === 'done'" viewBox="0 0 12 12"><path d="M2.5 6.2l2.3 2.3 4.7-5"
         fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg><svg

@@ -231,7 +231,7 @@ def test_frame_detail_and_context_across_segments(api):
     assert frame['image']['preview_url'] == f'/api/v1/routes/{ROUTE}/frames/0/5/image?variant=preview'
     hinted = get_json(server, f'/api/v1/routes/{ROUTE}/frames/0/2')
     assert hinted['second_reading'][0]['value_kph'] == 60
-    assert hinted['suspicious'] and 'seconda lettura vede 60' in hinted['suspicious_reasons'][0]
+    assert hinted['suspicious'] and 'second reading sees 60' in hinted['suspicious_reasons'][0]
     context = get_json(server, f'/api/v1/routes/{ROUTE}/frames/1/1/context?before=3&after=2')
     assert [(f['frame_key'], f['offset'], f['same_segment']) for f in context['frames']] == [
         ('0/0', -3, False), ('0/2', -2, False), ('0/5', -1, False), ('1/1', 0, True), ('1/3', 1, True),

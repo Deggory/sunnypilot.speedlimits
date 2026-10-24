@@ -9,7 +9,7 @@ import type {FrameEdit, FrameStatus} from './types';
 export interface PageNotice {
   text: string;
   error: boolean;
-  /** With "Riprova a salvare". */
+  /** With "Retry saving". */
   retry: boolean;
 }
 
@@ -24,8 +24,8 @@ export function pageNotices(): PageNotice[] {
   let list = unsaved.slice(0, 8).join(', ');
   if (unsaved.length > 8) list += ', …';
   const text = unsaved.length === 1
-    ? '1 fotogramma confermato NON salvato sul server (' + list + ').'
-    : unsaved.length + ' fotogrammi confermati NON salvati sul server (' + list + ').';
+    ? '1 confirmed frame NOT saved on the server (' + list + ').'
+    : unsaved.length + ' confirmed frames NOT saved on the server (' + list + ').';
   out.push({text, error: true, retry: true});
   return out;
 }
@@ -36,28 +36,28 @@ export type LineClass = '' | 'ok' | 'warn' | 'error';
 function saveText(key: string, s: FrameEdit | undefined): [string, LineClass] {
   const status = frameStatus(key);
   if (!report.apiBase) {
-    if (status === 'done') return ['Confermato in questo browser: esporta il JSONL per conservarlo.', 'ok'];
-    if (status === 'dirty') return ['Modifiche non confermate (solo in questo browser).', 'warn'];
+    if (status === 'done') return ['Confirmed in this browser: export the JSONL to keep it.', 'ok'];
+    if (status === 'dirty') return ['Changes not confirmed (only in this browser).', 'warn'];
     return ['', ''];
   }
-  if (status === 'saving') return ['Salvataggio in corso…', ''];
+  if (status === 'saving') return ['Saving…', ''];
   if (!s) return ['', ''];
   if (status === 'done' && aiConfirmed(key)) {
     const via = s.channel === 'mcp' ? 'MCP' : s.channel === 'rest' ? 'REST' : '';
-    const who = s.reviewer || 'un’AI';
-    return ['Salvato ✓ · revisione ' + s.revision + ' · ' + who + ' (AI' + (via ? ' · ' + via : '') + ')', 'ok'];
+    const who = s.reviewer || 'an AI';
+    return ['Saved ✓ · revision ' + s.revision + ' · ' + who + ' (AI' + (via ? ' · ' + via : '') + ')', 'ok'];
   }
   if (status === 'done') {
-    return ['Salvato ✓ · revisione ' + s.revision + (s.reviewer ? ' · ' + s.reviewer : ''), 'ok'];
+    return ['Saved ✓ · revision ' + s.revision + (s.reviewer ? ' · ' + s.reviewer : ''), 'ok'];
   }
-  if (status === 'error' && s.error) return ['NON salvato: ' + s.error, 'error'];
-  if (status === 'error') return ['Confermato ma non ancora salvato: nuovo tentativo automatico.', 'error'];
+  if (status === 'error' && s.error) return ['NOT saved: ' + s.error, 'error'];
+  if (status === 'error') return ['Confirmed but not saved yet: it is tried again by itself.', 'error'];
   if (status === 'dirty' && s.server_confirmed) {
-    return ['Modificato: premi Conferma per salvarlo. Sul server resta la versione di prima.', 'warn'];
+    return ['Changed: press Confirm to save it. The server keeps the earlier version.', 'warn'];
   }
-  if (status === 'dirty') return ['Modifiche da confermare.', 'warn'];
+  if (status === 'dirty') return ['Changes to confirm.', 'warn'];
   if (s.base && s.base.confirmed === false) {
-    return ['Conferma annullata: non verrà importato finché non lo confermi di nuovo.', ''];
+    return ['Confirmation withdrawn: it will not be imported until you confirm it again.', ''];
   }
   return ['', ''];
 }
@@ -65,32 +65,32 @@ function saveText(key: string, s: FrameEdit | undefined): [string, LineClass] {
 export interface ConfirmLabels {
   label: string;
   mobileLabel: string;
-  /** Already on the server and unchanged: Conferma only moves on. */
+  /** Already on the server and unchanged: Confirm only moves on. */
   already: boolean;
 }
 
-/** Conferma on the panel and on the phone bar: they say what they save ("Conferma · 60 · 40"). */
+/** Confirm on the panel and on the phone bar: they say what they save ("Confirm · 60 · 40"). */
 export function confirmLabels(key: string, work: FrameEdit, status: FrameStatus): ConfirmLabels {
   const names = work.detections.map(shortName);
-  // On a phone too: "Conferma · 60", so the list under the photo need not be checked to know what is saved.
-  let label = 'Conferma · ' + names.join(' · ');
+  // On a phone too: "Confirm · 60", so the list under the photo need not be checked to know what is saved.
+  let label = 'Confirm · ' + names.join(' · ');
   let mobileLabel = label;
   if (work.detections.length === 0) {
-    label = 'Conferma · nessun cartello';
-    mobileLabel = 'Nessun cartello';
+    label = 'Confirm · no sign';
+    mobileLabel = 'No sign';
   }
   let already = false;
   if (status === 'done' && report.apiBase && sameAsServer(state.edits[key])) {
-    label = 'Già confermato · avanti →';
-    mobileLabel = 'Avanti →';
+    label = 'Already confirmed · next →';
+    mobileLabel = 'Next →';
     already = true;
   } else if (status === 'done') {
-    label = 'Confermato ✓ · conferma di nuovo';
-    mobileLabel = 'Confermato ✓';
+    label = 'Confirmed ✓ · confirm again';
+    mobileLabel = 'Confirmed ✓';
   }
   if (status === 'saving') {
-    label = 'Salvataggio…';
-    mobileLabel = 'Salvataggio…';
+    label = 'Saving…';
+    mobileLabel = 'Saving…';
   }
   return {label, mobileLabel, already};
 }
@@ -98,7 +98,7 @@ export function confirmLabels(key: string, work: FrameEdit, status: FrameStatus)
 export interface StatusLine {
   text: string;
   cls: LineClass;
-  /** Annulla modifiche, Annulla conferma (armed: "Sì, annulla"). */
+  /** Discard changes, Withdraw confirmation (armed: "Yes, withdraw"). */
   discard: boolean;
   withdraw: boolean;
   armed: boolean;
@@ -106,7 +106,7 @@ export interface StatusLine {
   mobile: string;
 }
 
-/** The line under the inspector: Annulla modifiche / Annulla conferma, the save line, the phone bar message. */
+/** The line under the inspector: Discard changes / Withdraw confirmation, the save line, the phone bar message. */
 export function statusLine(key: string, status: FrameStatus): StatusLine {
   const s = state.edits[key];
   // One status line of fixed height: the latest message for this frame, else what the server holds.
@@ -130,7 +130,7 @@ export function statusLine(key: string, status: FrameStatus): StatusLine {
   else if (savedClass === 'error') mobile = savedText;
   else if (state.serverWarning) mobile = state.serverWarning;
   else if (state.storageWarning) mobile = state.storageWarning;
-  else if (unsaved > 0) mobile = unsaved + ' fotogrammi confermati NON salvati: riprova dal pannello.';
+  else if (unsaved > 0) mobile = unsaved + (unsaved === 1 ? ' confirmed frame' : ' confirmed frames') + ' NOT saved: retry from the panel.';
   return {
     text,
     cls,

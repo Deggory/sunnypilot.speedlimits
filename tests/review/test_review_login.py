@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import pytest
 
+from nnslr_tools.pages import asset
+
 from nnslr_tools import review_auth
 from review_helpers import ADMIN, PASSWORD, ROUTE, TOKEN, RunningServer, json_of, make_report, sign_in
 
@@ -34,11 +36,11 @@ def test_first_visit_creates_the_administrator_with_the_setup_code(lan):
     status, response, data = server.request('GET', '/api/auth/state')
     assert json_of(data) == {'configured': False, 'signed_in': False, 'local': False}
     status, response, data = server.request('POST', '/api/auth/setup/check', body={'code': 'wrong-code-000000'})
-    assert status == 403 and 'sbagliato' in json_of(data)['message']
+    assert status == 403 and 'Wrong setup code' in json_of(data)['message']
     assert server.request('POST', '/api/auth/setup/check', body={'code': TOKEN})[0] == 200
     status, response, data = server.request('POST', '/api/auth/setup',
                                             body={'code': TOKEN, 'user': ADMIN, 'password': 'short'})
-    assert status == 400 and '12 caratteri' in json_of(data)['message']
+    assert status == 400 and '12 characters' in json_of(data)['message']
     status, response, data = server.request('POST', '/api/auth/setup',
                                             body={'code': TOKEN, 'user': ADMIN, 'password': PASSWORD})
     assert status == 200
@@ -61,14 +63,15 @@ def test_sign_in_sign_out_and_wrong_attempts(lan):
     server, root = lan
     sign_in(server)
     status, response, data = server.request('POST', '/api/auth/login', body={'user': ADMIN, 'password': 'nope nope nope'})
-    assert status == 401 and json_of(data)['message'] == 'Nome o password sbagliati.'
+    assert status == 401 and json_of(data)['message'] == 'Wrong name or password.'
     status, response, data = server.request('POST', '/api/auth/login', body={'user': ADMIN, 'password': PASSWORD})
     assert status == 200
     session = cookie_of(response)
     state = json_of(server.request('GET', '/api/auth/state', headers=session)[2])
     assert state['signed_in'] and state['user'] == ADMIN and state['sessions'] == 2
     status, response, data = server.request('GET', '/account', headers=session)
-    assert status == 200 and b'Cambia la password' in data
+    # The account page is a Vue app: its form is in the account script.
+    assert status == 200 and asset('js/account.js').encode() in data and b'password-form' in data
     status, response, data = server.request('POST', '/api/auth/logout', body={}, headers=session)
     assert status == 200 and 'Max-Age=0' in response.getheader('Set-Cookie')
     assert server.request('GET', '/api/routes', headers=session)[0] == 401
@@ -76,7 +79,7 @@ def test_sign_in_sign_out_and_wrong_attempts(lan):
     for _ in range(5):
         server.request('POST', '/api/auth/login', body={'user': ADMIN, 'password': 'wrong password'})
     status, response, data = server.request('POST', '/api/auth/login', body={'user': ADMIN, 'password': PASSWORD})
-    assert status == 429 and 'Troppi tentativi' in json_of(data)['message']
+    assert status == 429 and 'Too many wrong attempts' in json_of(data)['message']
 
 
 def test_password_change_signs_out_every_other_browser(lan):

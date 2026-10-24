@@ -1,4 +1,4 @@
-// Revisione cartelli (review/ReviewApp.vue), with the frames embedded in the page: the payload of
+// The sign review (review/ReviewApp.vue), with the frames embedded in the page: the payload of
 // pages.render_review in <script id="payload">. The page draws its own top bar, the Account menu in it.
 import {mountPage} from '../common/mount';
 import ReviewApp from '../review/ReviewApp.vue';

@@ -152,8 +152,8 @@ const tip = computed(() => {
   const rows = props.series.map((line) => ({key: line.key, label: line.label, color: line.color, value: line.values[epoch - 1] ?? null}));
   return {epoch, rows, left: x(epoch), flip: x(epoch) > width.value * 0.55};
 });
-const tipText = computed(() => tip.value === null ? '' : 'Epoca ' + tip.value.epoch + ': ' + tip.value.rows
-  .map((row) => row.label + ' ' + (row.value === null ? 'n/d' : props.format(row.value))).join(', '));
+const tipText = computed(() => tip.value === null ? '' : 'Epoch ' + tip.value.epoch + ': ' + tip.value.rows
+  .map((row) => row.label + ' ' + (row.value === null ? 'n/a' : props.format(row.value))).join(', '));
 </script>
 
 <template>
@@ -163,7 +163,7 @@ const tipText = computed(() => tip.value === null ? '' : 'Epoca ' + tip.value.ep
       <span class="chart-legend"><span v-for="line in series" :key="line.key" class="chart-key"><span class="chart-swatch"
         :style="{background: line.color}" aria-hidden="true"></span>{{ line.label }}</span></span>
     </figcaption>
-    <div ref="wrap" class="chart-plot" tabindex="0" role="group" :aria-label="title + ': frecce per scorrere le epoche'"
+    <div ref="wrap" class="chart-plot" tabindex="0" role="group" :aria-label="title + ': arrow keys move through the epochs'"
          @pointermove="onMove" @pointerdown="onMove" @pointerleave="onLeave" @keydown="onKey"
          @focus="hovered = hovered ?? (last || null)" @blur="hovered = null">
       <svg :width="width" :height="HEIGHT" :viewBox="'0 0 ' + width + ' ' + HEIGHT" aria-hidden="true">
@@ -176,7 +176,7 @@ const tipText = computed(() => tip.value === null ? '' : 'Epoca ' + tip.value.ep
         </g>
         <g v-if="inProgress" class="chart-now">
           <rect :x="inProgress.x" :y="M.top" :width="Math.max(2, inProgress.w)" :height="plotH" rx="3"/>
-          <text :x="inProgress.x + inProgress.w / 2" :y="M.top - 4" text-anchor="middle">epoca {{ inProgress.epoch }}</text>
+          <text :x="inProgress.x + inProgress.w / 2" :y="M.top - 4" text-anchor="middle">epoch {{ inProgress.epoch }}</text>
         </g>
         <line v-if="tip" class="chart-cross" :x1="x(tip.epoch)" :x2="x(tip.epoch)" :y1="M.top" :y2="M.top + plotH"/>
         <path v-for="line in lines" :key="'l' + line.key" class="chart-line" :d="line.path" :style="{stroke: line.color}"/>
@@ -195,11 +195,11 @@ const tipText = computed(() => tip.value === null ? '' : 'Epoca ' + tip.value.ep
           </template>
         </template>
       </svg>
-      <div v-if="last === 0" class="chart-empty">Nessuna epoca ancora</div>
+      <div v-if="last === 0" class="chart-empty">No epoch yet</div>
       <div v-if="tip" class="chart-tip" :class="{flip: tip.flip}" :style="{left: tip.left + 'px'}" aria-hidden="true">
-        <div class="chart-tip-head">Epoca {{ tip.epoch }}</div>
+        <div class="chart-tip-head">Epoch {{ tip.epoch }}</div>
         <div v-for="row in tip.rows" :key="row.key" class="chart-tip-row"><span class="chart-tip-key" :style="{background: row.color}"></span><strong>{{
-          row.value === null ? 'n/d' : format(row.value) }}</strong><span>{{ row.label }}</span></div>
+          row.value === null ? 'n/a' : format(row.value) }}</strong><span>{{ row.label }}</span></div>
       </div>
       <span class="sr-only" aria-live="polite">{{ tipText }}</span>
     </div>

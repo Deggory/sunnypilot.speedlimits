@@ -54,9 +54,9 @@ FAILS_PER_ADDRESS = 5
 FAILS_IN_ALL = 50
 CONCURRENT_CHECKS = 2
 
-WRONG_LOGIN = 'Nome o password sbagliati.'
-WRONG_CODE = 'Codice di configurazione sbagliato.'
-ALREADY = 'L’amministratore esiste già: accedi.'
+WRONG_LOGIN = 'Wrong name or password.'
+WRONG_CODE = 'Wrong setup code.'
+ALREADY = 'The administrator already exists: sign in.'
 
 
 def auth_dir(root: Path) -> Path:
@@ -71,7 +71,7 @@ def read_private(path: Path) -> str:
     except FileNotFoundError:
         return ''
     except (OSError, UnicodeDecodeError) as exc:
-        raise ReviewRejected(500, 'unreadable', 'Non riesco a leggere l’accesso salvato su questo server ('
+        raise ReviewRejected(500, 'unreadable', 'Cannot read the saved sign-in data on this server ('
                              + type(exc).__name__ + ').') from None
 
 
@@ -79,13 +79,13 @@ def write_private(path: Path, text: str) -> None:
     """Writes a file readable by its owner only (600), all at once: a temporary file in the same folder,
     flushed to disk, then renamed over the old one. A link is never written through."""
     if path.is_symlink():
-        raise ReviewRejected(409, 'file_is_a_link', 'Il file dell’accesso su questo server è un link: '
-                             'sistemalo a mano.')
+        raise ReviewRejected(409, 'file_is_a_link', 'The sign-in file on this server is a link: '
+                             'fix it by hand.')
     try:
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         handle, temporary = tempfile.mkstemp(prefix='.' + path.name + '.', suffix='.tmp', dir=str(path.parent))
     except OSError as exc:
-        raise ReviewRejected(500, 'cannot_save', 'Non riesco a salvarlo su questo server ('
+        raise ReviewRejected(500, 'cannot_save', 'Cannot save it on this server ('
                              + type(exc).__name__ + ').') from None
     try:
         with os.fdopen(handle, 'w', encoding='utf-8') as stream:
@@ -99,7 +99,7 @@ def write_private(path: Path, text: str) -> None:
             os.unlink(temporary)
         except OSError:
             pass
-        raise ReviewRejected(500, 'cannot_save', 'Non riesco a salvarlo su questo server ('
+        raise ReviewRejected(500, 'cannot_save', 'Cannot save it on this server ('
                              + type(exc).__name__ + ').') from None
 
 
@@ -135,15 +135,15 @@ def _session_key(token: str) -> str:
 
 def check_new_password(password, username: str) -> str:
     if not isinstance(password, str) or len(password) < MIN_PASSWORD:
-        raise ReviewRejected(400, 'weak_password', 'La password deve avere almeno ' + str(MIN_PASSWORD)
-                             + ' caratteri.')
+        raise ReviewRejected(400, 'weak_password', 'The password must have at least ' + str(MIN_PASSWORD)
+                             + ' characters.')
     if len(password) > MAX_PASSWORD:
-        raise ReviewRejected(400, 'weak_password', 'La password può avere al massimo ' + str(MAX_PASSWORD)
-                             + ' caratteri.')
+        raise ReviewRejected(400, 'weak_password', 'The password can have at most ' + str(MAX_PASSWORD)
+                             + ' characters.')
     if password.strip() == '' or len(set(password)) < 4:
-        raise ReviewRejected(400, 'weak_password', 'Scegli una password con più caratteri diversi.')
+        raise ReviewRejected(400, 'weak_password', 'Choose a password with more different characters.')
     if password.lower() == username.lower():
-        raise ReviewRejected(400, 'weak_password', 'La password non può essere uguale al nome.')
+        raise ReviewRejected(400, 'weak_password', 'The password cannot be the same as the name.')
     return password
 
 
@@ -178,8 +178,8 @@ class Throttle:
                 wait = max(wait, self._all[-FAILS_IN_ALL] + FAIL_WINDOW_SECONDS - now)
             if wait > 0:
                 minutes = max(1, int(wait // 60) + 1)
-                raise ReviewRejected(429, 'too_many_attempts', 'Troppi tentativi sbagliati: riprova tra '
-                                     + str(minutes) + ' minuti.')
+                raise ReviewRejected(429, 'too_many_attempts', 'Too many wrong attempts: try again in '
+                                     + str(minutes) + ' minutes.')
 
     def failed(self, address: str) -> None:
         with self._lock:
@@ -215,11 +215,11 @@ class AdminAuth:
         try:
             data = json.loads(text)
         except ValueError:
-            raise ReviewRejected(500, 'unreadable', 'Il file dell’amministratore di questo server è rovinato.') \
+            raise ReviewRejected(500, 'unreadable', 'The administrator file of this server is damaged.') \
                 from None
         if not isinstance(data, dict) or not isinstance(data.get('user'), str) or not isinstance(
                 data.get('password'), dict):
-            raise ReviewRejected(500, 'unreadable', 'Il file dell’amministratore di questo server è rovinato.')
+            raise ReviewRejected(500, 'unreadable', 'The administrator file of this server is damaged.')
         return data
 
     def _load_sessions(self) -> dict:
@@ -296,7 +296,7 @@ class AdminAuth:
     # -- actions -----------------------------------------------------------------------------------
     def _checking(self):
         if not self._checks.acquire(timeout=5):
-            raise ReviewRejected(503, 'busy', 'Il server sta controllando altri tentativi: riprova tra un momento.')
+            raise ReviewRejected(503, 'busy', 'The server is checking other attempts: try again in a moment.')
         return self._checks
 
     def check_setup_code(self, code, address: str) -> None:
@@ -316,7 +316,7 @@ class AdminAuth:
     def setup(self, code, username, password, address: str) -> str:
         self.check_setup_code(code, address)
         if not isinstance(username, str) or not USERNAME_RE.fullmatch(username):
-            raise ReviewRejected(400, 'invalid_name', 'Il nome può avere lettere, cifre e . _ @ - (al massimo 64).')
+            raise ReviewRejected(400, 'invalid_name', 'The name can have letters, digits and . _ @ - (at most 64).')
         check_new_password(password, username)
         stored = hash_password(password)
         with self._lock:
@@ -332,7 +332,7 @@ class AdminAuth:
 
     def login(self, username, password, address: str) -> str:
         if not self.configured():
-            raise ReviewRejected(409, 'not_configured', 'Prima crea l’amministratore.')
+            raise ReviewRejected(409, 'not_configured', 'Create the administrator first.')
         self.throttle.check(address)
         if not isinstance(username, str) or not isinstance(password, str) or len(password) > MAX_PASSWORD \
                 or len(username) > 64:
@@ -378,7 +378,7 @@ class AdminAuth:
             slot.release()
         if not ok:
             self.throttle.failed(address)
-            raise ReviewRejected(403, 'wrong_password', 'La password attuale è sbagliata.')
+            raise ReviewRejected(403, 'wrong_password', 'The current password is wrong.')
         check_new_password(new, admin['user'])
         stored = hash_password(new)
         with self._lock:

@@ -1,6 +1,7 @@
-// Conferma, Annulla conferma, Annulla modifiche: what the reviewer decides about the frame on screen. With the
+// Confirm, Withdraw confirmation, Discard changes: what the reviewer decides about the frame on screen. With the
 // server a confirmation is saved at once; offline it stays in this browser until the JSONL export.
 import {messageOf} from '../common/api';
+import {hourMinute} from '../common/format';
 import {clone, writeLocal} from './dom';
 import {currentRow, frameStatus, fromServer, sameAsServer, workOf} from './frames';
 import {advanceAfterConfirm, go} from './navigation';
@@ -11,12 +12,12 @@ import type {SaveAnswer} from './types';
 function needReviewer(key: string): void {
   state.reviewerNeeded = true;
   state.reviewerFocus += 1;
-  state.notice = {key, text: 'Scrivi nome o sigla del revisore, poi conferma.', error: true};
+  state.notice = {key, text: 'Type the reviewer’s name or initials, then confirm.', error: true};
   state.lastSave = {key, result: 'need-reviewer', revision: 0};
 }
 
 function timeNow(): string {
-  return new Date().toLocaleTimeString('it-CH', {hour: '2-digit', minute: '2-digit'});
+  return hourMinute(new Date());
 }
 
 export async function confirmFrame(): Promise<void> {
@@ -24,14 +25,14 @@ export async function confirmFrame(): Promise<void> {
   if (!row) return;
   const key = row.frame_key;
   if (state.inFlight.has(key)) return;
-  // Already on the server and not changed since: Conferma moves on, it does not sign the frame again
+  // Already on the server and not changed since: Confirm moves on, it does not sign the frame again
   // (a frame an AI confirmed too: that confirmation is final).
   const current = state.edits[key];
   if (report.apiBase && frameStatus(key) === 'done' && current && sameAsServer(current)) {
     state.lastSave = {key, result: 'unchanged', revision: current.revision || 0};
     go(1);
     if (state.currentKey === key) {
-      state.notice = {key, text: 'Già confermato: non ci sono altri fotogrammi con questo filtro.', error: false};
+      state.notice = {key, text: 'Already confirmed: there are no more frames with this filter.', error: false};
     }
     return;
   }
@@ -61,13 +62,13 @@ export async function confirmFrame(): Promise<void> {
       review_timestamp: s.review_timestamp,
     };
     store();
-    advanceAfterConfirm(key, 'Confermato ' + key + ' in questo browser.');
+    advanceAfterConfirm(key, 'Confirmed ' + key + ' in this browser.');
     return;
   }
   state.notice = null;
   store();
   const ok = await send(key);
-  if (ok && state.currentKey === key) advanceAfterConfirm(key, 'Salvato ' + key + ' alle ' + timeNow() + '.');
+  if (ok && state.currentKey === key) advanceAfterConfirm(key, 'Saved ' + key + ' at ' + timeNow() + '.');
 }
 
 export async function withdrawFrame(): Promise<void> {
@@ -84,7 +85,7 @@ export async function withdrawFrame(): Promise<void> {
   // Two presses instead of a browser dialog: the second one, on the same frame, withdraws.
   if (state.withdrawArmed !== key) {
     state.withdrawArmed = key;
-    const text = 'Premi “Sì, annulla” per togliere la conferma: il fotogramma non verrà importato.';
+    const text = 'Press “Yes, withdraw” to take the confirmation away: the frame will not be imported.';
     state.notice = {key, text, error: false, warn: true};
     return;
   }
@@ -97,10 +98,10 @@ export async function withdrawFrame(): Promise<void> {
     const saved = fromServer(result.review);
     state.edits[key] = saved;
     takeSuspicious(result);
-    state.notice = {key, text: 'Conferma annullata: il fotogramma non verrà importato.', error: false};
+    state.notice = {key, text: 'Confirmation withdrawn: the frame will not be imported.', error: false};
     state.lastSave = {key, result: 'withdrawn', revision: saved.revision || 0};
   } catch (error) {
-    state.notice = {key, text: 'Annullamento non riuscito: ' + messageOf(error), error: true};
+    state.notice = {key, text: 'Withdrawing failed: ' + messageOf(error), error: true};
     state.lastSave = {key, result: 'error', revision: s.revision || 0};
   } finally {
     state.inFlight.delete(key);

@@ -5,9 +5,10 @@ import {nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import type {AuthState} from '../common/auth-types';
 import {onThemeChange, setTheme, storedTheme, type Theme} from '../common/theme';
+import {askConfirm} from '../composables/confirm';
 
 const props = defineProps<{current?: boolean}>();
-const THEMES: [Theme, string][] = [['dark', 'Scuro'], ['light', 'Chiaro'], ['auto', 'Automatico']];
+const THEMES: [Theme, string][] = [['dark', 'Dark'], ['light', 'Light'], ['auto', 'Automatic']];
 
 const open = ref(false);
 const state = ref<AuthState | null>(null);
@@ -35,7 +36,13 @@ function close(refocus: boolean): void {
 }
 
 async function signOut(everywhere: boolean): Promise<void> {
-  if (everywhere && !window.confirm('Uscire da tutti i browser, compreso questo?')) return;
+  if (everywhere) {
+    // The menu closes first: the dialog gives the focus back to the Account button.
+    close(true);
+    const ok = await askConfirm({title: 'Sign out everywhere?', action: 'Sign out everywhere', danger: true,
+      text: 'Every browser signed in to this site, this one included, will have to sign in again.'});
+    if (!ok) return;
+  }
   try {
     await post(everywhere ? '/api/auth/logout-all' : '/api/auth/logout');
   } catch {
@@ -64,12 +71,12 @@ onBeforeUnmount(() => {
 });
 
 const sessionsText = (value: AuthState): string =>
-  (value.sessions ?? 1) > 1 ? 'Connesso da ' + value.sessions + ' browser' : 'Connesso da questo browser';
+  (value.sessions ?? 1) > 1 ? 'Signed in on ' + value.sessions + ' browsers' : 'Signed in on this browser';
 </script>
 
 <template>
   <button ref="button" class="icon-btn account-btn" :class="{current: props.current}" type="button" id="account-btn"
-          aria-haspopup="dialog" :aria-expanded="open" aria-controls="account-pop" aria-label="Account e impostazioni"
+          aria-haspopup="dialog" :aria-expanded="open" aria-controls="account-pop" aria-label="Account and settings"
           title="Account" @click="open ? close(false) : show()">
     <svg viewBox="0 0 20 20" aria-hidden="true">
       <circle cx="10" cy="7" r="3.4" fill="none" stroke="currentColor" stroke-width="1.8"/>
@@ -77,15 +84,15 @@ const sessionsText = (value: AuthState): string =>
             stroke-linecap="round"/>
     </svg>
   </button>
-  <div v-show="open" ref="pop" class="account-pop" id="account-pop" role="dialog" aria-label="Account e impostazioni">
+  <div v-show="open" ref="pop" class="account-pop" id="account-pop" role="dialog" aria-label="Account and settings">
     <div class="pop-head">
       <span class="pop-avatar" aria-hidden="true">{{ (state?.user ?? '?').slice(0, 1).toUpperCase() }}</span>
       <div class="pop-who">
         <template v-if="state === null">
-          <strong>Account</strong><span>{{ error || 'Caricamento…' }}</span>
+          <strong>Account</strong><span>{{ error || 'Loading…' }}</span>
         </template>
         <template v-else-if="state.local">
-          <strong>Questo computer</strong><span>Sito su 127.0.0.1, senza accesso</span>
+          <strong>This computer</strong><span>Site on 127.0.0.1, no sign-in</span>
         </template>
         <template v-else>
           <strong>{{ state.user }}</strong><span>{{ sessionsText(state) }}</span>
@@ -93,17 +100,17 @@ const sessionsText = (value: AuthState): string =>
       </div>
     </div>
     <div class="pop-section">
-      <div class="pop-label">Aspetto</div>
-      <div class="segmented" role="radiogroup" aria-label="Aspetto">
+      <div class="pop-label">Appearance</div>
+      <div class="segmented" role="radiogroup" aria-label="Appearance">
         <button v-for="[value, label] in THEMES" :key="value" type="button" role="radio"
                 :aria-checked="theme === value" @click="setTheme(value)">{{ label }}</button>
       </div>
     </div>
     <div class="pop-section pop-items">
-      <a class="pop-item" href="/account">Password e browser connessi</a>
+      <a class="pop-item" href="/account">Password and signed-in browsers</a>
       <template v-if="state !== null && !state.local">
-        <button class="pop-item" type="button" @click="signOut(false)">Esci</button>
-        <button class="pop-item danger" type="button" @click="signOut(true)">Esci da tutti i browser</button>
+        <button class="pop-item" type="button" @click="signOut(false)">Sign out</button>
+        <button class="pop-item danger" type="button" @click="signOut(true)">Sign out everywhere</button>
       </template>
     </div>
   </div>

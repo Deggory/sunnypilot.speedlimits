@@ -3,8 +3,9 @@
 import {onMounted, ref} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import type {AuthAnswer, AuthState} from '../common/auth-types';
+import {askConfirm} from '../composables/confirm';
 
-const who = ref('Caricamento…');
+const who = ref('Loading…');
 const current = ref('');
 const fresh = ref('');
 const repeat = ref('');
@@ -13,13 +14,13 @@ const done = ref('');
 const busy = ref(false);
 
 function show(state: AuthState): void {
-  let text = 'Connesso come ' + (state.user ?? '') + '.';
-  if (state.sessions !== undefined && state.sessions > 1) text += ' Connesso da ' + state.sessions + ' browser.';
-  who.value = text;
+  const many = state.sessions !== undefined && state.sessions > 1;
+  who.value = 'Signed in as ' + (state.user ?? '') + (many ? ', on ' + state.sessions + ' browsers.' : '.');
 }
 
 async function signOut(everywhere: boolean): Promise<void> {
-  if (everywhere && !window.confirm('Uscire da tutti i browser, compreso questo?')) return;
+  if (everywhere && !await askConfirm({title: 'Sign out everywhere?', action: 'Sign out everywhere', danger: true,
+    text: 'Every browser signed in to this site, this one included, will have to sign in again.'})) return;
   try {
     await post(everywhere ? '/api/auth/logout-all' : '/api/auth/logout');
   } catch {
@@ -31,15 +32,15 @@ async function signOut(everywhere: boolean): Promise<void> {
 async function changePassword(): Promise<void> {
   error.value = '';
   done.value = '';
-  if (!current.value) { error.value = 'Scrivi la password attuale.'; return; }
-  if (fresh.value.length < 12) { error.value = 'La nuova password deve avere almeno 12 caratteri.'; return; }
-  if (fresh.value !== repeat.value) { error.value = 'Le due nuove password sono diverse.'; return; }
+  if (!current.value) { error.value = 'Type the current password.'; return; }
+  if (fresh.value.length < 12) { error.value = 'The new password needs at least 12 characters.'; return; }
+  if (fresh.value !== repeat.value) { error.value = 'The two new passwords are different.'; return; }
   busy.value = true;
   try {
     const answer = await post<AuthAnswer>('/api/auth/password', {current: current.value, password: fresh.value});
     current.value = fresh.value = repeat.value = '';
     show(answer.state);
-    done.value = 'Password cambiata: gli altri browser sono usciti.';
+    done.value = 'Password changed: the other browsers are signed out.';
   } catch (problem) {
     error.value = messageOf(problem);
   } finally {
@@ -55,27 +56,27 @@ onMounted(() => {
 <template>
   <main class="page settings">
     <header class="page-head"><h1 class="page-title">Account</h1>
-      <p class="page-sub">Chi entra in questo sito dal browser. Gli agenti e i client API usano invece il token nell’header, mai il nome e la password.</p></header>
+      <p class="page-sub">Who signs in to this site from a browser. Agents and API clients use the token in the header instead, never the name and password.</p></header>
     <section class="card state-box">
-      <h2>Amministratore</h2>
+      <h2>Administrator</h2>
       <p id="admin-sub">{{ who }}</p>
       <div class="buttons">
-        <button id="btn-signout" class="btn" type="button" @click="signOut(false)">Esci</button>
-        <button id="btn-signout-all" class="btn danger" type="button" @click="signOut(true)">Esci da tutti i browser</button>
+        <button id="btn-signout" class="btn" type="button" @click="signOut(false)">Sign out</button>
+        <button id="btn-signout-all" class="btn danger" type="button" @click="signOut(true)">Sign out everywhere</button>
       </div>
     </section>
     <section class="card state-box">
-      <h2>Cambia la password</h2>
+      <h2>Change the password</h2>
       <form id="password-form" class="auth-form" novalidate @submit.prevent="changePassword">
         <input type="text" name="username" autocomplete="username" hidden>
-        <label class="field">Password attuale<input id="current" v-model="current" type="password" autocomplete="current-password" maxlength="256"></label>
-        <label class="field">Nuova password<input id="fresh" v-model="fresh" type="password" autocomplete="new-password" maxlength="256" minlength="12"></label>
-        <label class="field">Ripeti la nuova password<input id="repeat" v-model="repeat" type="password" autocomplete="new-password" maxlength="256"></label>
+        <label class="field">Current password<input id="current" v-model="current" type="password" autocomplete="current-password" maxlength="256"></label>
+        <label class="field">New password<input id="fresh" v-model="fresh" type="password" autocomplete="new-password" maxlength="256" minlength="12"></label>
+        <label class="field">Repeat the new password<input id="repeat" v-model="repeat" type="password" autocomplete="new-password" maxlength="256"></label>
         <div id="password-error" class="auth-error" role="alert">{{ error }}</div>
         <div id="password-ok" class="auth-ok" role="status">{{ done }}</div>
-        <button id="btn-password" class="btn primary" type="submit" :disabled="busy">Cambia la password</button>
+        <button id="btn-password" class="btn primary" type="submit" :disabled="busy">Change the password</button>
       </form>
-      <p class="note">Dopo il cambio, tutti gli altri browser devono accedere di nuovo. Password dimenticata: chi ha accesso al server ferma il sito, sposta via <code>web/auth/admin.json</code> della cartella dati e lo riavvia; la visita successiva chiede di nuovo il codice di configurazione.</p>
+      <p class="note">After the change every other browser has to sign in again. Forgotten password: someone with access to the server stops the site, moves <code>web/auth/admin.json</code> out of the data folder and starts it again; the next visit asks for the setup code again.</p>
     </section>
   </main>
 </template>

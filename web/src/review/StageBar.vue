@@ -20,9 +20,9 @@ const pillClass = computed(() => {
 const frameData = computed(() => {
   const row = props.row;
   const proposals = proposalsOf(row).length;
-  let info = 'Segmento ' + row.segment_index + ' · immagine ' + row.output_index + ' · ' + proposals
-    + (proposals === 1 ? ' proposta' : ' proposte');
-  if (report.routeHasHints) info += ' · ' + hintsOf(row.frame_key).length + ' in seconda lettura';
+  let info = 'Segment ' + row.segment_index + ' · image ' + row.output_index + ' · ' + proposals
+    + (proposals === 1 ? ' proposal' : ' proposals');
+  if (report.routeHasHints) info += ' · ' + hintsOf(row.frame_key).length + ' in the second reading';
   return info;
 });
 
@@ -34,18 +34,18 @@ function hintsSwitched(event: Event): void {
 <template>
   <div class="stage-bar">
     <div class="nav">
-      <button type="button" class="btn icon" id="prev" aria-label="Fotogramma precedente" :disabled="position.index <= 0"
+      <button type="button" class="btn icon" id="prev" aria-label="Previous frame" :disabled="position.index <= 0"
               @click="go(-1)">‹</button>
       <span class="pos" id="pos">{{ position.index + 1 }} / {{ position.length }}</span>
-      <button type="button" class="btn icon" id="next" aria-label="Fotogramma successivo"
+      <button type="button" class="btn icon" id="next" aria-label="Next frame"
               :disabled="position.index >= position.length - 1" @click="go(1)">›</button>
     </div>
     <span id="statePill" :class="pillClass">{{ statusLabel(row.frame_key) }}</span>
     <span class="data" id="frameData">{{ frameData }}</span>
     <div class="stage-tools">
-      <button type="button" class="btn" :class="{on: state.drawing}" id="draw" @click="toggleDrawing">{{ state.drawing ? 'Annulla' : '+ Riquadro' }}</button>
-      <button type="button" class="btn danger" id="remove" :disabled="selectedBox === null" @click="removeSelected">Elimina</button>
+      <button type="button" class="btn" :class="{on: state.drawing}" id="draw" @click="toggleDrawing">{{ state.drawing ? 'Cancel' : '+ Box' }}</button>
+      <button type="button" class="btn danger" id="remove" :disabled="selectedBox === null" @click="removeSelected">Delete</button>
     </div>
-    <label class="switch" id="hintToggle" :hidden="!report.routeHasHints"><input type="checkbox" id="showHints" :checked="state.showHints" @change="hintsSwitched"><span class="track" aria-hidden="true"></span>Seconda lettura</label>
+    <label class="switch" id="hintToggle" :hidden="!report.routeHasHints"><input type="checkbox" id="showHints" :checked="state.showHints" @change="hintsSwitched"><span class="track" aria-hidden="true"></span>Second reading</label>
   </div>
 </template>

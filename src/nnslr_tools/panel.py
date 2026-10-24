@@ -21,10 +21,11 @@ import signal
 import subprocess
 import threading
 import time
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 
-from nnslr_tools.job_progress import progress
+from nnslr_tools.job_progress import last_line, progress, with_step_progress
 
 REPO = Path(__file__).resolve().parents[2]
 ACTIONS_ENV = 'NNSLR_PANEL_ACTIONS'
@@ -35,6 +36,8 @@ PROGRESS_BYTES = 4 * 1024 * 1024
 # Written by helpers/1_prepare.sh when it starts: the routes of that run, for the progress.
 BATCH_FILE = 'logs/prepare/batch.json'
 HISTORY = 12
+RUN_NAME = re.compile(r'[A-Za-z0-9._-]+')
+STABLE_CHECK_SECONDS = 600
 JOB_ID = re.compile(r'[0-9]{8}-[0-9]{6}-[a-z_]+')
 FINISHED = re.compile(r'== finito con codice (\d+)\s*$')
 # Runs the helper and appends its exit code as the last line of the log.
@@ -42,32 +45,34 @@ WRAPPER = '"$@"; code=$?; echo; echo "== finito con codice $code"; exit $code'
 
 ACTIONS = {
     # Every route still on the comma, over ssh with this machine's key (Host comma in ~/.ssh/config).
-    'fetch': {'label': 'Scarica dal comma', 'group': 'fetch', 'command': ['helpers/fetch_comma_segments.sh']},
-    'prepare': {'label': 'Prepara le route nuove', 'group': 'prepare', 'command': ['helpers/1_prepare.sh']},
-    'dataset': {'label': 'Importa le revisioni', 'group': 'train',
+    'fetch': {'label': 'Download from the comma', 'group': 'fetch', 'command': ['helpers/fetch_comma_segments.sh']},
+    'prepare': {'label': 'Prepare new routes', 'group': 'prepare', 'command': ['helpers/1_prepare.sh']},
+    'dataset': {'label': 'Import reviews', 'group': 'train',
                 'command': ['helpers/3_train.sh', '--dataset-only']},
-    'train': {'label': 'Allena da zero', 'group': 'train', 'command': ['helpers/3_train.sh']},
-    'train_continue': {'label': 'Allena dai pesi stable', 'group': 'train',
+    'train': {'label': 'Train', 'group': 'train', 'command': ['helpers/3_train.sh']},
+    'train_continue': {'label': 'Train from the stable model', 'group': 'train',
                        'command': ['helpers/3_train.sh', '--continue']},
     # git pull + restart of this server (KillMode=process: the action itself survives the restart).
     # --no-link: the link with the token must not land in the log.
-    'update': {'label': 'Aggiorna il codice', 'group': 'update', 'command': ['helpers/update.sh', '--no-link']},
+    'update': {'label': 'Update the code', 'group': 'update', 'command': ['helpers/update.sh', '--no-link']},
 }
 # The same work started from a terminal: (group, label, fragment of the command line).
 ACTIVITIES = (
     # Also the copy in openpilot.distill: both write the shared folder of the comma videos.
-    ('fetch', 'download dal comma', 'fetch_comma_segments.sh'),
-    ('prepare', 'preparazione', 'helpers/1_prepare.sh'),
-    ('prepare', 'estrazione dei frame', 'nnslr extract-frames'),
-    ('prepare', 'pre-annotazione', 'nnslr preannotate'),
-    ('train', 'dataset e training', 'helpers/3_train.sh'),
-    ('train', 'training su GPU', 'run_v100_baseline.sh'),
-    ('update', 'aggiornamento del codice', 'helpers/update.sh'),
+    ('fetch', 'download from the comma', 'fetch_comma_segments.sh'),
+    ('prepare', 'preparation', 'helpers/1_prepare.sh'),
+    ('prepare', 'frame extraction', 'nnslr extract-frames'),
+    ('prepare', 'pre-annotation', 'nnslr preannotate'),
+    ('train', 'dataset and training', 'helpers/3_train.sh'),
+    ('train', 'GPU training', 'run_v100_baseline.sh'),
+    ('update', 'code update', 'helpers/update.sh'),
     # Shown only: the driving model of openpilot.distill shares the GPU (the training refuses a busy GPU).
-    ('other', 'training openpilot.distill', 'supervised.train'),
+    ('other', 'openpilot.distill training', 'supervised.train'),
 )
-GROUP_NAMES = {'fetch': 'un download dal comma', 'prepare': 'una preparazione',
-               'train': 'un import o un training', 'update': 'un aggiornamento del codice'}
+# The groups of this checkout's own helpers (see Panel._ours).
+OWN_GROUPS = ('prepare', 'train', 'update')
+GROUP_NAMES = {'fetch': 'a download from the comma', 'prepare': 'a preparation',
+               'train': 'an import or a training', 'update': 'a code update'}
 # Groups that never run together with a group, besides itself. The download and the preparation
 # both write the links of data/raw/routes; the update rewrites the helpers under a running bash
 # and restarts this server.
@@ -101,6 +106,10 @@ class Panel:
         self._status_module = None
         # Progress of each job, by job id: (log size, progress), so a log is read again only when it grew.
         self._progress: dict[str, tuple[int, str, dict]] = {}
+        self._dataset: tuple[tuple, dict | None] | None = None
+        # (time of the last check, published?): None until the first answer.
+        self._stable: tuple[float, bool | None] = (-float('inf'), None)
+        self._stable_checking = False
 
     # -- helpers of the checkout -------------------------------------------------------------
     def available(self) -> bool:
@@ -145,9 +154,21 @@ class Panel:
             except OSError:
                 continue
             for group, label, fragment in ACTIVITIES:
-                if fragment in command and label not in found:
+                if fragment in command and label not in found and self._ours(entry, group):
                     found[label] = {'group': group, 'label': label, 'pid': int(entry.name)}
         return list(found.values())
+
+    def _ours(self, process: Path, group: str) -> bool:
+        """The helpers of this checkout run from it (the panel starts them there, the guide says so for a
+        terminal): the same helper of another checkout is not ours. A download and other programs (the
+        copy in openpilot.distill, its training) count wherever they run."""
+        if group not in OWN_GROUPS:
+            return True
+        try:
+            cwd = Path(os.readlink(process / 'cwd'))
+        except OSError:
+            return True
+        return cwd.is_relative_to(self.repo.resolve())
 
     def _running_groups(self, activities: list[dict]) -> set[str]:
         groups = {item['group'] for item in activities}
@@ -248,6 +269,9 @@ class Panel:
             payload['reviewed_routes'] = sum(1 for row in rows if row['confirmed'])
             payload['next_action'] = _next_action(payload['next_step'])
         payload['actions'] = self._action_states(payload, activities)
+        payload['dataset'] = self.dataset_summary()
+        payload['training_starts'] = self.training_starts()
+        payload['next_step_text'], payload['all_ready'] = _next_step_text(payload)
         for job in payload['jobs']:
             job['progress'] = self.job_progress(job, payload['preparation'])
         self._terminal_training(payload)
@@ -285,7 +309,28 @@ class Panel:
             text = ''
         result = progress(job['action'], job['state'], text, preparation if job['action'] == 'prepare' else None)
         self._progress[job['id']] = (key[0], key[1], result)
+        if job['state'] == 'running':
+            result = self._with_step_progress(result, job['action'], job['started_at'])
         return result
+
+    def _with_step_progress(self, result: dict, action: str, started_at: str) -> dict:
+        """The progress inside the current step: the last report of a command (logs/progress.json, written
+        by nnslr_tools.progress) if it came after the job started, or what the GPU setup is doing."""
+        record = _read_json(self.root / 'logs' / 'progress.json')
+        try:
+            started = datetime.fromisoformat(started_at).timestamp()
+        except ValueError:
+            started = 0.0
+        if record is not None and not (isinstance(record.get('at'), (int, float)) and record['at'] >= started):
+            record = None
+        setup = ''
+        try:
+            with (self.root / 'logs' / 'setup-gpu.log').open('rb') as log:
+                log.seek(max(0, log.seek(0, 2) - 4096))
+                setup = last_line(log.read().decode('utf-8', 'replace'))
+        except OSError:
+            pass
+        return with_step_progress(result, action, record, setup)
 
     def _action_states(self, payload: dict, activities: list[dict]) -> dict:
         running = self._running_groups(activities)
@@ -298,30 +343,97 @@ class Panel:
             reason = ''
             conflict = _conflicting_group(action['group'], running)
             if not payload['actions_enabled']:
-                reason = 'pannello in sola lettura'
+                reason = 'the panel is read-only'
             elif conflict is not None:
-                reason = 'c\'è già ' + GROUP_NAMES[conflict] + ' in corso'
+                reason = GROUP_NAMES[conflict][0].upper() + GROUP_NAMES[conflict][1:] + ' is running'
             elif name == 'update' and not (self.repo / 'helpers/update.sh').is_file():
-                reason = 'manca helpers/update.sh in questa installazione'
+                reason = 'helpers/update.sh is missing in this installation'
             elif name == 'update':
                 pass
             elif name == 'fetch' and not (self.repo / 'helpers/fetch_comma_segments.sh').is_file():
-                reason = 'manca helpers/fetch_comma_segments.sh in questa installazione'
+                reason = 'helpers/fetch_comma_segments.sh is missing in this installation'
             elif name == 'fetch' and self.fetch_python() is None:
-                reason = 'manca il lettore dei log del comma (vedi docs/GUIDA.md)'
+                reason = 'the reader of the comma logs is missing (see docs/GUIDA.md)'
             elif name == 'fetch':
                 pass
             elif name == 'prepare' and not to_prepare:
-                reason = 'nessuna route nuova da preparare'
+                reason = 'no new route to prepare'
             elif name != 'prepare' and not confirmed:
-                reason = 'nessun fotogramma confermato'
+                reason = 'no confirmed frame'
             elif name.startswith('train') and payload['reviewed_routes'] < payload['min_routes']:
-                reason = (f'servono {payload["min_routes"]} route revisionate, '
-                          f'ora {payload["reviewed_routes"]}')
+                reason = (f'{payload["min_routes"]} reviewed routes are needed, '
+                          f'now {payload["reviewed_routes"]}')
             elif name.startswith('train') and gpu is not None and gpu['processes']:
-                reason = 'la GPU è occupata da un altro processo'
+                reason = 'the GPU is busy with another process'
             states[name] = {'label': action['label'], 'allowed': not reason, 'reason': reason}
         return states
+
+    # -- the dataset and the starting points of a training ----------------------------------------
+    def dataset_summary(self) -> dict | None:
+        """What the gold dataset holds (frames, objects by family, human/AI, per route), its split and the
+        last import. Read again only when one of the files changed."""
+        objects = self.root / 'annotations' / 'objects.jsonl'
+        files = [objects, self.root / 'logs' / 'import.json', self.root / 'splits' / 'latest.json']
+        key = tuple(path.stat().st_mtime_ns if path.is_file() else 0 for path in files)
+        if self._dataset is not None and self._dataset[0] == key:
+            return self._dataset[1]
+        summary = _dataset_summary(self.root) if objects.is_file() else None
+        self._dataset = (key, summary)
+        return summary
+
+    def training_starts(self) -> list[dict]:
+        """Where a training can start: ImageNet weights (the default), random weights, the stable model
+        on Hugging Face (when one is published), or a finished run of this server."""
+        starts = [
+            {'key': 'imagenet', 'label': 'Pre-trained on ImageNet', 'default': True, 'available': True, 'reason': '',
+             'description': 'MobileNetV3 that already knows shapes, edges and circles from a million photos: '
+                            'it learns the Swiss signs fastest.'},
+            {'key': 'random', 'label': 'Random weights', 'default': False, 'available': True, 'reason': '',
+             'description': 'A network that knows nothing: it learns everything from the reviewed frames. '
+                            'Slower, and weaker with few frames.'},
+        ]
+        stable = self._stable_published()
+        starts.append({'key': 'stable', 'label': 'The stable model', 'default': False, 'available': stable is True,
+                       'reason': '' if stable is True else ('Checking Hugging Face…' if stable is None else
+                                                             'No stable model published on Hugging Face yet'),
+                       'description': 'Continues from the last model published as stable on Hugging Face.'})
+        for run in self._finished_runs():
+            starts.append({'key': 'run:' + run, 'label': 'Run ' + run, 'default': False, 'available': True,
+                           'reason': '', 'description': 'Continues from the best weights of this earlier '
+                                                        'training on this server.'})
+        return starts
+
+    def _finished_runs(self) -> list[str]:
+        """Runs of this server with the best weights of both networks, newest first."""
+        runs = self.root / 'runs'
+        if not runs.is_dir():
+            return []
+        found = [entry for entry in runs.iterdir() if RUN_NAME.fullmatch(entry.name)
+                 and (entry / 'detector' / 'detector-best.pt').is_file() and (entry / 'reader' / 'reader-best.pt').is_file()]
+        return [entry.name for entry in sorted(found, key=lambda entry: entry.stat().st_mtime, reverse=True)]
+
+    def _stable_published(self) -> bool | None:
+        """True when training/stable.json exists on Hugging Face; None while not checked yet. Asked at most
+        every 10 minutes, in the background, so a status call never waits for the network."""
+        with self._lock:
+            checked_at, published = self._stable
+            if time.monotonic() - checked_at > STABLE_CHECK_SECONDS and not self._stable_checking:
+                self._stable_checking = True
+                threading.Thread(target=self._check_stable, daemon=True).start()
+        return published
+
+    def _check_stable(self) -> None:
+        repo = os.environ.get('NNSLR_HF_REPO', 'cristianku/sunnypilot-speedlimits-models')
+        url = 'https://huggingface.co/' + repo + '/resolve/main/training/stable.json'
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, method='HEAD'), timeout=10) as answer:
+                published = answer.status == 200
+        except (OSError, ValueError):
+            # 401/404 (no repository or no stable.json) and no network alike: not available.
+            published = False
+        with self._lock:
+            self._stable = (time.monotonic(), published)
+            self._stable_checking = False
 
     # -- progress of the preparation -----------------------------------------------------------
     def preparation(self, rows: list[dict], activities: list[dict]) -> dict | None:
@@ -366,13 +478,13 @@ class Panel:
     def _route_progress(self, row: dict) -> dict:
         route = row['route']
         if row['run_id'] is not None:
-            return {'route': route, 'phase': 'pronta', 'done': row['report_frames'],
-                    'total': row['report_frames'], 'unit': 'frame', 'percent': 100}
+            return {'route': route, 'phase': 'ready', 'done': row['report_frames'],
+                    'total': row['report_frames'], 'unit': 'frames', 'percent': 100}
         if row['linked'] == 0:
-            return {'route': route, 'phase': 'da collegare', 'done': 0, 'total': 0, 'unit': 'segmenti', 'percent': 0}
+            return {'route': route, 'phase': 'to link', 'done': 0, 'total': 0, 'unit': 'segments', 'percent': 0}
         if row['extracted'] < row['linked']:
-            return {'route': route, 'phase': 'frame', 'done': row['extracted'], 'total': row['linked'],
-                    'unit': 'segmenti', 'percent': 50 * row['extracted'] // row['linked']}
+            return {'route': route, 'phase': 'extracting frames', 'done': row['extracted'], 'total': row['linked'],
+                    'unit': 'segments', 'percent': 50 * row['extracted'] // row['linked']}
         done = self._preannotated_frames(route)
         total = row['frames']
         percent = 50
@@ -381,7 +493,7 @@ class Panel:
         # The report counts only once it is moved in place (run_id above).
         if percent > 99:
             percent = 99
-        return {'route': route, 'phase': 'cartelli', 'done': done, 'total': total, 'unit': 'frame', 'percent': percent}
+        return {'route': route, 'phase': 'proposing signs', 'done': done, 'total': total, 'unit': 'frames', 'percent': percent}
 
     def _batch_routes(self) -> list[str] | None:
         try:
@@ -429,34 +541,53 @@ class Panel:
         return found
 
     # -- actions -------------------------------------------------------------------------------
-    def start(self, action: str) -> dict:
+    def start(self, action: str, options: dict | None = None) -> dict:
+        """Starts an action. The only option is the starting point of a training ({'start': key} of
+        training_starts()), turned into a flag or the environment of helpers/3_train.sh, never a command."""
         if action not in ACTIONS:
-            raise PanelError(404, 'unknown_action', 'Azione sconosciuta.')
+            raise PanelError(404, 'unknown_action', 'Unknown action.')
+        start_env = {}
+        start_args = []
+        start = (options or {}).get('start')
+        if start is not None:
+            if action != 'train':
+                raise PanelError(400, 'bad_option', 'Only a training has a starting point.')
+            choice = next((item for item in self.training_starts() if item['key'] == start), None)
+            if choice is None:
+                raise PanelError(400, 'bad_option', 'Unknown starting point.')
+            if not choice['available']:
+                raise PanelError(409, 'not_available', choice['reason'] + '.')
+            if start == 'random':
+                start_env['NNSLR_TRAIN_INIT'] = 'random'
+            elif start == 'stable':
+                start_args.append('--continue')
+            elif start.startswith('run:'):
+                start_env['NNSLR_TRAIN_FROM_RUN'] = start[len('run:'):]
         if not self.actions_enabled or not self.available():
-            raise PanelError(403, 'actions_disabled', 'Il pannello è in sola lettura su questo server.')
+            raise PanelError(403, 'actions_disabled', 'The panel is read-only on this server.')
         group = ACTIONS[action]['group']
         if action == 'update' and not (self.repo / 'helpers/update.sh').is_file():
-            raise PanelError(403, 'actions_disabled', 'Manca helpers/update.sh in questa installazione.')
+            raise PanelError(403, 'actions_disabled', 'helpers/update.sh is missing in this installation.')
         fetch_python = None
         if action == 'fetch':
             if not (self.repo / 'helpers/fetch_comma_segments.sh').is_file():
-                raise PanelError(403, 'actions_disabled', 'Manca helpers/fetch_comma_segments.sh in questa installazione.')
+                raise PanelError(403, 'actions_disabled', 'helpers/fetch_comma_segments.sh is missing in this installation.')
             fetch_python = self.fetch_python()
             if fetch_python is None:
-                raise PanelError(403, 'actions_disabled', 'Manca il lettore dei log del comma (vedi docs/GUIDA.md).')
+                raise PanelError(403, 'actions_disabled', 'The reader of the comma logs is missing (see docs/GUIDA.md).')
         with self._lock:
             conflict = _conflicting_group(group, self._running_groups(self.activities()))
             if conflict is not None:
-                raise PanelError(409, 'busy', 'C\'è già ' + GROUP_NAMES[conflict] + ' in corso: aspetta che finisca.')
+                raise PanelError(409, 'busy', GROUP_NAMES[conflict][0].upper() + GROUP_NAMES[conflict][1:] + ' is running: wait for it to finish.')
             self.logs.mkdir(parents=True, exist_ok=True)
             job_id = datetime.now().strftime('%Y%m%d-%H%M%S') + '-' + action
             path = self.logs / (job_id + '.log')
             if path.exists():
-                raise PanelError(409, 'busy', 'Un\'azione è appena partita: riprova tra un secondo.')
-            command = list(ACTIONS[action]['command'])
+                raise PanelError(409, 'busy', 'An action has just started: try again in a second.')
+            command = list(ACTIONS[action]['command']) + start_args
             if action == 'prepare':
                 command.append('--jobs=' + os.environ.get(PREPARE_JOBS_ENV, '2'))
-            environment = dict(os.environ, NNSLR_DATA_ROOT=str(self.root))
+            environment = dict(os.environ, NNSLR_DATA_ROOT=str(self.root), **start_env)
             if fetch_python:
                 environment[FETCH_PYTHON_ENV] = fetch_python
             with path.open('wb') as log:
@@ -499,8 +630,8 @@ class Panel:
         group = self._group(job_id)
         if group is None:
             if JOB_ID.fullmatch(job_id) and (self.logs / (job_id + '.log')).is_file():
-                raise PanelError(409, 'not_running', 'L\'azione è già finita.')
-            raise PanelError(404, 'unknown_job', 'Azione non avviata dal pannello (fermala dal terminale).')
+                raise PanelError(409, 'not_running', 'The action has already finished.')
+            raise PanelError(404, 'unknown_job', 'Not an action of the panel (stop it from its terminal).')
         try:
             os.killpg(group, signal.SIGTERM)
         except ProcessLookupError:
@@ -557,6 +688,96 @@ def _exit_code(path: Path) -> int | None:
         return None
     match = FINISHED.search(tail)
     return int(match.group(1)) if match else None
+
+
+# English names of the sign families of the dataset (sign_family of objects.jsonl).
+FAMILY_LABELS = {'maximum_speed': 'Speed limit', 'variable_display': 'Variable display', 'zone': 'Zone',
+                 'cancellation': 'End of limit', 'other_sign': 'Other sign', 'not_a_sign': 'Not a sign',
+                 'unreadable': 'Unreadable', 'road_marking': 'Road marking'}
+SPEED_FAMILIES = ('maximum_speed', 'variable_display', 'zone', 'cancellation')
+
+
+def _dataset_summary(root: Path) -> dict:
+    families: dict[str, int] = {}
+    per_route: dict[str, dict] = {}
+    frames: set[str] = set()
+    human = ai = objects = 0
+    with (root / 'annotations' / 'objects.jsonl').open(encoding='utf-8') as source:
+        for line in source:
+            try:
+                item = json.loads(line)
+            except ValueError:
+                continue
+            objects += 1
+            family = item.get('sign_family') or 'unknown'
+            families[family] = families.get(family, 0) + 1
+            by_ai = (item.get('provenance') or {}).get('label_basis') == 'ai_review'
+            ai += by_ai
+            human += not by_ai
+            route = per_route.setdefault(item.get('route_id') or '?', {'frames': set(), 'objects': 0,
+                                                                        'speed_signs': 0, 'human': 0, 'ai': 0})
+            route['frames'].add(item.get('image_path'))
+            frames.add(item.get('image_path'))
+            route['objects'] += 1
+            route['speed_signs'] += family in SPEED_FAMILIES
+            route['ai' if by_ai else 'human'] += 1
+    # The split in use: data/splits/latest.json points to it (logs/splits.json is rewritten while a
+    # training makes a new one).
+    pointer = _read_json(root / 'splits' / 'latest.json') or {}
+    split_path = root / str(pointer.get('path', '')) if pointer.get('path') else None
+    split = _read_json(split_path) if split_path is not None and split_path.resolve().is_relative_to(root.resolve()) else None
+    imported = _read_json(root / 'logs' / 'import.json')
+    return {
+        'frames': len(frames), 'objects': objects, 'routes': len(per_route), 'human': human, 'ai': ai,
+        'families': [{'key': key, 'label': FAMILY_LABELS.get(key, key.replace('_', ' ').capitalize()), 'count': count}
+                     for key, count in sorted(families.items(), key=lambda pair: -pair[1])],
+        'per_route': [{'route': name, 'frames': len(values['frames']), 'objects': values['objects'],
+                       'speed_signs': values['speed_signs'], 'human': values['human'], 'ai': values['ai']}
+                      for name, values in sorted(per_route.items())],
+        'changed_at': _mtime(root / 'annotations' / 'objects.jsonl'),
+        'split': None if not split or split_path is None else {'counts': split.get('counts') or {}, 'made_at': _mtime(split_path),
+                                         'warnings': split.get('warnings') or []},
+        'last_import': None if not imported else {
+            'at': _mtime(root / 'logs' / 'import.json'),
+            'new_frames': imported.get('imported_frame_count') or 0,
+            'already': imported.get('already_imported_frame_count') or 0,
+            'changed_after_import': len(imported.get('changed_after_import') or []),
+            'warnings': imported.get('warnings') or []},
+    }
+
+
+def _read_json(path: Path) -> dict | None:
+    try:
+        value = json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _mtime(path: Path) -> str | None:
+    try:
+        return datetime.fromtimestamp(path.stat().st_mtime).astimezone().isoformat(timespec='seconds')
+    except OSError:
+        return None
+
+
+def _next_step_text(payload: dict) -> tuple[str, bool]:
+    """The next step in English for the page (route_status.next_step stays Italian for the terminal), and
+    whether everything is ready (dataset current, a training can start)."""
+    rows = payload['routes']
+    states = {row['state'] for row in rows}
+    if not rows:
+        return 'No routes yet: download drives from the comma.', False
+    if states & {'collegare', 'estrarre', 'preannotare'}:
+        return 'New videos to turn into frames with proposed signs: prepare the new routes.', False
+    if 'revisionare' in states:
+        return 'Open the routes to review and confirm or correct the signs.', False
+    if payload['reviewed_routes'] < payload['min_routes']:
+        return (f'Training needs at least {payload["min_routes"]} reviewed routes (now {payload["reviewed_routes"]}): '
+                'download more drives from the comma.'), False
+    if 'importare' in states:
+        return 'The reviews are ready: import them and train the detector and the reader on the GPU.', False
+    return 'The dataset is up to date: you can train a new model whenever you like.', True
 
 
 # The last /proc/stat sample: the CPU use is the busy share of the time between two status calls.

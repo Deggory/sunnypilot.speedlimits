@@ -1,7 +1,8 @@
 <script setup lang="ts">
-// Prepara: from the drives on the comma to frames with the proposed signs. The two actions, the download or
+// Prepare: from the drives on the comma to frames with the proposed signs. The two actions, the download or
 // preparation running (or the last one), the routes.
 import {computed} from 'vue';
+import {plural} from '../common/format';
 import type {ActionName, ActionState, Job, PanelStatus, RouteState} from '../common/panel-types';
 import ActionList from './ActionList.vue';
 import JobProgress from './JobProgress.vue';
@@ -14,10 +15,10 @@ const props = defineProps<{status: PanelStatus | null}>();
 defineEmits<{run: [name: ActionName, state: ActionState]; stop: [job: Job]; details: [job: Job]}>();
 
 const ACTIONS: [ActionName, string][] = [
-  ['fetch', 'Copia dal comma i giri nuovi nella cartella dei video, segmento per segmento; le route già preparate restano come sono.'],
-  ['prepare', 'Per ogni route nuova collega i video, estrae i fotogrammi e fa proporre i cartelli al modello: poi la route è pronta da revisionare.'],
+  ['fetch', 'Copies the new drives from the comma into the video folder, segment by segment; the routes already prepared stay as they are.'],
+  ['prepare', 'For every new route it links the videos, extracts the frames and has the model propose the signs: then the route is ready to review.'],
 ];
-const COUNTS: [RouteState, string][] = [['collegare', 'da collegare'], ['estrarre', 'da estrarre'], ['preannotare', 'da pre-annotare']];
+const COUNTS: [RouteState, string][] = [['collegare', 'to link'], ['estrarre', 'to extract'], ['preannotare', 'to pre-annotate']];
 
 const job = computed(() => jobOf(props.status, PREPARE_ACTIONS));
 const activities = computed(() => terminalActivities(props.status, ['fetch', 'prepare']));
@@ -28,16 +29,16 @@ const total = computed(() => counts.value.reduce((sum, item) => sum + item.count
 
 <template>
   <header class="page-head">
-    <h1 class="page-title">Prepara</h1>
-    <p class="page-sub">Dai giri del comma ai fotogrammi con i cartelli proposti, tutto automatico.</p>
+    <h1 class="page-title">Prepare</h1>
+    <p class="page-sub">From the drives of the comma to frames with the proposed signs, all automatic.</p>
   </header>
 
   <section class="card tab-card" aria-labelledby="prepare-title">
     <div class="tab-card-head">
       <div>
-        <h2 id="prepare-title">Route nuove</h2>
-        <div class="figure" id="prepare-big">{{ status === null ? '–' : total ? total + ' route da preparare' : 'Tutto preparato' }}</div>
-        <p class="figure-note">{{ status === null ? '' : total ? 'Video arrivati dal comma, non ancora fotogrammi.' : 'Nessun video in attesa: per altre route, scarica dal comma.' }}</p>
+        <h2 id="prepare-title">New routes</h2>
+        <div class="figure" id="prepare-big">{{ status === null ? '–' : total ? plural(total, 'route') + ' to prepare' : 'All prepared' }}</div>
+        <p class="figure-note">{{ status === null ? '' : total ? 'Videos arrived from the comma, not frames yet.' : 'No video waiting: for more routes, download from the comma.' }}</p>
       </div>
       <ul v-if="total" class="chips">
         <li v-for="item in counts.filter((entry) => entry.count)" :key="item.state"><strong>{{ item.count }}</strong> {{ item.label }}</li>
@@ -47,12 +48,12 @@ const total = computed(() => counts.value.reduce((sum, item) => sum + item.count
   </section>
 
   <section v-if="job || activities.length" class="live-section" :class="{now: job?.state === 'running' || activities.length > 0}" aria-labelledby="prepare-job-title">
-    <h2 class="section-title" id="prepare-job-title">{{ job?.state === 'running' || activities.length ? 'In corso' : 'Ultimo lavoro' }}</h2>
+    <h2 class="section-title" id="prepare-job-title">{{ job?.state === 'running' || activities.length ? 'Running' : 'Last job' }}</h2>
     <div class="jp-list" aria-live="polite">
-      <JobProgress v-if="job" :job="job" :heading="job.state !== 'running' && activities.length ? 'Ultimo lavoro' : undefined" @details="$emit('details', $event)" @stop="$emit('stop', $event)">
+      <JobProgress v-if="job" :job="job" :heading="job.state !== 'running' && activities.length ? 'Last job' : undefined" :system="status?.system" @details="$emit('details', $event)" @stop="$emit('stop', $event)">
         <PrepRoutes v-if="job.action === 'prepare' && job.state === 'running' && status?.preparation" :routes="status.preparation.working"/>
       </JobProgress>
-      <TerminalActivity v-for="activity in activities" :key="activity.label" :activity="activity" :preparation="status?.preparation ?? null"/>
+      <TerminalActivity v-for="activity in activities" :key="activity.pid + activity.label" :activity="activity" :preparation="status?.preparation ?? null" :system="status?.system"/>
     </div>
   </section>
 

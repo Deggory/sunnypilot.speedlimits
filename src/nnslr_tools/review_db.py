@@ -119,44 +119,44 @@ VERSION_2_COLUMNS = (
     ('channel', "TEXT NOT NULL DEFAULT 'web' CHECK (channel IN ('web', 'rest', 'mcp'))"),
 )
 
-# Italian text shown by the review page for each import-annotations reason code.
+# English text shown by the review page for each import-annotations reason code.
 REASON_MESSAGES = {
-    'invalid_json': 'Dati JSON non validi.',
-    'invalid_schema': 'Struttura della revisione non valida.',
-    'unknown_enum': 'Valore non ammesso in uno dei campi a scelta.',
-    'unreviewed_proposal': 'Il fotogramma non risulta confermato.',
-    'missing_provenance': 'Mancano i dati di provenienza della revisione.',
-    'invalid_review_timestamp': 'Data della revisione non valida.',
-    'invalid_identity': 'Identità del fotogramma o di un riquadro non valida.',
-    'invalid_route_id': 'Identificativo della route non valido.',
-    'invalid_dimensions': 'Dimensioni del fotogramma non valide.',
-    'invalid_group': 'Sito fisico e incontro devono essere vuoti oppure un identificativo (non “unknown”).',
-    'capture_time_inconsistency': 'Dati temporali del fotogramma incoerenti.',
-    'illegal_speed': f'Il valore deve essere un numero intero tra {MIN_VALUE_KPH} e {MAX_VALUE_KPH} km/h.',
-    'value_family_mismatch': 'Questo tipo di cartello non può avere un valore in km/h.',
-    'value_state_inconsistency': 'Valore in km/h incoerente con il tipo scelto.',
-    'invalid_bbox': 'Riquadro non valido: deve stare dentro l’immagine e avere larghezza e altezza.',
-    'invalid_score': 'Punteggio della proposta non valido.',
-    'missing_image': 'L’immagine originale del fotogramma non si trova sul server.',
-    'unsafe_image_path': 'Percorso dell’immagine non consentito.',
-    'absolute_path': 'Percorso dell’immagine non consentito.',
-    'remote_path': 'Percorso dell’immagine non consentito.',
-    'path_traversal': 'Percorso dell’immagine non consentito.',
-    'hash_mismatch': 'L’immagine originale è cambiata dopo l’estrazione: rigenera il report.',
-    'invalid_image': 'L’immagine originale è danneggiata.',
-    'image_dimensions_mismatch': 'Le dimensioni dell’immagine non corrispondono al report.',
-    'duplicate_identity': 'Lo stesso riquadro compare due volte nel fotogramma.',
-    'contradictory_frame_labels': 'Il fotogramma risulta sia vuoto sia con riquadri.',
-    'empty_dataset': 'Nessuna annotazione da salvare.',
+    'invalid_json': 'Invalid JSON data.',
+    'invalid_schema': 'Invalid review structure.',
+    'unknown_enum': 'Value not allowed in one of the choice fields.',
+    'unreviewed_proposal': 'The frame is not confirmed.',
+    'missing_provenance': 'The provenance data of the review is missing.',
+    'invalid_review_timestamp': 'Invalid review date.',
+    'invalid_identity': 'Invalid identity of the frame or of a box.',
+    'invalid_route_id': 'Invalid route id.',
+    'invalid_dimensions': 'Invalid frame dimensions.',
+    'invalid_group': 'Physical site and encounter must be empty or an identifier (not “unknown”).',
+    'capture_time_inconsistency': 'Inconsistent time data of the frame.',
+    'illegal_speed': f'The value must be a whole number between {MIN_VALUE_KPH} and {MAX_VALUE_KPH} km/h.',
+    'value_family_mismatch': 'This type of sign cannot have a value in km/h.',
+    'value_state_inconsistency': 'Value in km/h inconsistent with the chosen type.',
+    'invalid_bbox': 'Invalid box: it must be inside the image and have a width and a height.',
+    'invalid_score': 'Invalid proposal score.',
+    'missing_image': 'The original image of the frame is not on the server.',
+    'unsafe_image_path': 'Image path not allowed.',
+    'absolute_path': 'Image path not allowed.',
+    'remote_path': 'Image path not allowed.',
+    'path_traversal': 'Image path not allowed.',
+    'hash_mismatch': 'The original image changed after the extraction: rebuild the report.',
+    'invalid_image': 'The original image is damaged.',
+    'image_dimensions_mismatch': 'The image dimensions do not match the report.',
+    'duplicate_identity': 'The same box appears twice in the frame.',
+    'contradictory_frame_labels': 'The frame is marked both as empty and as having boxes.',
+    'empty_dataset': 'No annotations to save.',
 }
 
-HUMAN_REVIEW_EXISTS_MESSAGE = ('Questo fotogramma è già confermato da un revisore umano: un revisore AI non lo '
-                               'modifica né lo ritira senza override_human_review=true, da usare solo se il '
-                               'proprietario l’ha chiesto per questo fotogramma.')
+HUMAN_REVIEW_EXISTS_MESSAGE = ('This frame is already confirmed by a human reviewer: an AI reviewer does not '
+                               'change or withdraw it without override_human_review=true, to use only if the '
+                               'owner asked for it for this frame.')
 
 
 class ReviewRejected(ValueError):
-    """A save the server refuses; ``message`` is the Italian text for the page."""
+    """A save the server refuses; ``message`` is the English text for the page."""
 
     def __init__(self, status: int, reason: str, message: str):
         self.status = status
@@ -184,14 +184,14 @@ def italian_message(reason: str, detail: str = '') -> str:
     if detail.startswith(reason + ':'):
         detail = detail[len(reason) + 1:].strip()
     if reason == 'missing_provenance' and 'reviewer' in detail:
-        text = 'Indica un nome o pseudonimo del revisore.'
+        text = 'Give a name or pseudonym of the reviewer.'
     elif reason in REASON_MESSAGES:
         text = REASON_MESSAGES[reason]
     else:
-        text = 'Revisione non accettata.'
+        text = 'Review not accepted.'
     if detail:
-        return f'{text} (motivo: {reason}; {detail})'
-    return f'{text} (motivo: {reason})'
+        return f'{text} (reason: {reason}; {detail})'
+    return f'{text} (reason: {reason})'
 
 
 class ReviewStore:
@@ -310,7 +310,7 @@ class ReviewStore:
                     existing = _select_review(connection, route_id, run_id, frame_key)
                     if existing is None:
                         raise ReviewRejected(404, 'not_found',
-                                             'Nessuna revisione salvata da annullare per questo fotogramma.')
+                                             'No saved review to withdraw for this frame.')
                     _check_base_revision(base_revision, existing['revision'])
                     _check_human_review(protect_human, existing)
                     payload = json.dumps(existing['payload'], sort_keys=True, separators=(',', ':'), allow_nan=False)
@@ -462,8 +462,8 @@ def _check_base_revision(base_revision: int | None, current: int) -> None:
         return
     if base_revision != current:
         raise ReviewRejected(409, 'revision_conflict',
-                             'Questo fotogramma è stato salvato da un’altra pagina nel frattempo: '
-                             'ricarica la pagina per vedere la versione attuale.')
+                             'This frame was saved by another page in the meantime: '
+                             'reload the page to see the current version.')
 
 
 def _check_human_review(protect_human: bool, existing: dict | None) -> None:
@@ -615,10 +615,10 @@ def _check_reviewer_text(reviewer) -> None:
     name = reviewer.strip()
     if len(name) > MAX_REVIEWER_LENGTH:
         raise ReviewRejected(400, 'invalid_reviewer',
-                             f'Il nome del revisore può avere al massimo {MAX_REVIEWER_LENGTH} caratteri.')
+                             f'The reviewer name can have at most {MAX_REVIEWER_LENGTH} characters.')
     if not name.isprintable():
         raise ReviewRejected(400, 'invalid_reviewer',
-                             'Il nome del revisore contiene caratteri non ammessi (di controllo o invisibili).')
+                             'The reviewer name contains characters that are not allowed (control or invisible characters).')
 
 
 def _reviewer_kind(body: dict, channel: str, require_versioning: bool) -> str:
@@ -628,7 +628,7 @@ def _reviewer_kind(body: dict, channel: str, require_versioning: bool) -> str:
     kind = body.get('reviewer_kind')
     if kind not in REVIEWER_KINDS:
         raise ReviewRejected(400, 'invalid_reviewer_kind',
-                             'reviewer_kind deve essere "human" (persona) oppure "ai" (Claude, Codex, altri modelli).')
+                             'reviewer_kind must be "human" (a person) or "ai" (Claude, Codex, other models).')
     return kind
 
 
@@ -642,7 +642,7 @@ def _stored_reviewer(reviewer, kind: str):
             name = AI_REVIEWER_PREFIX + name
     elif name.lower().startswith(AI_REVIEWER_PREFIX):
         raise ReviewRejected(400, 'invalid_reviewer',
-                             'Un nome che inizia con "ai/" indica un revisore AI: usa reviewer_kind "ai".')
+                             'A name that starts with "ai/" means an AI reviewer: use reviewer_kind "ai".')
     _check_reviewer_text(name)
     return name
 
@@ -651,13 +651,13 @@ def _check_versioning(body: dict, run_id: str) -> None:
     """Clients of /api/v1 and MCP must name the report and the revision they edited."""
     if not isinstance(body.get('run_id'), str) or not body['run_id']:
         raise ReviewRejected(400, 'missing_run_id',
-                             'Manca run_id: rileggi il fotogramma e invia il run_id del report che hai guardato.')
+                             'run_id is missing: read the frame again and send the run_id of the report you looked at.')
     if body['run_id'] != run_id:
         raise ReviewRejected(409, 'stale_report',
-                             'Il report di questa route è stato rigenerato: rileggi il fotogramma.')
+                             'The report of this route was rebuilt: read the frame again.')
     if 'base_revision' not in body or body['base_revision'] is None:
         raise ReviewRejected(428, 'base_revision_required',
-                             'Manca base_revision: invia la revision letta con il fotogramma (0 se non era salvato).')
+                             'base_revision is missing: send the revision read with the frame (0 if it was not saved).')
 
 
 def save_frame_review(store: ReviewStore, root: Path, *, route_id: str, run_id: str, report_row: dict,
@@ -675,7 +675,7 @@ def save_frame_review(store: ReviewStore, root: Path, *, route_id: str, run_id: 
         _check_versioning(body, run_id)
     if body.get('run_id') != run_id:
         raise ReviewRejected(409, 'stale_report',
-                             'Il report di questa route è stato rigenerato: ricarica la pagina.')
+                             'The report of this route was rebuilt: reload the page.')
     confirmed = body.get('confirmed')
     if type(confirmed) is not bool:
         raise ReviewRejected(400, 'invalid_schema', italian_message('invalid_schema', 'confirmed must be true or false'))
@@ -702,7 +702,7 @@ def save_frame_review(store: ReviewStore, root: Path, *, route_id: str, run_id: 
         raise ReviewRejected(400, 'invalid_schema', italian_message('invalid_schema', 'detections must be a list'))
     if len(body['detections']) > MAX_DETECTIONS_PER_FRAME:
         raise ReviewRejected(400, 'too_many_boxes',
-                             f'Troppi riquadri nel fotogramma (massimo {MAX_DETECTIONS_PER_FRAME}).')
+                             f'Too many boxes in the frame (at most {MAX_DETECTIONS_PER_FRAME}).')
     named = dict(body)
     named['reviewer'] = reviewer
     frame = build_reviewed_frame(report_row, named, utc_now(), reviewer_kind=kind, channel=channel)

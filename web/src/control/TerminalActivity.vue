@@ -1,17 +1,18 @@
 <script setup lang="ts">
-// Work started from a terminal (or by another program): not a job of the site, so no log and no Ferma.
+// Work started from a terminal (or by another program): not a job of the site, so no log and no Stop.
 // A preparation shows how far it is, from what it already wrote; anything else a moving bar.
 import {computed} from 'vue';
-import type {Activity, Preparation} from '../common/panel-types';
+import type {Activity, Preparation, SystemInfo} from '../common/panel-types';
 import JobSteps from './JobSteps.vue';
+import MiniMachine from './MiniMachine.vue';
 import PrepRoutes from './PrepRoutes.vue';
 
-const props = defineProps<{activity: Activity; preparation: Preparation | null}>();
+const props = defineProps<{activity: Activity; preparation: Preparation | null; system?: SystemInfo | null | undefined}>();
 const prep = computed(() => props.activity.group === 'prepare' ? props.preparation : null);
 // A training started from a terminal has the progress of its log (data/logs/train-<run>.log).
 const progress = computed(() => props.activity.progress ?? null);
 const percent = computed(() => prep.value?.percent ?? progress.value?.percent ?? null);
-const where = computed(() => props.activity.group === 'other' ? 'un altro programma sul server' : 'avviato da un terminale');
+const where = computed(() => props.activity.group === 'other' ? 'another program on the server' : 'started from a terminal');
 </script>
 
 <template>
@@ -22,23 +23,24 @@ const where = computed(() => props.activity.group === 'other' ? 'un altro progra
         <h3>{{ activity.label.charAt(0).toUpperCase() + activity.label.slice(1) }}</h3>
         <span class="jp-when">{{ where }} · pid {{ activity.pid }}</span>
       </div>
-      <span class="pill run">in corso</span>
+      <span class="pill run">running</span>
     </header>
     <div class="jp-body">
       <div class="jp-main">
         <div class="jp-figure">
-          <span v-if="percent === null" class="jp-big jp-big-word">in corso</span>
+          <span v-if="percent === null" class="jp-big jp-big-word">running</span>
           <span v-else class="jp-big">{{ Math.floor(percent) }}<small>%</small></span>
         </div>
         <div class="jp-bar" :class="{indeterminate: percent === null}" role="progressbar" :aria-label="activity.label"
              aria-valuemin="0" aria-valuemax="100" :aria-valuenow="percent ?? undefined"
-             :aria-valuetext="percent === null ? 'in corso, avanzamento non noto' : undefined"><span
+             :aria-valuetext="percent === null ? 'running, progress unknown' : undefined"><span
           :style="percent === null ? undefined : {width: percent + '%'}"></span></div>
-        <p v-if="prep && prep.routes_total" class="jp-detail">{{ prep.routes_done }} di {{ prep.routes_total }} route pronte</p>
+        <p v-if="prep && prep.routes_total" class="jp-detail">{{ prep.routes_done }} of {{ prep.routes_total }} routes ready</p>
         <p v-if="progress?.detail" class="jp-detail">{{ progress.detail }}</p>
         <p v-if="progress?.last_line" class="jp-line">{{ progress.last_line }}</p>
         <PrepRoutes v-if="prep" :routes="prep.working"/>
-        <p class="jp-line">Si ferma dal terminale da cui è partito: qui si vede soltanto.</p>
+        <p class="jp-line">It stops from the terminal it started in: here it is only shown.</p>
+        <MiniMachine v-if="system" :system="system"/>
       </div>
       <JobSteps v-if="progress?.steps.length" :steps="progress.steps"/>
     </div>

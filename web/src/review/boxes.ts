@@ -1,11 +1,11 @@
-// The list of the boxes of the frame in the panel ("Cartelli"), as data for BoxList.vue: what each one is,
+// The list of the boxes of the frame in the panel ("Signs"), as data for BoxList.vue: what each one is,
 // where it comes from, what the reviewer changed, the boxes that are the same sign twice.
 import {describe, shortName} from './catalog';
 import {proposalsOf} from './frames';
 import {overlap} from './geometry';
 import type {Detection, FrameEdit, FrameRow} from './types';
 
-/** "aggiunto a mano", "modello · 87%", or what the reviewer changed: "modello 40 " + "→ 60". */
+/** "added by hand", "model · 87%", or what the reviewer changed: "model 40 " + "→ 60". */
 export interface Source {
   text: string;
   changed: string | null;
@@ -28,12 +28,12 @@ function originalOf(row: FrameRow, d: Detection): Detection | null {
 
 function sourceOf(row: FrameRow, d: Detection): Source {
   const original = originalOf(row, d);
-  if (original === null) return {text: 'aggiunto a mano', changed: null};
+  if (original === null) return {text: 'added by hand', changed: null};
   if (original.family !== d.family || original.value_kph !== d.value_kph) {
-    return {text: 'modello ' + shortName(original) + ' ', changed: '→ ' + shortName(d)};
+    return {text: 'model ' + shortName(original) + ' ', changed: '→ ' + shortName(d)};
   }
-  if (original.score === null || original.score === undefined) return {text: 'modello', changed: null};
-  return {text: 'modello · ' + Math.round(Number(original.score) * 100) + '%', changed: null};
+  if (original.score === null || original.score === undefined) return {text: 'model', changed: null};
+  return {text: 'model · ' + Math.round(Number(original.score) * 100) + '%', changed: null};
 }
 
 export function boxItems(row: FrameRow, work: FrameEdit): BoxItem[] {
@@ -52,5 +52,5 @@ export function boxItems(row: FrameRow, work: FrameEdit): BoxItem[] {
 
 export function boxCountText(count: number): string {
   if (count === 0) return '';
-  return count === 1 ? '1 riquadro' : count + ' riquadri';
+  return count === 1 ? '1 box' : count + ' boxes';
 }

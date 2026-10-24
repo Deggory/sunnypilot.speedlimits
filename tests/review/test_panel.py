@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from nnslr_tools.pages import asset
 from nnslr_tools.panel import Panel, PanelError
 from review_helpers import ROUTE, TOKEN, RunningServer, json_of, make_report, sign_in
 
@@ -19,6 +20,14 @@ FAKE_PREPARE = '#!/usr/bin/env bash\necho "prepare $*"\necho "data root $NNSLR_D
 FAKE_TRAIN = '#!/usr/bin/env bash\necho "train $*"\nexit 3\n'
 FAKE_UPDATE = '#!/usr/bin/env bash\necho "update $*"\nsleep "${FAKE_UPDATE_SLEEP:-0}"\n'
 FAKE_FETCH = '#!/usr/bin/env bash\necho "fetch $*"\necho "python $COMMA_FETCH_PYTHON"\nsleep "${FAKE_FETCH_SLEEP:-0}"\n'
+
+
+@pytest.fixture(autouse=True)
+def only_this_checkout(monkeypatch):
+    """A download or a training really running on this machine must not make these tests busy: here every
+    group counts only from the test checkout."""
+    import nnslr_tools.panel as panel_module
+    monkeypatch.setattr(panel_module, 'OWN_GROUPS', ('fetch', 'prepare', 'train', 'update', 'other'))
 
 
 @pytest.fixture
@@ -62,9 +71,9 @@ def test_status_explains_why_each_action_is_not_available(root, checkout, monkey
     assert [row['route'] for row in status['routes']] == [ROUTE]
     assert status['routes'][0]['state'] == 'revisionare'
     assert status['next_action'] == 'review'
-    assert status['actions']['prepare'] == {'label': 'Prepara le route nuove', 'allowed': False,
-                                            'reason': 'nessuna route nuova da preparare'}
-    assert status['actions']['dataset']['reason'] == 'nessun fotogramma confermato'
+    assert status['actions']['prepare'] == {'label': 'Prepare new routes', 'allowed': False,
+                                            'reason': 'no new route to prepare'}
+    assert status['actions']['dataset']['reason'] == 'no confirmed frame'
     assert status['actions']['train']['allowed'] is False
     # The machine for the Stato page: GPU, CPU per core, RAM, disk, as distill-web's Status.
     assert set(status['system']) == {'gpu', 'disk', 'cpus', 'load', 'loads', 'cpu', 'memory'}
@@ -73,7 +82,7 @@ def test_status_explains_why_each_action_is_not_available(root, checkout, monkey
 def test_action_runs_in_background_and_keeps_its_exit_code(root, checkout):
     panel = Panel(root, repo=checkout)
     job = panel.start('prepare')
-    assert job['action'] == 'prepare' and job['label'] == 'Prepara le route nuove'
+    assert job['action'] == 'prepare' and job['label'] == 'Prepare new routes'
     done = finished(panel, job['id'])
     assert (done['state'], done['code']) == ('ok', 0)
     text = full_log(panel, job['id'])
@@ -94,8 +103,8 @@ def test_one_action_per_kind_and_stop(root, checkout, monkeypatch):
     with pytest.raises(PanelError) as busy:
         panel.start('prepare')
     assert busy.value.status == 409
-    assert any(item['label'] == 'preparazione' for item in panel.activities())
-    assert panel.status()['actions']['prepare']['reason'] == "c'è già una preparazione in corso"
+    assert any(item['label'] == 'preparation' for item in panel.activities())
+    assert panel.status()['actions']['prepare']['reason'] == 'A preparation is running'
     assert panel.stop(job['id']) == {'id': job['id'], 'stopping': True}
     assert finished(panel, job['id'])['state'] in ('interrupted', 'failed')
     with pytest.raises(PanelError) as unknown:
@@ -118,7 +127,7 @@ def test_stop_works_after_a_restart_of_the_server(root, checkout, monkeypatch):
 
 def test_update_runs_without_printing_the_token_link(root, checkout):
     panel = Panel(root, repo=checkout)
-    assert panel.status()['actions']['update'] == {'label': 'Aggiorna il codice', 'allowed': True, 'reason': ''}
+    assert panel.status()['actions']['update'] == {'label': 'Update the code', 'allowed': True, 'reason': ''}
     done = finished(panel, panel.start('update')['id'])
     assert (done['state'], done['code']) == ('ok', 0)
     assert 'update --no-link' in full_log(panel, done['id'])
@@ -131,7 +140,7 @@ def test_update_never_runs_together_with_a_preparation_or_a_training(root, check
     with pytest.raises(PanelError) as busy:
         panel.start('update')
     assert busy.value.status == 409
-    assert panel.status()['actions']['update']['reason'] == "c'è già una preparazione in corso"
+    assert panel.status()['actions']['update']['reason'] == 'A preparation is running'
     panel.stop(job['id'])
     finished(panel, job['id'])
 
@@ -141,7 +150,7 @@ def test_update_never_runs_together_with_a_preparation_or_a_training(root, check
         with pytest.raises(PanelError) as busy:
             panel.start(action)
         assert busy.value.status == 409
-    assert panel.status()['actions']['prepare']['reason'] == "c'è già un aggiornamento del codice in corso"
+    assert panel.status()['actions']['prepare']['reason'] == 'A code update is running'
     panel.stop(update['id'])
     finished(panel, update['id'])
 
@@ -149,7 +158,7 @@ def test_update_never_runs_together_with_a_preparation_or_a_training(root, check
 def test_update_needs_its_helper(root, checkout):
     (checkout / 'helpers/update.sh').unlink()
     panel = Panel(root, repo=checkout)
-    assert panel.status()['actions']['update']['reason'] == 'manca helpers/update.sh in questa installazione'
+    assert panel.status()['actions']['update']['reason'] == 'helpers/update.sh is missing in this installation'
     with pytest.raises(PanelError) as missing:
         panel.start('update')
     assert missing.value.status == 403
@@ -168,7 +177,7 @@ def test_fetch_uses_the_log_reader_of_openpilot_distill(root, checkout, no_log_r
     distill.chmod(0o755)
     panel = Panel(root, repo=checkout)
     # No confirmed frame needed: the download comes before everything else.
-    assert panel.status()['actions']['fetch'] == {'label': 'Scarica dal comma', 'allowed': True, 'reason': ''}
+    assert panel.status()['actions']['fetch'] == {'label': 'Download from the comma', 'allowed': True, 'reason': ''}
     done = finished(panel, panel.start('fetch')['id'])
     assert (done['state'], done['code']) == ('ok', 0)
     text = full_log(panel, done['id'])
@@ -177,7 +186,7 @@ def test_fetch_uses_the_log_reader_of_openpilot_distill(root, checkout, no_log_r
 
 def test_fetch_needs_a_log_reader(root, checkout, no_log_reader):
     panel = Panel(root, repo=checkout)
-    assert panel.status()['actions']['fetch']['reason'] == 'manca il lettore dei log del comma (vedi docs/GUIDA.md)'
+    assert panel.status()['actions']['fetch']['reason'] == 'the reader of the comma logs is missing (see docs/GUIDA.md)'
     with pytest.raises(PanelError) as missing:
         panel.start('fetch')
     assert missing.value.status == 403
@@ -188,20 +197,20 @@ def test_fetch_never_runs_together_with_a_preparation_or_an_update(root, checkou
     monkeypatch.setenv('FAKE_FETCH_SLEEP', '30')
     panel = Panel(root, repo=checkout)
     fetch = panel.start('fetch')
-    assert any(item['label'] == 'download dal comma' for item in panel.activities())
+    assert any(item['label'] == 'download from the comma' for item in panel.activities())
     for action in ('fetch', 'prepare', 'update'):
         with pytest.raises(PanelError) as busy:
             panel.start(action)
         assert busy.value.status == 409
-    assert panel.status()['actions']['prepare']['reason'] == "c'è già un download dal comma in corso"
+    assert panel.status()['actions']['prepare']['reason'] == 'A download from the comma is running'
     # A training does not touch the videos.
-    assert panel.status()['actions']['dataset']['reason'] != "c'è già un download dal comma in corso"
+    assert panel.status()['actions']['dataset']['reason'] != 'A download from the comma is running'
     panel.stop(fetch['id'])
     finished(panel, fetch['id'])
 
     monkeypatch.setenv('FAKE_SLEEP', '30')
     prepare = panel.start('prepare')
-    assert panel.status()['actions']['fetch']['reason'] == "c'è già una preparazione in corso"
+    assert panel.status()['actions']['fetch']['reason'] == 'A preparation is running'
     panel.stop(prepare['id'])
     finished(panel, prepare['id'])
 
@@ -228,7 +237,7 @@ def test_preparation_progress_from_what_is_on_disk(root, checkout, monkeypatch, 
     panel = Panel(root, repo=checkout)
     rows = panel.status()['routes']
     assert panel.status()['preparation'] is None  # nothing running
-    running = [{'group': 'prepare', 'label': 'preparazione', 'pid': 1}]
+    running = [{'group': 'prepare', 'label': 'preparation', 'pid': 1}]
 
     # A run of an older 1_prepare.sh: no batch file, no overall percent.
     assert panel.preparation(rows, running) == {'percent': None, 'routes_done': 0, 'routes_total': 0, 'working': []}
@@ -240,9 +249,9 @@ def test_preparation_progress_from_what_is_on_disk(root, checkout, monkeypatch, 
     # ROUTE has its report: 100. extracting: 1/4 segments = 12. annotating: 4/8 frames = 75.
     assert (progress['percent'], progress['routes_done'], progress['routes_total']) == ((100 + 12 + 75) // 3, 1, 3)
     assert panel._route_progress(next(r for r in rows if r['route'] == extracting)) == {
-        'route': extracting, 'phase': 'frame', 'done': 1, 'total': 4, 'unit': 'segmenti', 'percent': 12}
+        'route': extracting, 'phase': 'extracting frames', 'done': 1, 'total': 4, 'unit': 'segments', 'percent': 12}
     assert panel._route_progress(next(r for r in rows if r['route'] == annotating)) == {
-        'route': annotating, 'phase': 'cartelli', 'done': 4, 'total': 8, 'unit': 'frame', 'percent': 75}
+        'route': annotating, 'phase': 'proposing signs', 'done': 4, 'total': 8, 'unit': 'frames', 'percent': 75}
 
 
 def test_read_only_panel_and_unknown_actions(root, checkout):
@@ -250,7 +259,7 @@ def test_read_only_panel_and_unknown_actions(root, checkout):
     with pytest.raises(PanelError) as disabled:
         panel.start('prepare')
     assert disabled.value.status == 403
-    assert panel.status()['actions']['train']['reason'] == 'pannello in sola lettura'
+    assert panel.status()['actions']['train']['reason'] == 'the panel is read-only'
     with pytest.raises(PanelError) as unknown:
         Panel(root, repo=checkout).start('rm')
     assert unknown.value.status == 404
@@ -273,19 +282,19 @@ def served(root, checkout):
 
 
 def test_panel_page_status_and_run_over_http(served):
-    status, response, data = served.request('GET', '/panoramica')
+    status, response, data = served.request('GET', '/')
     assert status == 200
     csp = response.getheader('Content-Security-Policy')
     assert "script-src 'nonce-" in csp and "connect-src 'self'" in csp
     nonce = csp.split("'nonce-")[1].split("'")[0]
     assert f'<script nonce="{nonce}">' in data.decode()
-    assert '/panoramica' in served.request('GET', '/')[2].decode()
-    # The three tabs are one page; the old addresses of the panel and of Stato lead to the first.
-    for path in ('/prepara', '/allena'):
+    # The three tabs are one page (Overview is the home page); the old addresses lead to them.
+    for path in ('/prepare', '/train'):
         assert served.request('GET', path)[0] == 200, path
-    for path in ('/pannello', '/stato'):
+    for path, target in (('/pannello', '/'), ('/stato', '/'), ('/panoramica', '/'), ('/prepara', '/prepare'),
+                         ('/allena', '/train')):
         status, response, data = served.request('GET', path)
-        assert status == 303 and response.getheader('Location') == '/panoramica', path
+        assert status == 303 and response.getheader('Location') == target, path
     payload = json_of(served.request('GET', '/api/panel/status')[2])
     assert payload['routes'][0]['route'] == ROUTE and 'prepare' in payload['actions']
 
@@ -315,8 +324,11 @@ def test_panel_needs_the_sign_in_like_the_rest_of_the_site(root, checkout):
     server = RunningServer(root, token=TOKEN, require_token=True)
     server.app.panel = Panel(root, repo=checkout)
     try:
-        for path in ['/panoramica', '/prepara', '/allena', '/api/panel/status']:
-            assert server.request('GET', path)[0] == 401, path
+        # Signed out, the pages show the sign-in page and the API answers 401.
+        for path in ['/', '/prepare', '/train']:
+            status, response, data = server.request('GET', path)
+            assert status in (200, 401) and asset('js/login.js').encode() in data, path
+        assert server.request('GET', '/api/panel/status')[0] == 401
         assert server.request('POST', '/api/panel/run/prepare', body={})[0] == 401
         assert server.request('GET', '/api/panel/status', headers=sign_in(server))[0] == 200
     finally:
@@ -332,5 +344,5 @@ def test_a_training_started_from_a_terminal_has_the_progress_of_its_own_log(root
     payload = {'jobs': [], 'activities': [{'group': 'train', 'label': 'dataset e training', 'pid': 1}]}
     panel._terminal_training(payload)
     progress = payload['activities'][0]['progress']
-    assert progress['detail'] == 'detector · epoca 2 di 20'
+    assert progress['detail'] == 'detector · epoch 2 of 20'
     assert progress['curves']['detector']['points'] == [{'epoch': 2, 'train_loss': 0.9, 'val_loss': 1.0, 'seconds': 30}]

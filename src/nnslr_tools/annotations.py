@@ -11,6 +11,7 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
+from nnslr_tools.progress import report as report_progress
 from nnslr_tools.manifest import normalize_relpath, parse_route_id, sha256_of
 from nnslr_tools.media import MediaToolError, png_dimensions
 from speed_vision_core.types import MIN_VALUE_KPH, MAX_VALUE_KPH
@@ -126,7 +127,8 @@ def frame_identity(row: dict) -> tuple:
     return row['route_id'], row['segment_index'], row['camera_stream'], index
 
 
-def validate_annotation(row: dict, root: Path, *, dataset_kind: str = 'gold') -> None:
+def validate_annotation(row: dict, root: Path, *, dataset_kind: str = 'gold',
+                        image_facts: dict | None = None) -> None:
     # [model-review] - START
     require(dataset_kind in DATASET_KINDS, 'unknown_dataset_kind', str(dataset_kind))
     # [model-review] - END
@@ -217,13 +219,46 @@ def validate_annotation(row: dict, root: Path, *, dataset_kind: str = 'gold') ->
         path = root / normalize_relpath(root, Path(row['image_path']))
     except ValueError as exc:
         raise DatasetError('unsafe_image_path', str(exc)) from exc
-    require(path.is_file(), 'missing_image', row['image_path'])
-    require(sha256_of(path) == row['image_sha256'], 'hash_mismatch', row['image_path'])
+    # The facts of the image: computed by validate_dataset for all images at once (in parallel), or here.
+    facts = image_facts.get(path) if image_facts is not None else None
+    if facts is None:
+        facts = image_check(path)
+    if facts['missing']:
+        raise DatasetError('missing_image', row['image_path'])
+    require(facts['sha256'] == row['image_sha256'], 'hash_mismatch', row['image_path'])
+    if facts['invalid'] is not None:
+        raise DatasetError('invalid_image', facts['invalid'])
+    require(facts['dimensions'] == (row['width'], row['height']), 'image_dimensions_mismatch', row['image_path'])
+
+
+def image_check(path: Path) -> dict:
+    """What validate_annotation needs to know of an image: present, its SHA-256, and its PNG verified
+    (dimensions, or why it is invalid). Reads and decodes the whole file: the slow part of a validation."""
+    if not path.is_file():
+        return {'missing': True, 'sha256': None, 'dimensions': None, 'invalid': None}
     try:
-        dimensions = png_dimensions(path, verify=True)
+        return {'missing': False, 'sha256': sha256_of(path), 'dimensions': png_dimensions(path, verify=True),
+                'invalid': None}
     except MediaToolError as exc:
-        raise DatasetError('invalid_image', str(exc)) from exc
-    require(dimensions == (row['width'], row['height']), 'image_dimensions_mismatch', row['image_path'])
+        return {'missing': False, 'sha256': sha256_of(path), 'dimensions': None, 'invalid': str(exc)}
+
+
+def image_checks(paths: list[Path]) -> dict:
+    """image_check of many images on every core (an image shared by many objects is read once)."""
+    unique = sorted(set(paths))
+    workers = min(len(unique), os.cpu_count() or 1, 16)
+    facts = {}
+    if workers <= 1:
+        for index, path in enumerate(unique, 1):
+            facts[path] = image_check(path)
+            report_progress('validate', index, len(unique), f'{index} of {len(unique)} images checked')
+        return facts
+    from concurrent.futures import ProcessPoolExecutor
+    with ProcessPoolExecutor(max_workers=workers) as pool:
+        for index, (path, result) in enumerate(zip(unique, pool.map(image_check, unique, chunksize=16)), 1):
+            facts[path] = result
+            report_progress('validate', index, len(unique), f'{index} of {len(unique)} images checked')
+    return facts
 
 
 def validate_dataset(rows: list[dict], root: Path, *, dataset_kind: str = 'gold') -> dict:
@@ -233,9 +268,17 @@ def validate_dataset(rows: list[dict], root: Path, *, dataset_kind: str = 'gold'
     errors = []
     seen, boxes, frames = set(), set(), {}
     negative_frames, object_frames = set(), set()
+    # The images first, all at once on every core: reading and decoding them is the slow part.
+    paths = []
+    for row in rows:
+        try:
+            paths.append(root / normalize_relpath(root, Path(row['image_path'])))
+        except (KeyError, TypeError, ValueError):
+            continue  # validate_annotation reports the row
+    facts = image_checks(paths)
     for line, row in enumerate(rows, 1):
         try:
-            validate_annotation(row, root, dataset_kind=dataset_kind)
+            validate_annotation(row, root, dataset_kind=dataset_kind, image_facts=facts)
             require(row['annotation_id'] not in seen, 'duplicate_identity', row['annotation_id'])
             seen.add(row['annotation_id'])
             identity = frame_identity(row)
