@@ -50,10 +50,10 @@ const total = computed(() => counts.value.reduce((sum, item) => sum + item.count
   <section v-if="job || activities.length" class="live-section" :class="{now: job?.state === 'running' || activities.length > 0}" aria-labelledby="prepare-job-title">
     <h2 class="section-title" id="prepare-job-title">{{ job?.state === 'running' || activities.length ? 'Running' : 'Last job' }}</h2>
     <div class="jp-list" aria-live="polite">
-      <JobProgress v-if="job" :job="job" :heading="job.state !== 'running' && activities.length ? 'Last job' : undefined" :system="status?.system" @details="$emit('details', $event)" @stop="$emit('stop', $event)">
+      <JobProgress v-if="job" :job="job" :heading="job.state !== 'running' && activities.length ? 'Last job' : undefined" @details="$emit('details', $event)" @stop="$emit('stop', $event)">
         <PrepRoutes v-if="job.action === 'prepare' && job.state === 'running' && status?.preparation" :routes="status.preparation.working"/>
       </JobProgress>
-      <TerminalActivity v-for="activity in activities" :key="activity.pid + activity.label" :activity="activity" :preparation="status?.preparation ?? null" :system="status?.system"/>
+      <TerminalActivity v-for="activity in activities" :key="activity.pid + activity.label" :activity="activity" :preparation="status?.preparation ?? null"/>
     </div>
   </section>
 

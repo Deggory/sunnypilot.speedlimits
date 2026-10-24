@@ -184,7 +184,7 @@ border:1.5px solid var(--line-strong);background:var(--surface);color:var(--mute
 .goal span{flex:1;height:8px;border-radius:4px;background:var(--surface-3)}
 .goal span.on{background:var(--ok)}
 
-/* The sparklines of the machine in small (MiniMachine.vue). */
+/* The sparklines (components/Spark.vue). */
 .spark{height:44px;margin:10px 0 6px;border-radius:8px;background:var(--surface-2);overflow:hidden}
 .spark svg{width:100%;height:100%;display:block}
 .job-item .sub{overflow-wrap:anywhere}
@@ -216,7 +216,7 @@ border:1.5px solid var(--line-strong);background:var(--surface);color:var(--mute
 .net h3 span{font-size:13px;font-weight:400;color:var(--muted)}
 .net-wait{margin:0;padding:18px;border-radius:14px;border:1px dashed var(--line-strong);color:var(--muted);font-size:14px;text-align:center}
 .net-charts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px 28px}
-.chart{margin:0;min-width:0}
+.chart{margin:0;min-width:0;padding:12px 14px 6px;border:1px solid var(--line);border-radius:14px;background:var(--surface)}
 .chart-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:4px 14px;margin-bottom:4px}
 .chart-title{font-size:13px;font-weight:600}
 .chart-legend{display:flex;gap:14px;font-size:12.5px;color:var(--muted)}
@@ -231,6 +231,7 @@ border:1.5px solid var(--line-strong);background:var(--surface);color:var(--mute
 .chart-line{fill:none;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
 .chart-dot{stroke:var(--surface);stroke-width:2}
 .chart-best circle{fill:none;stroke-width:1.5}
+.chart-best text{paint-order:stroke;stroke:var(--surface);stroke-width:4px;stroke-linejoin:round}
 .chart-cross{stroke:var(--line-strong);stroke-width:1}
 .chart-empty{position:absolute;inset:16px 64px 26px 46px;display:grid;place-items:center;color:var(--muted);font-size:13px}
 .chart-tip{position:absolute;top:6px;z-index:2;min-width:132px;padding:8px 10px;border-radius:10px;pointer-events:none;
@@ -318,15 +319,6 @@ h2.flow-head{margin:0}
 .flow-link:hover{text-decoration:underline;text-underline-offset:3px}
 .flow-link .icon{width:16px;height:16px}
 
-/* The machine in small inside a running job (MiniMachine.vue): quiet tiles, value and the last minutes. */
-.jp-machine{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:8px;margin-top:4px;padding-top:12px;
-border-top:1px dashed var(--line-strong)}
-.mini{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:baseline;gap:2px 8px;min-width:0;padding:8px 10px 6px;
-border-radius:12px;background:var(--surface-2);border:1px solid var(--line)}
-.mini-label{font-size:11.5px;font-weight:600;letter-spacing:.02em;color:var(--muted);white-space:nowrap}
-.mini-value{font-size:13px;font-weight:650;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
-.mini .spark{grid-column:1/-1;height:22px;margin:4px 0 0;border-radius:6px;background:transparent}
-.mini.hot .mini-value{color:var(--bad)}
 
 /* What the dataset holds (DatasetSection.vue): figures, bar lists, the split as one stacked bar, the routes.
    The split takes the first five slots of the reference categorical palette (validated, both themes): train
@@ -634,7 +626,6 @@ border-top:1px solid var(--line)}
   .ds-routes thead th{font-size:10.5px;letter-spacing:0;white-space:normal;vertical-align:bottom}
   .ds-routes td.route a{font-size:11.5px}
   .ds-routes .rid-pad{display:none}
-  .jp-machine{grid-template-columns:1fr 1fr}
   /* Evaluate: the runs keep name, state and the reader's and detector's main number; the counts stack. */
   .runs th:nth-child(2),.runs td:nth-child(2),.runs th:nth-child(5),.runs td:nth-child(5),.runs th:nth-child(7),.runs td:nth-child(7){display:none}
   .runs th,.runs td{padding:8px 6px}

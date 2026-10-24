@@ -39,11 +39,11 @@ const gpuProcesses = computed(() => props.status?.system.gpu?.process_list ?? []
   <section class="live-section" aria-labelledby="running-title">
     <h2 class="section-title" id="running-title">Running<span v-if="running.length + activities.length" class="count-badge">{{ running.length + activities.length }}</span></h2>
     <div v-if="running.length + activities.length" class="jp-list" aria-live="polite">
-      <JobProgress v-for="job in running" :key="job.id" :job="job" :system="status?.system" @details="$emit('details', $event)" @stop="$emit('stop', $event)">
+      <JobProgress v-for="job in running" :key="job.id" :job="job" @details="$emit('details', $event)" @stop="$emit('stop', $event)">
         <PrepRoutes v-if="job.action === 'prepare' && status?.preparation" :routes="status.preparation.working"/>
       </JobProgress>
       <TerminalActivity v-for="activity in activities" :key="activity.pid + activity.label" :activity="activity"
-                        :preparation="status?.preparation ?? null" :system="status?.system"/>
+                        :preparation="status?.preparation ?? null"/>
     </div>
     <div v-else class="card idle" :class="{waiting: status === null}">
       <div class="idle-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor"

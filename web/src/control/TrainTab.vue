@@ -189,10 +189,10 @@ const numbers = computed(() => {
   <section v-if="job || activities.length" class="live-section" :class="{now: job?.state === 'running' || activities.length > 0}" aria-labelledby="train-job-title">
     <h2 class="section-title" id="train-job-title">{{ job?.state === 'running' || activities.length ? 'Running' : 'Last job' }}</h2>
     <div class="jp-list" aria-live="polite">
-      <JobProgress v-if="job" :job="job" :heading="job.state !== 'running' && activities.length ? 'Last job' : undefined" :system="status?.system"
+      <JobProgress v-if="job" :job="job" :heading="job.state !== 'running' && activities.length ? 'Last job' : undefined"
                    @details="emit('details', $event)" @stop="emit('stop', $event)"/>
       <TrainingCharts v-if="charted" :progress="charted.progress" :running="charted.running"/>
-      <TerminalActivity v-for="activity in activities" :key="activity.pid + activity.label" :activity="activity" :preparation="null" :system="status?.system"/>
+      <TerminalActivity v-for="activity in activities" :key="activity.pid + activity.label" :activity="activity" :preparation="null"/>
     </div>
   </section>
 

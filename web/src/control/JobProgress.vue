@@ -4,15 +4,14 @@
 // known, about how long is left; Stop and Details (the log in the sheet); while it runs, the machine in small
 // under the buttons. A finished job shows how it ended.
 import {computed, inject} from 'vue';
-import type {Job, SystemInfo} from '../common/panel-types';
+import type {Job} from '../common/panel-types';
 import Icon from '../components/Icon.vue';
 import {useNow} from '../composables/now';
 import JobSteps from './JobSteps.vue';
 import {elapsedText, failedStep, JOB_STATE, PIPELINE_ACTIONS, roughText, startedAt, startedWhen} from './jobs';
-import MiniMachine from './MiniMachine.vue';
 import {RESUME_JOB} from './use-actions';
 
-const props = defineProps<{job: Job; heading?: string | undefined; system?: SystemInfo | null | undefined}>();
+const props = defineProps<{job: Job; heading?: string | undefined}>();
 defineEmits<{details: [job: Job]; stop: [job: Job]}>();
 const now = useNow();
 
@@ -94,7 +93,6 @@ const barKind = computed(() => ({ok: 'ok', failed: 'bad', interrupted: 'warn', r
           <button v-if="running && job.stoppable" class="btn small danger" type="button" @click="$emit('stop', job)"><Icon name="stop"/>Stop</button>
           <button v-if="resumable" class="btn small primary" type="button" @click="resumeJob?.(job)"><Icon name="resume"/>Resume</button>
         </div>
-        <MiniMachine v-if="running && system" :system="system"/>
       </div>
       <JobSteps v-if="steps.length" :steps="steps" :current="job.state === 'running' ? job.progress.step_progress : null"/>
     </div>

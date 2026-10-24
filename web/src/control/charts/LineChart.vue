@@ -182,7 +182,8 @@ const tipText = computed(() => tip.value === null ? '' : 'Epoch ' + tip.value.ep
         <path v-for="line in lines" :key="'l' + line.key" class="chart-line" :d="line.path" :style="{stroke: line.color}"/>
         <g v-if="bestPoint" class="chart-best">
           <circle :cx="bestPoint.cx" :cy="bestPoint.cy" r="6.5" :style="{stroke: bestPoint.color}"/>
-          <text :x="bestPoint.cx" :y="bestPoint.cy - 11" text-anchor="middle">{{ bestPoint.label }}</text>
+          <!-- Left of the mark: the values of the last epoch are written on its right. -->
+          <text :x="bestPoint.cx - 11" :y="bestPoint.cy + 4" text-anchor="end">{{ bestPoint.label }}</text>
         </g>
         <template v-for="line in lines" :key="'e' + line.key">
           <circle v-if="line.end" class="chart-dot" :class="{live: running}" :cx="x(line.end.epoch)" :cy="y(line.end.value)" r="4"

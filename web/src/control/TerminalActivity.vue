@@ -2,12 +2,11 @@
 // Work started from a terminal (or by another program): not a job of the site, so no log and no Stop.
 // A preparation shows how far it is, from what it already wrote; anything else a moving bar.
 import {computed} from 'vue';
-import type {Activity, Preparation, SystemInfo} from '../common/panel-types';
+import type {Activity, Preparation} from '../common/panel-types';
 import JobSteps from './JobSteps.vue';
-import MiniMachine from './MiniMachine.vue';
 import PrepRoutes from './PrepRoutes.vue';
 
-const props = defineProps<{activity: Activity; preparation: Preparation | null; system?: SystemInfo | null | undefined}>();
+const props = defineProps<{activity: Activity; preparation: Preparation | null}>();
 const prep = computed(() => props.activity.group === 'prepare' ? props.preparation : null);
 // A training started from a terminal has the progress of its log (data/logs/train-<run>.log).
 const progress = computed(() => props.activity.progress ?? null);
@@ -40,7 +39,6 @@ const where = computed(() => props.activity.group === 'other' ? 'another program
         <p v-if="progress?.last_line" class="jp-line">{{ progress.last_line }}</p>
         <PrepRoutes v-if="prep" :routes="prep.working"/>
         <p class="jp-line">It stops from the terminal it started in: here it is only shown.</p>
-        <MiniMachine v-if="system" :system="system"/>
       </div>
       <JobSteps v-if="progress?.steps.length" :steps="progress.steps"/>
     </div>
