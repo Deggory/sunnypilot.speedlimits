@@ -147,6 +147,42 @@ def _new_id(taken: set, source_key: str) -> str:
     return base + '-' + str(number)
 
 
+def match_boxes(olds: list, news: list, *, width: float, height: float) -> dict:
+    """Which box of ``news`` (this frame) is the same sign as each box of ``olds`` (the frame before):
+    {old index: (new index, scale, shift)}. Boxes without a valid bbox_xyxy match nothing.
+
+    Signs grow and move away from FOCUS as the car gets closer; in a turn the whole view slides as well.
+    """
+    unit = width / 1344 if width else 1.0
+    focus = (FOCUS[0] * width, FOCUS[1] * height)
+    candidates = {}
+    for i, old in enumerate(olds):
+        old_box = _box(old)
+        if old_box is None:
+            continue
+        for j, new in enumerate(news):
+            new_box = _box(new)
+            if new_box is None:
+                continue
+            pair = _pair(old_box, new_box, focus)
+            if pair is not None:
+                candidates[(i, j)] = pair
+    # In a turn the whole view slides: try no slide and the slide each candidate pair implies, keep the one
+    # that explains most signs (then the smallest slide). One sign alone can always be explained by its slide:
+    # a large one only when nothing else is there, and it still has to have grown like a sign coming closer.
+    turns = [(0.0, 0.0)] + [pair[1] for pair in candidates.values()]
+    best = None
+    for turn in turns:
+        slide = math.hypot(turn[0], turn[1])
+        if slide > MAX_TURN * width:
+            continue
+        taken, total = _assign(olds, news, candidates, turn, unit)
+        score = (len(taken), -(total + slide / (TURN_COST * width)))
+        if best is None or score > best[0]:
+            best = (score, taken)
+    return best[1] if best is not None else {}
+
+
 def carry_over(previous: list, current: list, *, width: float, height: float, source_key: str,
                proposals: list | None = None) -> dict:
     """The boxes of this frame after "Apply previous", and what happened to each previous box.
@@ -165,30 +201,7 @@ def carry_over(previous: list, current: list, *, width: float, height: float, so
             by_id[item['detection_id']] = item
     result = [copy.deepcopy(item) for item in current if isinstance(item, dict)]
     olds = [item for item in previous if isinstance(item, dict) and _box(item) is not None]
-
-    candidates = {}
-    for i, old in enumerate(olds):
-        for j, new in enumerate(result):
-            new_box = _box(new)
-            if new_box is None:
-                continue
-            pair = _pair(_box(old), new_box, focus)
-            if pair is not None:
-                candidates[(i, j)] = pair
-    # In a turn the whole view slides: try no slide and the slide each candidate pair implies, keep the one
-    # that explains most signs (then the smallest slide). One sign alone can always be explained by its slide:
-    # a large one only when nothing else is there, and it still has to have grown like a sign coming closer.
-    turns = [(0.0, 0.0)] + [pair[1] for pair in candidates.values()]
-    best = None
-    for turn in turns:
-        slide = math.hypot(turn[0], turn[1])
-        if slide > MAX_TURN * width:
-            continue
-        taken_old, total = _assign(olds, result, candidates, turn, unit)
-        score = (len(taken_old), -(total + slide / (TURN_COST * width)))
-        if best is None or score > best[0]:
-            best = (score, taken_old)
-    taken_old = best[1] if best is not None else {}
+    taken_old = match_boxes(olds, result, width=width, height=height)
 
     matched = 0
     kept = 0

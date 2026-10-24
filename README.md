@@ -93,6 +93,8 @@ export NNSLR_DATA_ROOT=/path/to/speed-vision-data
 .venv/bin/nnslr extract-frames --route ROUTE_ID
 # Preannotation requires the optional [preannotate] dependencies and downloads model weights.
 .venv/bin/nnslr preannotate --route ROUTE_ID
+.venv/bin/nnslr gps --all --missing          # GPS position and country of every frame (derived/gps/)
+.venv/bin/nnslr tracks --all                 # the same sign across consecutive confirmed frames (derived/tracks/)
 .venv/bin/nnslr review --route ROUTE_ID
 ```
 

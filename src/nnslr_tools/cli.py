@@ -1176,6 +1176,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_gps.add_argument("--missing", action="store_true", help="with --all: only routes without positions yet")
     p_gps.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_gps.set_defaults(func=_cmd_gps)
+    p_tracks = sub.add_parser("tracks", help="the same sign followed across consecutive confirmed frames "
+                                             "(derived/tracks/<route>/tracks.jsonl), with the matching of Apply previous")
+    p_tracks.add_argument("--route", action="append", help="route id; repeat for more")
+    p_tracks.add_argument("--all", action="store_true", help="every route with a pre-annotation report")
+    p_tracks.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+    p_tracks.set_defaults(func=_cmd_tracks)
     # [preannotation] - END
 
     # [reviewed-dataset] - START
@@ -1476,6 +1482,26 @@ def _cmd_gps(args: argparse.Namespace) -> int:
             result = {"route_id": route, "error": str(exc)}
         print(json.dumps(result, sort_keys=True), flush=True)
     return 1 if failed else 0
+
+
+def _cmd_tracks(args: argparse.Namespace) -> int:
+    from nnslr_tools.preannotate import resolve_data_root
+    from nnslr_tools.review import latest_report, list_reports, report_rows
+    from nnslr_tools.review_db import ReviewStore, db_path
+    from nnslr_tools.tracks import build_tracks
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    routes = list(args.route or [])
+    if args.all:
+        routes += [route for route, _ in list_reports(root)]
+    if not routes:
+        print("nnslr tracks: name a --route or use --all", file=sys.stderr)
+        return 2
+    store = ReviewStore(db_path(root))
+    for route in routes:
+        directory = latest_report(root, route)
+        result = build_tracks(root, route, report_rows(directory), store.reviews(route, directory.name))
+        print(json.dumps(result, sort_keys=True), flush=True)
+    return 0
 
 
 def _cmd_mcp(args: argparse.Namespace) -> int:

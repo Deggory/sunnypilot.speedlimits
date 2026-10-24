@@ -181,3 +181,24 @@ def test_only_the_frame_just_before(server):
     assert status == 409 and answer['error'] == 'no_previous_frame'
     status, answer = apply_on_page(running, '0/0', {'run_id': RUN_ID})
     assert status == 409 and answer['error'] == 'no_previous_frame'
+
+
+def test_tracks_follow_the_same_sign_across_consecutive_frames():
+    from nnslr_tools.tracks import link_tracks
+    sign = box_at(600, 330, 24)
+    other = box_at(900, 320, 24)
+    frames = []
+    for position in range(4):
+        boxes = [confirmed(closer(sign, 1.25 ** position))]
+        if position < 2:
+            boxes.append(confirmed(closer(other, 1.25 ** position), family='other_sign', value=None))
+        frames.append({'frame_key': f'0/{position}', 'segment_index': 0, 'output_index': position,
+                       'position': position, 'detections': boxes})
+    # A gap: the frame at position 5 does not follow position 3, its sign starts a new track.
+    frames.append({'frame_key': '0/5', 'segment_index': 0, 'output_index': 5, 'position': 5,
+                   'detections': [confirmed(sign)]})
+    lines = link_tracks(frames, width=W, height=H)
+    speed = [line['track_id'] for line in lines if line['family'] == 'variable_display']
+    assert len(set(speed[:4])) == 1 and speed[4] != speed[0]
+    others = {line['track_id'] for line in lines if line['family'] == 'other_sign'}
+    assert len(others) == 1 and others.isdisjoint(speed)
