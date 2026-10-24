@@ -40,3 +40,6 @@ checkpoints/
 # ONNX bundle) must be force-added with `git add -f <path>` and documented
 # in docs/vision-speed-limit/decisions.md at that time.
 # [nnslr-hygiene] - END
+
+# --- TypeScript of the site (web/): helpers/build_web.sh installs the tools here ---
+web/node_modules/

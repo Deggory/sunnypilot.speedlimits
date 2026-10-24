@@ -15,7 +15,6 @@ in a header (``Authorization: Bearer`` or ``X-Review-Token``), also on 127.0.0.1
 """
 from __future__ import annotations
 
-import html
 import ipaddress
 import json
 import mimetypes
@@ -25,7 +24,6 @@ import secrets
 import socket
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from importlib.resources import files
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
@@ -34,7 +32,8 @@ from nnslr_tools.preannotate import PreannotationError, _inside, resolve_data_ro
 # [site-login] - START
 from nnslr_tools.review_auth import SESSION_MAX_SECONDS, AdminAuth, auth_dir
 # [site-login] - END
-from nnslr_tools.review_hints import empty_stats
+from nnslr_tools.pages import (render_account, render_index, render_login, render_panel, render_problem,
+                               render_review, render_status)
 from nnslr_tools.review_service import ReviewService
 
 TOKEN_ENV = 'NNSLR_REVIEW_TOKEN'
@@ -49,32 +48,11 @@ LOGIN_MESSAGE = 'Accesso richiesto: ricarica la pagina e accedi con nome e passw
 PUBLIC_AUTH_ROUTES = ('/api/auth/login', '/api/auth/setup/check', '/api/auth/setup')
 AUTH_ROUTES = PUBLIC_AUTH_ROUTES + ('/api/auth/logout', '/api/auth/logout-all', '/api/auth/password')
 # The pages a browser opens: without a session they show the sign-in page instead.
-PAGE_RE = re.compile(r'/(index\.html|pannello|account|route/[^/]+(/(index\.html)?)?)?')
+PAGE_RE = re.compile(r'/(index\.html|pannello|stato|account|route/[^/]+(/(index\.html)?)?)?')
 # [site-login] - END
 API_TOKEN_MESSAGE = ('Token mancante o errato: invialo nell’header "Authorization: Bearer <token>" '
                      '(oppure "X-Review-Token"), mai nell’indirizzo.')
 DEFAULT_CSP = "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
-
-
-def render_review(rows: list[dict], run_id: str, *, route_id: str = '', server: bool = False,
-                  nonce: str = '', hints: dict | None = None, hint_stats: dict | None = None,
-                  suspicious: dict | None = None, routes: list[dict] | None = None) -> str:
-    """The review page with its data embedded. Hints and suspicious flags travel apart from the
-    frame rows, so the JSONL export (which copies the rows) never contains them."""
-    template=files('nnslr_tools').joinpath('review.html').read_text()
-    if hints is None:
-        hints = {}
-    if hint_stats is None:
-        hint_stats = empty_stats()
-    if suspicious is None:
-        suspicious = {}
-    if routes is None:
-        routes = []
-    data={'run_id':run_id,'route_id':route_id,'server':server,'frames':rows,'hints':hints,
-          'hint_stats':hint_stats,'suspicious':suspicious,'routes':routes}
-    payload=json.dumps(data,ensure_ascii=True,allow_nan=False).replace('<','\\u003c').replace('>','\\u003e').replace('&','\\u0026')
-    page=template.replace('__NNSLR_NONCE__',nonce)
-    return page.replace('__NNSLR_DATA__',payload)
 
 
 def write_review(directory: Path, rows: list[dict], run_id: str) -> None:
@@ -316,187 +294,6 @@ class ReviewApp(ReviewService):
                 'url': '/route/' + route + '/',
             })
         return summaries
-
-
-def _site_style() -> str:
-    """Style of the route index, sign-in, account and error pages: site.css, read on every request so a
-    change to it is live at the next page load. Same tokens and top bar as the review page and the panel."""
-    return files('nnslr_tools').joinpath('site.css').read_text()
-
-
-def _plural(count: int, one: str, many: str) -> str:
-    if count == 1:
-        return '1 ' + one
-    return str(count) + ' ' + many
-
-
-# Dark (the default, as distill-web and perception-web) or the light look chosen on the Account page,
-# read before the first paint. The pages served from html files carry the same line.
-THEME_SCRIPT = ('<script nonce="{nonce}">try{{var t=localStorage.getItem(\'nnslr-theme\');'
-                'if(t===\'light\'||t===\'auto\')document.documentElement.dataset.theme=t}}catch(e){{}}</script>')
-# The tabs of the site, the same on every page: (current key, address, label).
-SITE_TABS = (('route', '/', 'Route'), ('panel', '/pannello', 'Pannello'), ('status', '/stato', 'Stato'))
-# At the right of the top bar on every page: the dark / light switch and the Account icon (not a tab).
-THEME_TOGGLE = '<button class="icon-btn theme-toggle" type="button" id="theme-toggle" aria-pressed="false" aria-label="Passa al tema chiaro" title="Passa al tema chiaro"><svg class="i-sun" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3.6" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M10 1.8v2.2M10 16v2.2M1.8 10H4M16 10h2.2M4.2 4.2l1.6 1.6M14.2 14.2l1.6 1.6M4.2 15.8l1.6-1.6M14.2 5.8l1.6-1.6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><svg class="i-moon" viewBox="0 0 20 20" aria-hidden="true"><path d="M16.5 12.6A7 7 0 0 1 7.4 3.5a7 7 0 1 0 9.1 9.1z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></button>'
-ACCOUNT_LINK = '<a class="icon-btn account-btn" href="/account" aria-label="Account" title="Account"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="7" r="3.4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3.6 17.2c.9-3.1 3.4-4.8 6.4-4.8s5.5 1.7 6.4 4.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></a>'
-THEME_TOGGLE_SCRIPT = '<script nonce="{nonce}">(function(){{var b=document.getElementById(\'theme-toggle\');if(!b)return;var r=document.documentElement;function dark(){{var t=r.dataset.theme;if(t===\'light\')return false;if(t===\'auto\')return!matchMedia(\'(prefers-color-scheme: light)\').matches;return true}}function show(){{var d=dark();b.classList.toggle(\'is-light\',!d);b.setAttribute(\'aria-pressed\',String(!d));b.title=d?\'Passa al tema chiaro\':\'Passa al tema scuro\';b.setAttribute(\'aria-label\',b.title)}}b.addEventListener(\'click\',function(){{var next=dark()?\'light\':\'dark\';try{{localStorage.setItem(\'nnslr-theme\',next)}}catch(e){{}}if(next===\'dark\')delete r.dataset.theme;else r.dataset.theme=next;show()}});show()}})();</script>'
-
-
-def _page_tail(nonce: str = '') -> str:
-    """End of the server pages: the script of the dark / light switch."""
-    return (THEME_TOGGLE_SCRIPT.format(nonce=nonce) if nonce else '') + '</body></html>'
-
-
-def _page_head(title: str, current: str = '', nonce: str = '') -> list[str]:
-    """Head, top bar and tabs of the server pages. current is the key of the tab to mark, '' for none."""
-    tabs = ''
-    for key, href, label in SITE_TABS:
-        tabs += '<a href="' + href + '"' + (' aria-current="page"' if key == current else '') + '>' + label + '</a>'
-    theme = THEME_SCRIPT.format(nonce=nonce) if nonce else ''
-    return [
-        '<!doctype html><html lang="it"><head><meta charset="utf-8">',
-        '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">',
-        '<meta name="color-scheme" content="light dark">',
-        theme,
-        '<title>' + html.escape(title) + '</title>',
-        '<style>' + _site_style() + '</style></head><body>',
-        '<header class="topbar"><div class="topbar-inner">'
-        '<a class="brand" href="/" title="Elenco delle route"><span class="brand-mark" aria-hidden="true">50</span>'
-        '<span class="brand-name">Speed limits</span></a>'
-        + THEME_TOGGLE + ACCOUNT_LINK.replace('<a ', '<a aria-current="page" ' if current == 'account' else '<a ', 1)
-        + '</div><nav class="tabs" aria-label="Sezioni">' + tabs + '</nav></header>',
-    ]
-
-
-# [control-panel] - START
-def render_panel(nonce: str) -> str:
-    """The control panel page; it loads its data from /api/panel/status."""
-    return files('nnslr_tools').joinpath('panel.html').read_text().replace('__NNSLR_NONCE__', nonce)
-
-
-def render_status(nonce: str) -> str:
-    """The Stato page (the machine and the jobs, as distill-web's Status); data from /api/panel/status."""
-    return files('nnslr_tools').joinpath('status.html').read_text().replace('__NNSLR_NONCE__', nonce)
-# [control-panel] - END
-
-
-# [site-login] - START
-def render_login(nonce: str) -> str:
-    """The sign-in page (also the first visit, which creates the administrator)."""
-    page = files('nnslr_tools').joinpath('login.html').read_text()
-    return page.replace('__NNSLR_STYLE__', _site_style()).replace('__NNSLR_NONCE__', nonce)
-
-
-def render_account(nonce: str, signed_in_browser: bool) -> str:
-    """The account page: who is signed in, sign out, change the password."""
-    lines = _page_head('Speed limits · Account', 'account', nonce)
-    if not signed_in_browser:
-        lines.append('<main class="page"><div class="card state-box center"><h1>Account</h1><p>Questo sito è avviato '
-                     'solo per questo computer (127.0.0.1): non chiede di accedere. Sulla rete di casa (servizio '
-                     '<code>speedlimits-web</code>) si entra con nome e password.</p></div></main>' + _page_tail(nonce))
-        return '\n'.join(lines)
-    lines.append(files('nnslr_tools').joinpath('account.html').read_text().replace('__NNSLR_NONCE__', nonce))
-    return '\n'.join(lines)
-# [site-login] - END
-
-
-# Groups of the route list, in this order: the work in progress first, finished routes last.
-ROUTE_GROUPS = (('doing', 'In corso'), ('todo', 'Da iniziare'), ('done', 'Completate'))
-
-
-def _route_state(confirmed: int, total: int) -> str:
-    if total and confirmed >= total:
-        return 'done'
-    if confirmed == 0:
-        return 'todo'
-    return 'doing'
-
-
-def _route_row(summary: dict) -> str:
-    total = summary['frame_count']
-    confirmed = summary['confirmed_count']
-    percent = 0
-    if total:
-        percent = round(confirmed * 100 / total)
-    state = _route_state(confirmed, total)
-    # What opening the route means: carry on (the one obvious action), start, or look again at a finished one.
-    action_class = 'btn small open'
-    action = 'Inizia →'
-    if state == 'doing':
-        action_class = 'btn small primary open'
-        action = 'Riprendi →'
-    elif state == 'done':
-        action_class = 'btn small open again'
-        action = 'Ricontrolla'
-    suspicious = summary.get('suspicious_count', 0)
-    hint_frames = summary.get('hint_frames', 0)
-    stats = ['<span>' + _plural(total, 'fotogramma', 'fotogrammi') + '</span>',
-             '<span>' + str(summary['frames_with_proposals']) + ' con proposte</span>']
-    if suspicious:
-        stats.append('<span class="sus">' + _plural(suspicious, 'sospetto', 'sospetti') + '</span>')
-    else:
-        stats.append('<span>0 sospetti</span>')
-    if hint_frames:
-        stats.append('<span>' + str(hint_frames) + ' con seconda lettura</span>')
-    route = html.escape(summary['route_id'])
-    return ('<li><a class="card-row ' + state + '" href="' + html.escape(summary['url']) + '">'
-            + '<span class="state-icon" aria-hidden="true">' + ('✓' if state == 'done' else '') + '</span>'
-            + '<span class="route" title="' + route + '">' + route + '</span>'
-            + '<span class="count">' + str(confirmed) + ' di ' + str(total)
-            + ' <span class="unit">confermati</span></span>'
-            + '<span class="bar" aria-hidden="true"><span style="width:' + str(percent) + '%"></span></span>'
-            + '<span class="stats">' + ''.join(stats) + '</span>'
-            + '<span class="' + action_class + '">' + action + '</span></a></li>')
-
-
-def render_index(summaries: list[dict], database: Path, nonce: str = '') -> str:
-    lines = _page_head('Speed limits · Route', 'route', nonce)
-    lines.append('<main class="page">')
-    lines.append('<header class="page-head"><h1 class="page-title">Route</h1>'
-                 '<p class="page-sub">Scegli una route da revisionare. Ogni conferma viene salvata subito '
-                 'sul server.</p></header>')
-    if not summaries:
-        lines.append('<div class="card state-box"><h2>Nessuna route da revisionare</h2><p>Prepara una route con '
-                     '<code>nnslr extract-frames</code> e <code>nnslr preannotate</code>, poi ricarica questa '
-                     'pagina.</p></div>')
-    else:
-        grouped = {key: [] for key, _ in ROUTE_GROUPS}
-        for summary in summaries:
-            grouped[_route_state(summary['confirmed_count'], summary['frame_count'])].append(summary)
-        for key, title in ROUTE_GROUPS:
-            if not grouped[key]:
-                continue
-            lines.append('<section class="group" aria-labelledby="group-' + key + '">'
-                         '<h2 class="group-title" id="group-' + key + '">' + title
-                         + ' <span class="n">' + str(len(grouped[key])) + '</span></h2><ul class="cards">')
-            for summary in grouped[key]:
-                lines.append(_route_row(summary))
-            lines.append('</ul></section>')
-    lines.append('<details class="foot"><summary>Dettagli tecnici</summary>'
-                 '<p>Database delle revisioni: <code>' + html.escape(str(database)) + '</code></p></details>')
-    lines.append('</main>' + _page_tail(nonce))
-    return '\n'.join(lines)
-
-
-def render_problem(status: int, message: str, nonce: str = '') -> str:
-    if status == 404:
-        title = 'Pagina non trovata'
-    elif status == 403:
-        title = 'Accesso negato'
-    else:
-        title = 'Errore'
-    lines = _page_head('Speed limits · ' + title, '', nonce)
-    lines.append('<main class="page"><div class="card state-box center">')
-    lines.append('<p class="code">Codice HTTP ' + str(status) + '</p>')
-    lines.append('<h1>' + html.escape(title) + '</h1>')
-    # "Pagina non trovata." under the title "Pagina non trovata" would only repeat it.
-    if message.rstrip('.') != title:
-        lines.append('<p>' + html.escape(message) + '</p>')
-    # Every 403 page (token missing or wrong, host not allowed) would come back here from the list.
-    if status != 403:
-        lines.append('<a class="btn back" href="/">← Elenco delle route</a>')
-    lines.append('</div></main>' + _page_tail(nonce))
-    return '\n'.join(lines)
 
 
 def make_handler(app: ReviewApp):

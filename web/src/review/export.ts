@@ -1,0 +1,73 @@
+// "Scarica revisioni JSONL": the confirmed frames as reviewed_frame lines, the same line the server stores
+// (review_db.build_reviewed_frame). Offline it is the only way to keep the review; with the server, a backup.
+import {byId} from '../common/dom';
+import {rows, runId, state} from './state';
+import type {Detection, FrameRow} from './types';
+
+/** One line of the export: the report row with the reviewer's decisions (review_db.build_reviewed_frame). */
+interface ReviewedFrame extends FrameRow {
+  reviewer: string | null | undefined;
+  review_timestamp: string | null | undefined;
+  kind: 'reviewed_frame';
+  ground_truth: false;
+  training_ready: false;
+  review_state: 'reviewed';
+  label_basis: 'human_review' | 'ai_review';
+  source_proposals: Detection[] | undefined;
+  detections: Detection[];
+  reviewer_kind?: 'ai';
+  review_channel?: string | undefined;
+}
+
+function say(text: string, ok: boolean): void {
+  const message = byId('exportMsg');
+  message.textContent = text;
+  message.className = 'save-msg ' + (ok ? 'ok' : 'error');
+}
+
+export function exportJsonl(): void {
+  const confirmed = rows.flatMap((row) => {
+    const s = state.edits[row.frame_key];
+    return s && s.review_state === 'reviewed' ? [{row, s}] : [];
+  });
+  if (confirmed.some(({s}) => !s.reviewer || !s.review_timestamp)) {
+    say('Riconferma le vecchie revisioni per registrarne revisore e data.', false);
+    return;
+  }
+  const lines = confirmed.map(({row, s}) => {
+    const line: ReviewedFrame = {
+      ...row,
+      reviewer: s.reviewer,
+      review_timestamp: s.review_timestamp,
+      site_group: s.site_group ?? row.site_group ?? null,
+      encounter_id: s.encounter_id ?? row.encounter_id ?? null,
+      kind: 'reviewed_frame',
+      ground_truth: false,
+      training_ready: false,
+      review_state: 'reviewed',
+      label_basis: 'human_review',
+      source_proposals: row.detections,
+      detections: s.detections.map((d) => ({
+        ...d, review_state: 'reviewed', value_state: d.value_kph == null ? 'unknown' : 'reviewed',
+      })),
+    };
+    // A frame an AI confirmed keeps its provenance (label_basis, reviewer_kind, channel), as the server stores it.
+    if (s.reviewer_kind === 'ai') {
+      line.label_basis = 'ai_review';
+      line.reviewer_kind = 'ai';
+      line.review_channel = s.channel;
+    }
+    return JSON.stringify(line);
+  });
+  if (lines.length === 0) {
+    say('Conferma almeno un fotogramma prima di esportare.', false);
+    return;
+  }
+  const url = URL.createObjectURL(new Blob([lines.join('\n') + '\n'], {type: 'application/x-ndjson'}));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'annotations-' + runId + '.jsonl';
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  say(lines.length + (lines.length === 1 ? ' fotogramma esportato.' : ' fotogrammi esportati.'), true);
+}

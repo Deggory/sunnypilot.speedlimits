@@ -1,6 +1,8 @@
-/* Route list, sign-in, account and error pages. Read on every request (review.py, _site_style): a change here is
-   live at the next page load. The look of distill-web: the tokens and the frame below are copied from
-   openpilot.distill (web/static/app.css) and are the same in review.html, panel.html and status.html. */
+/* The look shared by every page of the site, and with distill-web and perception-web: the tokens are
+   copied from openpilot.distill (web/static/app.css), dark by default with the light palette for
+   <html data-theme="light"> and, with data-theme="auto", for a light system. Then the frame: base, top
+   bar with the tabs, page head, cards, buttons, pills, bars, tables, lists, sheet, toast.
+   pages.py puts this file at the top of the <style> of every page. */
 /* Copied from openpilot.distill web/static/app.css (the look shared by distill-web and perception-web).
    Keep in step with it. Dark is the default; <html data-theme="light"> or "auto" picks the light one. */
 :root{--bg:#0b0f16;--bg-glow:rgba(59,130,246,.16);--surface:#161b24;--surface-2:#1c2230;--surface-3:#232b3b;
@@ -198,114 +200,3 @@ a.icon-btn{text-decoration:none}
 
 /* On a phone the bar keeps the brand, the dot and the two icons; the time of the last update stays in the dot's title. */
 @media (max-width:480px){.live span:last-child{display:none}}
-
-/* -- the pages of review.py (route list, error pages) and login.html / account.html -------------- */
-.group-title{display:flex;align-items:baseline;gap:8px;margin:8px 0 0;font-size:13px;font-weight:600;letter-spacing:.05em;
-text-transform:uppercase;color:var(--muted)}
-.group-title .n{color:var(--muted);font-weight:500;letter-spacing:0}
-/* Route list: one card per group, one row per route; the whole row is the link. */
-.cards{list-style:none;margin:0;padding:0;background:var(--card-grad),var(--surface);border:1px solid var(--line);
-border-radius:18px;box-shadow:var(--shadow);overflow:hidden}
-.cards > li + li{border-top:1px solid var(--line)}
-.card-row{display:grid;grid-template-columns:16px minmax(220px,1.25fr) minmax(120px,1fr) 176px 120px;
-grid-template-areas:"icon route bar count open" "icon stats bar count open";column-gap:22px;row-gap:3px;align-items:center;
-padding:14px 20px;color:inherit;text-decoration:none;transition:background .15s}
-.card-row:hover{background:var(--surface-2)}
-.card-row:focus-visible{outline-offset:-3px}
-/* Status icon: open ring to start, half ring in progress, check done. */
-.state-icon{grid-area:icon;width:14px;height:14px;border-radius:50%;border:1.5px solid var(--muted);display:grid;
-place-items:center;color:var(--on-ok);font-size:9px;font-weight:800;line-height:1}
-.card-row.doing .state-icon{border-color:var(--accent);background:linear-gradient(90deg,var(--accent) 50%,transparent 50%);
-box-shadow:inset 0 0 0 2px var(--surface)}
-.card-row.done .state-icon{border:0;background:var(--ok)}
-.route{grid-area:route;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--font-data);
-font-size:13.5px;font-weight:600}
-/* Each figure keeps its words together; the dot in front of the first figure of a line is clipped. */
-.stats{grid-area:stats;display:flex;flex-wrap:wrap;column-gap:14px;overflow:hidden;font-size:12.5px;color:var(--muted);
-font-variant-numeric:tabular-nums}
-.stats span{margin-left:-14px;white-space:nowrap}
-.stats span::before{content:"·";display:inline-block;width:14px;text-align:center}
-.stats .sus{color:var(--sus);font-weight:600}
-.card-row .bar{grid-area:bar}
-.card-row.done .bar span{background:var(--ok)}
-.count{grid-area:count;justify-self:end;text-align:right;white-space:nowrap;font-size:14px;font-weight:650;
-font-variant-numeric:tabular-nums}
-.count .unit{font-weight:400;color:var(--muted)}
-.card-row.done .route,.card-row.done .count{color:var(--muted)}
-.open{grid-area:open;justify-self:end;min-width:110px}
-.card-row:hover .open:not(.primary){border-color:var(--hover-line);background:var(--surface-3)}
-.card-row:hover .open.primary{background:var(--accent-hover);border-color:var(--accent-hover)}
-
-/* Empty list, error pages, account */
-.state-box{display:flex;flex-direction:column;gap:10px;max-width:640px;width:100%}
-.state-box.center{margin:40px auto;max-width:480px;text-align:center;align-items:center}
-.state-box h1{margin:0;font-size:24px;font-weight:700;letter-spacing:-.02em}
-.state-box h2{margin:0}
-.state-box p{margin:0;color:var(--muted)}
-.state-box .code{font-size:12px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
-
-/* [site-login] - START */
-/* Sign-in card, as distill's. A hidden step stays hidden even where a rule sets display. */
-.auth-card [hidden],.auth-form[hidden]{display:none!important}
-.auth-card{max-width:420px;width:100%;margin:48px auto 24px;padding:26px 24px 22px;border-radius:22px;
-background:var(--card-grad),var(--surface);border:1px solid var(--line);box-shadow:var(--auth-shadow);
-display:flex;flex-direction:column;gap:14px}
-.auth-logo{align-self:center;width:44px;height:44px;font-size:15px;border-width:5px}
-.auth-head{display:flex;align-items:center;justify-content:center;position:relative}
-.auth-head.idle{display:none}
-.auth-back{position:absolute;left:0;top:-4px;width:32px;height:32px;border-radius:50%;border:0;background:var(--surface-2);
-color:var(--muted);font:inherit;font-size:18px;line-height:1;cursor:pointer}
-.auth-steps{display:flex;gap:6px}
-.auth-steps span{width:7px;height:7px;border-radius:50%;background:var(--line-strong)}
-.auth-steps span.on{background:var(--accent)}
-.auth-title{margin:0;text-align:center;font-size:28px;font-weight:750;letter-spacing:-.02em;line-height:1.15}
-.auth-sub{margin:-6px 0 6px;text-align:center;color:var(--muted)}
-.auth-form{display:flex;flex-direction:column;gap:14px}
-.field{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--muted);font-weight:500}
-.field input{font:inherit;font-size:16px;color:var(--fg);background:var(--surface-2);border:1px solid var(--line-strong);
-border-radius:12px;padding:10px 12px;min-height:44px;width:100%;transition:border-color .2s,box-shadow .2s}
-.field input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 4px var(--accent-soft)}
-.auth-error{color:var(--bad);font-size:14px}
-.auth-ok{color:var(--ok);font-size:14px}
-.auth-error:empty,.auth-ok:empty{display:none}
-.auth-foot{text-align:center;padding-top:12px;border-top:1px solid var(--line)}
-/* The old names of the buttons in login.html and account.html. */
-.button{appearance:none;border:1px solid var(--line-strong);background:var(--surface-2);color:var(--fg);font:inherit;
-font-weight:650;padding:10px 18px;border-radius:12px;cursor:pointer;min-height:44px;transition:background .2s,border-color .2s}
-.button:hover:not(:disabled){border-color:var(--hover-line);background:var(--surface-3)}
-.button.primary{background:var(--accent);border-color:var(--accent);color:#fff;box-shadow:0 6px 18px rgba(37,99,235,.3)}
-.button.primary:hover:not(:disabled){background:var(--accent-hover);border-color:var(--accent-hover)}
-.button.danger{color:var(--bad);border-color:var(--danger-line);background:transparent}
-.button.danger:hover:not(:disabled){background:var(--bad-soft);border-color:var(--bad)}
-.button:disabled{opacity:.45;cursor:not-allowed}
-.settings{max-width:720px}
-.settings .state-box{max-width:none}
-.settings .auth-form{max-width:420px}
-.settings .auth-form .button.primary{align-self:flex-start}
-/* Appearance: dark, light, as the system (as distill's Settings). */
-.segmented{display:inline-flex;gap:4px;padding:4px;background:var(--surface-2);border:1px solid var(--line);border-radius:12px;align-self:flex-start}
-.segmented button{appearance:none;border:0;background:none;color:var(--muted);font:inherit;font-weight:600;font-size:14px;
-padding:7px 16px;border-radius:9px;cursor:pointer;min-height:36px}
-.segmented button[aria-checked="true"]{color:var(--tab-on-fg);background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--tab-on-ring)}
-/* [site-login] - END */
-
-/* Technical details, out of the way */
-.foot{font-size:13px;color:var(--muted)}
-.foot summary{display:inline-flex;align-items:center;gap:6px;padding:4px 0;cursor:pointer;list-style:none}
-.foot summary::-webkit-details-marker{display:none}
-.foot summary::after{content:"›";font-size:16px;line-height:1;transition:transform .2s}
-.foot[open] summary::after{transform:rotate(90deg)}
-.foot summary:hover{color:var(--fg)}
-.foot p{margin:8px 0 0}
-
-@media (max-width:900px){
-  .card-row{grid-template-columns:16px minmax(0,1fr) auto;grid-template-areas:"icon route open" ". count count" ". bar bar" ". stats stats";
-    column-gap:12px;row-gap:6px;padding:14px 16px}
-  .count{justify-self:start;text-align:left;font-size:13.5px}
-  .open{min-width:0}
-}
-@media (max-width:480px){
-  .brand-name{font-size:17px}
-  .cards{border-radius:16px}
-  .auth-card{margin:20px auto}
-}

@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+__NNSLR_THEME__
+<title>Speed limits · Pannello</title>
+<style>
+__NNSLR_SHARED_CSS__
+/* Pannello only, after the shared frame (web/src/pages/panel.ts, web/src/panel/). */
+.page-head{margin-bottom:4px}
+.banner{margin:0;padding:12px 16px;border-radius:14px;background:var(--warn-soft);color:var(--fg);border:1px solid var(--warn);display:none}
+.banner.show{display:block}
+.live.off{color:var(--bad)}
+/* Disabled step buttons stay legible (flat, muted text): the reason under them explains why. */
+.steps .btn:disabled,.hero .btn:disabled{opacity:1;background:transparent;border-color:var(--line);color:var(--muted)}
+.hero .btn.primary:disabled{background:var(--accent-soft);border-color:var(--tab-on-ring);color:var(--tab-on-fg)}
+.reason{margin:0}
+
+/* Colour of a step, shared by the 'Prossimo passo' card and the step that needs attention:
+   blue review (an action), amber prepare (machine work waiting), green train / done (ready). */
+.k-review{--k:var(--rev);--k-soft:var(--rev-soft)}
+.k-prepare{--k:var(--todo);--k-soft:var(--todo-soft)}
+.k-train,.k-done{--k:var(--ok);--k-soft:var(--ok-soft)}
+
+/* Next step: a soft wash in the step's colour and a coloured eyebrow. */
+.hero{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px 28px;align-items:center;
+background:linear-gradient(100deg,var(--k-soft,transparent),transparent 72%),var(--card-grad),var(--surface);
+border-color:color-mix(in srgb,var(--k,var(--line)) 40%,transparent)}
+.hero .kicker{display:inline-flex;align-items:center;gap:8px;margin:0 0 6px;color:var(--k,var(--muted))}
+.hero .kicker::before{content:"";width:8px;height:8px;border-radius:50%;background:currentColor}
+.hero .title{font-size:22px;line-height:1.2;font-weight:700;letter-spacing:-.015em}
+.hero .text{margin-top:4px;color:var(--muted);max-width:70ch}
+.hero .text:empty{display:none}
+.hero .actions{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+.hero .actions:empty{display:none}
+
+/* The three steps. Each card: head, figure, meter, text, then a foot (buttons + one reason line)
+   at the bottom, so the three button rows line up. */
+.steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.step{display:flex;flex-direction:column;gap:10px}
+.step>*{min-width:0}
+.step.attention{border-color:color-mix(in srgb,var(--k) 55%,transparent);box-shadow:0 0 0 3px var(--k-soft),var(--shadow)}
+.step-head{display:flex;align-items:center;gap:10px}
+.step-head h2{margin:0}
+.step-num{width:24px;height:24px;border-radius:50%;flex:none;display:grid;place-items:center;
+background:var(--surface-2);border:1px solid var(--line-strong);color:var(--muted);font-size:12px;font-weight:700;font-variant-numeric:tabular-nums}
+.step.attention .step-num{background:var(--k-soft);border-color:var(--k);color:var(--k)}
+.step .big{font-size:22px;line-height:1.2;font-weight:700;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+.big-note{display:block;margin-top:2px;font-size:13.5px;font-weight:500;letter-spacing:0;color:var(--muted)}
+.step .sub{font-size:13px;color:var(--muted)}
+.step-foot{margin-top:auto;padding-top:8px;display:flex;flex-direction:column;gap:8px}
+/* Distill's buttons are wide: one per row, full width, rather than a ragged wrap. */
+.step-foot .buttons{flex-direction:column;align-items:stretch}
+/* One line, always there (empty or not), so the cards keep the same foot height. */
+.step-foot .reason{min-height:18px;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:none}
+/* Where subgrid exists the five parts line up across the cards, not only the foot. */
+@supports (grid-template-rows:subgrid){
+  @media (min-width:901px){
+    .steps{grid-template-rows:repeat(5,auto)}
+    .step{display:grid;grid-row:span 5;grid-template-rows:subgrid;grid-template-columns:minmax(0,1fr);row-gap:10px}
+    .step>.step-head{grid-row:1}
+    .step>.big{grid-row:2}
+    .step>.bar,.step>.goal{grid-row:3;align-self:center}
+    .step>.sub{grid-row:4}
+    .step>.step-foot{grid-row:5;margin-top:0}
+  }
+}
+.goal{display:flex;gap:4px}
+.goal span{flex:1;height:8px;border-radius:4px;background:var(--surface-3)}
+.goal span.on{background:var(--ok)}
+
+/* A job started from a step: a card in that step, as distill's (no shell: the raw log stays folded
+   in "Dettagli tecnici"). */
+.job-live:empty{display:none}
+.job-live{margin-top:6px}
+.jobcard{border-radius:16px;padding:14px 16px;background:var(--surface-2);border:1px solid var(--line);display:flex;flex-direction:column;gap:10px;min-width:0}
+.jobcard-head{display:flex;align-items:center;gap:10px;min-width:0}
+.jobcard-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.jobcard-bar{height:8px;border-radius:4px;background:var(--surface-3);overflow:hidden;position:relative}
+.jobcard-bar span{display:block;height:100%;width:0;border-radius:4px;background:var(--accent);transition:width .6s ease}
+.jobcard.ok .jobcard-bar span{background:var(--ok)}.jobcard.bad .jobcard-bar span{background:var(--bad)}
+.jobcard.warn .jobcard-bar span{background:var(--warn)}
+.jobcard-bar.indeterminate span{width:35%!important;position:absolute;animation:live-slide 1.4s ease-in-out infinite}
+@keyframes live-slide{0%{left:-35%}100%{left:100%}}
+.jobcard-sub{color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
+.jobcard-line{margin:0;color:var(--muted);font-size:13px;overflow-wrap:anywhere}
+.jobcard-line:empty{display:none}
+.jobcard-foot{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap}
+.jobcard-foot a{font-size:13.5px;font-weight:600;text-decoration:none}
+.jobcard-foot a:hover{text-decoration:underline}
+.jobcard-foot .grow{flex:1}
+.jobcard details{flex-basis:100%;order:2}
+.jobcard summary{cursor:pointer;font-size:13px;color:var(--muted);width:max-content}
+.jobcard summary:hover{color:var(--fg)}
+/* The raw log, folded: plain small text on the card, not a terminal. */
+.jobcard-log{margin:8px 0 0;max-height:220px;overflow:auto;padding:10px 12px;border-radius:10px;background:var(--surface);
+border:1px solid var(--line);color:var(--muted);font-family:var(--font-data);font-size:12px;line-height:1.5;white-space:pre-wrap;word-break:break-word}
+.spinner{width:16px;height:16px;border-radius:50%;border:2.5px solid var(--line-strong);border-top-color:var(--rev);flex:none;
+animation:live-spin .8s linear infinite}
+@keyframes live-spin{to{transform:rotate(360deg)}}
+
+/* Pills: 'da revisionare' neutral and 'da importare' green, both with a hollow dot (not done yet). */
+.pill.hollow::before{background:transparent;box-shadow:inset 0 0 0 1.5px currentColor}
+
+/* Routes table: the route column has a fixed width, numbers right-aligned. */
+.table-card{padding:18px 0 4px}
+.table-card h2{padding:0 20px}
+table{table-layout:fixed}
+col.c-route{width:200px}
+col.c-seg{width:100px}
+col.c-frames{width:120px}
+col.c-objects{width:124px}
+col.c-state{width:228px}
+th{overflow:hidden;text-overflow:ellipsis}
+th:first-child,td:first-child{padding-left:20px}
+th:last-child,td:last-child{padding-right:20px}
+tbody tr:hover td{background:var(--accent-soft)}
+.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.route{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+td.route a{font-family:var(--font-data);font-size:12.5px;color:var(--fg);text-decoration:none}
+td.route a:hover{color:var(--rev);text-decoration:underline;text-underline-offset:2px}
+td.none{color:var(--muted)}
+/* Bar, then the count in a fixed right-aligned slot, so every bar ends at the same x. */
+.reviewed{display:flex;align-items:center;gap:10px}
+.reviewed .bar{flex:1;min-width:40px}
+.reviewed .num{flex:none;width:11ch;font-size:12.5px;color:var(--muted)}
+td .note{display:block;margin-top:4px;font-size:12px}
+.table-card .empty{padding:0 20px 14px}
+
+@media (max-width:1100px){
+  col.c-route{width:180px}
+  col.c-seg{width:92px}
+  col.c-objects{width:112px}
+  col.c-state{width:200px}
+}
+@media (max-width:900px){
+  .steps{grid-template-columns:minmax(0,1fr)}
+  .step-foot .reason{white-space:normal}
+  .step-foot .reason:empty{display:none}
+}
+@media (max-width:720px){
+  .hero{grid-template-columns:minmax(0,1fr)}
+  .hero .actions{align-items:stretch}
+}
+@media (max-width:640px){
+  .hero .title{font-size:20px}
+  .step .big{font-size:20px}
+  /* Route, Confermati and Stato only; the route drops its leading zeros (still in the link title). */
+  col.c-seg,col.c-frames,col.c-objects,
+  th:nth-child(2),td:nth-child(2),th:nth-child(3),td:nth-child(3),th:nth-child(5),td:nth-child(5){display:none}
+  col.c-route{width:35%}
+  col.c-state{width:39%}
+  th{padding:8px 6px;font-size:10.5px;letter-spacing:0}
+  td{padding:10px 6px;vertical-align:top}
+  th:first-child,td:first-child{padding-left:14px}
+  th:last-child,td:last-child{padding-right:14px}
+  .table-card h2{padding:0 14px}
+  td.route a{font-size:11.5px}
+  .rid-pad,.pill-long{display:none}
+  .jobcard-label{white-space:normal}
+  .reviewed{flex-direction:column;align-items:stretch;gap:6px}
+  .reviewed .bar{order:2;min-width:0;flex:none}
+  .reviewed .num{width:auto;text-align:left;font-size:11px}
+  td .pill{font-size:11.5px;padding:2px 7px;gap:5px}
+}
+@media (max-width:480px){.table-card{padding:16px 0 4px}}
+@media (prefers-reduced-motion:reduce){.goal span,.bar span,.jobcard-bar span{transition:none}.jobcard-bar span,.spinner{animation:none!important}}
+</style>
+</head>
+<body>
+__NNSLR_TOPBAR__
+
+<main class="page">
+  <div class="page-head">
+    <h1 class="page-title">Pannello</h1>
+    <p class="page-sub">Prepara, revisiona, allena: a che punto è il lavoro e qual è il prossimo passo.</p>
+  </div>
+
+  <div class="banner" id="readonly">Pannello in sola lettura: su questo server i pulsanti sono disattivati.</div>
+
+  <section class="card hero" id="hero" aria-labelledby="hero-title">
+    <div>
+      <h2 class="kicker">Prossimo passo</h2>
+      <div class="title" id="hero-title">…</div>
+      <div class="text" id="hero-text"></div>
+    </div>
+    <div class="actions" id="hero-actions"></div>
+  </section>
+
+  <section class="steps" aria-label="I tre passi">
+    <article class="card step k-prepare" id="step-prepare">
+      <div class="step-head"><span class="step-num">1</span><h2>Prepara</h2></div>
+      <div class="big" id="prepare-big">–</div>
+      <div class="sub" id="prepare-sub">Giri dal comma → fotogrammi → cartelli proposti, tutto automatico.</div>
+      <div class="step-foot"><div class="buttons" id="prepare-buttons"></div><p class="reason" id="prepare-reason"></p>
+        <div class="job-live" id="prepare-live" aria-live="polite"></div></div>
+    </article>
+    <article class="card step k-review" id="step-review">
+      <div class="step-head"><span class="step-num">2</span><h2>Revisiona</h2></div>
+      <div class="big" id="review-big">–</div>
+      <div class="bar ok" aria-hidden="true"><span id="review-bar"></span></div>
+      <div class="sub" id="review-sub">Confermi o correggi i cartelli: l'unico passo a mano.</div>
+      <div class="step-foot"><div class="buttons"><a class="btn" href="/">Elenco delle route →</a></div><p class="reason"></p></div>
+    </article>
+    <article class="card step k-train" id="step-train">
+      <div class="step-head"><span class="step-num">3</span><h2>Allena</h2></div>
+      <div class="big" id="train-big">–</div>
+      <div class="goal" id="train-goal" aria-hidden="true"></div>
+      <div class="sub" id="train-sub">Revisioni → dataset → modello, sulla GPU.</div>
+      <div class="step-foot"><div class="buttons" id="train-buttons"></div><p class="reason" id="train-reason"></p>
+        <div class="job-live" id="train-live" aria-live="polite"></div></div>
+    </article>
+  </section>
+
+  <section class="card table-card" aria-labelledby="routes-title">
+    <h2 id="routes-title">Route</h2>
+    <div class="table-wrap" id="routes-wrap"><table>
+      <colgroup><col class="c-route"><col class="c-seg"><col class="c-frames"><col class="c-reviewed"><col class="c-objects"><col class="c-state"></colgroup>
+      <thead><tr><th>ID</th><th class="num" title="Segmenti estratti su quelli arrivati">Segmenti</th><th class="num">Fotogrammi</th>
+        <th>Confermati</th><th class="num" title="Oggetti di questa route già nel dataset">Nel dataset</th><th>Stato</th></tr></thead>
+      <tbody id="routes"></tbody>
+    </table></div>
+    <p class="empty" id="routes-empty" hidden>Nessuna route: scarica i giri con <strong>Scarica dal comma</strong> (passo 1).</p>
+  </section>
+</main>
+
+<div class="toast" id="toast" role="alert"></div>
+
+__NNSLR_SCRIPT__
+</body>
+</html>

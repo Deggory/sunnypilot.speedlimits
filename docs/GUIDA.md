@@ -178,6 +178,17 @@ Il database delle revisioni si aggiorna da solo alla versione 2 al primo avvio d
 
 `data/` e `.env` non sono in git.
 
+### Il codice delle pagine del sito
+
+| Cosa | Dove |
+| --- | --- |
+| Sorgenti TypeScript, uno per pagina più i moduli comuni | `web/src/pages/<pagina>.ts`, `web/src/common/`, `web/src/review/`, `web/src/panel/` |
+| Template HTML, stili (`shared.css`: colori e cornice comuni con distill-web) | `src/nnslr_tools/web/` |
+| Script compilati (committati: il server e `helpers/update.sh` non hanno bisogno di Node) | `src/nnslr_tools/web/js/<pagina>.js` |
+| Chi mette insieme pagina, stili e script, con il nonce | `src/nnslr_tools/pages.py` |
+
+Per cambiare una pagina: modifica `web/src` (o il template), lancia `helpers/build_web.sh`, poi committa sorgenti e `js/` insieme; un test fallisce se `js/` non corrisponde ai sorgenti. HTML, CSS e `js/` sono riletti a ogni richiesta: basta ricaricare la pagina. `pages.py` e il resto del Python valgono dopo il riavvio del servizio.
+
 ## 6. Script del repository
 
 | Script | Cosa fa | Effetti |
@@ -190,6 +201,7 @@ Il database delle revisioni si aggiorna da solo alla versione 2 al primo avvio d
 | `helpers/setup_mcp.sh` | installa l'SDK MCP; `--claude` prepara Claude Code in questa cartella; `--restart` copia il database se va migrato e riavvia il sito | pacchetti in `.venv`, `~/.claude.json`, `.claude/settings.local.json`, riavvio del servizio |
 | `helpers/mcp.sh` | server MCP (stdio) per Claude Code, Codex e altri client, anche via ssh ([API_MCP.md](API_MCP.md)) | legge le route; salva revisioni AI nel database (non con `--read-only`) |
 | `helpers/fetch_comma_segments.sh` | scarica i giri nuovi dal comma | rete, cartella condivisa dei video |
+| `helpers/build_web.sh` | controlla i tipi del TypeScript delle pagine (`web/src`) e lo compila in `src/nnslr_tools/web/js`; `--check` dice solo se i file compilati sono aggiornati | la prima volta installa TypeScript ed esbuild in `web/node_modules` (Node da PyPI con `uvx`, niente nel sistema) |
 | `scripts/install_review_service.sh` | installa/aggiorna/toglie il servizio `speedlimits-web` | systemd, `/etc/speedlimits-web.env`, `.env` |
 | `scripts/setup_v100_training_env.sh` | crea `.venv-gpu` (lo lancia anche `helpers/3_train.sh`) | installa pacchetti |
 | `scripts/run_v100_baseline.sh` | training completo (lo lancia `helpers/3_train.sh`) | GPU |

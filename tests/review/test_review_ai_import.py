@@ -252,7 +252,7 @@ def test_page_export_of_an_ai_review_imports_like_the_database(site, capsys):
                                channel=restored['channel'])
     assert exported == review['payload']
     page = server.request('GET', f'/route/{ROUTE}/')[2].decode()
-    assert "line.label_basis = 'ai_review'" in page and 'line.review_channel = s.channel' in page
+    assert 'line.label_basis = "ai_review"' in page and 'line.review_channel = s.channel' in page
     assert 'non esportati' not in page
     source = root / 'annotations-export.jsonl'
     source.write_bytes(jsonl_bytes([exported]))

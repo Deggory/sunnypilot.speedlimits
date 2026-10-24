@@ -1,0 +1,765 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+__NNSLR_THEME__
+<title>Revisione cartelli</title>
+<style>
+__NNSLR_SHARED_CSS__
+/* Revisione cartelli (web/src/pages/review.ts): patterns built from the shared tokens. */
+:root {
+  --control: 36px;
+  --inspector: 384px;
+  --topbar-row: 56px;
+  /* Confirmed by an AI: the green of a confirmation, hatched. Same look in the timeline, legend and state tag. */
+  --ai-hatch: repeating-linear-gradient(135deg, var(--ok) 0 2px, transparent 2px 4px), var(--ok-soft);
+  /* The top band of a frame confirmed with doubts. */
+  --doubt: var(--todo);
+}
+
+/* Layout: one compact bar on top; photo, its bar and the timeline card on the canvas; on a computer the inspector
+   is docked to the right edge at full height. Nothing above the photo or above the timeline changes height
+   after loading: messages live in the inspector. One column with a fixed bottom bar on phones. */
+/* Base, buttons, pills, icon buttons and the brand mark are shared.css's; below, what this page does otherwise. */
+body { overflow-x: hidden; }
+body::before {
+  content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--topbar-bg);
+}
+button, input, select, textarea { font: inherit; color: inherit; letter-spacing: inherit; }
+button { cursor: pointer; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+kbd {
+  font-family: var(--font-ui); font-size: 11px; font-weight: 650; line-height: 17px; border-radius: 5px; padding: 0 5px;
+  background: var(--surface-2); color: var(--fg); border: 1px solid var(--line-strong); border-bottom-width: 2px;
+}
+
+/* ---------- top bar: one row (brand, route, filters, progress, reviewer); the photo needs the height ---------- */
+/* The bar of shared.css, but one row of full width without tabs, and under the safe area of the notch. */
+.topbar { top: env(safe-area-inset-top, 0px); padding-top: 0; padding-bottom: 0; }
+.topbar-inner { gap: 14px; min-height: var(--topbar-row); max-width: none; margin: 0; }
+.route-pick { display: flex; align-items: center; min-width: 0; flex: 0 1 236px; }
+.route-pick select { font-family: var(--font-data); font-size: 12.5px; cursor: pointer; }
+select, input[type="text"], input[type="number"] {
+  width: 100%; min-width: 0; min-height: 44px; padding: 10px 12px; font-size: 16px; color: var(--fg);
+  background: var(--surface-2); border: 1px solid var(--line-strong); border-radius: 12px; transition: border-color 0.2s, box-shadow 0.2s;
+}
+select:hover, input[type="text"]:hover, input[type="number"]:hover { border-color: var(--hover-line); }
+input[type="text"]:focus, input[type="number"]:focus, select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+input::placeholder { color: var(--placeholder); }
+/* Dense controls of the toolbar. */
+.topbar select, .topbar input[type="text"] { min-height: var(--control); padding: 5px 10px; font-size: 13px; border-radius: 10px; }
+/* Segmented controls: distill's pill container, the chosen one tinted with the accent. */
+.filters, .segmented {
+  display: inline-flex; gap: 2px; padding: 3px; flex: none; max-width: 100%;
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px;
+}
+.filters button, .segmented button {
+  border: 0; background: none; color: var(--muted); font-weight: 600; font-size: 13px; white-space: nowrap;
+  padding: 4px 11px; min-height: 28px; border-radius: 9px; transition: background 0.2s, color 0.2s;
+}
+.filters button:hover, .segmented button:hover { color: var(--fg); }
+.filters button:focus-visible, .segmented button:focus-visible { outline-offset: -3px; }
+.filters button[aria-pressed="true"], .segmented button[aria-pressed="true"] {
+  color: var(--tab-on-fg); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--tab-on-ring);
+}
+/* Route progress: a large tabular count, then the bar. */
+.progress { display: flex; align-items: center; gap: 12px; flex: 1 1 180px; min-width: 0; }
+.progress-text { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.progress-text strong { color: var(--fg); font-size: 16px; font-weight: 750; letter-spacing: -0.01em; }
+.progress-text .sus { color: var(--sus); font-weight: 600; }
+.progress-bar { flex: 1 1 auto; max-width: 360px; min-width: 28px; height: 8px; border-radius: 4px; background: var(--surface-3); overflow: hidden; }
+.progress-bar span { display: block; height: 100%; width: 0; background: var(--ok); border-radius: 4px; transition: width 0.4s; }
+/* Phones only: "0/2160" next to the route. */
+.progress-short { display: none; }
+.reviewer { display: flex; align-items: center; flex: none; }
+.reviewer input { width: 140px; }
+/* No name yet: dashed until filled, red once a save needed it. */
+.reviewer input:placeholder-shown { border-style: dashed; border-color: var(--hover-line); background: transparent; }
+.reviewer input.need { border-style: solid; border-color: var(--bad); box-shadow: 0 0 0 4px var(--bad-soft); }
+
+/* Dark/light switch and Account link (shared.css) at the end of the toolbar. */
+.topbar .theme-toggle { margin-left: -4px; }
+
+/* ---------- page: canvas + inspector ---------- */
+/* Not the centred column of shared.css: the canvas takes the whole width. */
+.page {
+  max-width: none; margin: 0; display: block;
+  padding-block: 16px 28px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.workspace { display: grid; grid-template-columns: minmax(0, 1fr) var(--inspector); align-items: start; }
+.stage-col { display: flex; flex-direction: column; min-width: 0; }
+.stage {
+  position: relative; display: grid; place-items: center; min-height: 160px; overflow: hidden;
+  background: var(--stage); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow);
+}
+#scene { display: block; width: 100%; height: auto; max-height: 74vh; touch-action: pan-x pan-y pinch-zoom; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+#scene.drawing { cursor: crosshair; touch-action: none; }
+#scene.dragging, #zoom.dragging { touch-action: none; }
+.box { fill: transparent; stroke-width: 2.25; vector-effect: non-scaling-stroke; cursor: pointer; }
+.box.proposal, .box-under.proposal { stroke-dasharray: 8 5; }
+.box.selected { stroke: var(--ov-selected); stroke-width: 2.75; stroke-dasharray: none; }
+/* The dark under-stroke the drawing code puts below every box: a CSS filter would not show on iOS Safari. */
+.box-under, .hint-under { fill: none; stroke: var(--ov-halo); stroke-opacity: 0.6; stroke-width: 5; vector-effect: non-scaling-stroke; pointer-events: none; }
+.box-under.selected { stroke-width: 5.5; stroke-dasharray: none; }
+.hint-under { stroke-width: 4.5; stroke-dasharray: 4 2; }
+.handle { fill: var(--ov-selected); stroke: var(--ov-halo); stroke-width: 1; vector-effect: non-scaling-stroke; pointer-events: none; }
+.handle-hit { fill: transparent; stroke: none; cursor: nwse-resize; touch-action: none; }
+.handle-hit.ne, .handle-hit.sw { cursor: nesw-resize; }
+.tag, .hint-tag { stroke: var(--ov-halo); stroke-opacity: 0.9; stroke-linejoin: round; paint-order: stroke; font-family: var(--font-ui); font-weight: 650; pointer-events: none; }
+.tag { fill: var(--ov-text); }
+.hint-tag { fill: var(--ov-hint); }
+.hint-box { fill: none; stroke: var(--ov-hint); stroke-width: 2; stroke-dasharray: 4 2; vector-effect: non-scaling-stroke; pointer-events: none; }
+.hint-box.low { opacity: 0.85; }
+#draft { fill: rgba(255, 214, 10, 0.18); stroke: var(--ov-selected); stroke-width: 2; vector-effect: non-scaling-stroke; pointer-events: none; }
+.stage-hint { position: absolute; left: 12px; bottom: 14px; right: 12px; display: flex; justify-content: center; pointer-events: none; }
+.stage-hint span {
+  background: rgba(8, 11, 16, 0.8); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+  color: #e8ecf3; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 999px; padding: 6px 14px; font-size: 13px; font-weight: 600;
+}
+
+/* The bar under the photo: one line, fixed height; the frame data text shrinks, nothing else moves. */
+.stage-bar { display: flex; align-items: center; gap: 10px; min-height: 36px; margin-top: 12px; }
+.nav { display: inline-flex; align-items: center; flex: none; gap: 2px; padding: 3px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px; }
+.nav .btn { width: 32px; min-height: 30px; padding: 0; border: 0; border-radius: 9px; background: transparent; box-shadow: none; font-size: 19px; font-weight: 500; }
+.nav .btn:hover:not(:disabled) { background: var(--surface-3); }
+.nav .pos { font-size: 13px; font-weight: 650; min-width: 9ch; text-align: center; font-variant-numeric: tabular-nums; }
+.stage-bar .data { flex: 1 1 auto; min-width: 0; font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.stage-tools { display: flex; align-items: center; gap: 8px; flex: none; margin-left: auto; }
+
+/* Pills of shared.css. */
+.pill::before { flex: none; }
+/* Frame state tag: a solid pill, readable at a glance; its square marker is the timeline cell of the same state.
+   Fixed width on a computer, so the bar never shifts between frames. Text on a solid fill is the page colour. */
+.pill.state { width: 162px; height: 30px; padding: 0 12px; gap: 8px; font-size: 13px; font-weight: 700; overflow: hidden; }
+.pill.state::before { width: 10px; height: 10px; border-radius: 2px; }
+.pill.state.todo, .pill.state.saving { background: var(--surface-2); border-color: var(--line-strong); color: var(--fg); }
+.pill.state.todo::before, .pill.state.saving::before { background: var(--none-cell); box-shadow: inset 0 0 0 1px var(--hover-line); }
+.pill.state.saving { color: var(--muted); }
+.pill.state.sus { background: var(--sus); border-color: transparent; color: var(--bg); }
+.pill.state.done { background: var(--ok); color: var(--bg); }
+.pill.state.done.ai { background: var(--ok-soft); border-color: var(--ok); color: var(--ok); }
+.pill.state.done.ai::before { background: var(--ai-hatch); box-shadow: inset 0 0 0 1px var(--ok); }
+.pill.state.dirty { background: var(--warn); color: var(--bg); }
+.pill.state.error { background: var(--bad); color: var(--bg); }
+.pill.state.sus::before, .pill.state.done:not(.ai)::before, .pill.state.dirty::before, .pill.state.error::before { background: var(--bg); }
+
+/* Buttons of shared.css, on one line; the small variant also in the tools under the photo. */
+.btn { white-space: nowrap; }
+.stage-tools .btn { padding: 5px 12px; min-height: 34px; font-size: 13px; border-radius: 10px; }
+.btn.icon { width: var(--control); padding: 0; font-size: 19px; line-height: 1; }
+.btn.on, .btn.on:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--accent); color: var(--tab-on-fg); }
+.btn.tint { color: var(--rev); border-color: var(--banner-line); background: transparent; }
+.btn.tint:hover:not(:disabled) { background: var(--rev-soft); }
+.btn.primary.already, .btn.primary.already:hover:not(:disabled) { background: var(--ok-soft); border-color: var(--ok); color: var(--ok); box-shadow: none; }
+.btn.primary:disabled { opacity: 1; background: var(--accent-soft); border-color: var(--tab-on-ring); color: var(--tab-on-fg); }
+/* Conferma: the label shortens, the Enter key cap stays. */
+.btn.confirm { min-width: 0; gap: 10px; }
+.btn-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.keycap { flex: none; font-size: 12px; line-height: 18px; padding: 0 6px; color: inherit; background: rgba(255, 255, 255, 0.18); border: 0; }
+.already .keycap, .btn:disabled .keycap { background: var(--surface-3); }
+.link { border: 0; background: transparent; color: var(--rev); font-size: 13px; font-weight: 600; padding: 4px 2px; white-space: nowrap; flex: none; }
+.link:hover { text-decoration: underline; }
+.link.danger { color: var(--bad); }
+
+/* Switch: the checkbox stays real and focusable. */
+.switch { position: relative; display: inline-flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--fg); cursor: pointer; white-space: nowrap; min-height: 34px; flex: none; }
+.switch input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }
+.switch .track { position: relative; width: 36px; height: 22px; border-radius: 11px; background: var(--surface-3); border: 1px solid var(--line-strong); flex: none; transition: background 0.2s; }
+.switch .track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); transition: transform 0.2s; }
+.switch input:checked + .track { background: var(--accent); border-color: var(--accent); }
+.switch input:checked + .track::after { transform: translateX(14px); }
+.switch input:focus-visible + .track { outline: 3px solid var(--focus); outline-offset: 2px; }
+
+/* Chevron of disclosures, drawn with borders. */
+details summary::after, .tl-toggle::after {
+  content: ""; flex: none; width: 7px; height: 7px; margin: 0 4px 0 12px;
+  border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); transition: transform 0.2s;
+}
+details[open] summary::after, .tl-toggle[aria-expanded="true"]::after { transform: rotate(45deg); }
+
+/* Card headings: the small uppercase label of the other pages. */
+.tl-heading, .section-head h2 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+
+/* ---------- timeline card: title, legend, one row per segment, doubt counters ---------- */
+.tl-card {
+  margin-top: 16px; overflow: hidden; background: var(--card-grad), var(--surface);
+  border: 1px solid var(--line); border-radius: 18px; box-shadow: var(--shadow);
+}
+.tl-heading { padding: 16px 20px 0; }
+/* Phone only: one button folds the legend, the timeline and the doubt counters away. */
+.tl-toggle { display: none; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 8px 20px 12px; font-size: 12px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.legend i { flex: none; width: 10px; height: 10px; border-radius: 2px; }
+.legend .l-done { background: var(--ok); }
+.legend .l-ai { background: var(--ai-hatch); }
+.legend .l-unsure { background: linear-gradient(var(--doubt) 0 35%, var(--ok) 35%); }
+.legend .l-sus { background: var(--sus); }
+.legend .l-has { background: var(--has); }
+.legend .l-none { background: var(--none-cell); box-shadow: inset 0 0 0 1px var(--line-strong); }
+.legend .l-dirty { background: var(--warn); }
+.legend .l-error { background: var(--bad); }
+/* The cells fill the width: one column per image of the longest segment (set by the script). */
+.timeline { display: flex; flex-direction: column; gap: 3px; padding: 2px 20px 16px; }
+.tl-seg { display: grid; grid-template-columns: 40px minmax(0, 1fr); align-items: center; gap: 10px; }
+.tl-label { font-size: 11px; color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tl-ticks { display: grid; grid-template-columns: repeat(var(--tl-cols, 60), minmax(0, 1fr)); gap: 2px; min-width: 0; }
+.tl-ticks button { min-width: 0; height: 12px; border: 0; padding: 0; border-radius: 2px; background: var(--none-cell); }
+.tl-ticks button.has { background: var(--has); }
+.tl-ticks button.sus { background: var(--sus); }
+.tl-ticks button.dirty { background: var(--warn); }
+.tl-ticks button.error { background: var(--bad); }
+.tl-ticks button.done { background: var(--ok); }
+.tl-ticks button.done.unsure { background: linear-gradient(var(--doubt) 0 4px, var(--ok) 4px); }
+/* Confirmed by an AI (REST API or MCP): hatched, so the provenance stays visible. */
+.tl-ticks button.done.ai { background: var(--ai-hatch); }
+.tl-ticks button.done.ai.unsure { background: linear-gradient(var(--doubt) 0 4px, transparent 4px), var(--ai-hatch); }
+.tl-ticks button:hover { box-shadow: inset 0 0 0 1px var(--fg); }
+.tl-ticks button.cur, .tl-ticks button.cur:hover { position: relative; z-index: 1; box-shadow: 0 0 0 1.5px var(--surface), 0 0 0 3px var(--fg); }
+.quality { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 12px 20px; font-size: 13px; color: var(--muted); background: var(--surface-2); border-top: 1px solid var(--line); }
+.quality-label { margin-right: 4px; font-weight: 600; }
+.qchip {
+  border: 1px solid var(--line-strong); background: var(--surface); color: var(--fg); border-radius: 999px;
+  padding: 3px 11px; min-height: 28px; font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums;
+}
+.qchip:hover { border-color: var(--hover-line); background: var(--surface-3); }
+.qchip.zero { color: var(--muted); }
+.qchip.some { color: var(--warn); background: var(--warn-soft); border-color: transparent; }
+.qchip[aria-pressed="true"] { color: var(--tab-on-fg); background: var(--accent-soft); border-color: transparent; box-shadow: inset 0 0 0 1px var(--tab-on-ring); }
+
+/* ---------- inspector ---------- */
+.panel {
+  display: flex; flex-direction: column; min-width: 0;
+  background: var(--card-grad), var(--surface); border: 1px solid var(--line); border-radius: 18px; box-shadow: var(--shadow);
+}
+.panel section { padding: 16px 20px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.panel section:first-child { border-top: 0; }
+.section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.section-head .count { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.reasons { margin: 0; font-size: 13px; color: var(--sus); background: var(--sus-soft); border-radius: 12px; padding: 9px 12px; overflow-wrap: anywhere; }
+.reasons strong { font-weight: 650; }
+.filter-note { margin: 0; font-size: 13px; color: var(--fg); background: var(--rev-soft); border: 1px solid var(--banner-line); border-radius: 12px; padding: 9px 12px; }
+.box-list { display: flex; flex-direction: column; gap: 6px; }
+.box-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center;
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px; transition: border-color 0.2s, box-shadow 0.2s;
+}
+.box-row:hover { border-color: var(--hover-line); }
+.box-row.selected { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.box-main {
+  display: grid; grid-template-columns: 24px minmax(0, 1fr); column-gap: 10px; align-items: center;
+  border: 0; background: transparent; padding: 7px 4px 7px 10px; min-height: 48px; border-radius: 12px; text-align: left; min-width: 0;
+}
+.box-main .n {
+  grid-row: 1 / span 2; width: 24px; height: 24px; border-radius: 50%; background: var(--surface-3); color: var(--fg);
+  display: grid; place-items: center; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.box-row.selected .n { background: var(--accent); color: #fff; }
+.box-main .what { font-weight: 650; font-size: 14px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.box-main .src { font-size: 12.5px; color: var(--muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.box-main .src .changed { color: var(--rev); font-weight: 650; }
+.box-main .src .dup { color: var(--warn); font-weight: 650; }
+.box-del { border: 0; background: transparent; width: 34px; height: 34px; margin-right: 6px; border-radius: 10px; color: var(--muted); font-size: 13px; }
+.box-del:hover { background: var(--bad-soft); color: var(--bad); }
+.pick-hint { margin: -4px 2px 0; font-size: 13px; color: var(--muted); }
+/* No box: a quiet empty state, a dashed sign outline beside the sentence. */
+.empty-note {
+  display: flex; flex-direction: column; align-items: center; gap: 10px; margin: 0; padding: 22px 18px; text-align: center;
+  border: 1px dashed var(--line-strong); border-radius: 14px; background: var(--surface-2); font-size: 13px; color: var(--muted);
+}
+.empty-note svg { flex: none; width: 34px; height: 34px; color: var(--disabled); }
+.field-label { margin: 4px 0 -4px; font-size: 12px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  border: 1px solid var(--line-strong); background: var(--surface-2); color: var(--fg); border-radius: 999px;
+  padding: 4px 13px; min-height: 32px; font-size: 13.5px; font-weight: 600; transition: background 0.2s, border-color 0.2s;
+}
+.chip:hover { border-color: var(--hover-line); background: var(--surface-3); }
+.chip[aria-pressed="true"], .chip[aria-pressed="true"]:hover { color: var(--tab-on-fg); background: var(--accent-soft); border-color: var(--accent); }
+.chips.minor { gap: 2px; margin-top: -6px; }
+.chips.minor .chip { border-color: transparent; background: transparent; color: var(--muted); padding: 2px 9px; min-height: 28px; font-size: 12.5px; }
+.chips.minor .chip:hover { background: var(--surface-2); color: var(--fg); }
+.chips.minor .chip[aria-pressed="true"] { color: var(--tab-on-fg); background: var(--accent-soft); border-color: var(--accent); }
+.segmented { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
+.segmented button { padding: 4px 8px; min-height: 32px; }
+/* Value buttons look like the Swiss signs: white face, red ring, readable "100" and "120". Five per row. */
+.signs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; justify-items: center; }
+.sign {
+  width: 100%; max-width: 50px; aspect-ratio: 1; padding: 0; border-radius: 50%;
+  border: 4.5px solid var(--sign-ring); background: var(--sign-face); color: var(--sign-ink);
+  display: grid; place-items: center; font-size: 16px; font-weight: 800; letter-spacing: -0.03em; font-variant-numeric: tabular-nums;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2); transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.sign.wide { font-size: 14px; letter-spacing: -0.06em; }
+.sign:hover { transform: scale(1.06); }
+.sign.unknown { border: 2px dashed var(--muted); background: var(--surface-2); color: var(--muted); font-size: 18px; box-shadow: none; }
+.sign[aria-pressed="true"] { box-shadow: 0 0 0 3px var(--surface), 0 0 0 6px var(--accent); transform: scale(1.04); }
+.value-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.value-line input { width: 90px; min-height: 36px; padding: 5px 10px; border-radius: 10px; font-variant-numeric: tabular-nums; }
+.field-error { margin: 0; color: var(--bad); font-size: 13px; }
+details { background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px; }
+details summary {
+  display: flex; align-items: center; justify-content: space-between; list-style: none; cursor: pointer;
+  min-height: 40px; padding: 8px 12px; font-size: 14px; font-weight: 600;
+}
+details summary::-webkit-details-marker { display: none; }
+details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10px; }
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; padding: 2px 12px 14px; }
+.grid2 label, .stack label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 500; color: var(--muted); min-width: 0; }
+.grid2 select, .grid2 input, .stack input { min-height: 38px; padding: 6px 10px; font-size: 14px; border-radius: 10px; background: var(--surface); }
+.stack { display: flex; flex-direction: column; gap: 10px; padding: 2px 12px 14px; }
+.stack p { margin: 0; font-size: 12.5px; color: var(--muted); }
+.stack .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+#editor { gap: 10px; }
+.zoom-wrap { background: var(--stage); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+#zoom { display: block; width: 100%; height: 180px; touch-action: pan-x pan-y pinch-zoom; user-select: none; -webkit-user-select: none; }
+#zoomBox { fill: none; stroke: var(--ov-selected); stroke-width: 2; vector-effect: non-scaling-stroke; pointer-events: none; }
+.evidence { margin: -6px 0 0; font-size: 12.5px; color: var(--muted); }
+.hint-intro { margin: -6px 0 0; font-size: 13px; color: var(--muted); }
+.hint-list { display: flex; flex-direction: column; gap: 6px; }
+.hint-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 10px; min-width: 0;
+  padding: 8px 8px 8px 12px; background: var(--rev-soft); border: 1px solid var(--banner-line); border-radius: 12px;
+}
+.hint-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.hint-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.hint-what { font-weight: 650; font-size: 14px; }
+.conf { font-size: 11.5px; font-weight: 600; border-radius: 999px; padding: 1px 8px; background: var(--surface-2); color: var(--muted); }
+.conf.high { color: var(--ok); background: var(--ok-soft); }
+.conf.medium { color: var(--warn); background: var(--warn-soft); }
+.hint-sub { font-size: 12.5px; color: var(--muted); }
+.hint-note { margin: 0; font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
+.hint-stats { margin: 0; font-size: 12.5px; color: var(--muted); }
+
+/* Confirm block: the button stays at the bottom; messages make the section grow upwards, never the photo. */
+.confirm-section { gap: 8px; }
+.notices { display: flex; flex-direction: column; gap: 6px; }
+.notices:empty { display: none; }
+.notice {
+  margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 9px 12px; font-size: 13px;
+  color: var(--warn); background: var(--warn-soft); border-radius: 12px;
+}
+.notice.error { color: var(--bad); background: var(--bad-soft); border: 1px solid var(--error-line); }
+.status-line { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 2.6em; }
+.save-msg { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.35; min-width: 0; overflow-wrap: anywhere; }
+.save-msg.ok { color: var(--ok); }
+.save-msg.warn { color: var(--warn); }
+.save-msg.error { color: var(--bad); font-weight: 650; }
+.status-actions { display: flex; gap: 10px; flex: none; }
+.confirm-area { display: flex; flex-direction: column; gap: 6px; }
+.confirm-area .btn.primary { width: 100%; min-height: 48px; font-size: 15.5px; }
+/* Keyboard shortcuts, right under Conferma; hidden on touch screens. */
+.keys { margin: 4px 0 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 12px; font-size: 12px; color: var(--muted); line-height: 1.9; }
+.keys span { white-space: nowrap; }
+.state-box {
+  background: var(--card-grad), var(--surface); border: 1px solid var(--line); border-radius: 18px; box-shadow: var(--shadow);
+  padding: 24px 28px; max-width: 720px; margin: 32px auto; display: flex; flex-direction: column; gap: 12px;
+}
+.state-box h2 { margin: 0; font-size: 19px; font-weight: 700; letter-spacing: -0.01em; }
+.state-box p { margin: 0; color: var(--muted); max-width: 62ch; }
+
+.mobilebar { display: none; }
+
+/* ==========================================================================
+   Computer: the inspector docks to the right edge, full height under the bar.
+   ========================================================================== */
+@media (min-width: 981px) {
+  .page { padding: 0; }
+  .stage-col { width: 100%; max-width: 1320px; justify-self: center; padding: 20px 28px 40px; }
+  /* On low laptops the photo leaves room for its bar and the start of the timeline. */
+  #scene { max-height: min(72vh, calc(100vh - var(--topbar-h, 57px) - 200px)); }
+  /* The inspector has the window's height and scrolls on its own: the confirm button never moves. */
+  .panel {
+    position: sticky; top: var(--topbar-h, 57px); height: calc(100vh - var(--topbar-h, 57px)); height: calc(100dvh - var(--topbar-h, 57px));
+    overflow-y: auto; overscroll-behavior: contain; scroll-padding-bottom: 170px;
+    background: var(--surface); border: 0; border-left: 1px solid var(--line); border-radius: 0; box-shadow: none;
+  }
+  /* No box selected: the list takes the free height, "Altro" sits with the confirm block at the bottom. */
+  .panel:not(.editing) > section:first-child { flex: 1 0 auto; }
+  .panel .confirm-section {
+    position: sticky; bottom: 0; z-index: 2; margin-top: auto; padding: 10px 20px 14px;
+    background: var(--topbar-bg); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+  }
+  .panel .confirm-section.quiet .status-line { min-height: 0; }
+}
+@media (min-width: 641px) {
+  /* "+ Riquadro" and "Annulla" take the same width: the bar never re-wraps while drawing. */
+  #draw { min-width: 7.5em; }
+}
+@media (min-width: 981px) and (max-width: 1400px) {
+  /* The frame data get their own line; the height is the same on every frame. */
+  .stage-bar { flex-wrap: wrap; row-gap: 8px; }
+  .stage-bar .data { order: 5; flex-basis: 100%; }
+  #scene { max-height: min(72vh, calc(100vh - var(--topbar-h, 57px) - 230px)); }
+  /* Two even rows of four: no label left alone on a second line. */
+  .legend { display: grid; grid-template-columns: repeat(4, max-content); gap: 4px 18px; font-size: 11.5px; }
+  .brand-name { display: none; }
+}
+@media (min-width: 981px) and (max-width: 1240px) {
+  :root { --inspector: 352px; }
+  .topbar-inner { gap: 10px; }
+  .stage-col { padding: 16px 20px 32px; }
+  .filters button { padding: 4px 8px; }
+  .reviewer input { width: 112px; }
+  .progress-text strong { font-size: 15px; }
+}
+
+/* ==========================================================================
+   Tablet and phone: one column, the confirm button in a bottom bar.
+   ========================================================================== */
+@media (max-width: 980px) {
+  .topbar-inner { flex-wrap: wrap; padding-block: 8px; gap: 8px 12px; }
+  .brand-name { display: none; }
+  #scene { max-height: none; }
+  .stage-bar { flex-wrap: wrap; }
+  .stage-bar .data { order: 5; flex-basis: 100%; white-space: normal; }
+  /* Photo, its bar, then the inspector: the boxes to check come right under the photo. The timeline card
+     follows, folded under its title. */
+  .workspace { display: flex; flex-direction: column; align-items: stretch; gap: 12px; }
+  .stage-col { display: contents; }
+  .stage { order: 1; }
+  .stage-bar { order: 2; margin-top: 0; }
+  .panel { order: 3; }
+  .tl-card { order: 4; margin-top: 0; }
+  .tl-heading { display: none; }
+  .tl-toggle {
+    display: flex; align-items: center; gap: 10px; width: 100%; min-height: 52px; padding: 10px 16px;
+    border: 0; background: transparent; color: var(--fg); text-align: left;
+  }
+  .tl-toggle .tl-title { flex: none; font-size: 13px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+  .tl-toggle .tl-sub { flex: 1 1 auto; min-width: 0; text-align: right; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .workspace.tl-open .tl-toggle { border-bottom: 1px solid var(--line); }
+  .workspace:not(.tl-open) .legend, .workspace:not(.tl-open) .timeline, .workspace:not(.tl-open) .quality { display: none; }
+  .legend { padding: 10px 16px 8px; }
+  .timeline { padding: 2px 16px 14px; }
+  .quality { padding: 10px 16px; }
+  .tl-ticks button { height: 16px; }
+  .signs { grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 6px; }
+  /* The confirm button is in the bottom bar: the section under the inspector shows only messages and links. */
+  .panel .confirm-section.quiet { display: none; }
+  .confirm-area .btn.primary, .keys { display: none; }
+  .mobilebar {
+    display: flex; flex-direction: column; gap: 6px; position: fixed; left: 0; right: 0; bottom: 0; z-index: 6;
+    background: var(--topbar-bg); -webkit-backdrop-filter: saturate(160%) blur(16px); backdrop-filter: saturate(160%) blur(16px);
+    border-top: 1px solid var(--line); box-shadow: var(--sheet-shadow);
+    padding-top: 8px;
+    padding-bottom: max(10px, env(safe-area-inset-bottom, 0px));
+    padding-left: max(12px, env(safe-area-inset-left, 0px));
+    padding-right: max(12px, env(safe-area-inset-right, 0px));
+  }
+  .mobile-buttons { display: flex; gap: 8px; }
+  .mobile-buttons .btn { flex: 1; min-width: 0; min-height: 50px; padding: 8px; border-radius: 14px; font-size: 24px; font-weight: 500; }
+  .mobile-buttons .btn.primary { flex: 3; font-size: 16px; font-weight: 650; }
+  .mobile-msg { margin: 0; font-size: 13px; color: var(--bad); font-weight: 650; overflow-wrap: anywhere; }
+  /* The bottom bar never covers the end of the page: its height is measured by the script. */
+  .page { padding-bottom: calc(var(--mobilebar-h, 76px) + 16px); }
+}
+/* Touch: every target at least 44px. */
+@media (max-width: 980px), (pointer: coarse) {
+  :root { --control: 44px; }
+  .chip, .chips.minor .chip { min-height: 44px; padding: 5px 14px; }
+  .segmented button, .filters button { min-height: 40px; }
+  .btn.small, .stage-tools .btn { min-height: 44px; }
+  .qchip { min-height: 36px; padding: 4px 12px; }
+  .box-main { min-height: 54px; }
+  .box-del { width: 44px; height: 44px; margin-right: 2px; }
+  details summary { min-height: 48px; }
+  .nav .btn { width: 44px; min-height: 40px; font-size: 22px; }
+  .value-line input { min-height: 44px; }
+  .switch { min-height: 44px; }
+}
+@media (max-width: 640px) {
+  /* Header: sign, route, "0/2160" and reviewer on one row, the filters on the next; the route progress is
+     also the header's bottom line. It scrolls away with the page. */
+  .topbar { position: static; padding-left: max(12px, env(safe-area-inset-left, 0px)); padding-right: max(12px, env(safe-area-inset-right, 0px)); }
+  .topbar-inner { position: relative; padding-block: 6px 8px; gap: 6px 8px; }
+  .brand-mark { width: 30px; height: 30px; border-width: 3.5px; font-size: 11px; }
+  .route-pick { order: 1; flex: 1 1 0; }
+  .topbar .route-pick select { min-height: 40px; padding-inline: 8px 4px; font-size: 12px; }
+  .progress-short { order: 2; display: block; flex: none; font-size: 13px; font-weight: 750; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+  .reviewer { order: 3; }
+  .topbar .reviewer input { width: 80px; min-height: 40px; padding: 3px 8px; font-size: 16px; }
+  .reviewer input::placeholder { font-size: 14px; }
+  .theme-toggle { order: 4; }
+  .account-btn { order: 5; }
+  .topbar .theme-toggle { margin-left: 0; }
+  .topbar .icon-btn { width: 34px; height: 34px; }
+  /* Five filters (with "AI · N") fit 390px; on a narrower screen the row scrolls, the page never does. */
+  .filters { order: 6; flex: 1 1 100%; display: flex; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+  .filters::-webkit-scrollbar { display: none; }
+  .filters button { flex: 1 0 auto; padding: 3px 4px; font-size: 12px; }
+  .progress { position: absolute; left: calc(-1 * max(12px, env(safe-area-inset-left, 0px))); right: calc(-1 * max(12px, env(safe-area-inset-right, 0px))); bottom: -1px; gap: 0; }
+  .progress-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .progress-bar { max-width: none; height: 2px; border-radius: 0; background: transparent; }
+  .progress-bar span { border-radius: 0 2px 2px 0; }
+
+  .page { padding-top: 0; padding-left: max(12px, env(safe-area-inset-left, 0px)); padding-right: max(12px, env(safe-area-inset-right, 0px)); }
+  /* The photo first, edge to edge. */
+  .stage { margin-left: calc(-1 * max(12px, env(safe-area-inset-left, 0px))); margin-right: calc(-1 * max(12px, env(safe-area-inset-right, 0px))); border: 0; border-radius: 0; box-shadow: none; }
+  /* Bar under the photo: nav and tools on one row, the state tag and the frame data on the next, the
+     second-reading switch (when the route has one) on a third. */
+  .stage-bar {
+    display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 10px; row-gap: 8px; align-items: center;
+    grid-template-areas: "nav nav tools" "pill data data" "hint hint hint";
+  }
+  .nav { grid-area: nav; justify-self: start; }
+  .nav .pos { min-width: 7ch; }
+  .stage-tools .btn { padding-inline: 10px; }
+  .stage-tools { grid-area: tools; margin-left: 0; }
+  #statePill { grid-area: pill; width: auto; height: 32px; }
+  .stage-bar .data { grid-area: data; font-size: 13px; line-height: 1.4; }
+  #hintToggle { grid-area: hint; justify-self: start; }
+  .panel { border-radius: 16px; }
+  .panel section { padding: 14px 16px; }
+  .tl-card { border-radius: 16px; }
+  .status-line { min-height: 0; }
+  .grid2 { grid-template-columns: minmax(0, 1fr); }
+  .signs { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px 8px; }
+  .sign { max-width: 56px; font-size: 18px; border-width: 5px; }
+  .sign.wide { font-size: 16px; }
+  .empty-note { flex-direction: row; align-items: center; gap: 12px; padding: 12px 14px; text-align: left; }
+  .empty-note svg { width: 28px; height: 28px; }
+  .tl-seg { grid-template-columns: 30px minmax(0, 1fr); gap: 6px; }
+  .tl-label { font-size: 10.5px; }
+  /* A whole segment fits the width: about 4px cells, 1px apart. */
+  .tl-ticks { gap: 1px; }
+  .tl-ticks button { height: 18px; border-radius: 1px; }
+  .tl-ticks button.cur, .tl-ticks button.cur:hover { box-shadow: 0 0 0 1px var(--surface), 0 0 0 2.5px var(--fg); }
+  #zoom { height: 160px; }
+  .mobilebar .keycap { display: none; }
+}
+@media (max-height: 500px) and (max-width: 980px) {
+  .topbar { position: static; }
+  #scene { max-height: calc(100vh - 96px); }
+}
+/* Key caps and shortcuts only where there is a keyboard: hidden on touch screens. */
+@media (pointer: coarse) {
+  .keys, .keycap { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" id="brand" href="/" title="Elenco delle route"><span class="brand-mark" aria-hidden="true">50</span><span class="brand-name">Speed limits</span></a>
+    <div class="route-pick">
+      <label for="route" class="sr-only">Route</label>
+      <select id="route"></select>
+    </div>
+    <div class="filters" role="group" aria-label="Quali fotogrammi mostrare">
+      <button type="button" data-filter="todo" aria-pressed="true" title="Non ancora confermati">Da rivedere</button>
+      <button type="button" data-filter="suspicious" aria-pressed="false" title="Il modello e la seconda lettura non sono d’accordo">Sospetti</button>
+      <button type="button" data-filter="proposals" aria-pressed="false" title="Con proposte del modello">Con proposte</button>
+      <button type="button" data-filter="all" aria-pressed="false">Tutti</button>
+      <button type="button" data-filter="ai" aria-pressed="false" title="Confermati da un revisore AI (REST API o MCP)" hidden>AI</button>
+    </div>
+    <div class="progress" aria-live="polite">
+      <div class="progress-text" id="progressText"></div>
+      <div class="progress-bar"><span id="progressBar"></span></div>
+    </div>
+    <span class="progress-short" id="progressShort" aria-hidden="true"></span>
+    <div class="reviewer">
+      <label for="reviewer" class="sr-only">Revisore</label>
+      <input type="text" id="reviewer" maxlength="100" placeholder="Revisore" autocomplete="name" spellcheck="false">
+    </div>
+    __NNSLR_BAR_END__
+  </div>
+</header>
+
+<div class="page">
+  <div id="stateBox" class="state-box" hidden></div>
+
+  <div id="workspace" class="workspace">
+    <div class="stage-col">
+      <div class="stage" id="stage">
+        <svg id="scene" xmlns="http://www.w3.org/2000/svg" aria-label="Fotogramma con i riquadri dei cartelli">
+          <image id="photo" x="0" y="0" preserveAspectRatio="none"></image>
+          <g id="hintLayer"></g>
+          <g id="overlays"></g>
+          <rect id="draft" visibility="hidden"></rect>
+        </svg>
+        <div class="stage-hint" id="stageHint" hidden><span>Trascina sull’immagine per disegnare il riquadro</span></div>
+      </div>
+      <div class="stage-bar">
+        <div class="nav">
+          <button type="button" class="btn icon" id="prev" aria-label="Fotogramma precedente">‹</button>
+          <span class="pos" id="pos">–</span>
+          <button type="button" class="btn icon" id="next" aria-label="Fotogramma successivo">›</button>
+        </div>
+        <span id="statePill" class="pill state todo">Da rivedere</span>
+        <span class="data" id="frameData"></span>
+        <div class="stage-tools">
+          <button type="button" class="btn" id="draw">+ Riquadro</button>
+          <button type="button" class="btn danger" id="remove" disabled>Elimina</button>
+        </div>
+        <label class="switch" id="hintToggle" hidden><input type="checkbox" id="showHints" checked><span class="track" aria-hidden="true"></span>Seconda lettura</label>
+      </div>
+      <section class="tl-card" aria-labelledby="tlHeading">
+        <h2 class="tl-heading" id="tlHeading">Timeline</h2>
+        <button type="button" class="tl-toggle" id="tlToggle" aria-expanded="false" aria-controls="timeline"><span class="tl-title">Timeline</span><span class="tl-sub" id="tlSub"></span></button>
+        <div class="legend">
+          <span><i class="l-done"></i>confermato</span>
+          <span><i class="l-ai"></i>da AI</span>
+          <span><i class="l-unsure"></i>confermato con dubbi</span>
+          <span><i class="l-sus"></i>sospetto</span>
+          <span><i class="l-has"></i>con proposte o 2ª lettura</span>
+          <span><i class="l-none"></i>niente proposto</span>
+          <span><i class="l-dirty"></i>da confermare</span>
+          <span><i class="l-error"></i>non salvato</span>
+        </div>
+        <div class="timeline" id="timeline" aria-label="Tutti i fotogrammi della route"></div>
+        <div class="quality" role="group" aria-label="Dubbi nei fotogrammi confermati">
+          <span class="quality-label">Confermati con dubbi:</span>
+          <button type="button" class="qchip" id="qUnknown" data-filter="unknown" aria-pressed="false"></button>
+          <button type="button" class="qchip" id="qUnreadable" data-filter="unreadable" aria-pressed="false"></button>
+          <button type="button" class="qchip" id="qRoad" data-filter="road" aria-pressed="false"></button>
+        </div>
+      </section>
+    </div>
+
+    <aside class="panel" aria-label="Revisione del fotogramma">
+      <section>
+        <div class="section-head"><h2>Cartelli</h2><span class="count" id="boxCount"></span></div>
+        <p class="reasons" id="reasons" hidden></p>
+        <p class="filter-note" id="filterNote" hidden></p>
+        <div class="box-list" id="boxList"></div>
+        <p class="pick-hint" id="pickHint" hidden>Seleziona un riquadro per correggerne valore, tipo e strada.</p>
+        <p class="empty-note" id="noBoxes" hidden><svg viewBox="0 0 34 34" aria-hidden="true"><circle cx="17" cy="17" r="14" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="4 3.3"/><path d="M12 17h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span>Nessun riquadro. Se non ci sono cartelli di velocità, conferma “nessun cartello”: serve anche questo esempio.</span></p>
+      </section>
+
+      <section id="editor" hidden>
+        <div class="section-head"><h2 id="editorTitle">Riquadro</h2></div>
+        <div class="zoom-wrap">
+          <svg id="zoom" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" aria-label="Ingrandimento del riquadro selezionato">
+            <image id="zoomPhoto" x="0" y="0" preserveAspectRatio="none"></image>
+            <rect id="zoomBox"></rect>
+            <g id="zoomHandles"></g>
+          </svg>
+        </div>
+        <p class="evidence" id="evidence"></p>
+        <div class="signs" id="quickValues" role="group" aria-label="Velocità"></div>
+        <div id="valueBlock" class="value-line">
+          <label for="value">Altro valore</label>
+          <input type="number" id="value" min="5" max="250" step="1" inputmode="numeric" placeholder="–">
+          <span>km/h</span>
+        </div>
+        <p class="field-error" id="valueError" hidden></p>
+        <p class="field-label">Tipo</p>
+        <div class="chips" id="families" role="group" aria-label="Tipo di cartello"></div>
+        <div class="chips minor" id="familiesMore" role="group" aria-label="Altri tipi"></div>
+        <p class="field-label">Strada</p>
+        <div class="segmented" id="roads" role="group" aria-label="Su quale strada vale"></div>
+        <details>
+          <summary>Dettagli del cartello</summary>
+          <div class="grid2">
+            <label>Visibilità
+              <select id="visibility">
+                <option value="unknown">Da valutare</option>
+                <option value="clear">Chiara</option>
+                <option value="partial">Parziale</option>
+                <option value="poor">Scarsa</option>
+              </select>
+            </label>
+            <label>Occlusione
+              <select id="occlusion">
+                <option value="unknown">Da valutare</option>
+                <option value="none">Assente</option>
+                <option value="partial">Parziale</option>
+                <option value="heavy">Forte</option>
+              </select>
+            </label>
+            <label>Pannello sotto
+              <select id="supplementary_panel">
+                <option value="unknown">Da valutare</option>
+                <option value="none">Assente</option>
+                <option value="present">Presente</option>
+                <option value="unresolved">Non risolto</option>
+              </select>
+            </label>
+            <label>Temporaneo
+              <select id="temporary">
+                <option value="unknown">Non determinato</option>
+                <option value="true">Sì</option>
+                <option value="false">No</option>
+              </select>
+            </label>
+            <label>Display variabile
+              <select id="variable_display">
+                <option value="unknown">Non determinato</option>
+                <option value="true">Sì</option>
+                <option value="false">No</option>
+              </select>
+            </label>
+            <label>Note
+              <input type="text" id="notes" autocomplete="off">
+            </label>
+          </div>
+        </details>
+      </section>
+
+      <section id="hintSection" hidden>
+        <div class="section-head"><h2>Seconda lettura</h2></div>
+        <p class="hint-intro">Un altro modello ha guardato il fotogramma. Usala solo se lo vedi anche tu.</p>
+        <div class="hint-list" id="hintList"></div>
+        <p class="hint-stats" id="hintStats"></p>
+      </section>
+
+      <section>
+        <details>
+          <summary>Altro</summary>
+          <div class="stack">
+            <label>Sito fisico
+              <input type="text" id="site_group" placeholder="Stesso identificativo nelle altre route" autocomplete="off">
+            </label>
+            <label>Incontro
+              <input type="text" id="encounter_id" placeholder="Stesso identificativo nei frame vicini" autocomplete="off">
+            </label>
+            <div class="row">
+              <button type="button" class="btn small" id="export">Scarica revisioni JSONL</button>
+              <span class="save-msg" id="exportMsg" role="status"></span>
+            </div>
+            <p id="storageNote"></p>
+            <p>Proposte di cartelli da un modello addestrato in Vietnam e numeri sull’asfalto da OCR verificato con segmentazione della strada. Modelli non validati sulle strade svizzere. Conferma solo ciò che riesci a vedere. Il numero proposto non è il limite applicabile alla vettura.</p>
+            <p>Lascia sconosciuto ciò che non puoi verificare. L’istante di passaggio resta non annotato. Ogni revisione viene controllata con le regole di import-annotations prima di entrare nel dataset.</p>
+          </div>
+        </details>
+      </section>
+
+      <section class="confirm-section">
+        <div class="notices" id="notices"></div>
+        <div class="confirm-area">
+          <div class="status-line">
+            <p class="save-msg" id="saveMsg" role="status"></p>
+            <div class="status-actions">
+              <button type="button" class="link" id="discard" hidden>Annulla modifiche</button>
+              <button type="button" class="link danger" id="withdraw" hidden>Annulla conferma</button>
+            </div>
+          </div>
+          <button type="button" class="btn primary confirm" id="confirm" data-action="confirm"><span class="btn-label" id="confirmLabel">Conferma</span><kbd class="keycap" aria-hidden="true">↵</kbd></button>
+          <p class="keys" aria-label="Scorciatoie da tastiera"><span><kbd>←</kbd> <kbd>→</kbd> fotogramma</span> <span><kbd>Invio</kbd> conferma</span> <span><kbd>N</kbd> nuovo riquadro</span> <span><kbd>Canc</kbd> elimina</span> <span id="keyHints"><kbd>H</kbd> seconda lettura</span> <span><kbd>Esc</kbd> annulla</span></p>
+        </div>
+      </section>
+    </aside>
+  </div>
+</div>
+
+<nav class="mobilebar" id="mobilebar" aria-label="Navigazione">
+  <p class="mobile-msg" id="mobileMsg" role="alert" hidden></p>
+  <div class="mobile-buttons">
+    <button type="button" class="btn" id="mPrev" aria-label="Fotogramma precedente">‹</button>
+    <button type="button" class="btn primary confirm" id="mConfirm" data-action="confirm"><span class="btn-label" id="mConfirmLabel">Conferma</span><kbd class="keycap" aria-hidden="true">↵</kbd></button>
+    <button type="button" class="btn" id="mNext" aria-label="Fotogramma successivo">›</button>
+  </div>
+</nav>
+
+<script type="application/json" id="payload">__NNSLR_DATA__</script>
+__NNSLR_SCRIPT__
+</body>
+</html>

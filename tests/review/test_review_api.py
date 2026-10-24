@@ -504,7 +504,7 @@ def test_review_page_shows_ai_reviews_as_final(api):
     page = page.decode()
     assert 'data-filter="ai"' in page and 'id="tlToggle"' in page and 'frameReviewerKind' in page
     assert 'Approva' not in page and 'approv' not in page.lower()
-    assert "' (AI' + (via ? ' · ' + via : '') + ')'" in page
+    assert '" (AI" + (via ? " · " + via : "") + ")"' in page
     reviews = json_of(server.request('GET', f'/api/route/{ROUTE}/reviews')[2])['reviews']
     assert reviews[0]['reviewer_kind'] == 'ai' and reviews[0]['channel'] == 'rest'
     # A person may still correct it from the page: the correction is a human review.
