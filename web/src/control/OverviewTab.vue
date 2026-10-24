@@ -1,7 +1,7 @@
 <script setup lang="ts">
-// Overview, the home page: the machine in small at the top, the next step, the three phases (the review with
-// Resume review and the route list), what is running now (live, with Stop), or how the last job ended; the
-// recent jobs, the site, the processes on the GPU.
+// Overview, the home page (the machine is in the tab row, TopMachine.vue): the next step, the three phases (the
+// review with Resume review and the route list), what is running now (live, with Stop), or how the last job ended;
+// the recent jobs, the site, the processes on the GPU.
 import {computed} from 'vue';
 import type {ActionName, ActionState, Job, PanelStatus} from '../common/panel-types';
 import ActionList from './ActionList.vue';
@@ -9,7 +9,6 @@ import FlowTiles from './FlowTiles.vue';
 import JobItem from './JobItem.vue';
 import JobProgress from './JobProgress.vue';
 import {terminalActivities} from './jobs';
-import MiniMachine from './MiniMachine.vue';
 import NextStepCard from './NextStepCard.vue';
 import {nextStep, WAITING} from './next-step';
 import PrepRoutes from './PrepRoutes.vue';
@@ -33,12 +32,7 @@ const gpuProcesses = computed(() => props.status?.system.gpu?.process_list ?? []
 </script>
 
 <template>
-  <header class="page-head">
-    <h1 class="page-title">Overview</h1>
-    <p class="page-sub">What the server is doing, how it is, and the next step.</p>
-  </header>
-  <MiniMachine v-if="status" class="server-strip" :system="status.system" disk/>
-
+  <h1 class="sr-only">Overview</h1>
   <NextStepCard :next="next" :actions="status?.actions ?? null" :review-href="reviewHref" @run="(name, state) => $emit('run', name, state)"/>
   <FlowTiles :status="status" :attention="next.attention" :busy="busy"/>
 

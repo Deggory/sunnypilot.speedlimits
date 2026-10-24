@@ -48,20 +48,25 @@ SECONDS = re.compile(r'\b([0-9]+)s$')
 FETCHED = re.compile(r'^== (\S+)--(\d+) -> ')
 ON_COMMA = re.compile(r'^(\S+) sul comma: ')
 FINISHED = re.compile(r'^== finito con codice ')
+# A line of JSON printed in the log (the report of the CUDA smoke test, ...): a brace, a bracket, a quoted key
+# or a bare value. Never the last line shown: a lone "}" says nothing.
+JSON_LINE = re.compile(r'^(?:[{}\[\]"]|(?:-?\d[\d.eE+-]*|true|false|null),?$)')
 
 
 def last_line(text: str) -> str:
-    """The last line that says something: not the start and end markers of the wrapper, not empty."""
+    """The last line that says something: not the start and end markers of the wrapper, not JSON, not empty."""
     for line in reversed(text.splitlines()):
         line = line.strip()
-        if line and not FINISHED.match(line) and not line.startswith(('== helpers/', '== scripts/')):
+        if (line and not FINISHED.match(line) and not JSON_LINE.match(line)
+                and not line.startswith(('== helpers/', '== scripts/'))):
             return line[:300]
     return ''
 
 
 def progress(action: str, state: str, text: str, preparation: dict | None = None) -> dict:
     """{'steps': [{'key', 'label', 'state': done|current|todo|failed}], 'percent': 0-100 or None,
-    'detail': str, 'last_line': str, 'curves': {'detector'|'reader': {'epochs': total, 'points':
+    'detail': str, 'last_line': str, 'step_progress': how far the current step is from the log alone (see
+    _inside_step) or None, 'curves': {'detector'|'reader': {'epochs': total, 'points':
     [{'epoch', 'train_loss', 'val_loss', ('train_accuracy', 'val_accuracy',) 'seconds'}]}}} for an action
     in state running, ok, failed or interrupted."""
     steps = STEPS.get(action, ())
@@ -69,6 +74,8 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
     current = keys[0] if keys else ''
     done: set[str] = set()
     epoch: tuple[str, int, int] | None = None
+    # The last sub-step of scripts/run_v100_baseline.sh: its number and its title.
+    substep: tuple[int, str] | None = None
     fetched = 0
     route = ''
     # The curves of the training: per network, one point per epoch.
@@ -82,6 +89,7 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
         match = SUBSTEP.match(line)
         if match and PIPELINE.get(int(match.group(1))) in keys:
             current = PIPELINE[int(match.group(1))]
+            substep = (int(match.group(1)), line[match.end():].strip(' ='))
         match = EPOCH.match(line)
         if match:
             epoch = (match.group(1), int(match.group(2)), int(match.group(3)))
@@ -102,6 +110,7 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
     if current in keys:
         done.update(keys[:keys.index(current)])
 
+    inside = _inside_step(current, epoch, substep) if current in keys else None
     finished_ok = state == 'ok'
     rows = []
     for key, label, _ in steps:
@@ -120,9 +129,9 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
     elif action in ('train', 'train_continue', 'dataset'):
         total = sum(weight for _, _, weight in steps)
         reached = sum(weight for key, _, weight in steps if key in done)
-        if epoch is not None and epoch[0] == current and epoch[2]:
+        if inside is not None:
             weight = dict((key, weight) for key, _, weight in steps)[current]
-            reached += weight * epoch[1] / epoch[2]
+            reached += weight * inside['done'] / inside['total']
         percent = round(reached * 100 / total, 1)
     elif action == 'prepare' and preparation is not None and preparation.get('percent') is not None:
         percent = float(preparation['percent'])
@@ -134,7 +143,24 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
     elif action == 'fetch' and (fetched or route):
         detail = (str(fetched) + (' segment downloaded' if fetched == 1 else ' segments downloaded')
                   + (' · ' + route if route and state == 'running' else ''))
-    return {'steps': rows, 'percent': percent, 'detail': detail, 'last_line': last_line(text), 'curves': curves}
+    return {'steps': rows, 'percent': percent, 'detail': detail, 'last_line': last_line(text),
+            'step_progress': inside if state == 'running' and current in keys else None, 'curves': curves}
+
+
+def _inside_step(current: str, epoch: tuple[str, int, int] | None, substep: tuple[int, str] | None) -> dict | None:
+    """{'done', 'total', 'percent', 'text'} of the current step from its log: the epochs written by a training,
+    or which of its sub-steps of scripts/run_v100_baseline.sh it is in (the checks are three, the export and
+    the bundle two: the second of three is at 33%). None when the log says nothing more."""
+    if epoch is not None and epoch[0] == current and epoch[2]:
+        done, total = min(epoch[1], epoch[2]), epoch[2]
+        return {'done': done, 'total': total, 'percent': round(done * 100 / total, 1),
+                'text': 'epoch ' + str(epoch[1]) + ' of ' + str(total)}
+    parts = sorted(number for number, step in PIPELINE.items() if step == current)
+    if substep is None or substep[0] not in parts or len(parts) < 2:
+        return None
+    done = parts.index(substep[0])
+    return {'done': done, 'total': len(parts), 'percent': round(done * 100 / len(parts), 1),
+            'text': substep[1] + ' · ' + str(done + 1) + ' of ' + str(len(parts))}
 
 
 # The tasks that report their own progress (nnslr_tools.progress) and the step they belong to.
@@ -146,11 +172,12 @@ def with_step_progress(result: dict, action: str, record: dict | None, setup_lin
                        download: dict | None = None) -> dict:
     """Adds 'step_progress' ({'done', 'total', 'percent', 'text'}) for the current step of a running job:
     from the last report of a command (when it belongs to that step) or, while the GPU environment is
-    made, the last line of its log. With a count, the job's percent counts it too."""
+    made, the last line of its log; otherwise what the log alone says (progress(): epochs, sub-steps). With a
+    count, the job's percent counts it too."""
     current = next((step['key'] for step in result['steps'] if step['state'] == 'current'), None)
     if current is None:
         return result
-    step_progress = None
+    step_progress = result.get('step_progress')
     if record is not None and TASK_STEPS.get(record.get('task')) == current and record.get('total'):
         done, total = int(record['done']), int(record['total'])
         step_progress = {'done': done, 'total': total, 'percent': round(min(done, total) * 100 / total, 1),

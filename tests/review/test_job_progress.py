@@ -68,8 +68,30 @@ def test_the_progress_inside_the_current_step_comes_from_the_last_report():
     assert inside['step_progress'] == {'done': 50, 'total': 200, 'percent': 25.0, 'text': 'epoch 3 of 20'}
     # 13 of 100 done before the detector, and a quarter of its 40.
     assert inside['percent'] == 23.0
+    # A report of another step is not this one's: the epochs of the log stay.
     other = with_step_progress(running, 'train', {'task': 'validate', 'done': 1, 'total': 2})
-    assert other['step_progress'] is None and other['percent'] == running['percent']
+    assert other['step_progress'] == running['step_progress'] and other['percent'] == running['percent']
     setup = progress('train', 'running', '== a. importo\n== b. controllo\n== c. ambiente GPU\n')
     assert with_step_progress(setup, 'train', None, 'Downloading torch (900 MB)')['step_progress']['text'] == \
         'Downloading torch (900 MB)'
+
+
+def test_the_current_step_has_its_own_percent_from_the_log():
+    # The detector: 5 of its 20 epochs.
+    assert progress('train', 'running', TRAIN_LOG)['step_progress'] == {
+        'done': 5, 'total': 20, 'percent': 25.0, 'text': 'epoch 5 of 20'}
+    # The checks are the sub-steps 1-3 of the pipeline: at the smoke test, two of three are done.
+    checks = progress('train', 'running', TRAIN_LOG.split('== 4/10')[0])
+    assert states(checks)['checks'] == 'current'
+    assert checks['step_progress'] == {'done': 2, 'total': 3, 'percent': 66.7,
+                                       'text': 'Explicit CUDA smoke test · 3 of 3'}
+    # 10 of 100 before the checks, and two thirds of their 3.
+    assert checks['percent'] == 12.0
+    # Nothing to count yet, and nothing for a job that is not running.
+    assert progress('train', 'running', '== a. importo le revisioni confermate\n')['step_progress'] is None
+    assert progress('train', 'failed', TRAIN_LOG)['step_progress'] is None
+
+
+def test_the_last_line_is_never_a_piece_of_json():
+    log = TRAIN_LOG.split('== 4/10')[0] + '{\n  "cuda": true,\n  "devices": [\n    "sm_90"\n  ],\n  "bytes": 3407,\n  12\n}\n'
+    assert progress('train', 'running', log)['last_line'] == '== 3/10 Explicit CUDA smoke test =='

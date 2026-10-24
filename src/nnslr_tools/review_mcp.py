@@ -44,7 +44,8 @@ get_frame_context(...) when the sign is far, covered, blurred or ambiguous -> sa
 When the previous frame is confirmed, apply_previous_frame(...) carries its labels onto the same signs here:
 check each carried box on this image; boxes with check_position true must be fixed or dropped first.
 Model proposals and the second reading are hints, not truth. Never invent a speed: unreadable number
--> value_kph null. Call get_review_schema for the allowed values and the rules.
+-> value_kph null. Other traffic signs (direction, town entry, give way, no entry, danger...) get a box too:
+family other_sign with their sign_type; logos and advertising stay out. Call get_review_schema for the allowed values and the rules.
 Save only when the owner has authorized saving for this route; otherwise only read. Your saves are
 recorded as an AI review (reviewer stored as "ai/<name>"), never as a person, and are final: no person
 approves them again, the next dataset import takes them as labels. Send run_id and

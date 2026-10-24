@@ -508,6 +508,10 @@ def make_handler(app: ReviewApp):
             if path == '/api/panel/status':
                 self._json(200, app.panel.status())
                 return
+            # The machine alone, for the strip in the tab row of the pages outside the panel (every 4 s).
+            if path == '/api/panel/system':
+                self._json(200, {'system': app.panel.system()})
+                return
             if path == '/api/panel/runs':
                 self._json(200, app.panel.runs())
                 return

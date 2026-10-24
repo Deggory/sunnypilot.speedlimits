@@ -76,10 +76,10 @@ code{background:var(--surface-2);border:1px solid var(--line);border-radius:6px;
 padding:12px max(16px,env(safe-area-inset-right,0px)) 10px max(16px,env(safe-area-inset-left,0px))}
 .topbar-inner{display:flex;align-items:center;gap:10px;max-width:1180px;margin:0 auto;min-height:32px}
 .brand{display:flex;align-items:center;gap:10px;color:inherit;text-decoration:none;min-width:0;flex:none}
-/* The logo (pages.BRAND_MARK, BrandMark.vue): a sign in a detection box on a tile, in the place and size of
-   distill's tile. */
-.brand-mark{width:32px;height:32px;border-radius:9px;background:linear-gradient(140deg,#2563eb,#7c3aed);display:grid;
-place-items:center;flex:none;box-shadow:0 4px 14px rgba(59,130,246,.32)}
+/* The logo (pages.BRAND_MARK, BrandMark.vue): a 50 sign in the corners of the selected box, on a dark tile in the
+   place and size of distill's tile; the hairline keeps the tile apart from the dark page. */
+.brand-mark{width:32px;height:32px;border-radius:10px;background:linear-gradient(160deg,#2b3445,#0f1520);display:grid;
+place-items:center;flex:none;box-shadow:inset 0 0 0 1px rgba(255,255,255,.08),0 4px 14px rgba(15,21,32,.28)}
 .brand-mark svg{width:100%;height:100%;display:block}
 .brand-name{margin:0;font-size:19px;font-weight:700;letter-spacing:-.01em;white-space:nowrap}
 .live{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted);min-width:0}
@@ -93,6 +93,22 @@ place-items:center;flex:none;box-shadow:0 4px 14px rgba(59,130,246,.32)}
 min-height:36px;display:inline-flex;align-items:center;text-decoration:none;transition:background .2s,color .2s}
 .tabs a:hover{color:var(--fg)}
 .tabs a[aria-current="page"]{color:var(--tab-on-fg);background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--tab-on-ring)}
+/* The machine at the right of the tab row (TopMachine.vue): label, value and the last two minutes, quiet; under
+   the tabs when the row is too narrow for both. */
+.tabs-machine{margin-left:auto;display:flex;align-items:center;min-width:0}
+.tm{display:flex;flex-wrap:wrap;align-items:center;row-gap:4px;padding:0 2px}
+.tm-cell{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;white-space:nowrap;font-size:12.5px;line-height:1.2}
+.tm-cell+.tm-cell{border-left:1px solid var(--line)}
+.tm-label{color:var(--muted);font-weight:600;font-size:11.5px;letter-spacing:.02em}
+.tm-value{font-weight:650;font-variant-numeric:tabular-nums;color:var(--fg)}
+.tm-cell.hot .tm-value{color:var(--bad)}
+.tm .spark{width:22px;height:14px;margin:0;background:none;border-radius:0;flex:none}
+.tm .spark svg{width:100%;height:100%;display:block}
+@media (max-width:1240px){
+  .tabs{flex-wrap:wrap}
+  .tabs-machine{flex:1 0 100%;margin:2px 0 0;padding:6px 0 2px;border-top:1px solid var(--line)}
+}
+@media (max-width:560px){.tm .spark{display:none}.tm-cell{padding:2px 7px}}
 
 /* page */
 .page{max-width:1180px;margin:0 auto;padding:20px max(16px,env(safe-area-inset-right,0px))

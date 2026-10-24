@@ -326,8 +326,7 @@ border-radius:12px;background:var(--surface-2);border:1px solid var(--line)}
 .mini-label{font-size:11.5px;font-weight:600;letter-spacing:.02em;color:var(--muted);white-space:nowrap}
 .mini-value{font-size:13px;font-weight:650;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .mini .spark{grid-column:1/-1;height:22px;margin:4px 0 0;border-radius:6px;background:transparent}
-/* The same at the top of the Overview: one quiet row under the title, no dashed rule. */
-.jp-machine.server-strip{order:-2;margin:-6px 0 4px;padding-top:0;border-top:0;grid-template-columns:repeat(auto-fit,minmax(140px,1fr))}
+.mini.hot .mini-value{color:var(--bad)}
 
 /* What the dataset holds (DatasetSection.vue): figures, bar lists, the split as one stacked bar, the routes.
    The split takes the first five slots of the reference categorical palette (validated, both themes): train

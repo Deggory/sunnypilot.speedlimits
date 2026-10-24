@@ -2,6 +2,7 @@
 import {createApp, type Component} from 'vue';
 import AccountMenu from '../components/AccountMenu.vue';
 import ConfirmDialog from '../components/ConfirmDialog.vue';
+import TopMachine from '../components/TopMachine.vue';
 
 /** The confirm dialog of the page (composables/confirm.ts), in its own element at the end of <body>. */
 function mountConfirmDialog(): void {
@@ -14,12 +15,14 @@ function mountConfirmDialog(): void {
 
 /**
  * The parts every signed-in page shares: the Account menu in the top bar rendered by pages.py (#account-menu;
- * data-current marks the Account page) and the confirm dialog.
+ * data-current marks the Account page), the machine in the tab row (#tabs-machine) and the confirm dialog.
  */
 export function mountSiteParts(): void {
   mountConfirmDialog();
   const host = document.getElementById('account-menu');
   if (host !== null) createApp(AccountMenu, {current: host.dataset['current'] === 'true'}).mount(host);
+  const machine = document.getElementById('tabs-machine');
+  if (machine !== null) createApp(TopMachine, {feed: machine.dataset['feed'] ?? 'system'}).mount(machine);
 }
 
 /** The page's own app in #app, plus the Account menu and the confirm dialog. */

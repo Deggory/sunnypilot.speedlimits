@@ -297,6 +297,9 @@ def test_panel_page_status_and_run_over_http(served):
         assert status == 303 and response.getheader('Location') == target, path
     payload = json_of(served.request('GET', '/api/panel/status')[2])
     assert payload['routes'][0]['route'] == ROUTE and 'prepare' in payload['actions']
+    # The machine alone, for the strip in the tab row of the other pages.
+    machine = json_of(served.request('GET', '/api/panel/system')[2])
+    assert set(machine) == {'system'} and 'memory' in machine['system'] and 'disk' in machine['system']
 
     status, response, data = served.request('POST', '/api/panel/run/prepare', body={})
     assert status == 200, data
@@ -329,6 +332,7 @@ def test_panel_needs_the_sign_in_like_the_rest_of_the_site(root, checkout):
             status, response, data = server.request('GET', path)
             assert status in (200, 401) and asset('js/login.js').encode() in data, path
         assert server.request('GET', '/api/panel/status')[0] == 401
+        assert server.request('GET', '/api/panel/system')[0] == 401
         assert server.request('POST', '/api/panel/run/prepare', body={})[0] == 401
         assert server.request('GET', '/api/panel/status', headers=sign_in(server))[0] == 200
     finally:

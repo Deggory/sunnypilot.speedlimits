@@ -835,9 +835,12 @@ def review_schema() -> dict:
             'overexposed: value_kph null and a note.',
             'applicability: own_road for our road, other_road for e.g. a side access, unresolved only when it '
             'cannot be decided.',
-            'Logos, advertising, give-way, arrows, height limits and other bans are not speed signs: leave them '
-            'out of detections. Duplicates on the same sign: keep one box with the right value.',
-            'A frame without relevant signs is confirmed with detections [] (negative examples matter).',
+            'Other traffic signs (give way, stop, direction signs, town entry and exit, main road, motorway, '
+            'no entry, no overtaking, weight, height or width limits, minimum speed, danger signs...) get a box '
+            'too: family "other_sign" with their sign_type (get_review_schema lists them), so the model learns '
+            'not to take them for limits. Logos, advertising and shop signs stay out of detections. Duplicates '
+            'on the same sign: keep one box with the right value.',
+            'A frame without traffic signs is confirmed with detections [] (negative examples matter).',
             'Look at the image before saving; model proposals and the second reading are only hints. Save only '
             'when the owner authorized saving for this route.',
             'A saved confirmation is final, by a person or by an AI (no second approval): the next dataset import '
