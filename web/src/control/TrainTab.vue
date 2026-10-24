@@ -68,6 +68,11 @@ const CUTTER_ACTIONS = computed((): [ActionName, string][] => [
     + (cutterFamilies.value === 'all' ? 'the speed signs and the other signs' : 'the speed signs only')
     + ' on the GPU, then measures it on test and validation by the size of the sign. A new run; it takes hours.'],
 ]);
+/** Reviews into the training data, under the count of frames not yet in it. */
+const IMPORT_ACTIONS: [ActionName, string][] = [
+  ['dataset', 'Adds the frames confirmed since the last import to the training data and splits it again by place. '
+    + 'No GPU, a few minutes.'],
+];
 /** The classifier's training, in its card. */
 const CLASSIFIER_ACTIONS: [ActionName, string][] = [
   ['train_classifier', 'Mines the false boxes of the cutter in use, trains the classifier with “not a sign” and the kinds of '
@@ -119,10 +124,12 @@ const numbers = computed(() => {
         : 'Training needs at least ' + numbers.needed + ' routes: whole routes are kept apart to check the model on roads it never saw.' }}</p>
     </div>
     <div class="card number">
-      <h2>New since the last training</h2>
+      <h2>Not yet in the training data</h2>
       <div class="figure" id="train-fresh">{{ numbers ? thousands(numbers.fresh) : '–' }}<span class="figure-unit">{{ numbers?.fresh === 1 ? 'frame' : 'frames' }}</span></div>
-      <p class="figure-note">{{ numbers === null ? '' : numbers.fresh ? 'Frames confirmed or corrected after the last import, in ' + plural(numbers.freshRoutes, 'route') + '. The next training takes them in by itself.'
-        : 'Every confirmed frame is already in the dataset.' }}</p>
+      <p class="figure-note">{{ numbers === null ? '' : numbers.fresh ? 'Confirmed or corrected after the last import, in ' + plural(numbers.freshRoutes, 'route') + '. Only Import reviews and the whole pipeline add them: the cutter and the classifier train on the data of the last import.'
+        : 'Every confirmed frame is already in the training data.' }}</p>
+      <ActionList v-if="numbers?.fresh" :items="IMPORT_ACTIONS" :actions="status?.actions ?? null"
+                  @run="(name, state) => emit('run', name, state)"/>
     </div>
     <div class="card number">
       <h2>What the model learns from</h2>
