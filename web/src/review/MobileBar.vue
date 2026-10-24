@@ -5,7 +5,7 @@ import {computed, useTemplateRef} from 'vue';
 import {position, status} from './current';
 import {confirmFrame} from './confirm';
 import {confirmLabels, statusLine} from './messages';
-import {go} from './navigation';
+import {step} from './navigation';
 import type {FrameEdit, FrameRow} from './types';
 import {useHeightVar} from './use-layout';
 
@@ -23,11 +23,11 @@ const message = computed(() => (props.row ? statusLine(props.row.frame_key, stat
     <p class="mobile-msg" id="mobileMsg" role="alert" :hidden="message === ''">{{ message }}</p>
     <div class="mobile-buttons">
       <button type="button" class="btn" id="mPrev" aria-label="Previous frame" :disabled="position.index <= 0"
-              @click="go(-1)">‹</button>
+              @click="step(-1)">‹</button>
       <button type="button" class="btn primary confirm" :class="{already: labels.already}" id="mConfirm" data-action="confirm"
               :disabled="status === 'saving'" :data-save-state="status" @click="confirmFrame"><span class="btn-label" id="mConfirmLabel">{{ labels.mobileLabel }}</span><kbd class="keycap" aria-hidden="true">↵</kbd></button>
       <button type="button" class="btn" id="mNext" aria-label="Next frame"
-              :disabled="position.index >= position.length - 1" @click="go(1)">›</button>
+              :disabled="position.index >= position.length - 1" @click="step(1)">›</button>
     </div>
   </nav>
 </template>

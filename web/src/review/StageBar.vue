@@ -1,11 +1,11 @@
 <script setup lang="ts">
-// The bar under the photo: position in the filter, state tag, frame data, drawing and removing boxes, the
+// The bar under the photo: position in the route, state tag, frame data, drawing and removing boxes, the
 // second reading shown or not.
 import {computed} from 'vue';
 import {position, selectedBox, status} from './current';
 import {removeSelected, toggleDrawing, toggleHints} from './edits';
 import {aiConfirmed, proposalsOf, reasonsOf, statusLabel} from './frames';
-import {go} from './navigation';
+import {step} from './navigation';
 import {hintsOf, report, state} from './store';
 import type {FrameRow} from './types';
 
@@ -35,10 +35,10 @@ function hintsSwitched(event: Event): void {
   <div class="stage-bar">
     <div class="nav">
       <button type="button" class="btn icon" id="prev" aria-label="Previous frame" :disabled="position.index <= 0"
-              @click="go(-1)">‹</button>
+              @click="step(-1)">‹</button>
       <span class="pos" id="pos">{{ position.index + 1 }} / {{ position.length }}</span>
       <button type="button" class="btn icon" id="next" aria-label="Next frame"
-              :disabled="position.index >= position.length - 1" @click="go(1)">›</button>
+              :disabled="position.index >= position.length - 1" @click="step(1)">›</button>
     </div>
     <span id="statePill" :class="pillClass">{{ statusLabel(row.frame_key) }}</span>
     <span class="data" id="frameData">{{ frameData }}</span>

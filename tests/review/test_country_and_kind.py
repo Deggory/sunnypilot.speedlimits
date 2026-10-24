@@ -1,0 +1,96 @@
+"""The country of a frame (from its GPS position, nnslr_tools.gps) and the kind of an "Other sign"
+(nnslr_tools.sign_types): proposed, saved, refused when wrong, the same list on the page and on the server."""
+from __future__ import annotations
+
+import json
+import re
+from pathlib import Path
+
+import pytest
+
+from nnslr_tools.gps import country_of, frame_position, positions_path
+from nnslr_tools.sign_types import SIGN_TYPES
+from review_helpers import ROUTE, RUN_ID, TOKEN, RunningServer, json_of, make_report, page_body
+
+CATALOG = Path(__file__).resolve().parents[2] / 'web/src/review/catalog.ts'
+
+
+@pytest.mark.parametrize('latitude, longitude, code', [
+    (47.37, 8.54, 'CH'), (46.20, 6.14, 'CH'), (45.46, 9.19, 'IT'), (52.23, 21.01, 'PL'), (48.14, 11.58, 'DE'),
+    (48.86, 2.35, 'FR'), (47.48, 8.05, 'CH'), (40.0, -40.0, None), (None, None, None)])
+def test_the_country_of_a_position(latitude, longitude, code):
+    assert country_of(latitude, longitude) == code
+
+
+def test_the_position_of_a_frame_is_the_nearest_fix():
+    log = {'first_frame_mono': 10_000_000_000,
+           'fixes': [[10_000_000_000 + k * 100_000_000, 47.0 + k / 1000, 8.0, 10.0, 90.0] for k in range(50)]}
+    assert frame_position(log, 2)['latitude'] == 47.02
+    # Beyond the last fix by more than GPS_MAX_GAP_S: no position.
+    assert frame_position(log, 9) is None
+    assert frame_position({'first_frame_mono': None, 'fixes': []}, 0) is None
+
+
+def test_the_page_offers_the_kinds_of_the_server():
+    text = CATALOG.read_text()
+    block = text[text.index('export const SIGN_KIND_GROUPS'):text.index('export function signKindOf')]
+    assert sorted(re.findall(r"\{id: '([a-z_]+)', label:", block)) == sorted(SIGN_TYPES)
+
+
+@pytest.fixture
+def server(tmp_path, monkeypatch):
+    monkeypatch.setenv('NNSLR_REVIEW_TOKEN', TOKEN)
+    rows = make_report(tmp_path, count=3)
+    lines = [{'frame_key': '0/0', 'segment_index': 0, 'output_index': 0, 'latitude': 47.48, 'longitude': 8.05,
+              'speed_mps': 13.6, 'bearing_deg': 14.4, 'country': 'CH', 'country_from': 'gps'},
+             {'frame_key': '0/1', 'segment_index': 0, 'output_index': 1, 'latitude': None, 'longitude': None,
+              'speed_mps': None, 'bearing_deg': None, 'country': 'CH', 'country_from': 'nearest_fix'}]
+    target = positions_path(tmp_path, ROUTE)
+    target.parent.mkdir(parents=True)
+    target.write_text(''.join(json.dumps(line) + '\n' for line in lines))
+    running = RunningServer(tmp_path)
+    yield running, {row['frame_key']: row for row in rows}
+    running.close()
+
+
+def test_frames_carry_their_position_and_proposed_country(server):
+    running, rows = server
+    status, response, data = running.request('GET', f'/api/v1/routes/{ROUTE}/frames/0/0',
+                                             headers={'Authorization': 'Bearer ' + TOKEN})
+    frame = json_of(data)
+    assert status == 200 and frame['gps']['latitude'] == 47.48 and frame['country_proposed'] == 'CH'
+    status, response, data = running.request('GET', f'/route/{ROUTE}/')
+    assert status == 200 and b'"country_proposed": "CH"' in data and b'"PL": "Poland"' in data
+
+
+def test_the_country_is_saved_proposed_or_picked(server):
+    running, rows = server
+    status, response, data = running.post_frame(ROUTE, '0/0', page_body(rows['0/0']))
+    assert status == 200 and json_of(data)['review']['country'] == 'CH'
+    body = page_body(rows['0/1'])
+    body['country'] = 'IT'
+    status, response, data = running.post_frame(ROUTE, '0/1', body)
+    assert status == 200 and json_of(data)['review']['country'] == 'IT'
+    body = page_body(rows['0/2'])
+    body['country'] = 'Switzerland'
+    status, response, data = running.post_frame(ROUTE, '0/2', body)
+    assert status == 400 and json_of(data)['error'] == 'invalid_country'
+    # No position read for 0/2: no country unless the reviewer gives one.
+    body['country'] = None
+    status, response, data = running.post_frame(ROUTE, '0/2', body)
+    assert status == 200 and json_of(data)['review']['country'] is None
+
+
+def test_the_kind_of_an_other_sign_is_kept_and_checked(server):
+    running, rows = server
+    body = page_body(rows['0/0'])
+    body['detections'][0].update(family='other_sign', value_kph=None, sign_type='town_entry')
+    status, response, data = running.post_frame(ROUTE, '0/0', body)
+    assert status == 200 and json_of(data)['review']['detections'][0]['sign_type'] == 'town_entry'
+    body = page_body(rows['0/2'])
+    body['detections'][0]['sign_type'] = 'town_entry'
+    status, response, data = running.post_frame(ROUTE, '0/2', body)
+    assert status == 400 and json_of(data)['error'] == 'invalid_sign_type'
+    body['detections'][0].update(family='other_sign', value_kph=None, sign_type='lamp_post')
+    status, response, data = running.post_frame(ROUTE, '0/2', body)
+    assert status == 400 and 'sign_type must be one of' in json_of(data)['message']

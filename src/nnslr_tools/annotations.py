@@ -417,8 +417,20 @@ def import_reviews(inputs: list[Path], root: Path, output: Path, *, dataset_kind
 
 
 def import_review_sources(sources: list[tuple[str, bytes]], root: Path, output: Path, *,
-                          dataset_kind: str = 'gold') -> dict:
-    """Import review JSONL contents given as (name, bytes); files and the review database both end here."""
+                          dataset_kind: str = 'gold', drop_frames=None, dry_run: bool = False) -> dict:
+    """Import review JSONL contents given as (name, bytes); files and the review database both end here.
+
+    ``drop_frames`` holds frame identities (:func:`frame_identity`) whose rows already in
+    the dataset are taken out before the new rows are added: the review database uses it
+    for a frame reviewed again after its import (its new rows replace the old ones) and for
+    a frame whose confirmation was withdrawn. The validation runs on the whole combined
+    dataset and nothing is written when it fails. The removed rows are kept, as they were,
+    in the content-addressed archive ``annotations/replaced/<sha256>.jsonl``. With only
+    removals and no new rows the dataset is still written.
+
+    ``dry_run`` validates and reports exactly as an import would, writing nothing (no
+    dataset, no source archive, no archive of removed rows).
+    """
     # [model-review] - START
     require(dataset_kind in DATASET_KINDS, 'unknown_dataset_kind', str(dataset_kind))
     # [model-review] - END
@@ -437,14 +449,37 @@ def import_review_sources(sources: list[tuple[str, bytes]], root: Path, output: 
             require(identity not in frame_ids, 'duplicate_identity', 'reviewed frame')
             frame_ids.add(identity)
             imported.extend(rows)
-    require(bool(imported), 'empty_dataset', 'no annotations to import')
     existing = load_jsonl(output) if output.exists() else []
-    combined = sorted(existing + imported, key=lambda r: str(r.get('annotation_id', '')))
+    drop = set(drop_frames or ())
+    kept, removed = [], []
+    for row in existing:
+        try:
+            dropped = bool(drop) and frame_identity(row) in drop
+        except (KeyError, TypeError):
+            # Not a canonical row: the validation below reports it.
+            dropped = False
+        if dropped:
+            removed.append(row)
+        else:
+            kept.append(row)
+    require(bool(imported) or bool(removed), 'empty_dataset', 'no annotations to import')
+    combined = sorted(kept + imported, key=lambda r: str(r.get('annotation_id', '')))
     # [model-review] - START
     report = validate_dataset(combined, root, dataset_kind=dataset_kind)
     # [model-review] - END
     if not report['valid']:
         raise DatasetError(report['errors'][0]['reason'], json.dumps(report, sort_keys=True))
+    replaced_archive = None
+    removed_payload = b''
+    if removed:
+        removed_payload = jsonl_bytes(removed)
+        replaced_archive = root / 'annotations/replaced' / (hashlib.sha256(removed_payload).hexdigest() + '.jsonl')
+    result = {**report, 'imported_count': len(imported), 'removed_count': len(removed),
+              'replaced_archive': None if replaced_archive is None else str(replaced_archive),
+              'output': str(output)}
+    if dry_run:
+        result['dry_run'] = True
+        return result
     # Preserve exact source reviews; failed validation never publishes dataset truth.
     for digest, payload in archives:
         archived = root / 'annotations/imports' / (digest + '.jsonl')
@@ -452,6 +487,12 @@ def import_review_sources(sources: list[tuple[str, bytes]], root: Path, output: 
             require(archived.read_bytes() == payload, 'source_archive_mismatch')
         else:
             atomic_write(archived, payload)
+    # The rows taken out of the dataset stay traceable, exactly as they were.
+    if replaced_archive is not None:
+        if replaced_archive.exists():
+            require(replaced_archive.read_bytes() == removed_payload, 'replaced_archive_mismatch')
+        else:
+            atomic_write(replaced_archive, removed_payload)
     atomic_write(output, jsonl_bytes(combined))
-    return {**report, 'imported_count': len(imported), 'output': str(output)}
+    return result
 # [reviewed-dataset] - END

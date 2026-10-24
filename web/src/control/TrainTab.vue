@@ -1,12 +1,11 @@
 <script setup lang="ts">
 // Train: from the reviews to a model. The numbers (reviewed routes against what the split needs, confirmed
-// frames still to import, what the dataset holds), the actions (Import reviews; Train a model with the
-// choice of where it starts), the import or training running (or the last one) with all its steps and its
+// frames still to import, what the dataset holds), the action (Train a model with the choice of where it
+// starts: it imports the reviews and fixes the split itself, helpers/3_train.sh steps a-b), the import or training running (or the last one) with all its steps and its
 // curves, and what the dataset holds.
 import {computed} from 'vue';
 import {plural, thousands} from '../common/format';
 import type {ActionName, ActionState, Job, JobProgress as Progress, PanelStatus, TrainingStart} from '../common/panel-types';
-import ActionList from './ActionList.vue';
 import DatasetSection from './DatasetSection.vue';
 import JobProgress from './JobProgress.vue';
 import {jobOf, terminalActivities, TRAIN_ACTIONS} from './jobs';
@@ -16,10 +15,6 @@ import TrainStart from './TrainStart.vue';
 
 const props = defineProps<{status: PanelStatus | null}>();
 const emit = defineEmits<{run: [name: ActionName, state: ActionState, start?: TrainingStart]; stop: [job: Job]; details: [job: Job]}>();
-
-const ACTIONS: [ActionName, string][] = [
-  ['dataset', 'Brings the confirmed frames into the dataset and fixes the train / validation / test split, without the GPU. A few minutes.'],
-];
 
 const job = computed(() => jobOf(props.status, TRAIN_ACTIONS));
 const activities = computed(() => terminalActivities(props.status, ['train', 'other']));
@@ -60,29 +55,28 @@ const numbers = computed(() => {
 
   <section class="numbers" aria-label="The numbers">
     <div class="card number">
-      <h2>Reviewed routes</h2>
+      <h2>Routes with confirmed frames</h2>
       <div class="figure" id="train-big">{{ numbers ? (numbers.reviewed >= numbers.needed ? numbers.reviewed : numbers.reviewed + ' of ' + numbers.needed) : '–' }}</div>
       <div class="goal" aria-hidden="true"><span v-for="index in numbers?.needed ?? 0" :key="index" :class="{on: index <= (numbers?.reviewed ?? 0)}"></span></div>
-      <p class="figure-note">{{ numbers === null ? '' : numbers.reviewed >= numbers.needed ? numbers.needed + ' are enough for the split: you can train.'
-        : 'The train / validation / test split needs at least ' + numbers.needed + ' independent routes.' }}</p>
+      <p class="figure-note">{{ numbers === null ? '' : numbers.reviewed >= numbers.needed ? 'Enough to train: whole routes are kept apart to check the model on roads it never saw (at least ' + numbers.needed + ').'
+        : 'Training needs at least ' + numbers.needed + ' routes: whole routes are kept apart to check the model on roads it never saw.' }}</p>
     </div>
     <div class="card number">
-      <h2>To import</h2>
+      <h2>New since the last training</h2>
       <div class="figure" id="train-fresh">{{ numbers ? thousands(numbers.fresh) : '–' }}<span class="figure-unit">{{ numbers?.fresh === 1 ? 'frame' : 'frames' }}</span></div>
-      <p class="figure-note">{{ numbers === null ? '' : numbers.fresh ? 'Confirmed after the last import, in ' + plural(numbers.freshRoutes, 'route') + '.'
-        : 'Every confirmation is already in the dataset.' }}</p>
+      <p class="figure-note">{{ numbers === null ? '' : numbers.fresh ? 'Frames confirmed or corrected after the last import, in ' + plural(numbers.freshRoutes, 'route') + '. The next training takes them in by itself.'
+        : 'Every confirmed frame is already in the dataset.' }}</p>
     </div>
     <div class="card number">
-      <h2>In the dataset</h2>
-      <div class="figure" id="train-objects">{{ numbers ? thousands(numbers.objects) : '–' }}<span class="figure-unit">objects</span></div>
-      <p class="figure-note">{{ numbers === null ? '' : (numbers.frames === null ? 'From ' : thousands(numbers.frames) + ' frames from ')
-        + plural(numbers.inDataset, 'route') + '.' }} <a v-if="status?.dataset" class="figure-link" href="#dataset">Details ↓</a></p>
+      <h2>What the model learns from</h2>
+      <div class="figure" id="train-objects">{{ numbers ? thousands(numbers.objects) : '–' }}<span class="figure-unit">boxes</span></div>
+      <p class="figure-note">{{ numbers === null ? '' : 'Signs and “not a sign” boxes on ' + (numbers.frames === null ? '' : thousands(numbers.frames) + ' frames of ')
+        + plural(numbers.inDataset, 'route') + ', from the last import.' }} <a v-if="status?.dataset" class="figure-link" href="#dataset">Details ↓</a></p>
     </div>
   </section>
 
   <section class="card tab-card" aria-labelledby="train-actions-title">
     <h2 id="train-actions-title">Actions</h2>
-    <ActionList :items="ACTIONS" :actions="status?.actions ?? null" @run="(name, state) => emit('run', name, state)"/>
     <TrainStart :starts="status ? status.training_starts ?? [] : null" :state="status?.actions.train ?? null"
                 @start="(start) => status && emit('run', 'train', status.actions.train, start)"/>
   </section>

@@ -1,8 +1,8 @@
 // The frame on screen, as computed values the components share: its row, its working copy, its state, the
-// box selected in it, its place in the filter.
+// box selected in it, its place in the route.
 import {computed, watchEffect} from 'vue';
-import {aiConfirmed, currentRow, frameStatus, isConfirmed, reasonsOf, visibleRows, workOf} from './frames';
-import {report, state} from './store';
+import {aiConfirmed, currentRow, frameStatus, isConfirmed, reasonsOf, workOf} from './frames';
+import {indexOf, report, state} from './store';
 import type {Detection, FrameEdit, FrameRow, FrameStatus} from './types';
 
 export const row = computed<FrameRow | null>(() => currentRow());
@@ -11,11 +11,10 @@ export const work = computed<FrameEdit | null>(() => (row.value ? state.edits[ro
 export const status = computed<FrameStatus>(() => (row.value ? frameStatus(row.value.frame_key) : 'todo'));
 export const selectedBox = computed<Detection | null>(() => work.value?.detections[state.selected] ?? null);
 
-/** Position of the frame in its filter (0 based) and the length of the filter. */
+/** Position of the frame in the route (0 based) and the number of frames: what ‹ › walk through. */
 export const position = computed(() => {
-  const list = visibleRows();
   const key = row.value?.frame_key;
-  return {index: Math.max(0, list.findIndex((item) => item.frame_key === key)), length: list.length};
+  return {index: key === undefined ? 0 : Math.max(0, indexOf(key)), length: report.rows.length};
 });
 
 /** Confirmed, suspicious and AI-confirmed frames of the route. */

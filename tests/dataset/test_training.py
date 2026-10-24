@@ -177,3 +177,15 @@ def test_detector_train_dry_run_is_cpu_only(tmp_path, capsys):
     assert summary["record_count"] >= 5
     assert "frames" not in summary
     assert "torch" not in sys.modules
+
+
+def test_training_plans_carry_who_confirmed_each_label(tmp_path, capsys):
+    dataset, _, latest = _training_fixture(tmp_path, capsys, ai=True)
+    rows = {r["annotation_id"]: r["provenance"]["label_basis"] for r in load_jsonl(dataset)}
+    reader = prepare_reader_training(dataset, latest, tmp_path)
+    for record in reader["records"]:
+        assert record["label_basis"] == rows[record["annotation_id"]]
+    detector = prepare_detector_training(dataset, latest, tmp_path)
+    for frame in detector["frames"]:
+        assert {rows[i] for i in frame["annotation_ids"]} == {frame["label_basis"]}
+    assert "human_review" in {r["label_basis"] for r in reader["records"]}

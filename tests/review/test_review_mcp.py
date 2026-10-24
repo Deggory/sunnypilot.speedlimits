@@ -21,7 +21,8 @@ from review_helpers import ROUTE, RUN_ID, TOKEN, RunningServer, json_of, make_re
 
 KEYS = [(0, 0), (0, 1), (0, 4), (2, 0), (2, 3), (2, 7), (5, 2)]
 TOOL_NAMES = {'list_routes', 'list_frames', 'next_frame', 'get_frame', 'get_frame_image', 'get_frame_context',
-              'get_review_schema', 'save_frame_review', 'get_review_progress', 'get_review_history'}
+              'get_review_schema', 'save_frame_review', 'get_review_progress', 'get_review_history',
+              'apply_previous_frame'}
 SRC = Path(__file__).resolve().parents[2] / 'src'
 
 

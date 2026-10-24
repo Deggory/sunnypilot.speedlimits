@@ -23,9 +23,9 @@ REPO = Path(__file__).resolve().parents[1]
 SEGMENT_DIR = re.compile(r"^([0-9a-f]{8}--[0-9a-f]{10})--(\d+)$")
 ROUTE_ID = re.compile(r"^[0-9a-f]{8}--[0-9a-f]{10}$")
 RUN_ID = re.compile(r"^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$")
-# nnslr build-splits makes five disjoint partitions (train, validation, test, route-held-out,
-# hard-negative) of independent route/site groups: fewer reviewed routes cannot be split.
-MIN_REVIEWED_ROUTES = 5
+# nnslr build-splits makes three disjoint partitions (train, validation, test) of independent
+# route/site groups: fewer reviewed routes cannot be split.
+MIN_REVIEWED_ROUTES = 3
 
 # State of a route, in pipeline order, with the helper that moves it forward.
 STATES = {

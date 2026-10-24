@@ -6,6 +6,16 @@ import {revealStage, scrollTimelineToCurrent} from './scroll';
 import {indexOf, report, rowOf, state} from './store';
 import type {Filter} from './types';
 
+/** ‹ › and ← →: the frame just before or after in the route, whatever the filter (the filter decides where
+ * Confirm goes next, and Shift with an arrow). */
+export function step(delta: number): void {
+  const index = state.currentKey === null ? -1 : indexOf(state.currentKey);
+  const target = report.rows[index + delta];
+  if (index < 0 || target === undefined) return;
+  openFrame(target.frame_key);
+}
+
+/** The frame before or after in the filter (Shift+arrow, "Already confirmed · next"). */
 export function go(step: number): void {
   const list = visibleRows();
   const index = list.findIndex((row) => row.frame_key === state.currentKey);

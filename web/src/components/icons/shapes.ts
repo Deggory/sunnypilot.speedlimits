@@ -47,6 +47,10 @@ export const ICONS = {
   /** Starting point: the stable model (a badge with a star). */
   stable: [{d: ring(12, 9.5, 6.3)}, {d: 'M8.6 14.8 7.5 21l4.5-2.4 4.5 2.4-1.1-6.2'},
     {d: 'M12 6.4l1 2 2.2.3-1.6 1.5.4 2.2-2-1-2 1 .4-2.2-1.6-1.5 2.2-.3z'}],
+  /** Apply previous: the frame before behind this one, the sign carried over. */
+  previous: [{d: 'M13.5 8.5V5A1.5 1.5 0 0 0 12 3.5H5A1.5 1.5 0 0 0 3.5 5v7A1.5 1.5 0 0 0 5 13.5h3.5'},
+    {d: 'M11 9.5h8a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5h-8A1.5 1.5 0 0 1 9.5 19v-8A1.5 1.5 0 0 1 11 9.5z'},
+    {d: ring(15, 15, 2.5)}, {d: ring(8.5, 8.5, 1.6)}],
   /** Starting point: an earlier run (a clock turning back). */
   history: [{d: 'M3.8 12a8.2 8.2 0 1 0 2.4-5.8L4 8.4'}, {d: 'M4 4.2v4.2h4.2'}, {d: 'M12 7.8V12l3 2'}],
 } satisfies Record<string, Shape[]>;

@@ -34,7 +34,22 @@ export function setFamily(id: string): void {
   editSelected((d) => {
     d.family = id;
     if (!familyHasValue(id)) d.value_kph = null;
+    // The kind belongs to "Other sign" only.
+    if (id !== 'other_sign') delete d.sign_type;
     d.value_state = d.value_kph === null || d.value_kph === undefined ? 'unknown' : 'reviewed';
+    state.valueError = false;
+  });
+}
+
+/** A kind of "Other sign" (town entry, direction →...); pressed again, the kind goes and the sign stays. */
+export function setKind(id: string): void {
+  editSelected((d) => {
+    const again = d.family === 'other_sign' && d.sign_type === id;
+    d.family = 'other_sign';
+    d.value_kph = null;
+    d.value_state = 'unknown';
+    if (again) delete d.sign_type;
+    else d.sign_type = id;
     state.valueError = false;
   });
 }
@@ -113,6 +128,14 @@ export function useHint(index: number): void {
 export function setFrameField(row: FrameRow, key: 'site_group' | 'encounter_id', value: string): void {
   const trimmed = value.trim();
   workOf(row)[key] = trimmed === '' ? null : trimmed;
+  changed(row);
+}
+
+/** The country of the frame; the one of its GPS position again when the reviewer picks that one. */
+export function setCountry(row: FrameRow, value: string): void {
+  const work = workOf(row);
+  const picked = value === '' ? null : value;
+  work.country = picked === (row.country_proposed ?? null) ? undefined : picked;
   changed(row);
 }
 

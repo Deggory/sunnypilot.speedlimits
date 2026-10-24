@@ -23,10 +23,13 @@ import json
 from importlib.resources import files
 from pathlib import Path
 
+from nnslr_tools.gps import country_names
 from nnslr_tools.review_hints import empty_stats
 
 # The tabs of the site: (key of the current page, address, label). Account is the icon at the right.
-SITE_TABS = (('overview', '/', 'Overview'), ('prepare', '/prepare', 'Prepare'), ('train', '/train', 'Train'))
+# In the order of the work: prepare the routes, review them, train on the reviews.
+SITE_TABS = (('overview', '/', 'Overview'), ('prepare', '/prepare', 'Prepare'), ('review', '/routes', 'Review'),
+             ('train', '/train', 'Train'))
 # The tabs that are one Vue app (web/src/control), by address: the app shows the tab of the address. The
 # route list (/routes) is reached from the Overview.
 CONTROL_TABS = {'/': 'overview', '/prepare': 'prepare', '/train': 'train'}
@@ -116,7 +119,8 @@ def render_review(rows: list[dict], run_id: str, *, route_id: str = '', server: 
             'hints': hints if hints is not None else {},
             'hint_stats': hint_stats if hint_stats is not None else empty_stats(),
             'suspicious': suspicious if suspicious is not None else {},
-            'routes': routes if routes is not None else []}
+            'routes': routes if routes is not None else [],
+            'countries': country_names()}
     payload = json.dumps(data, ensure_ascii=True, allow_nan=False)
     payload = payload.replace('<', '\\u003c').replace('>', '\\u003e').replace('&', '\\u0026')
     return fill(asset('review.html'), nonce, 'review', 'route', data=payload)
@@ -233,7 +237,7 @@ def render_index(summaries: list[dict], database: Path, nonce: str = '') -> str:
     main.append('<details class="foot"><summary>Technical details</summary>'
                 '<p>Review database: <code>' + html.escape(str(database)) + '</code></p></details>')
     main.append('</main>')
-    return simple_page('Routes', '', nonce, '\n'.join(main))
+    return simple_page('Routes', 'review', nonce, '\n'.join(main))
 
 
 def render_problem(status: int, message: str, nonce: str = '') -> str:

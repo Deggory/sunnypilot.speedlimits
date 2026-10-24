@@ -100,7 +100,10 @@ input::placeholder { color: var(--placeholder); }
 #scene.dragging, #zoom.dragging { touch-action: none; }
 .box { fill: transparent; stroke-width: 2.25; vector-effect: non-scaling-stroke; cursor: pointer; }
 .box.proposal, .box-under.proposal { stroke-dasharray: 8 5; }
-.box.selected { stroke: var(--ov-selected); stroke-width: 2.75; stroke-dasharray: none; }
+.box.selected { stroke: var(--ov-selected); stroke-width: 2.75; stroke-dasharray: none; cursor: move; touch-action: none; }
+#zoom { cursor: move; }
+/* Placed by "Apply previous" where the sign should be: short dashes until the reviewer has checked it. */
+.box.check, .box-under.check { stroke-dasharray: 3 3; }
 /* The dark under-stroke the drawing code puts below every box: a CSS filter would not show on iOS Safari. */
 .box-under, .hint-under { fill: none; stroke: var(--ov-halo); stroke-opacity: 0.6; stroke-width: 5; vector-effect: non-scaling-stroke; pointer-events: none; }
 .box-under.selected { stroke-width: 5.5; stroke-dasharray: none; }
@@ -238,7 +241,8 @@ details[open] summary::after, .tl-toggle[aria-expanded="true"]::after { transfor
 .panel section { padding: 16px 20px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .panel section:first-child { border-top: 0; }
 .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-.section-head .count { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.section-head .count { margin-left: auto; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.section-head .btn.carry { align-self: center; min-height: 30px; padding: 4px 10px; font-size: 12.5px; }
 .reasons { margin: 0; font-size: 13px; color: var(--sus); background: var(--sus-soft); border-radius: 12px; padding: 9px 12px; overflow-wrap: anywhere; }
 .reasons strong { font-weight: 650; }
 .filter-note { margin: 0; font-size: 13px; color: var(--fg); background: var(--rev-soft); border: 1px solid var(--banner-line); border-radius: 12px; padding: 9px 12px; }
@@ -264,6 +268,9 @@ details[open] summary::after, .tl-toggle[aria-expanded="true"]::after { transfor
 .box-main .src .dup { color: var(--warn); font-weight: 650; }
 .box-del { border: 0; background: transparent; width: 34px; height: 34px; margin-right: 6px; border-radius: 10px; color: var(--muted); font-size: 13px; }
 .box-del:hover { background: var(--bad-soft); color: var(--bad); }
+.box-row.check { grid-template-columns: minmax(0, 1fr) auto auto; border-color: var(--warn); background: var(--warn-soft); }
+.box-row.check .src { color: var(--warn); font-weight: 600; }
+.box-here { margin-right: 2px; }
 .pick-hint { margin: -4px 2px 0; font-size: 13px; color: var(--muted); }
 /* No box: a quiet empty state, a dashed sign outline beside the sentence. */
 .empty-note {
@@ -297,6 +304,14 @@ details[open] summary::after, .tl-toggle[aria-expanded="true"]::after { transfor
 .sign:hover { transform: scale(1.06); }
 .sign.unknown { border: 2px dashed var(--muted); background: var(--surface-2); color: var(--muted); font-size: 18px; box-shadow: none; }
 .sign[aria-pressed="true"] { box-shadow: 0 0 0 3px var(--surface), 0 0 0 6px var(--accent); transform: scale(1.04); }
+.country-line { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); }
+.country-line select { flex: 0 1 220px; min-width: 0; min-height: 34px; }
+.country-src { font-size: 12.5px; }
+.country-src.picked { color: var(--rev); font-weight: 600; }
+.kinds { display: flex; flex-direction: column; gap: 6px; margin-top: -4px; }
+.kind-group { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.kind-group-label { flex: 0 0 100%; font-size: 11.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); margin-top: 2px; }
+.chip.kind { padding: 2px 10px; min-height: 28px; font-size: 12.5px; }
 .value-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
 .value-line input { width: 90px; min-height: 36px; padding: 5px 10px; border-radius: 10px; font-variant-numeric: tabular-nums; }
 .field-error { margin: 0; color: var(--bad); font-size: 13px; }

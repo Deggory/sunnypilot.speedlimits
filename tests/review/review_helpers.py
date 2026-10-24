@@ -114,6 +114,8 @@ def page_export_row(row: dict, body: dict, review_timestamp: str, *, reviewer_ki
             detection['value_state'] = 'reviewed'
         detections.append(detection)
     exported = copy.deepcopy(row)
+    # The country of the frame: the one sent, else the one its GPS position gives.
+    exported['country'] = body['country'] if 'country' in body else row.get('country_proposed')
     exported.update(reviewer=body['reviewer'], review_timestamp=review_timestamp,
                     site_group=body['site_group'] or row.get('site_group'),
                     encounter_id=body['encounter_id'] or row.get('encounter_id'),

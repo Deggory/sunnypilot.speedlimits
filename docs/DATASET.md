@@ -105,14 +105,27 @@ visits to the same physical site, and `encounter_id` for shared encounters.
 Missing physical-site labels are reported: route isolation alone cannot prove
 that two trips never pass the same sign.
 
-At least five connected groups are needed for all five requested partitions.
-One complete group containing reviewed negatives is reserved for hard-negative
-assessment, including its positive controls; another is route-held-out. The
-remaining groups use approximately 70/15/15 train/validation/test, with at least
-one group in each. Allocation is by group, not image count. The seed defaults
-to zero, and sorting plus hashing makes repeated invocations reproducible.
-Rejected audit records are excluded. Requested isolation is never weakened to
-force a ratio when grouping constraints leave too few independent samples.
+`build-splits` assigns three partitions (policy `train-validation-test-v2`):
+the training learns from `train`, picks its best epoch on `validation` and is
+measured on `test`. At least three connected groups are needed. `validation`
+and `test` each get whole groups adding up to about 15% of the accepted and
+corrected rows, at least one group each; every other group is `train`, so every
+reviewed route is used. Reviewed negatives (`not_a_sign`) stay with their group,
+in whatever partition. The test takes first the groups with the most frames
+confirmed by a person (`provenance.label_basis` `human_review`), skipping a
+group more than twice the remaining size, so it is as trustworthy as the
+reviews allow; `--test-route ROUTE` (repeatable) pins routes and their groups to
+`test` first. The seed defaults to zero and decides ties and the validation
+order; sorting plus hashing makes repeated invocations reproducible. Rejected
+audit records are excluded. Requested isolation is never weakened to force a
+ratio when grouping constraints leave too few independent samples. The split
+file records `policy`, `test_routes`, `counts`, `human_reviewed_counts` (rows
+confirmed by a person per partition) and the `routes` of every partition.
+
+Split files of the first policy, with five partitions (`route-held-out` and
+`hard-negative` as well), stay valid: `validate-dataset --splits` still accepts
+those names, but no command builds them any more and nothing read those two
+partitions.
 
 Split filenames are hashes of their canonical contents; changing a dataset
 requires a new split. Existing named split files cannot be overwritten with a
@@ -135,8 +148,8 @@ are still required before the baseline training milestone.
 is `<data-root>/datasets/training_candidate_dataset/objects.jsonl`; gold remains
 the default mode and accepts human review only. Gold validation rejects model
 rows even when imported directly as canonical annotations. Candidate split
-metadata cannot be presented as gold, and all five route/site/image-disjoint
-partitions are still required.
+metadata cannot be presented as gold, and the same route/site/image-disjoint
+train/validation/test partitions are still required.
 
 Human canonical rows retain schema version 1. Model rows use version 2 and
 require `provenance.label_basis=model_review`, a source-review SHA256,
@@ -227,6 +240,7 @@ Import the confirmed frames into the canonical dataset on the LXC:
 ```sh
 .venv/bin/nnslr import-annotations --from-db
 .venv/bin/nnslr import-annotations --from-db --route <route>
+.venv/bin/nnslr import-annotations --from-db --dry-run
 ```
 
 Validation, the source archive under `annotations/imports/` and the output file
@@ -236,8 +250,19 @@ MCP); AI frames keep their provenance and are counted in
 `imported_ai_frame_count`. Withdrawn confirmations and unreviewed proposals are
 never taken. Confirming a frame never imports or trains by itself. Frames already in the dataset with the same boxes and
 labels are skipped, so the command can be repeated after every review session.
-The comparison is per frame: a frame already in the dataset that was changed
-after its import (a box added, deleted, drawn again or relabelled) is not
-applied, because the dataset is append-only, and is listed under
-`changed_after_import`; the other frames are imported normally. A save carries
-at most 100 boxes, and the reviewer name at most 100 printable characters.
+The dataset follows the current review of each frame of the current reports.
+The comparison is per frame: a frame already in the dataset whose review changed
+after its import (a box added, deleted, drawn again or relabelled, or the review
+reclassified as an AI review) replaces all its old rows (same frame identity),
+counted in `replaced_frame_count` and listed under `changed_after_import`; a
+frame imported and later withdrawn leaves the dataset, counted in
+`removed_withdrawn_frame_count` and listed under `removed_withdrawn`. The rows
+taken out are archived exactly as they were in the content-addressed
+`annotations/replaced/<sha256>.jsonl` (`replaced_archive` in the report). The
+validation runs on the whole new dataset and nothing is written when it fails;
+an import with only removals still writes the dataset. Frames that the current
+reports do not review again stay as they are, and so do the rows of a withdrawn
+frame that came from an older pre-annotation run of the route.
+`--dry-run` (with `--from-db`) reports what would be new, replaced and removed,
+validation included, and writes nothing: no dataset and no archive. A save
+carries at most 100 boxes, and the reviewer name at most 100 printable characters.

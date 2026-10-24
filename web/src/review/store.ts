@@ -19,6 +19,8 @@ export interface Report {
   routeId: string;
   rows: readonly FrameRow[];
   routes: readonly RouteLink[];
+  /** Country code: English name, for the country of a frame. */
+  countries: Readonly<Record<string, string>>;
   hintStats: HintStats | null;
   routeHasHints: boolean;
   /** With the review server every confirmation is saved in its database; opened as a plain file the page
@@ -29,7 +31,7 @@ export interface Report {
 }
 
 export const report: Report = {
-  runId: '', routeId: '', rows: [], routes: [], hintStats: null, routeHasHints: false, apiBase: null,
+  runId: '', routeId: '', rows: [], routes: [], countries: {}, hintStats: null, routeHasHints: false, apiBase: null,
   storageKey: '', lastKeyStorage: '',
 };
 
@@ -120,6 +122,7 @@ export function initStore(raw: Partial<Payload>): void {
     routeId,
     rows: Array.isArray(raw.frames) ? raw.frames : [],
     routes: Array.isArray(raw.routes) ? raw.routes : [],
+    countries: isRecord(raw.countries) ? raw.countries as Record<string, string> : {},
     hintStats: isRecord(raw.hint_stats) ? raw.hint_stats as unknown as HintStats : null,
     routeHasHints: Object.keys(hintsByFrame).length > 0,
     apiBase: raw.server ? '/api/route/' + encodeURIComponent(routeId) : null,

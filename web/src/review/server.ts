@@ -2,9 +2,9 @@
 // did not reach it. Not used offline (the static report, apiBase null).
 import {messageOf} from '../common/api';
 import {clone} from './dom';
-import {fromServer, unsavedKeys} from './frames';
-import {report, state, store} from './store';
-import type {Problem, ReviewsAnswer, SaveAnswer, Suspicious} from './types';
+import {countryOf, fromServer, unsavedKeys} from './frames';
+import {report, rowOf, state, store} from './store';
+import type {FrameRow, Problem, ReviewsAnswer, SaveAnswer, Suspicious} from './types';
 
 /** A failed call; retry is true when trying again later can help (no network, server error). */
 export class SaveError extends Error {
@@ -70,6 +70,7 @@ export async function send(key: string): Promise<boolean> {
       detections: s.detections,
       site_group: s.site_group === undefined ? null : s.site_group,
       encounter_id: s.encounter_id === undefined ? null : s.encounter_id,
+      country: countryOf(rowOf(key) ?? {country_proposed: null} as FrameRow, s),
       base_revision: s.revision || 0,
     });
     if (state.edits[key] === s && (s.version || 0) === version) {

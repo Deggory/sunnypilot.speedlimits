@@ -66,6 +66,14 @@ def _reader_label(row: dict[str, Any]) -> str | None:
     return None
 
 
+def _label_basis(row: dict[str, Any]) -> str | None:
+    """Who confirmed a row: human_review, ai_review or model_review (provenance.label_basis)."""
+    provenance = row.get("provenance")
+    if not isinstance(provenance, dict):
+        return None
+    return provenance.get("label_basis")
+
+
 def _safe_image_path(data_root: Path, image_path: str) -> Path:
     root = data_root.resolve()
     candidate = (root / image_path).resolve()
@@ -179,6 +187,7 @@ def prepare_reader_training(
             "route_id": row.get("route_id"),
             "segment_index": row.get("segment_index"),
             "decoded_frame_index": row.get("decoded_frame_index"),
+            "label_basis": _label_basis(row),
         })
 
     train_labels = sorted({r["label"] for r in records if r["split"] == TRAIN_SPLIT})
@@ -291,6 +300,7 @@ def prepare_detector_training(
             "boxes": [],
             "annotation_ids": [],
             "explicit_negative": False,
+            "label_basis": _label_basis(row),
         })
         if (
             frame["image_path"] != row["image_path"]
@@ -299,6 +309,9 @@ def prepare_detector_training(
             or frame["height"] != row["height"]
         ):
             raise ValueError("inconsistent_frame_group")
+        if frame["label_basis"] != _label_basis(row):
+            # The same image confirmed by different kinds of reviewer: it counts as neither.
+            frame["label_basis"] = "mixed"
 
         family = row["sign_family"]
         if row["bbox_xyxy"] is None and family == "not_a_sign":

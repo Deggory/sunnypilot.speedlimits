@@ -469,13 +469,18 @@ put review files into `annotations/inbox/` under that root and run
 imported together; reimporting duplicate identities is rejected.
 
 `build-splits` creates an immutable content-addressed JSON under `splits/`, with
-`latest.json` pointing to it. Seed defaults to `0`. It requires at least five
-independent connected groups and a reviewed negative group to populate train,
-validation, test, route-held-out and hard-negative. A route is never split by
-frame; known shared sites, encounters and duplicate images also stay together.
-With only two routes, this command reports insufficient groups instead of
-manufacturing an apparently independent test set. Unknown repeated physical
-sites remain a reported grouping limitation.
+`latest.json` pointing to it. Seed defaults to `0`. It requires at least three
+independent connected groups and populates train, validation and test (policy
+`train-validation-test-v2`): validation and test each get whole groups adding up
+to about 15% of the active rows, everything else is train, and reviewed
+negatives stay with their group. The test prefers the groups with the most
+frames confirmed by a person; `--test-route ROUTE` (repeatable) pins routes to
+test. A route is never split by frame; known shared sites, encounters and
+duplicate images also stay together. With only two routes, this command reports
+insufficient groups instead of manufacturing an apparently independent test
+set. Unknown repeated physical sites remain a reported grouping limitation.
+Split files of the earlier five-partition policy (route-held-out, hard-negative)
+still validate.
 
 An invalid dataset returns a JSON error report and nonzero exit code. For an
 existing split, `nnslr validate-dataset --splits /path/to/split.json` also checks
@@ -627,6 +632,11 @@ nnslr evaluate --task reader \
 Reader evaluation records accuracy, per-class support and confusion plus
 sample-level mistakes. Detector evaluation records IoU-based precision, recall,
 F1 and false positives per image while retaining the individual error evidence.
+Most labels are AI reviews, so both also report `counts_by_label_basis` and a
+`human_reviewed` object with the same metrics restricted to the labels a person
+confirmed (`provenance.label_basis` `human_review`), or `null` when the
+partition has none; the top-level metrics stay those of the whole partition.
+`--dry-run` prints `counts_by_label_basis` and `human_reviewed_sample_count`.
 COCO-style mAP and time-based false positives/hour remain later evaluation work.
 
 Feed those errors directly into the next dataset iteration:

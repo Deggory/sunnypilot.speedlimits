@@ -1,5 +1,6 @@
 // "Download reviews (JSONL)": the confirmed frames as reviewed_frame lines, the same line the server stores
 // (review_db.build_reviewed_frame). Offline it is the only way to keep the review; with the server, a backup.
+import {countryOf} from './frames';
 import {report, state} from './store';
 import type {Detection, FrameRow} from './types';
 
@@ -14,6 +15,7 @@ interface ReviewedFrame extends FrameRow {
   label_basis: 'human_review' | 'ai_review';
   source_proposals: Detection[] | undefined;
   detections: Detection[];
+  country: string | null;
   reviewer_kind?: 'ai';
   review_channel?: string | undefined;
 }
@@ -38,13 +40,14 @@ export function exportJsonl(): void {
       review_timestamp: s.review_timestamp,
       site_group: s.site_group ?? row.site_group ?? null,
       encounter_id: s.encounter_id ?? row.encounter_id ?? null,
+      country: countryOf(row, s),
       kind: 'reviewed_frame',
       ground_truth: false,
       training_ready: false,
       review_state: 'reviewed',
       label_basis: 'human_review',
       source_proposals: row.detections,
-      detections: s.detections.map((d) => ({
+      detections: s.detections.map(({carried_from: _from, check_position: _check, ...d}) => ({
         ...d, review_state: 'reviewed', value_state: d.value_kph == null ? 'unknown' : 'reviewed',
       })),
     };

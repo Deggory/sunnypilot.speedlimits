@@ -1,6 +1,7 @@
 """import-annotations --from-db: same canonical dataset as the JSONL export, imported once."""
 from __future__ import annotations
 
+import hashlib
 import json
 
 from nnslr_tools import cli
@@ -65,7 +66,11 @@ def test_from_db_gives_the_same_dataset_as_the_jsonl_export(tmp_path, capsys):
     assert len(archives) == 1 and archives[0].read_bytes() == source.read_bytes()
 
 
-def test_from_db_default_output_is_idempotent_and_reports_late_changes(tmp_path, capsys):
+def replaced_archives(root):
+    return sorted((root / 'annotations/replaced').glob('*.jsonl'))
+
+
+def test_from_db_default_output_is_idempotent_and_replaces_late_changes(tmp_path, capsys):
     rows = make_report(tmp_path)
     store = ReviewStore(db_path(tmp_path))
     save(tmp_path, store, rows[0], page_body(rows[0]))
@@ -78,19 +83,28 @@ def test_from_db_default_output_is_idempotent_and_reports_late_changes(tmp_path,
     assert code == 0, out.out + out.err
     report = json.loads(out.out)
     assert report['imported_count'] == 0 and report['already_imported_frame_count'] == 1
-    assert dataset.read_bytes() == first
+    assert report['replaced_frame_count'] == 0 and report['removed_withdrawn_frame_count'] == 0
+    assert dataset.read_bytes() == first and not replaced_archives(tmp_path)
     save(tmp_path, store, rows[0], page_body(rows[0], value_kph=80))
     save(tmp_path, store, rows[1], page_body(rows[1]))
     code, out = invoke(capsys, 'import-annotations', '--from-db', '--data-root', str(tmp_path))
     assert code == 0, out.out + out.err
     report = json.loads(out.out)
-    assert report['imported_frame_count'] == 1
+    # The new frame is added and the frame reviewed again replaces its old rows.
+    assert report['imported_frame_count'] == 1 and report['replaced_frame_count'] == 1
     assert [c['frame_key'] for c in report['changed_after_import']] == ['0/0']
-    assert any('append-only' in w for w in report['warnings'])
+    assert report['removed_count'] == 1 and not any('append-only' in w for w in report['warnings'])
     values = []
     for record in canonical(dataset):
         values.append((record['output_index'], record['value_kph']))
-    assert sorted(values, key=str) == sorted([(0, 30), (1, None)], key=str)
+    assert sorted(values, key=str) == sorted([(0, 80), (1, None)], key=str)
+    # The replaced rows are archived exactly as they were, under their content hash.
+    [archive] = replaced_archives(tmp_path)
+    assert archive.read_bytes() == first and str(archive) == report['replaced_archive']
+    assert archive.name == hashlib.sha256(first).hexdigest() + '.jsonl'
+    code, out = invoke(capsys, 'import-annotations', '--from-db', '--data-root', str(tmp_path))
+    report = json.loads(out.out)
+    assert code == 0 and report['already_imported_frame_count'] == 2 and report['replaced_frame_count'] == 0
 
 
 def frame_records(path, output_index):
@@ -114,40 +128,155 @@ def import_change_and_import_again(tmp_path, capsys, rows, index, first_body, se
     code, out = invoke(capsys, 'import-annotations', '--from-db', '--data-root', str(tmp_path))
     assert code == 0, out.out + out.err
     report = json.loads(out.out)
-    # The new frame is imported, the changed one is listed and keeps its old rows.
-    assert report['imported_frame_count'] == 1
+    # The new frame is imported, the changed one replaces all its old rows.
+    assert report['imported_frame_count'] == 1 and report['replaced_frame_count'] == 1
     assert [c['frame_key'] for c in report['changed_after_import']] == [f'0/{index}']
-    assert frame_records(dataset, index) == before
+    after = frame_records(dataset, index)
+    # None of the old rows is left: the rows of the frame all come from the new review.
+    assert not [record for record in after if record in before]
+    assert len({record['provenance']['source_review_sha256'] for record in after}) == 1
     assert len(frame_records(dataset, 2)) == 1
-    return before
+    [archive] = replaced_archives(tmp_path)
+    assert canonical(archive) == before
+    code, out = invoke(capsys, 'validate-dataset', '--data-root', str(tmp_path))
+    assert code == 0, out.out + out.err
+    return before, after
 
 
-def test_empty_frame_imported_then_box_added_is_changed_not_new(tmp_path, capsys):
+def test_empty_frame_imported_then_box_added_replaces_the_negative(tmp_path, capsys):
     rows = make_report(tmp_path)
     first = page_body(rows[1])
     second = page_body(rows[1], manual_box=[3, 3, 12, 14])
-    before = import_change_and_import_again(tmp_path, capsys, rows, 1, first, second)
+    before, after = import_change_and_import_again(tmp_path, capsys, rows, 1, first, second)
     assert len(before) == 1 and before[0]['sign_family'] == 'not_a_sign' and before[0]['bbox_xyxy'] is None
+    # The whole-frame negative is gone: it never coexists with the new box.
+    assert [(record['sign_family'], record['bbox_xyxy']) for record in after] == [('unreadable', [3, 3, 12, 14])]
 
 
-def test_manual_box_drawn_again_is_changed_not_added(tmp_path, capsys):
+def test_manual_box_drawn_again_replaces_the_old_box(tmp_path, capsys):
     rows = make_report(tmp_path)
     first = page_body(rows[1], manual_box=[3, 3, 12, 14])
     second = page_body(rows[1], manual_box=[4, 4, 13, 15])
     second['detections'][0]['detection_id'] = 'manual-2'
-    before = import_change_and_import_again(tmp_path, capsys, rows, 1, first, second)
+    before, after = import_change_and_import_again(tmp_path, capsys, rows, 1, first, second)
     assert len(before) == 1 and before[0]['bbox_xyxy'] == [3, 3, 12, 14]
+    assert [record['bbox_xyxy'] for record in after] == [[4, 4, 13, 15]]
 
 
-def test_manual_box_deleted_is_changed_not_imported(tmp_path, capsys):
+def test_manual_box_deleted_leaves_the_dataset(tmp_path, capsys):
     rows = make_report(tmp_path)
     first = page_body(rows[0], manual_box=[3, 3, 12, 14])
     second = page_body(rows[0])
-    before = import_change_and_import_again(tmp_path, capsys, rows, 0, first, second)
+    before, after = import_change_and_import_again(tmp_path, capsys, rows, 0, first, second)
     boxes = []
     for record in before:
         boxes.append(record['bbox_xyxy'])
     assert sorted(boxes) == [[1, 2, 15, 20], [3, 3, 12, 14]]
+    assert [record['bbox_xyxy'] for record in after] == [[1, 2, 15, 20]]
+
+
+def test_frame_withdrawn_after_its_import_leaves_the_dataset(tmp_path, capsys):
+    rows = make_report(tmp_path)
+    store = ReviewStore(db_path(tmp_path))
+    save(tmp_path, store, rows[0], page_body(rows[0]))
+    save(tmp_path, store, rows[1], page_body(rows[1]))
+    code, out = invoke(capsys, 'import-annotations', '--from-db', '--data-root', str(tmp_path))
+    assert code == 0, out.out + out.err
+    dataset = tmp_path / 'annotations/objects.jsonl'
+    withdrawn_rows = frame_records(dataset, 1)
+    store.withdraw_review(route_id=ROUTE, run_id=RUN_ID, frame_key='0/1', reviewer='Cristian', client='test')
+    # Only a removal, no new frame: the dataset is still written.
+    code, out = invoke(capsys, 'import-annotations', '--from-db', '--data-root', str(tmp_path))
+    assert code == 0, out.out + out.err
+    report = json.loads(out.out)
+    assert report['imported_frame_count'] == 0 and report['already_imported_frame_count'] == 1
+    assert report['removed_withdrawn_frame_count'] == 1 and report['replaced_frame_count'] == 0
+    assert [c['frame_key'] for c in report['removed_withdrawn']] == ['0/1']
+    assert sorted({record['output_index'] for record in canonical(dataset)}) == [0]
+    [archive] = replaced_archives(tmp_path)
+    assert canonical(archive) == withdrawn_rows
+    # Nothing left to do: the next import changes nothing.
+    before = dataset.read_bytes()
+    code, out = invoke(capsys, 'import-annotations', '--from-db', '--data-root', str(tmp_path))
+    report = json.loads(out.out)
+    assert code == 0 and report['removed_withdrawn_frame_count'] == 0 and dataset.read_bytes() == before
+
+
+def test_withdrawn_frame_imported_from_an_older_run_stays(tmp_path, capsys):
+    old_run = '20261020T100000Z-00000000'
+    rows = make_report(tmp_path, run_id=old_run)
+    store = ReviewStore(db_path(tmp_path))
+    save_frame_review(store, tmp_path, route_id=ROUTE, run_id=old_run, report_row=rows[1],
+                      body=page_body(rows[1], run_id=old_run), client='test')
+    code, out = invoke(capsys, 'import-annotations', '--from-db', '--data-root', str(tmp_path))
+    assert code == 0, out.out + out.err
+    dataset = tmp_path / 'annotations/objects.jsonl'
+    before = dataset.read_bytes()
+    # A new pre-annotation run of the route, whose review of the same frame is withdrawn.
+    import shutil
+    shutil.rmtree(tmp_path / 'derived/preannotations' / ROUTE)
+    rows = make_report(tmp_path)
+    save(tmp_path, store, rows[1], page_body(rows[1]))
+    store.withdraw_review(route_id=ROUTE, run_id=RUN_ID, frame_key='0/1', reviewer='Cristian', client='test')
+    save(tmp_path, store, rows[0], page_body(rows[0]))
+    code, out = invoke(capsys, 'import-annotations', '--from-db', '--data-root', str(tmp_path))
+    assert code == 0, out.out + out.err
+    report = json.loads(out.out)
+    assert report['imported_frame_count'] == 1 and report['removed_withdrawn_frame_count'] == 0
+    assert set(before.decode().splitlines()) <= set(dataset.read_text().splitlines())
+    assert not replaced_archives(tmp_path)
+
+
+def test_from_db_dry_run_reports_and_writes_nothing(tmp_path, capsys):
+    rows = make_report(tmp_path)
+    store = ReviewStore(db_path(tmp_path))
+    save(tmp_path, store, rows[0], page_body(rows[0]))
+    save(tmp_path, store, rows[1], page_body(rows[1]))
+    code, out = invoke(capsys, 'import-annotations', '--from-db', '--dry-run', '--data-root', str(tmp_path))
+    assert code == 0, out.out + out.err
+    report = json.loads(out.out)
+    assert report['dry_run'] and report['valid'] and report['imported_frame_count'] == 2
+    assert not (tmp_path / 'annotations/objects.jsonl').exists()
+    assert not (tmp_path / 'annotations/imports').exists() and not (tmp_path / 'annotations/replaced').exists()
+    code, out = invoke(capsys, 'import-annotations', '--from-db', '--data-root', str(tmp_path))
+    assert code == 0 and not json.loads(out.out)['dry_run']
+    dataset = tmp_path / 'annotations/objects.jsonl'
+    before = dataset.read_bytes()
+    imports = sorted((tmp_path / 'annotations/imports').iterdir())
+    save(tmp_path, store, rows[0], page_body(rows[0], value_kph=80))
+    store.withdraw_review(route_id=ROUTE, run_id=RUN_ID, frame_key='0/1', reviewer='Cristian', client='test')
+    save(tmp_path, store, rows[2], page_body(rows[2]))
+    code, out = invoke(capsys, 'import-annotations', '--from-db', '--dry-run', '--data-root', str(tmp_path))
+    assert code == 0, out.out + out.err
+    report = json.loads(out.out)
+    assert (report['imported_frame_count'], report['replaced_frame_count'],
+            report['removed_withdrawn_frame_count']) == (1, 1, 1)
+    assert report['replaced_archive'].endswith('.jsonl')
+    assert dataset.read_bytes() == before and sorted((tmp_path / 'annotations/imports').iterdir()) == imports
+    assert not (tmp_path / 'annotations/replaced').exists()
+    code, out = invoke(capsys, 'import-annotations', 'reviews.jsonl', '--dry-run', '--data-root', str(tmp_path))
+    assert code != 0 and 'invalid_arguments' in out.out
+
+
+def test_a_replacement_that_fails_validation_writes_nothing(tmp_path, capsys):
+    rows = make_report(tmp_path)
+    store = ReviewStore(db_path(tmp_path))
+    for row in rows:
+        save(tmp_path, store, row, page_body(row))
+    code, out = invoke(capsys, 'import-annotations', '--from-db', '--data-root', str(tmp_path))
+    assert code == 0, out.out + out.err
+    dataset = tmp_path / 'annotations/objects.jsonl'
+    before = dataset.read_bytes()
+    imports = sorted((tmp_path / 'annotations/imports').iterdir())
+    save(tmp_path, store, rows[0], page_body(rows[0], value_kph=80))
+    store.withdraw_review(route_id=ROUTE, run_id=RUN_ID, frame_key='0/1', reviewer='Cristian', client='test')
+    # The image of frame 0/2, which stays in the dataset as it is, changed: the whole new dataset is
+    # validated, so the replacement and the removal are not written either.
+    (tmp_path / rows[2]['image_path']).write_bytes(b'changed after review')
+    code, out = invoke(capsys, 'import-annotations', '--from-db', '--data-root', str(tmp_path))
+    assert code != 0 and 'hash_mismatch' in out.out
+    assert dataset.read_bytes() == before and not replaced_archives(tmp_path)
+    assert sorted((tmp_path / 'annotations/imports').iterdir()) == imports
 
 
 def test_from_db_skips_withdrawn_and_filters_by_route(tmp_path, capsys):

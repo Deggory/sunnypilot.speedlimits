@@ -22,6 +22,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import re
 import sqlite3
 import threading
 from datetime import datetime, timezone
@@ -39,6 +40,8 @@ from nnslr_tools.annotations import (
     reviewed_frame_annotations,
     validate_dataset,
 )
+from nnslr_tools.carry_over import unchecked_boxes
+from nnslr_tools.sign_types import sign_type_problem
 from nnslr_tools.manifest import parse_route_id
 from speed_vision_core.types import MAX_VALUE_KPH, MIN_VALUE_KPH
 
@@ -49,11 +52,14 @@ DB_RELATIVE_PATH = Path('annotations') / 'review.sqlite'
 # Fields the reviewer can change on a box: the label fields of the import plus
 # the notes. Everything else on a proposal (score, model label, class, evidence)
 # comes from the read-only report on the server.
-EDITABLE_DETECTION_KEYS = LABEL_KEYS + ('notes',)
+EDITABLE_DETECTION_KEYS = LABEL_KEYS + ('notes', 'sign_type')
 
 # Every box of a saved frame is checked against the original image (hash and
 # PNG decode), so the number of boxes in one request is bounded.
 MAX_DETECTIONS_PER_FRAME = 100
+
+# The country of a reviewed frame: ISO 3166-1 alpha-2.
+COUNTRY_CODE = re.compile(r'[A-Z]{2}')
 
 # The reviewer name is stored with every save and printed on the server terminal.
 MAX_REVIEWER_LENGTH = 100
@@ -515,6 +521,8 @@ def public_review(review: dict) -> dict:
         'detections': payload.get('detections', []),
         'site_group': payload.get('site_group'),
         'encounter_id': payload.get('encounter_id'),
+        # Missing in reviews saved before the country existed: the page then shows the GPS proposal.
+        **({'country': payload['country']} if 'country' in payload else {}),
     }
 
 
@@ -568,7 +576,13 @@ def build_reviewed_frame(report_row: dict, body: dict, timestamp: str, *, review
     encounter_id = body.get('encounter_id')
     if encounter_id is None:
         encounter_id = report_row.get('encounter_id')
+    # The country of the frame: the reviewer's, else the one its GPS position gives (nnslr_tools.gps).
+    country = body.get('country') if 'country' in body else report_row.get('country_proposed')
+    if country is not None and (not isinstance(country, str) or not COUNTRY_CODE.fullmatch(country)):
+        raise ReviewRejected(400, 'invalid_country',
+                             'country must be a two-letter ISO 3166-1 code in capitals ("CH", "IT", "PL"), or null.')
     frame = copy.deepcopy(report_row)
+    frame['country'] = country
     frame['reviewer'] = reviewer
     frame['review_timestamp'] = timestamp
     frame['site_group'] = site_group
@@ -703,6 +717,19 @@ def save_frame_review(store: ReviewStore, root: Path, *, route_id: str, run_id: 
     if len(body['detections']) > MAX_DETECTIONS_PER_FRAME:
         raise ReviewRejected(400, 'too_many_boxes',
                              f'Too many boxes in the frame (at most {MAX_DETECTIONS_PER_FRAME}).')
+    for number, item in enumerate(body['detections'], start=1):
+        problem = sign_type_problem(item) if isinstance(item, dict) else None
+        if problem is not None:
+            raise ReviewRejected(400, 'invalid_sign_type', f'Box {number}: {problem}.')
+    # "Apply previous" placed these boxes where a sign should be: someone must have looked at them.
+    unchecked = unchecked_boxes(body['detections'])
+    if unchecked:
+        raise ReviewRejected(400, 'position_not_checked',
+                             ('Box ' if len(unchecked) == 1 else 'Boxes ')
+                             + ', '.join(str(number) for number in unchecked)
+                             + (' was' if len(unchecked) == 1 else ' were') + ' carried from the previous frame to '
+                             'where the sign should be: check it on this image (move it onto the sign, or remove '
+                             'it if the sign is gone), then save it without check_position.')
     named = dict(body)
     named['reviewer'] = reviewer
     frame = build_reviewed_frame(report_row, named, utc_now(), reviewer_kind=kind, channel=channel)
@@ -782,8 +809,32 @@ def _dataset_line(review: dict) -> dict:
     return line
 
 
+def _review_identity(review: dict) -> tuple | None:
+    """Frame identity (annotations.frame_identity) of a stored review, from its payload."""
+    payload = review['payload']
+    if not isinstance(payload, dict):
+        return None
+    keys = ('route_id', 'segment_index', 'camera_stream', 'decoded_frame_index', 'output_index')
+    return frame_identity({key: payload.get(key) for key in keys})
+
+
+def _frame_summary(review: dict) -> dict:
+    """How a report of the import names a frame of the review database."""
+    return {'route_id': review['route_id'], 'run_id': review['run_id'], 'frame_key': review['frame_key'],
+            'reviewer': review['reviewer'], 'updated_at': review['updated_at']}
+
+
+def _imported_from_run(rows: dict, run_id: str) -> bool:
+    """True when every dataset row of a frame came from the given pre-annotation run."""
+    for row in rows.values():
+        provenance = row.get('provenance')
+        if not isinstance(provenance, dict) or provenance.get('run_id') != run_id:
+            return False
+    return True
+
+
 def import_from_db(root: Path, output: Path, *, route: str | None = None, dataset_kind: str = 'gold',
-                   store: ReviewStore | None = None) -> dict:
+                   store: ReviewStore | None = None, dry_run: bool = False) -> dict:
     """Import the confirmed frames of each route's current report from the review database.
 
     The frames become the same JSONL lines the page export writes and go through
@@ -792,10 +843,20 @@ def import_from_db(root: Path, output: Path, *, route: str | None = None, datase
     or MCP) are both imported; AI rows keep label_basis ai_review, reviewer
     "ai/<name>" and their channel. Frames already in the dataset with the same
     boxes and labels are skipped, so running it again imports only what is new.
-    A frame already in the dataset whose boxes or labels changed after the
-    import (box added, removed, drawn again or relabelled) is not applied,
-    because the canonical dataset is append-only, and is listed under
-    changed_after_import.
+
+    The dataset follows the current review of every frame of the current reports:
+    a frame already in the dataset whose review changed after the import (box
+    added, removed, drawn again, relabelled, or reclassified as an AI review)
+    replaces all its old rows (same frame identity) and is listed under
+    changed_after_import; a frame imported and then withdrawn (confirmed = 0)
+    has its rows taken out and is listed under removed_withdrawn. The rows taken
+    out are archived in annotations/replaced/<sha256>.jsonl, and the validation
+    runs on the whole new dataset before anything is written. Frames the current
+    reports do not review again stay as they are, and so do the rows of a
+    withdrawn frame that came from an older pre-annotation run of the route.
+
+    ``dry_run`` reports what would be new, replaced and removed (validation
+    included) and writes nothing.
     """
     from nnslr_tools.preannotate import PreannotationError
     from nnslr_tools.review import latest_report
@@ -809,21 +870,39 @@ def import_from_db(root: Path, output: Path, *, route: str | None = None, datase
         routes = store.route_ids()
     warnings = []
     selected = []
+    withdrawn = []
     for route_id in routes:
         try:
             run_id = latest_report(root, route_id).name
         except (PreannotationError, ValueError, OSError) as exc:
             warnings.append(f'{route_id}: no current pre-annotation report ({exc}); its reviews were not imported')
             continue
-        for review in store.reviews(route_id, run_id, confirmed_only=True):
-            selected.append(review)
+        for review in store.reviews(route_id, run_id):
+            if review['confirmed']:
+                selected.append(review)
+            else:
+                withdrawn.append(review)
         older = store.confirmed_count_in_other_runs(route_id, run_id)
         if older:
             warnings.append(f'{route_id}: {older} confirmed frames belong to older pre-annotation runs '
                             f'and were not imported')
-    require(bool(selected), 'empty_dataset', 'no confirmed reviews in the review database')
     existing = _existing_frames(output)
+    # Frame identities whose rows leave the dataset: replaced by a changed review, or withdrawn.
+    drop = set()
+    removed = []
+    for review in withdrawn:
+        identity = _review_identity(review)
+        old_rows = existing.get(identity)
+        if old_rows is None:
+            continue
+        if not _imported_from_run(old_rows, review['run_id']):
+            # Imported from an older run of the route: this withdrawal did not put them there.
+            continue
+        drop.add(identity)
+        removed.append(_frame_summary(review))
+    require(bool(selected) or bool(removed), 'empty_dataset', 'no confirmed reviews in the review database')
     new_frames = []
+    new_count = 0
     new_ai_frames = 0
     already_imported = 0
     changed = []
@@ -832,30 +911,32 @@ def import_from_db(root: Path, output: Path, *, route: str | None = None, datase
         rows = reviewed_frame_annotations(line, PLACEHOLDER_SOURCE_HASH,
                                           dataset_kind=dataset_kind, name='review database')
         state = _import_state(rows, existing)
+        if state == 'imported':
+            already_imported = already_imported + 1
+            continue
+        # New and changed frames are both written; a changed one replaces its old rows.
+        new_frames.append(line)
         if state == 'new':
-            new_frames.append(line)
+            new_count = new_count + 1
             if line.get('label_basis') == AI_LABEL_BASIS:
                 new_ai_frames = new_ai_frames + 1
-        elif state == 'imported':
-            already_imported = already_imported + 1
         else:
-            changed.append({'route_id': review['route_id'], 'run_id': review['run_id'],
-                            'frame_key': review['frame_key'], 'reviewer': review['reviewer'],
-                            'updated_at': review['updated_at']})
-    if changed:
-        warnings.append(f'{len(changed)} confirmed frames changed after their import were not applied: '
-                        f'the canonical dataset is append-only (see changed_after_import)')
-    if not new_frames:
-        return {'valid': True, 'source': 'review-db', 'imported_count': 0, 'imported_frame_count': 0,
-                'imported_ai_frame_count': 0, 'already_imported_frame_count': already_imported,
-                'changed_after_import': changed, 'errors': [], 'warnings': warnings, 'output': str(output)}
-    report = import_review_sources([('review-db', jsonl_bytes(new_frames))], root, output,
-                                   dataset_kind=dataset_kind)
+            drop.add(frame_identity(rows[0]))
+            changed.append(_frame_summary(review))
+    counts = {'imported_frame_count': new_count, 'imported_ai_frame_count': new_ai_frames,
+              'already_imported_frame_count': already_imported,
+              'replaced_frame_count': len(changed), 'changed_after_import': changed,
+              'removed_withdrawn_frame_count': len(removed), 'removed_withdrawn': removed}
+    if not new_frames and not drop:
+        return {'valid': True, 'source': 'review-db', 'dry_run': dry_run, 'imported_count': 0, 'removed_count': 0,
+                **counts, 'errors': [], 'warnings': warnings, 'output': str(output)}
+    sources = []
+    if new_frames:
+        sources.append(('review-db', jsonl_bytes(new_frames)))
+    report = import_review_sources(sources, root, output, dataset_kind=dataset_kind, drop_frames=drop,
+                                   dry_run=dry_run)
     report['source'] = 'review-db'
-    report['imported_frame_count'] = len(new_frames)
-    report['imported_ai_frame_count'] = new_ai_frames
-    report['already_imported_frame_count'] = already_imported
-    report['changed_after_import'] = changed
+    report['dry_run'] = dry_run
+    report.update(counts)
     report['warnings'] = list(report.get('warnings', [])) + warnings
     return report
-

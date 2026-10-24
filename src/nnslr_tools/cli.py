@@ -767,6 +767,7 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
         selected = [r for r in plan["records"] if r["split"] == args.partition]
 
     if args.dry_run:
+        from nnslr_tools.evaluation import HUMAN_LABEL_BASIS, label_basis_counts
         report = {
             "task": args.task,
             "partition": args.partition,
@@ -774,6 +775,8 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
             "dataset_sha256": plan["dataset_sha256"],
             "split_sha256": plan["split_sha256"],
             "sample_count": len(selected),
+            "counts_by_label_basis": label_basis_counts(selected),
+            "human_reviewed_sample_count": sum(1 for r in selected if r.get("label_basis") == HUMAN_LABEL_BASIS),
             "checkpoint_required_for_execution": True,
         }
         print(json.dumps(report, indent=2, sort_keys=True))
@@ -1166,6 +1169,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_mcp.add_argument("--read-only", action="store_true",
                        help="read-only tools: save_frame_review is not offered (also NNSLR_MCP_READ_ONLY=1)")
     p_mcp.set_defaults(func=_cmd_mcp)
+    p_gps = sub.add_parser("gps", help="GPS position and country of every frame of a route, from its comma logs "
+                                       "(derived/gps/<route>/positions.jsonl); the review proposes that country")
+    p_gps.add_argument("--route", action="append", help="route id; repeat for more")
+    p_gps.add_argument("--all", action="store_true", help="every route with a pre-annotation report")
+    p_gps.add_argument("--missing", action="store_true", help="with --all: only routes without positions yet")
+    p_gps.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+    p_gps.set_defaults(func=_cmd_gps)
     # [preannotation] - END
 
     # [reviewed-dataset] - START
@@ -1177,9 +1187,14 @@ def build_parser() -> argparse.ArgumentParser:
     # [model-review] - END
     p_import.add_argument("--from-db", action="store_true",
                           help="import the confirmed frames saved by 'nnslr review' in <data-root>/annotations/review.sqlite "
-                               "(current report of each route; frames already imported are skipped). Human and AI "
+                               "(current report of each route; frames already imported are skipped, frames reviewed "
+                               "again replace their old rows, withdrawn frames leave the dataset; the rows taken out "
+                               "are archived in <data-root>/annotations/replaced/). Human and AI "
                                "confirmations are both imported; AI rows keep reviewer ai/<name> and label_basis ai_review")
     p_import.add_argument("--route", help="with --from-db: only this route")
+    p_import.add_argument("--dry-run", action="store_true",
+                          help="with --from-db: report what would be new, replaced and removed (validation included) "
+                               "without writing anything")
     p_import.set_defaults(func=_cmd_dataset)
     p_validate = sub.add_parser("validate-dataset", help="validate reviewed labels, images, hashes and capture provenance")
     # [model-review] - START
@@ -1188,12 +1203,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_validate.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_validate.add_argument("--splits", help="also check a frozen split for leakage and dataset identity")
     p_validate.set_defaults(func=_cmd_dataset)
-    p_splits = sub.add_parser("build-splits", help="freeze deterministic route/site-connected dataset partitions")
+    p_splits = sub.add_parser("build-splits", help="freeze deterministic route/site-connected train/validation/test partitions")
     # [model-review] - START
     p_splits.add_argument("dataset", nargs="?", help="default: gold <data-root>/annotations/objects.jsonl; training-candidate <data-root>/datasets/training_candidate_dataset/objects.jsonl")
     # [model-review] - END
     p_splits.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_splits.add_argument("--seed", type=int, default=0)
+    p_splits.add_argument("--test-route", action="append", default=[], metavar="ROUTE",
+                          help="put this route (with its connected group) in test; repeatable. Without it the "
+                               "test takes the groups with the most frames confirmed by a person")
     p_splits.add_argument("--output", help="default: <data-root>/splits/<sha256>.json (immutable)")
     p_splits.set_defaults(func=_cmd_dataset)
     # [reviewed-dataset] - END
@@ -1363,13 +1381,13 @@ def _cmd_dataset(args: argparse.Namespace) -> int:
                 raise DatasetError("invalid_arguments", "--from-db does not take review files")
             output = Path(args.output) if args.output else default_dataset
             try:
-                report = import_from_db(root, output, route=args.route, dataset_kind=kind)
+                report = import_from_db(root, output, route=args.route, dataset_kind=kind, dry_run=args.dry_run)
             except sqlite3.Error as exc:
                 raise DatasetError("review_db_error", str(exc)) from exc
         elif hasattr(args, "inputs"):
-            if args.route:
+            if args.route or args.dry_run:
                 from nnslr_tools.annotations import DatasetError
-                raise DatasetError("invalid_arguments", "--route needs --from-db")
+                raise DatasetError("invalid_arguments", "--route and --dry-run need --from-db")
             inputs = [Path(p) for p in args.inputs] if args.inputs else sorted((root / "annotations/inbox").glob("*.jsonl"))
             # [model-review] - START
             output = Path(args.output) if args.output else default_dataset
@@ -1384,7 +1402,7 @@ def _cmd_dataset(args: argparse.Namespace) -> int:
                 from nnslr_tools.splits import build_splits
                 # [model-review] - START
                 report = build_splits(rows, root, seed=args.seed, output=Path(args.output) if args.output else None,
-                                      dataset_kind=kind)
+                                      dataset_kind=kind, test_routes=args.test_route)
                 # [model-review] - END
             else:
                 # [model-review] - START
@@ -1432,6 +1450,32 @@ def _cmd_review_reclassify(args: argparse.Namespace) -> int:
         report["reviewers"][reviewer] = {"frames": len(changed), "by_route_run": dict(sorted(routes.items()))}
     print(json.dumps(report, indent=2, ensure_ascii=False))
     return 0
+
+
+def _cmd_gps(args: argparse.Namespace) -> int:
+    from nnslr_tools.gps import GpsError, build_positions, positions_path
+    from nnslr_tools.preannotate import resolve_data_root
+    from nnslr_tools.review import latest_report, list_reports, report_rows
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    routes = list(args.route or [])
+    if args.all:
+        routes += [route for route, _ in list_reports(root)
+                   if not (args.missing and positions_path(root, route).is_file())]
+    if not routes:
+        if args.all:
+            # --all --missing with every route already done.
+            return 0
+        print("nnslr gps: name a --route or use --all", file=sys.stderr)
+        return 2
+    failed = 0
+    for route in routes:
+        try:
+            result = build_positions(root, route, report_rows(latest_report(root, route)))
+        except (GpsError, ValueError, OSError) as exc:
+            failed += 1
+            result = {"route_id": route, "error": str(exc)}
+        print(json.dumps(result, sort_keys=True), flush=True)
+    return 1 if failed else 0
 
 
 def _cmd_mcp(args: argparse.Namespace) -> int:

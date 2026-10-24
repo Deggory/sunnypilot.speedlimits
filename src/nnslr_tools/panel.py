@@ -259,7 +259,7 @@ class Panel:
         activities = self.activities()
         system = self.system()
         payload = {'available': self.available(), 'actions_enabled': self.actions_enabled and self.available(),
-                   'routes': [], 'next_step': '', 'next_action': None, 'reviewed_routes': 0, 'min_routes': 5,
+                   'routes': [], 'next_step': '', 'next_action': None, 'reviewed_routes': 0, 'min_routes': 3,
                    'activities': activities, 'jobs': self.jobs(activities), 'system': system, 'actions': {},
                    'preparation': None}
         if payload['available']:
@@ -783,7 +783,12 @@ def _dataset_summary(root: Path) -> dict:
             'at': _mtime(root / 'logs' / 'import.json'),
             'new_frames': imported.get('imported_frame_count') or 0,
             'already': imported.get('already_imported_frame_count') or 0,
-            'changed_after_import': len(imported.get('changed_after_import') or []),
+            # Frames reviewed again after their import replace their old rows, and withdrawn ones leave the
+            # dataset; only an import made before that (no replaced_frame_count) left changed frames unapplied.
+            'changed_after_import': 0 if 'replaced_frame_count' in imported
+            else len(imported.get('changed_after_import') or []),
+            'replaced_frames': imported.get('replaced_frame_count') or 0,
+            'removed_frames': imported.get('removed_withdrawn_frame_count') or 0,
             'warnings': imported.get('warnings') or []},
     }
 

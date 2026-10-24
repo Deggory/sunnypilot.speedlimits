@@ -137,7 +137,7 @@ else
     report_errors "$LOG_DIR/import.json" >&2
     die "import fallito (report completo: $LOG_DIR/import.json)"
   fi
-  echo "Frame nuovi nel dataset: $(report "$LOG_DIR/import.json" 'r.get("imported_frame_count", 0)'), gia' presenti: $(report "$LOG_DIR/import.json" 'r.get("already_imported_frame_count", "-")')"
+  echo "Frame nuovi nel dataset: $(report "$LOG_DIR/import.json" 'r.get("imported_frame_count", 0)'), gia' presenti: $(report "$LOG_DIR/import.json" 'r.get("already_imported_frame_count", "-")'), rivisti e sostituiti: $(report "$LOG_DIR/import.json" 'r.get("replaced_frame_count", 0)'), tolti perche' ritirati: $(report "$LOG_DIR/import.json" 'r.get("removed_withdrawn_frame_count", 0)')"
   report "$LOG_DIR/import.json" '"\n".join("  attenzione: " + w for w in r.get("warnings", []))' | sed '/^$/d'
 
   echo "== b. controllo il dataset e fisso lo split"
@@ -146,11 +146,11 @@ else
     die "dataset non valido (report completo: $LOG_DIR/validate.json)"
   fi
   if ! "$NN" build-splits < /dev/null > "$LOG_DIR/splits.json" 2> "$LOG_DIR/splits.err"; then
-    # Five disjoint partitions (train, validation, test, route-held-out, hard-negative) of
-    # independent route/site groups: with fewer groups the split cannot be made.
+    # Three disjoint partitions (train, validation, test) of independent route/site groups:
+    # with fewer groups the split cannot be made.
     groups="$(sed -n 's/.*: \([0-9][0-9]*\) groups.*/\1/p' "$LOG_DIR/splits.json" | head -1)"
     if [ -n "$groups" ]; then
-      die "per dividere il dataset servono almeno 5 route (o luoghi) indipendenti revisionate, ora ce ne sono $groups.
+      die "per dividere il dataset servono almeno 3 route (o luoghi) indipendenti revisionate, ora ce ne sono $groups.
 Prepara e revisiona altre route (helpers/1_prepare.sh, helpers/2_review.sh), poi rilancia.
 Le revisioni fatte sono gia' nel dataset: non si perde niente."
     fi

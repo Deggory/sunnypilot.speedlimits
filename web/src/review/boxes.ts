@@ -16,6 +16,8 @@ export interface BoxItem {
   detectionId: string;
   what: string;
   source: Source;
+  /** Placed by "Apply previous" where the sign should be: the reviewer must look at it. */
+  check: boolean;
   /** The earlier box this one repeats (same sign drawn twice), or null. */
   duplicateOf: number | null;
 }
@@ -27,6 +29,8 @@ function originalOf(row: FrameRow, d: Detection): Detection | null {
 }
 
 function sourceOf(row: FrameRow, d: Detection): Source {
+  if (d.check_position) return {text: 'from ' + d.carried_from + ' · check it', changed: null};
+  if (d.carried_from) return {text: 'as in ' + d.carried_from, changed: null};
   const original = originalOf(row, d);
   if (original === null) return {text: 'added by hand', changed: null};
   if (original.family !== d.family || original.value_kph !== d.value_kph) {
@@ -45,6 +49,7 @@ export function boxItems(row: FrameRow, work: FrameEdit): BoxItem[] {
       detectionId: String(d.detection_id || ''),
       what: describe(d),
       source: sourceOf(row, d),
+      check: d.check_position === true,
       duplicateOf: earlier >= 0 ? earlier : null,
     };
   });

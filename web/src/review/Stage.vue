@@ -31,7 +31,7 @@ function photoDone(event: Event, failed: boolean): void {
 const drawing = computed(() => drawStage(props.work.detections, state.selected,
   state.showHints ? hintsOf(props.row.frame_key) : [], props.row.height,
   sceneScale(size.value, props.row.width, props.row.height), coarsePointer()));
-const resizing = computed(() => state.drag?.kind === 'resize' && state.drag.svg === 'scene');
+const resizing = computed(() => (state.drag?.kind === 'resize' || state.drag?.kind === 'move') && state.drag.svg === 'scene');
 </script>
 
 <template>

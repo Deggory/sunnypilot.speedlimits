@@ -29,6 +29,12 @@ export function workOf(row: FrameRow): FrameEdit {
   return work as FrameEdit;
 }
 
+/** The country of a frame: the one picked, else the one its GPS position gives. */
+export function countryOf(row: FrameRow, s: FrameEdit | undefined): string | null {
+  if (s && s.country !== undefined) return s.country;
+  return row.country_proposed ?? null;
+}
+
 /** The box selected in the frame on screen. */
 export function selectedDetection(): Detection | null {
   const row = currentRow();
@@ -47,6 +53,8 @@ export function fromServer(item: ConfirmedCopy): FrameEdit {
     review_timestamp: item.review_timestamp,
     site_group: item.site_group,
     encounter_id: item.encounter_id,
+    // A review saved before the country existed has none: the GPS proposal stands.
+    country: item.country,
     revision: item.revision,
     saved: true,
     error: null,
@@ -60,6 +68,7 @@ export function sameAsServer(s: FrameEdit | undefined): boolean {
   if (!s || !s.base) return false;
   if (JSON.stringify(s.detections) !== JSON.stringify(s.base.detections || [])) return false;
   if ((s.site_group ?? null) !== (s.base.site_group ?? null)) return false;
+  if (s.country !== undefined && (s.country ?? null) !== (s.base.country ?? null)) return false;
   return (s.encounter_id ?? null) === (s.base.encounter_id ?? null);
 }
 

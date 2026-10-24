@@ -598,7 +598,7 @@ def make_handler(app: ReviewApp):
                 self._json(200, app.next_frame(match.group(1), frame_filter=values.get('filter'),
                                                after=values.get('after')))
                 return
-            match = re.fullmatch(r'/api/v1/routes/([^/]+)/frames/([0-9]{1,9})/([0-9]{1,9})(/[a-z]+)?', path)
+            match = re.fullmatch(r'/api/v1/routes/([^/]+)/frames/([0-9]{1,9})/([0-9]{1,9})(/[a-z-]+)?', path)
             if match is None:
                 self._problem(404, 'not_found', 'Invalid API address.', True)
                 return
@@ -617,11 +617,14 @@ def make_handler(app: ReviewApp):
                 self._send(200, image['mime_type'], image['data'])
             elif action == '/review':
                 self._problem(405, 'method_not_allowed', 'Use POST to save a frame.', True)
+            elif action == '/apply-previous':
+                self._problem(405, 'method_not_allowed', 'Use POST, with the boxes of this frame or {}.', True)
             else:
                 self._problem(404, 'not_found', 'Invalid API address.', True)
 
         def _api_post(self, path):
-            match = re.fullmatch(r'/api/v1/routes/([^/]+)/frames/([0-9]{1,9})/([0-9]{1,9})/review', path)
+            match = re.fullmatch(r'/api/v1/routes/([^/]+)/frames/([0-9]{1,9})/([0-9]{1,9})/(review|apply-previous)',
+                                 path)
             if match is None:
                 self._problem(404, 'not_found', 'Invalid API address.', True)
                 return
@@ -631,6 +634,10 @@ def make_handler(app: ReviewApp):
                 return
             body = self._read_json()
             key = match.group(2) + '/' + match.group(3)
+            if match.group(4) == 'apply-previous':
+                # Saves nothing: the boxes of the previous frame carried onto this one, to check and save.
+                self._json(200, app.apply_previous(match.group(1), key, body))
+                return
             self._json(200, app.save_review(match.group(1), key, body, client=self.client_address[0],
                                             channel='rest'))
 
@@ -776,7 +783,7 @@ def make_handler(app: ReviewApp):
                     self._json(200, {'ok': True, **app.panel.stop(stop.group(1))})
                 return
             # [control-panel] - END
-            match = re.fullmatch(r'/api/route/([^/]+)/frame/([0-9]{1,9})/([0-9]{1,9})', path)
+            match = re.fullmatch(r'/api/route/([^/]+)/frame/([0-9]{1,9})/([0-9]{1,9})(/apply-previous)?', path)
             if match is None:
                 self._problem(404, 'not_found', 'Invalid save address.', True)
                 return
@@ -790,6 +797,10 @@ def make_handler(app: ReviewApp):
             body = self._read_json()
             route = match.group(1)
             frame_key = str(int(match.group(2))) + '/' + str(int(match.group(3)))
+            if match.group(4):
+                # "Apply previous" of the page: nothing is saved, the page shows the boxes to check.
+                self._json(200, app.apply_previous(route, frame_key, body))
+                return
             try:
                 directory, rows, by_key = app.report(route)
             except (PreannotationError, ValueError, OSError):

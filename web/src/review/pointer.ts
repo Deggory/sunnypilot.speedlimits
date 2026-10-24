@@ -1,5 +1,5 @@
 // Mouse and touch on the photo and on the zoom: draw a new box (drawing mode, N), select a box, move the
-// corners of the selected one. The handlers of both pictures (Stage.vue, BoxEditor.vue); the point under the
+// corners of the selected one or drag the whole box. The handlers of both pictures (Stage.vue, BoxEditor.vue); the point under the
 // pointer is the SVG's own math.
 import {nextTick} from 'vue';
 import {datasetOf} from './dom';
@@ -58,7 +58,21 @@ export function onPointerDown(event: PointerEvent, surface: Surface): void {
     event.preventDefault();
     state.drag = {kind: 'resize', svg: surface, corner, moved: false};
     svg.setPointerCapture(event.pointerId);
+    return;
   }
+  // Inside the selected box: the whole box follows the pointer.
+  const d = selectedDetection();
+  if (d && onSelectedBox(event, surface, toImagePoint(svg, event, row), d.bbox_xyxy)) {
+    event.preventDefault();
+    state.drag = {kind: 'move', svg: surface, start: toImagePoint(svg, event, row), box: [...d.bbox_xyxy], moved: false};
+    svg.setPointerCapture(event.pointerId);
+  }
+}
+
+/** On the photo the selected box itself, on the zoom anywhere inside it (its outline lets the pointer through). */
+function onSelectedBox(event: Event, surface: Surface, p: Point, b: Box): boolean {
+  if (surface === 'scene') return Number(datasetOf(event.target)?.['index']) === state.selected;
+  return p[0] >= b[0] && p[0] <= b[2] && p[1] >= b[1] && p[1] <= b[3];
 }
 
 export function onPointerMove(event: PointerEvent, surface: Surface): void {
@@ -74,6 +88,14 @@ export function onPointerMove(event: PointerEvent, surface: Surface): void {
   }
   const d = selectedDetection();
   if (!d) return;
+  if (drag.kind === 'move') {
+    // Inside the image: the box stops at its edges.
+    const dx = Math.min(Math.max(p[0] - drag.start[0], -drag.box[0]), row.width - drag.box[2]);
+    const dy = Math.min(Math.max(p[1] - drag.start[1], -drag.box[1]), row.height - drag.box[3]);
+    d.bbox_xyxy = [drag.box[0] + dx, drag.box[1] + dy, drag.box[2] + dx, drag.box[3] + dy];
+    if (Math.abs(dx) + Math.abs(dy) > 0) drag.moved = true;
+    return;
+  }
   const b: Box = [...d.bbox_xyxy];
   if (drag.corner === 'nw') { b[0] = p[0]; b[1] = p[1]; }
   if (drag.corner === 'ne') { b[2] = p[0]; b[1] = p[1]; }
@@ -109,16 +131,27 @@ export function finishDrag(event: PointerEvent, surface: Surface): void {
     addManualBox(row, box, 'unreadable', null);
     return;
   }
-  if (drag.moved) changed(row);
+  if (drag.moved) {
+    // A carried box moved (or resized) onto its sign: its position is checked.
+    const d = selectedDetection();
+    if (d) delete d.check_position;
+    changed(row);
+  }
 }
 
-// A touch on a corner, or anywhere while drawing, must not scroll the page.
+// A touch on a corner or on the selected box, or anywhere while drawing, must not scroll the page.
 export function onTouchStart(event: TouchEvent, surface: Surface): void {
   if (surface === 'scene' && state.drawing) {
     event.preventDefault();
     return;
   }
-  if (cornerOf(event.target) !== null) event.preventDefault();
+  if (cornerOf(event.target) !== null) {
+    event.preventDefault();
+    return;
+  }
+  const onBox = surface === 'scene' ? Number(datasetOf(event.target)?.['index']) === state.selected
+    : state.selected >= 0;
+  if (onBox) event.preventDefault();
 }
 
 /** A click on a box selects it; on the photo elsewhere it clears the selection. */

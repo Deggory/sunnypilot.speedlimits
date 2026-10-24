@@ -22,6 +22,70 @@ export const FAMILIES: readonly Family[] = [
   {id: 'not_a_sign', label: 'Not a sign', hasValue: false, minor: true},
 ];
 export const QUICK_VALUES: readonly number[] = [20, 30, 40, 50, 60, 70, 80, 100, 120];
+
+export interface SignKind {
+  id: string;
+  /** In the list of the boxes: "Danger: children". */
+  label: string;
+  /** On its button, under the name of its group: "Children". */
+  chip: string;
+  /** On the photo. */
+  short: string;
+}
+
+// What an "Other sign" is (sign_type; the same ids as nnslr_tools.sign_types.SIGN_TYPES), in groups of buttons
+// under "Type". Some give a limit without a number (town entry, motorway), some carry numbers that are no speed
+// (weight, height): the model has to know them apart.
+export const SIGN_KIND_GROUPS: readonly {label: string; kinds: readonly SignKind[]}[] = [
+  {label: 'Danger', kinds: [
+    {id: 'pedestrian_crossing', label: 'Pedestrian crossing', chip: 'Pedestrian crossing', short: 'crossing'},
+    {id: 'children', label: 'Danger: children', chip: 'Children', short: 'children'},
+    {id: 'traffic_queue', label: 'Danger: traffic queue', chip: 'Traffic queue', short: 'queue'},
+    {id: 'roadworks', label: 'Roadworks', chip: 'Roadworks', short: 'works'},
+    {id: 'danger_other', label: 'Other danger', chip: 'Other danger', short: 'danger'},
+  ]},
+  {label: 'Priority', kinds: [
+    {id: 'give_way', label: 'Give way', chip: 'Give way', short: 'give way'},
+    {id: 'stop', label: 'Stop', chip: 'Stop', short: 'stop'},
+    {id: 'main_road', label: 'Main road', chip: 'Main road', short: 'main road'},
+    {id: 'main_road_end', label: 'End of main road', chip: 'End of main road', short: 'main road end'},
+  ]},
+  {label: 'Bans and other numbers', kinds: [
+    {id: 'no_overtaking', label: 'No overtaking', chip: 'No overtaking', short: 'no overtaking'},
+    {id: 'no_overtaking_end', label: 'End of no overtaking', chip: 'End of no overtaking', short: 'overtaking end'},
+    {id: 'no_entry', label: 'No entry', chip: 'No entry', short: 'no entry'},
+    {id: 'minimum_speed', label: 'Minimum speed (blue)', chip: 'Minimum speed', short: 'minimum'},
+    {id: 'weight_limit', label: 'Weight limit', chip: 'Weight', short: 'weight'},
+    {id: 'height_limit', label: 'Height limit', chip: 'Height', short: 'height'},
+    {id: 'width_limit', label: 'Width limit', chip: 'Width', short: 'width'},
+  ]},
+  {label: 'Roads and places', kinds: [
+    {id: 'town_entry', label: 'Town entry', chip: 'Town entry', short: 'town'},
+    {id: 'town_exit', label: 'Town exit', chip: 'Town exit', short: 'town end'},
+    {id: 'motorway_start', label: 'Motorway', chip: 'Motorway', short: 'motorway'},
+    {id: 'motorway_end', label: 'End of motorway', chip: 'End of motorway', short: 'motorway end'},
+    {id: 'expressway_start', label: 'Expressway', chip: 'Expressway', short: 'expressway'},
+    {id: 'expressway_end', label: 'End of expressway', chip: 'End of expressway', short: 'expressway end'},
+    {id: 'roundabout', label: 'Roundabout', chip: 'Roundabout', short: 'roundabout'},
+    {id: 'one_way', label: 'One way', chip: 'One way', short: 'one way'},
+  ]},
+  {label: 'Directions', kinds: [
+    {id: 'direction_left', label: 'Direction ←', chip: '← Left', short: '←'},
+    {id: 'direction_right', label: 'Direction →', chip: 'Right →', short: '→'},
+    {id: 'direction_straight', label: 'Direction ↑', chip: '↑ Straight', short: '↑'},
+    {id: 'direction_several', label: 'Directions, several', chip: 'Several', short: 'directions'},
+  ]},
+  {label: 'Other', kinds: [{id: 'other', label: 'Something else', chip: 'Something else', short: 'other'}]},
+];
+
+export function signKindOf(id: string | null | undefined): SignKind | null {
+  if (!id) return null;
+  for (const group of SIGN_KIND_GROUPS) {
+    const found = group.kinds.find((kind) => kind.id === id);
+    if (found) return found;
+  }
+  return null;
+}
 export const ROADS: readonly {id: string; label: string}[] = [
   {id: 'own_road', label: 'Ours'},
   {id: 'other_road', label: 'Another'},
@@ -68,8 +132,10 @@ export function hasValue(d: {value_kph?: number | null | undefined}): boolean {
   return d.value_kph !== null && d.value_kph !== undefined;
 }
 
-/** The full description in the panel: "Speed limit · 60 km/h". */
+/** The full description in the panel: "Speed limit · 60 km/h", "Town entry". */
 export function describe(d: Detection): string {
+  const kind = d.family === 'other_sign' ? signKindOf(d.sign_type) : null;
+  if (kind !== null) return kind.label;
   const family = familyOf(d.family);
   let text = family ? family.label : String(d.family || 'No type');
   if (hasValue(d)) text += ' · ' + d.value_kph + ' km/h';
@@ -86,7 +152,7 @@ export function shortName(d: Detection): string {
     case 'variable_display': return known ? 'variable ' + v : 'variable';
     case 'road_marking_candidate': return known ? 'road ' + v : 'road';
     case 'cancellation': return known ? 'end ' + v : 'end';
-    case 'other_sign': return 'other';
+    case 'other_sign': return signKindOf(d.sign_type)?.short ?? 'other';
     case 'not_a_sign': return 'no';
     default: return '?';
   }

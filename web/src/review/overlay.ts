@@ -109,15 +109,17 @@ export function drawStage(detections: readonly Detection[], selected: number, hi
     const isSelected = i === selected;
     let cls = 'box';
     if (d.model_label) cls += ' proposal';
+    if (d.check_position) cls += ' check';
     if (isSelected) cls += ' selected';
-    const text = (i + 1) + ' · ' + shortName(d);
+    const text = (i + 1) + ' · ' + shortName(d) + (d.check_position ? ' · check' : '');
     const width = labelWidth(text, fontSize);
     // The selected box has its corners outside: its label goes above them.
     const top = isSelected ? b[1] - handleSize - fontSize * 0.2 : b[1] - fontSize * 0.35;
     const y = Math.max(fontSize, freeLabelY(placed, b[0], Math.max(fontSize, top), width, fontSize, -fontSize));
     placed.push({x: b[0], y, w: width, h: fontSize, text});
     boxes.push({
-      index: i, cls, rect: rectOf(b), stroke: isSelected ? null : boxColor(d), label: label(text, b[0], y, fontSize, k),
+      index: i, cls, rect: rectOf(b), stroke: isSelected ? null : d.check_position ? 'var(--warn)' : boxColor(d),
+      label: label(text, b[0], y, fontSize, k),
     });
   }
   const drawnHints: DrawnHint[] = [];

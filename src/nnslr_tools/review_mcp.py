@@ -30,6 +30,7 @@ from pathlib import Path
 
 from nnslr_tools.review_db import ReviewRejected
 from nnslr_tools.review_service import DETECTION_FAMILIES, review_schema
+from nnslr_tools.sign_types import SIGN_TYPES
 
 SERVER_NAME = 'nnslr-review'
 # Neighbour images that get_frame_context attaches at most, to keep answers small.
@@ -40,6 +41,8 @@ INSTRUCTIONS = """Review of Swiss speed-limit signs proposed by a model on dashc
 Typical flow: list_routes -> next_frame(route_id) -> get_frame_image(...) -> look at the image ->
 get_frame_context(...) when the sign is far, covered, blurred or ambiguous -> save_frame_review(...)
 -> next_frame(route_id, after=<frame_key>) until it returns frame null.
+When the previous frame is confirmed, apply_previous_frame(...) carries its labels onto the same signs here:
+check each carried box on this image; boxes with check_position true must be fixed or dropped first.
 Model proposals and the second reading are hints, not truth. Never invent a speed: unreadable number
 -> value_kph null. Call get_review_schema for the allowed values and the rules.
 Save only when the owner has authorized saving for this route; otherwise only read. Your saves are
@@ -113,13 +116,23 @@ class ReviewTools:
     def get_review_history(self, route_id, frame_key) -> dict:
         return self.service.history(route_id, frame_key)
 
+    def apply_previous_frame(self, route_id, frame_key, detections=None) -> dict:
+        body = {}
+        if detections is not None:
+            body['detections'] = detections
+        return self.service.apply_previous(route_id, frame_key, body)
+
     def save_frame_review(self, route_id, frame_key, *, run_id, base_revision, reviewer, detections,
-                          confirmed=True, site_group=None, encounter_id=None, override_human_review=False) -> dict:
+                          confirmed=True, site_group=None, encounter_id=None, override_human_review=False,
+                          country=None) -> dict:
         if self.read_only:
             raise ReviewRejected(403, 'read_only', 'Read-only MCP server: saving is disabled.')
         body = {'run_id': run_id, 'base_revision': base_revision, 'reviewer': reviewer, 'reviewer_kind': 'ai',
                 'confirmed': confirmed, 'detections': detections, 'site_group': site_group,
                 'encounter_id': encounter_id, 'override_human_review': override_human_review}
+        # Omitted: the country the GPS position of the frame gives.
+        if country is not None:
+            body['country'] = country
         return self.service.save_review(route_id, frame_key, body, client=self.client, channel='mcp')
 
 
@@ -202,6 +215,8 @@ def build_server(service, *, client: str, read_only: bool = False):
         suspicious_reasons: list[str]
         saved_box_count: NotRequired[int]
         proposals: list[dict[str, Any]]
+        gps: dict[str, Any] | None
+        country_proposed: str | None
         second_reading: list[dict[str, Any]]
         review: dict[str, Any] | None
         previous_frame_key: str | None
@@ -241,7 +256,11 @@ def build_server(service, *, client: str, read_only: bool = False):
         supplementary_panel: Literal['unknown', 'none', 'present', 'unresolved']
         temporary: bool | None
         variable_display: bool | None
+        sign_type: Literal[SIGN_TYPES] | None
         notes: str
+        # From apply_previous_frame: a save refuses check_position true (look, fix the box, drop the flag).
+        check_position: bool
+        carried_from: str
 
     class SaveResult(TypedDict):
         ok: bool
@@ -328,6 +347,36 @@ def build_server(service, *, client: str, read_only: bool = False):
         (unknown value, unreadable, road unresolved) and the first unconfirmed frame."""
         return call(tools.get_review_progress, route_id, suspicious_limit)
 
+    class Carried(TypedDict):
+        route_id: str
+        run_id: str
+        frame_key: str
+        source_frame_key: str
+        source_revision: int
+        source_reviewer_kind: str
+        detections: list[dict[str, Any]]
+        matched: int
+        estimated: int
+        dropped: int
+        kept: int
+        duplicates: int
+        to_check: list[int]
+        message: str
+        save: dict[str, Any]
+
+    @server.tool(annotations=reading)
+    def apply_previous_frame(route_id: RouteId, frame_key: FrameKey,
+                             detections: Annotated[list[Detection] | None, Field(max_length=100, description=(
+                                 'The boxes of this frame as you have them now; omit to start from the model '
+                                 'proposals.'))] = None) -> Carried:
+        """The boxes confirmed on the previous frame carried onto this one (saves nothing). A box of this
+        frame that is the same sign (moved and grown) takes the previous labels; a sign not found here gets a
+        box where it should be, with check_position true: look at the image, fix its bbox_xyxy or drop it if
+        the sign is gone, and remove check_position before save_frame_review (which refuses it otherwise).
+        Check every carried value in this image too. 409 previous_not_confirmed: confirm the previous frame
+        first."""
+        return call(tools.apply_previous_frame, route_id, frame_key, detections)
+
     @server.tool(annotations=reading)
     def get_review_history(route_id: RouteId, frame_key: FrameKey) -> History:
         """Every saved revision of a frame: reviewer, human or AI, channel, time and boxes."""
@@ -352,6 +401,9 @@ def build_server(service, *, client: str, read_only: bool = False):
                 confirmed: Annotated[bool, Field(description='false withdraws a confirmation (only if asked).')] = True,
                 site_group: str | None = None,
                 encounter_id: str | None = None,
+                country: Annotated[str | None, Field(pattern='^[A-Z]{2}$', description=(
+                    'ISO code of the country of the frame ("CH", "IT", "PL"); omit to keep country_proposed, '
+                    'from the GPS position of the frame.'))] = None,
                 override_human_review: Annotated[bool, Field(description='Change a frame confirmed by a human: '
                                                                          'only when the owner asked for it.')] = False,
         ) -> SaveResult:
@@ -361,7 +413,7 @@ def build_server(service, *, client: str, read_only: bool = False):
             report was rebuilt: read it again."""
             return call(tools.save_frame_review, route_id, frame_key, run_id=run_id, base_revision=base_revision,
                         reviewer=reviewer, detections=detections, confirmed=confirmed, site_group=site_group,
-                        encounter_id=encounter_id, override_human_review=override_human_review)
+                        encounter_id=encounter_id, override_human_review=override_human_review, country=country)
 
     return server
 

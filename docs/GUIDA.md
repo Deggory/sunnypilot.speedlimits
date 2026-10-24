@@ -34,9 +34,10 @@ Gli helper si possono rilanciare quando si vuole: il lavoro già fatto viene sal
 - `helpers/3_train.sh --continue`: nuovo training che parte dai pesi "stable" pubblicati su Hugging Face.
 - `helpers/3_train.sh --resume=<run>`: riprende un training interrotto (stessa cartella `data/runs/<run>/`).
 
-### Due regole da sapere
+### Tre regole da sapere
 
-- **Servono almeno 5 route revisionate** per allenare. `nnslr build-splits` divide il dataset in cinque parti indipendenti (train, validation, test, route-held-out, hard-negative): con meno route si ferma. Le revisioni importate restano nel dataset, non si perde niente.
+- **Servono almeno 3 route revisionate** per allenare. `nnslr build-splits` divide il dataset in tre parti indipendenti, per route intere: validation e test prendono circa il 15% ciascuna, tutto il resto è train, quindi ogni route revisionata viene usata. Il test prende per prime le route con più fotogrammi confermati da una persona (`--test-route <route>` ne fissa una nel test). Con meno di 3 route si ferma. Le revisioni importate restano nel dataset, non si perde niente.
+- **Il dataset segue l'ultima revisione di ogni fotogramma.** Un fotogramma già importato e poi rivisto (riquadri cambiati, o revisione riclassificata come AI) sostituisce le sue righe vecchie; uno già importato e poi ritirato viene tolto. Le righe tolte restano archiviate in `data/annotations/replaced/`. `nnslr import-annotations --from-db --dry-run` mostra cosa entrerebbe, cosa verrebbe sostituito e cosa tolto, senza scrivere niente.
 - **Una route già pre-annotata non viene più rielaborata.** Una nuova pre-annotazione lascerebbe le revisioni sul report vecchio e l'import le salterebbe. I segmenti di quella route arrivati dopo restano fuori; `helpers/status.sh` li segnala.
 
 ## 2. Il pannello web
@@ -204,7 +205,7 @@ Per cambiare una pagina: modifica `web/src` (o il template), lancia `helpers/bui
 
 | Messaggio | Cosa fare |
 | --- | --- |
-| `servono almeno 5 route (o luoghi) indipendenti revisionate` | Prepara e revisiona altre route, poi rilancia `helpers/3_train.sh`. |
+| `servono almeno 3 route (o luoghi) indipendenti revisionate` | Prepara e revisiona altre route, poi rilancia `helpers/3_train.sh`. |
 | `la GPU 0 e' occupata` / pulsante "la GPU è occupata" | Sta girando un altro training (spesso `openpilot.distill`): aspetta che finisca. Da terminale `--force` parte lo stesso, più lenti tutti e due. |
 | `la porta 8765 e' gia' occupata` | C'è già un sito acceso (il servizio o un altro `nnslr review`): `helpers/2_review.sh` ristampa il link, `helpers/2_review.sh --stop` spegne quello acceso a mano. |
 | `Sign-in required: reload the page and sign in` | La sessione è finita (7 giorni senza uso, uscita, password cambiata): ricarica e accedi con nome e password (sezione 3). |

@@ -3,7 +3,8 @@
 import {messageOf} from '../common/api';
 import {hourMinute} from '../common/format';
 import {clone, writeLocal} from './dom';
-import {currentRow, frameStatus, fromServer, sameAsServer, workOf} from './frames';
+import {countryOf, currentRow, frameStatus, fromServer, sameAsServer, workOf} from './frames';
+import {blockUnchecked} from './carry';
 import {advanceAfterConfirm, go} from './navigation';
 import {call, reviewerName, send, takeSuspicious} from './server';
 import {report, state, store} from './store';
@@ -36,6 +37,8 @@ export async function confirmFrame(): Promise<void> {
     }
     return;
   }
+  // Boxes "Apply previous" placed where a sign should be: the reviewer looks at each before saving.
+  if (blockUnchecked(row)) return;
   const reviewer = reviewerName();
   if (!reviewer) {
     needReviewer(key);
@@ -58,6 +61,7 @@ export async function confirmFrame(): Promise<void> {
       detections: clone(s.detections),
       site_group: s.site_group === undefined ? null : s.site_group,
       encounter_id: s.encounter_id === undefined ? null : s.encounter_id,
+      country: countryOf(row, s),
       reviewer: s.reviewer,
       review_timestamp: s.review_timestamp,
     };
@@ -126,6 +130,7 @@ export function discardChanges(): void {
         detections: clone(s.base.detections || []),
         site_group: s.base.site_group === undefined ? null : s.base.site_group,
         encounter_id: s.base.encounter_id === undefined ? null : s.base.encounter_id,
+        country: s.base.country ?? null,
         reviewer: s.base.reviewer,
         review_timestamp: s.base.review_timestamp,
         saved: true,

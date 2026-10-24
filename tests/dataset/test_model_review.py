@@ -64,7 +64,7 @@ def test_candidate_split_kind_cannot_be_relabelled_gold(tmp_path, capsys):
     split = json.loads(split_path.read_text())
     assert split['dataset_kind'] == 'training-candidate'
     assert not (tmp_path / 'splits/latest.json').exists()
-    assert set(split['assignments'].values()) == {'train', 'test', 'validation', 'route-held-out', 'hard-negative'}
+    assert set(split['assignments'].values()) == {'train', 'test', 'validation'}
     split['dataset_kind'] = 'gold'; split_path.write_text(json.dumps(split))
     code, out = invoke(capsys, 'validate-dataset', str(path), '--data-root', str(tmp_path),
                        '--dataset-kind', 'training-candidate', '--splits', str(split_path))
@@ -117,7 +117,7 @@ def _negative_source(root, i):
 
 
 def test_publish_repairs_candidate_split_pointer_and_resume_summary(tmp_path, monkeypatch):
-    # >=5 independent routes, all confirmed negatives -> build_splits succeeds.
+    # >=3 independent routes, all confirmed negatives -> build_splits succeeds.
     sources = [_negative_source(tmp_path, i) for i in range(5)]
     manifest = tmp_path / 'preannotations.jsonl'
     manifest.write_text(''.join(_json.dumps(s) + '\n' for s in sources))

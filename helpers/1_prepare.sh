@@ -4,6 +4,7 @@
 #      openpilot.distill downloads) into data/raw/routes   (nnslr link-videos)
 #   b. extracts the frames (1 per second) of the routes not extracted yet   (nnslr extract-frames)
 #   c. proposes the signs on the frames of the routes without a report     (nnslr preannotate)
+#      and reads where the car was at each frame and in which country       (nnslr gps)
 # Already done work is skipped, so it can be run after every fetch. Next: helpers/2_review.sh.
 #
 # Usage: helpers/1_prepare.sh [--jobs=<n>] [--background] [<route> ...]
@@ -72,6 +73,9 @@ prepare_route() {
     echo "$route: propongo i cartelli..."
     "$NN" preannotate --route "$route" < /dev/null >> "$log" 2>&1 \
       || { echo "$route: pre-annotazione fallita (vedi $log)"; return 1; }
+    # Where the car was at every frame and in which country (the review proposes it): not fatal.
+    "$NN" gps --route "$route" < /dev/null >> "$log" 2>&1 \
+      || echo "$route: posizione GPS non letta (vedi $log): il paese si indica a mano"
     echo "$route: pronta per la revisione"
     worked=1
   fi
@@ -154,6 +158,10 @@ else
   fi
   [ "$failed" -eq 0 ] || echo "Qualche route e' fallita: guarda i log in $LOG_DIR/"
 fi
+
+# Routes prepared before the GPS was read: their positions too (nnslr gps, quick).
+"$NN" gps --all --missing < /dev/null >> "$LOG_DIR/gps.log" 2>&1 \
+  || echo "Posizione GPS non letta per qualche route: vedi $LOG_DIR/gps.log"
 
 echo
 (cd "$ROOT" && "$PY" -m helpers.route_status)

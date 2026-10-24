@@ -74,6 +74,78 @@ def match_detections(
     }
 
 
+# The labels a person confirmed (provenance.label_basis); most labels are AI reviews.
+HUMAN_LABEL_BASIS = "human_review"
+
+
+def label_basis_counts(items: list[dict[str, Any]]) -> dict[str, int]:
+    """Evaluated samples (reader) or images (detector) by who confirmed their labels."""
+    counts = Counter(str(item.get("label_basis") or "unknown") for item in items)
+    return dict(sorted(counts.items()))
+
+
+def reader_metrics(samples: list[dict[str, Any]], classes: list[str]) -> dict[str, Any]:
+    """Accuracy, per-class support and confusion of reader samples (truth, predicted, correct)."""
+    confusion: dict[str, Counter[str]] = defaultdict(Counter)
+    support = Counter()
+    correct = Counter()
+    for sample in samples:
+        support[sample["truth"]] += 1
+        confusion[sample["truth"]][sample["predicted"]] += 1
+        if sample["correct"]:
+            correct[sample["truth"]] += 1
+    total = len(samples)
+    return {
+        "sample_count": total,
+        "accuracy": sum(correct.values()) / total if total else 0.0,
+        "unseen_truth_labels": sorted(set(support) - set(classes)),
+        "per_class": {
+            label: {
+                "support": support[label],
+                "correct": correct[label],
+                "accuracy": correct[label] / support[label],
+            }
+            for label in sorted(support)
+        },
+        "confusion": {
+            truth: dict(sorted(predictions.items()))
+            for truth, predictions in sorted(confusion.items())
+        },
+    }
+
+
+def detector_metrics(images: list[dict[str, Any]]) -> dict[str, Any]:
+    """IoU-based precision, recall, F1 and false positives per image of per-image detector results."""
+    tp = sum(image["true_positives"] for image in images)
+    fp = sum(image["false_positives"] for image in images)
+    fn = sum(image["false_negatives"] for image in images)
+    precision = tp / (tp + fp) if tp + fp else 0.0
+    recall = tp / (tp + fn) if tp + fn else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+    return {
+        "image_count": len(images),
+        "truth_box_count": tp + fn,
+        "true_positives": tp,
+        "false_positives": fp,
+        "false_negatives": fn,
+        "precision_iou": precision,
+        "recall_iou": recall,
+        "f1_iou": f1,
+        "false_positives_per_image": fp / len(images) if images else 0.0,
+    }
+
+
+def human_reviewed_metrics(items: list[dict[str, Any]], metrics) -> dict[str, Any] | None:
+    """The same metrics on the samples or images a person confirmed; None when there are none.
+
+    About nine labels out of ten are AI reviews: this is the measure on human labels only.
+    """
+    human = [item for item in items if item.get("label_basis") == HUMAN_LABEL_BASIS]
+    if not human:
+        return None
+    return {"label_basis": HUMAN_LABEL_BASIS, **metrics(human)}
+
+
 def _load_checkpoint(torch, checkpoint_path: Path, expected_task: str) -> dict[str, Any]:
     payload = torch.load(Path(checkpoint_path), map_location="cpu", weights_only=True)
     if not isinstance(payload, dict) or payload.get("task") != expected_task:
@@ -145,12 +217,6 @@ def evaluate_reader(
     model.to(device)
     model.eval()
 
-    confusion: dict[str, Counter[str]] = defaultdict(Counter)
-    support = Counter()
-    correct = Counter()
-    total = 0
-    total_correct = 0
-
     samples = []
     with torch.no_grad():
         for inputs, truth_labels, record_indices in loader:
@@ -163,13 +229,6 @@ def evaluate_reader(
                 predictions, confidences, truth_labels, record_indices.tolist()
             ):
                 predicted_label = classes[predicted_index]
-                support[truth_label] += 1
-                confusion[truth_label][predicted_label] += 1
-                total += 1
-                is_correct = predicted_label == truth_label
-                if is_correct:
-                    correct[truth_label] += 1
-                    total_correct += 1
                 row = records[record_index]
                 samples.append({
                     "annotation_id": row["annotation_id"],
@@ -177,31 +236,19 @@ def evaluate_reader(
                     "truth": truth_label,
                     "predicted": predicted_label,
                     "confidence": float(confidence),
-                    "correct": is_correct,
+                    "correct": predicted_label == truth_label,
+                    "label_basis": row.get("label_basis"),
                 })
 
-    per_class = {
-        label: {
-            "support": support[label],
-            "correct": correct[label],
-            "accuracy": correct[label] / support[label],
-        }
-        for label in sorted(support)
-    }
-    unseen_truth = sorted(set(support) - set(classes))
     return {
         "schema_version": 1,
         "task": "reader",
         "partition": partition,
-        "sample_count": total,
-        "accuracy": total_correct / total,
         "classes": classes,
-        "unseen_truth_labels": unseen_truth,
-        "per_class": per_class,
-        "confusion": {
-            truth: dict(sorted(predictions.items()))
-            for truth, predictions in sorted(confusion.items())
-        },
+        **reader_metrics(samples, classes),
+        # The same measure on the crops a person confirmed (None when the partition has none).
+        "counts_by_label_basis": label_basis_counts(samples),
+        "human_reviewed": human_reviewed_metrics(samples, lambda items: reader_metrics(items, classes)),
         "samples": samples,
         "checkpoint": str(checkpoint_path),
         "dataset_sha256": plan["dataset_sha256"],
@@ -249,7 +296,6 @@ def evaluate_detector(
     model.to(device)
     model.eval()
 
-    totals = Counter()
     image_results = []
     with torch.no_grad():
         for frame in frames:
@@ -268,14 +314,12 @@ def evaluate_detector(
                 if label == 1 and score >= score_threshold
             ]
             matched = match_detections(selected, frame["boxes"], iou_threshold=iou_threshold)
-            totals["tp"] += matched["true_positives"]
-            totals["fp"] += matched["false_positives"]
-            totals["fn"] += matched["false_negatives"]
             image_results.append({
                 "image_path": frame["image_path"],
                 "image_sha256": frame["image_sha256"],
                 "route_id": frame["route_id"],
                 "segment_index": frame["segment_index"],
+                "label_basis": frame.get("label_basis"),
                 "truth_boxes": frame["boxes"],
                 "predictions": selected,
                 "truth_count": len(frame["boxes"]),
@@ -287,24 +331,14 @@ def evaluate_detector(
                 "false_positive_details": matched["false_positive_details"],
             })
 
-    tp, fp, fn = totals["tp"], totals["fp"], totals["fn"]
-    precision = tp / (tp + fp) if tp + fp else 0.0
-    recall = tp / (tp + fn) if tp + fn else 0.0
-    f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
-
     return {
         "schema_version": 1,
         "task": "detector",
         "partition": partition,
-        "image_count": len(frames),
-        "truth_box_count": tp + fn,
-        "true_positives": tp,
-        "false_positives": fp,
-        "false_negatives": fn,
-        "precision_iou": precision,
-        "recall_iou": recall,
-        "f1_iou": f1,
-        "false_positives_per_image": fp / len(frames),
+        **detector_metrics(image_results),
+        # The same measure on the frames a person confirmed (None when the partition has none).
+        "counts_by_label_basis": label_basis_counts(image_results),
+        "human_reviewed": human_reviewed_metrics(image_results, detector_metrics),
         "score_threshold": score_threshold,
         "iou_threshold": iou_threshold,
         "checkpoint": str(checkpoint_path),

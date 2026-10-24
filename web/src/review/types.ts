@@ -22,8 +22,15 @@ export interface Detection {
   occlusion?: string;
   temporary?: boolean | null;
   variable_display?: boolean | null;
+  /** What an "Other sign" is: town_entry, direction_right... (catalog.SIGN_KIND_GROUPS); null: not said. */
+  sign_type?: string | null;
   notes?: string | null;
   detection_id?: string;
+  /** "Apply previous": the frame its labels come from. The server drops it when saving. */
+  carried_from?: string;
+  /** "Apply previous": the box is where the sign should be, a guess. No save accepts it until the reviewer has
+   * looked (moved the box onto the sign, or pressed "Here") and the flag is gone. */
+  check_position?: boolean;
 }
 
 /** One frame of the pre-annotation report. The rows carry more fields (hashes, models...): the JSONL export
@@ -39,6 +46,12 @@ export interface FrameRow {
   detections?: Detection[];
   site_group?: string | null;
   encounter_id?: string | null;
+  /** Where the car was (nnslr gps), null without a fix; missing when the GPS was not read for the route. */
+  gps?: {latitude: number; longitude: number; speed_mps: number | null; bearing_deg: number | null} | null;
+  /** The country of that position (ISO code), the one saved unless the reviewer picks another. */
+  country_proposed?: string | null;
+  /** gps: from this frame's position; nearest_fix: from the nearest frame with one. */
+  country_from?: string | null;
 }
 
 /** One sign seen by the second reading (nnslr_tools.review_hints). */
@@ -88,6 +101,8 @@ export interface Payload {
   hint_stats: HintStats;
   suspicious: Suspicious;
   routes: RouteLink[];
+  /** The countries the review knows, code: English name (nnslr_tools.gps.country_names). */
+  countries?: Record<string, string>;
 }
 
 /** One saved frame as the server sends it (review_db.public_review). */
@@ -106,6 +121,7 @@ export interface ServerReview {
   detections: Detection[];
   site_group: string | null;
   encounter_id: string | null;
+  country?: string | null;
 }
 
 /** GET /api/route/<id>/reviews */
@@ -124,6 +140,23 @@ export interface SaveAnswer {
   review: ServerReview;
   confirmed_count: number;
   suspicious: Suspicious;
+}
+
+/** POST /api/route/<id>/frame/<key>/apply-previous: the boxes of the frame with the previous one carried over
+ * (review_service.apply_previous). Nothing is saved. */
+export interface CarryAnswer {
+  frame_key: string;
+  source_frame_key: string;
+  detections: Detection[];
+  matched: number;
+  estimated: number;
+  dropped: number;
+  kept: number;
+  /** Model boxes removed: the same sign as a carried box. */
+  duplicates: number;
+  /** 1-based numbers of the boxes to check. */
+  to_check: number[];
+  message: string;
 }
 
 /** An error answer of the API (400, 403, 409 revision_conflict or stale_report...). */
@@ -157,6 +190,8 @@ export interface FrameEdit {
   review_timestamp?: string | null | undefined;
   site_group?: string | null | undefined;
   encounter_id?: string | null | undefined;
+  /** The country picked for the frame; undefined: the one its GPS gives (FrameRow.country_proposed). */
+  country?: string | null | undefined;
   server_confirmed?: boolean | undefined;
   base?: ConfirmedCopy | null | undefined;
 }
@@ -171,7 +206,7 @@ export type FrameStatus = 'todo' | 'dirty' | 'saving' | 'error' | 'done';
 /** body[data-server] for whoever drives the page. */
 export type ServerState = 'offline' | 'loading' | 'ready' | 'stale' | 'error';
 
-export type SaveResult = 'saving' | 'ok' | 'error' | 'unchanged' | 'need-reviewer' | 'withdrawn';
+export type SaveResult = 'saving' | 'ok' | 'error' | 'unchanged' | 'need-reviewer' | 'need-check' | 'withdrawn';
 
 /** The outcome of the last save, as body data attributes. */
 export interface LastSave {
@@ -194,7 +229,9 @@ export type Corner = 'nw' | 'ne' | 'sw' | 'se';
 /** The two pictures a pointer can work on: the photo and the zoom of the selected box. */
 export type Surface = 'scene' | 'zoom';
 
-/** A pointer drag on the photo or on the zoom: drawing a new box, or moving a corner of the selected one. */
+/** A pointer drag on the photo or on the zoom: drawing a new box, moving a corner of the selected one, or
+ * moving the whole selected box (box: where it was when the drag started). */
 export type Drag =
   | {kind: 'draw'; svg: Surface; start: Point}
-  | {kind: 'resize'; svg: Surface; corner: Corner; moved: boolean};
+  | {kind: 'resize'; svg: Surface; corner: Corner; moved: boolean}
+  | {kind: 'move'; svg: Surface; start: Point; box: Box; moved: boolean};

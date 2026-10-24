@@ -23,6 +23,9 @@ import threading
 from pathlib import Path
 
 from nnslr_tools.annotations import ENUMS, LABEL_KEYS
+from nnslr_tools.carry_over import carry_over, unchecked_boxes
+from nnslr_tools.sign_types import SIGN_TYPES
+from nnslr_tools.gps import load_positions, positions_path
 from nnslr_tools.manifest import parse_route_id
 from nnslr_tools.preannotate import PreannotationError, _inside
 from nnslr_tools.review_db import (AI_REVIEWER_PREFIX, MAX_DETECTIONS_PER_FRAME, MAX_REVIEWER_LENGTH,
@@ -31,6 +34,7 @@ from nnslr_tools.review_db import (AI_REVIEWER_PREFIX, MAX_DETECTIONS_PER_FRAME,
 from nnslr_tools.review_hints import frame_sizes_of, load_hints, suspicious_frames
 from speed_vision_core.types import MAX_VALUE_KPH, MIN_VALUE_KPH
 
+GPS_FIELDS = ('latitude', 'longitude', 'speed_mps', 'bearing_deg')
 FRAME_FILTERS = ('unreviewed', 'reviewed', 'suspicious', 'with_proposals', 'all')
 DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE = 200
@@ -149,20 +153,43 @@ class ReviewService:
     # ---------- reports (read-only) ----------
 
     def report(self, route: str) -> tuple[Path, list[dict], dict]:
-        """Current report of a route: directory, frame rows, rows by frame_key. Run directories never change."""
+        """Current report of a route: directory, frame rows, rows by frame_key. Run directories never change.
+
+        Each row also has ``gps`` (latitude, longitude, speed, bearing, or None) and ``country_proposed`` (from
+        the GPS, or None) when ``nnslr gps`` has run for the route (nnslr_tools.gps); they follow that file.
+        """
         from nnslr_tools.review import latest_report
         directory = latest_report(self.root, route)
-        key = str(directory)
+        positions = positions_path(self.root, route)
+        try:
+            stamp = positions.stat().st_mtime_ns
+        except OSError:
+            stamp = None
+        key = (str(directory), stamp)
         with self._reports_lock:
             cached = self._reports.get(key)
         if cached is None:
             from nnslr_tools.review import report_rows
             rows = report_rows(directory)
+            located = load_positions(self.root, route) if stamp is not None else {}
             by_key = {}
             for row in rows:
+                if isinstance(row, dict):
+                    position = located.get(row.get('frame_key'))
+                    row['gps'] = None
+                    row['country_proposed'] = None
+                    row['country_from'] = None
+                    if position is not None and position.get('latitude') is not None:
+                        row['gps'] = {name: position.get(name) for name in GPS_FIELDS}
+                    if position is not None:
+                        row['country_proposed'] = position.get('country')
+                        row['country_from'] = position.get('country_from')
                 by_key[row.get('frame_key')] = row
             cached = (rows, by_key)
             with self._reports_lock:
+                # One entry per report: the rows of an older positions file go.
+                for old in [item for item in self._reports if item[0] == key[0]]:
+                    del self._reports[old]
                 self._reports[key] = cached
         return directory, cached[0], cached[1]
 
@@ -395,6 +422,8 @@ class ReviewService:
                       'preview_format': 'jpeg', 'original_format': 'png',
                       'coordinates': 'bbox_xyxy = [x1, y1, x2, y2] in pixels of the original image'},
             'proposals': copy.deepcopy(proposals),
+            'gps': copy.deepcopy(row.get('gps')),
+            'country_proposed': row.get('country_proposed'),
             'second_reading': copy.deepcopy(snapshot.hints_by_frame.get(key, [])),
             'suspicious_reasons': reasons,
             'review': saved,
@@ -598,6 +627,67 @@ class ReviewService:
                                                       f'and at least {MIN_CROP_SIDE} pixels on each side.')
         return [x1, y1, x2, y2]
 
+    # ---------- apply previous ----------
+
+    def apply_previous(self, route, frame_key, body=None) -> dict:
+        """"Apply previous": the boxes confirmed on the frame before, carried onto this one. Saves nothing.
+
+        ``body`` may hold ``run_id`` (checked when given) and ``detections``, the boxes of this frame as
+        they are now (default: the model proposals). See :mod:`nnslr_tools.carry_over`: a box placed
+        where the sign should be has ``check_position: true`` and no save accepts it until that is gone.
+        """
+        key = frame_key_of(frame_key)
+        if body is None:
+            body = {}
+        if not isinstance(body, dict):
+            raise ReviewRejected(400, 'invalid_schema', 'The request must be a JSON object.')
+        snapshot = self.snapshot(route)
+        row = snapshot.row(key)
+        if body.get('run_id') is not None and body.get('run_id') != snapshot.run_id:
+            raise ReviewRejected(409, 'stale_report', 'The report of this route was rebuilt: read the frame again.')
+        position = snapshot.position[key]
+        source_key = snapshot.order[position - 1] if position > 0 else None
+        # The frame before in the timeline, in this segment or at the end of the one before.
+        if source_key is None or snapshot.by_key[source_key]['segment_index'] < row['segment_index'] - 1:
+            raise ReviewRejected(409, 'no_previous_frame', 'This frame has no frame just before it.')
+        source = snapshot.reviews.get(source_key)
+        if source is None or not source['confirmed']:
+            raise ReviewRejected(409, 'previous_not_confirmed',
+                                 f'The previous frame ({source_key}) is not confirmed: confirm it first.')
+        proposals = row.get('detections')
+        if not isinstance(proposals, list):
+            proposals = []
+        current = body.get('detections')
+        if current is None:
+            current = proposals
+        if not isinstance(current, list) or len(current) > MAX_DETECTIONS_PER_FRAME:
+            raise ReviewRejected(400, 'invalid_schema',
+                                 f'detections must be a list of at most {MAX_DETECTIONS_PER_FRAME} boxes.')
+        for item in current:
+            if not isinstance(item, dict):
+                raise ReviewRejected(400, 'invalid_schema', 'Every box must be a JSON object.')
+        result = carry_over(source['payload'].get('detections', []), current, width=row.get('width') or 0,
+                            height=row.get('height') or 0, source_key=source_key, proposals=proposals)
+        to_check = unchecked_boxes(result['detections'])
+        review = snapshot.reviews.get(key)
+        return {
+            'route_id': snapshot.route,
+            'run_id': snapshot.run_id,
+            'frame_key': key,
+            'source_frame_key': source_key,
+            'source_revision': source['revision'],
+            'source_reviewer_kind': source['reviewer_kind'],
+            'detections': result['detections'],
+            'matched': result['matched'],
+            'estimated': result['estimated'],
+            'dropped': result['dropped'],
+            'kept': result['kept'],
+            'duplicates': result['duplicates'],
+            'to_check': to_check,
+            'message': _carry_message(source_key, result),
+            'save': {'run_id': snapshot.run_id, 'base_revision': review['revision'] if review else 0},
+        }
+
     # ---------- saving ----------
 
     def save_review(self, route, frame_key, body, *, client: str, channel: str) -> dict:
@@ -643,6 +733,28 @@ class ReviewService:
                      f'{review["channel"]})')
 
 
+def _carry_message(source_key: str, result: dict) -> str:
+    """"From 3/27: 2 signs found here …" for the page and for an agent."""
+    parts = []
+    if result['matched']:
+        parts.append(f"{result['matched']} {'sign' if result['matched'] == 1 else 'signs'} found here and "
+                     f"labelled as there")
+    if result['kept']:
+        parts.append(f"{result['kept']} already changed here, left as {'it is' if result['kept'] == 1 else 'they are'}")
+    if result['estimated']:
+        parts.append(f"{result['estimated']} placed where {'it' if result['estimated'] == 1 else 'they'} should be: "
+                     f"check {'it' if result['estimated'] == 1 else 'each'} (move it onto the sign, or remove it "
+                     f"if it is gone)")
+    if result['dropped']:
+        parts.append(f"{result['dropped']} left the picture")
+    if result.get('duplicates'):
+        parts.append(f"{result['duplicates']} model {'box' if result['duplicates'] == 1 else 'boxes'} on a sign "
+                     f"that already has one removed")
+    if not parts:
+        return f'From {source_key}: no sign to carry over.'
+    return f'From {source_key}: ' + '; '.join(parts) + '.'
+
+
 def _with_detection_ids(detections: list, channel: str) -> list:
     """The boxes with a detection_id each: a new box without one gets "manual-<channel>-<n>"."""
     taken = set()
@@ -678,6 +790,8 @@ def review_schema() -> dict:
             'confirmed': 'true saves the boxes below; false withdraws the confirmation (only if asked)',
             'detections': f'list of at most {MAX_DETECTIONS_PER_FRAME} boxes; [] confirms that the frame has no '
                           f'relevant sign. A proposal left out of the list is recorded as rejected',
+            'country': 'ISO 3166-1 alpha-2 code of the country of the frame ("CH", "IT", "PL"...), or null; '
+                       'omitted: country_proposed of the frame, from its GPS position',
             'site_group': 'string or null (optional)',
             'encounter_id': 'string or null (optional)',
             'override_human_review': 'boolean, default false. An AI review never changes or withdraws a frame a '
@@ -698,13 +812,24 @@ def review_schema() -> dict:
             'temporary': 'true, false or null',
             'variable_display': 'true, false or null',
             'notes': 'string, possibly empty; never null',
+            'sign_type': 'only with family other_sign: what the sign is, one of ' + ', '.join(SIGN_TYPES)
+                         + '; null or omitted when not said',
+            'check_position': 'only in the answer of apply_previous: true on a box placed where a sign of the '
+                              'previous frame should be. A save with it still true is refused '
+                              '(400 position_not_checked): look at the image, fix bbox_xyxy or drop the box, '
+                              'then send it without check_position',
+            'carried_from': 'only in the answer of apply_previous: the frame the labels come from (ignored when '
+                            'saving)',
         },
         'label_fields': list(LABEL_KEYS) + ['notes'],
         'frame_filters': list(FRAME_FILTERS),
         'rules': [
             'Give a value only when the number is readable in this frame; never copy it from neighbours or from '
-            'the second reading. Unreadable number: value_kph null (family maximum_speed); not even the kind of '
-            'sign: family "unreadable" with a note.',
+            'the second reading by hand. Unreadable number: value_kph null (family maximum_speed); not even the '
+            'kind of sign: family "unreadable" with a note.',
+            'apply_previous carries the labels confirmed on the previous frame onto the same signs here (the '
+            'boxes move and grow as the car gets closer). It is a starting point: check every carried box in '
+            'this image (still there, same value, same road) and fix or drop it before saving.',
             'End of limit ("Fine limitazione"): family "cancellation", value_kph null, crossed number in notes.',
             'Zone ("Zona 30"): family "zone". Variable or lit panels: "variable_display"; off, blank or '
             'overexposed: value_kph null and a note.',
@@ -722,7 +847,8 @@ def review_schema() -> dict:
             '400': 'invalid request or value not allowed (error tells which)',
             '401': 'missing or wrong token (HTTP only)',
             '404': 'unknown route or frame',
-            '409': 'stale_report, revision_conflict or human_review_exists: read the frame again',
+            '409': 'stale_report, revision_conflict or human_review_exists: read the frame again; apply_previous: '
+                   'previous_not_confirmed or no_previous_frame',
             '428': 'base_revision_required',
         },
         'instructions': 'review_instructions.md in the repository (sections 4-5) has the full rules.',

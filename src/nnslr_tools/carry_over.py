@@ -1,0 +1,320 @@
+"""Apply previous: the boxes confirmed on the previous frame, carried onto the next one.
+
+Frames are one second apart, so on a road the same signs are usually still there, bigger and further
+from the centre of the view. For every box confirmed on the previous frame:
+
+- when a box of this frame is the same sign (it moved and grew as the car got closer), that box keeps
+  its position and takes the labels of the previous one (family, value, road, panel...);
+- when no box of this frame is that sign, a new box is made where the sign should be now: moved like
+  the nearest sign that was found, or at its old position when none was. Its position is a guess, so
+  it carries ``check_position: true`` and no save accepts it until the reviewer has looked at it
+  (moved it onto the sign, or removed it) and the flag is gone.
+
+Boxes of this frame that match nothing stay as they are. Boxes the reviewer already changed keep
+their labels. Signs only grow and move outwards from the point the road runs to (``FOCUS``), which is
+what the matching expects; it was measured on 359 pairs of confirmed boxes one frame apart.
+
+The page, the REST API and the MCP server all call :func:`carry_over` through
+``ReviewService.apply_previous``; nothing is saved here.
+"""
+from __future__ import annotations
+
+import copy
+import math
+
+# Where the road runs to, as a fraction of width and height: signs move away from it as they come
+# closer (median of the confirmed pairs: x 0.52, y 0.53).
+FOCUS = (0.52, 0.53)
+# How much a sign may grow from one frame to the next (the pairs: 1.0 to 2.0, a few up to 3).
+MIN_SCALE = 0.75
+MAX_SCALE = 3.5
+# How far the whole view may slide in a turn, as a fraction of the width, and what a slide costs: a slide
+# of TURN_COST * width costs as much as one pair at the edge of its tolerance.
+MAX_TURN = 0.35
+TURN_COST = 0.3
+# The labels a box takes from the previous frame. Visibility and occlusion belong to this picture.
+CARRIED_KEYS = ('family', 'value_kph', 'applicability', 'supplementary_panel', 'temporary', 'variable_display',
+                'sign_type', 'notes')
+# The labels that tell whether the reviewer already changed a box (the review page's fields).
+LABEL_KEYS = ('family', 'value_kph', 'applicability', 'supplementary_panel', 'visibility', 'occlusion',
+              'temporary', 'variable_display', 'sign_type')
+VALUE_FAMILIES = ('maximum_speed', 'cancellation', 'zone', 'variable_display', 'road_marking_candidate')
+CHECK_FIELD = 'check_position'
+FROM_FIELD = 'carried_from'
+# A carried box mostly out of the picture is dropped: the car has passed the sign.
+MIN_INSIDE = 0.3
+MIN_SIDE = 4
+# A box placed where a sign should be takes a box of this frame covering this much of it (overlap of the
+# smaller box); a leftover model box this much over a carried one is a duplicate of it.
+SNAP = 0.5
+DUPLICATE = 0.6
+
+
+def _box(item) -> list[float] | None:
+    box = item.get('bbox_xyxy') if isinstance(item, dict) else None
+    if not isinstance(box, list) or len(box) != 4:
+        return None
+    for value in box:
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+            return None
+    if box[2] <= box[0] or box[3] <= box[1]:
+        return None
+    return [float(value) for value in box]
+
+
+def _center(box: list[float]) -> tuple[float, float]:
+    return (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+
+
+def _size(box: list[float]) -> float:
+    return math.sqrt((box[2] - box[0]) * (box[3] - box[1]))
+
+
+def _pair(old: list[float], new: list[float], focus: tuple[float, float]):
+    """(scale, shift, moved) of ``new`` seen as the sign ``old`` one frame later, or None when it cannot
+    be: a sign does not shrink nor grow beyond MAX_SCALE in a second. ``shift`` is how far ``new`` is from
+    where the growth alone puts it: the turn of the car (the whole view slides) plus the error."""
+    scale = _size(new) / _size(old)
+    if scale < MIN_SCALE or scale > MAX_SCALE:
+        return None
+    old_center = _center(old)
+    new_center = _center(new)
+    expected = (focus[0] + scale * (old_center[0] - focus[0]), focus[1] + scale * (old_center[1] - focus[1]))
+    shift = (new_center[0] - expected[0], new_center[1] - expected[1])
+    return scale, shift, math.hypot(new_center[0] - old_center[0], new_center[1] - old_center[1])
+
+
+def _cost(pair, new: list[float], turn: tuple[float, float], unit: float) -> float | None:
+    """How far a pair is from the move expected with the view slid by ``turn``: <= 1, or None."""
+    scale, shift, moved = pair
+    # The focus is a guess (slopes, lane changes): the further a sign moved, the larger the error allowed.
+    tolerance = 0.8 * _size(new) + 0.25 * moved + 10 * unit
+    cost = math.hypot(shift[0] - turn[0], shift[1] - turn[1]) / tolerance
+    if cost > 1:
+        return None
+    return cost
+
+
+def _assign(olds: list, news: list, candidates: dict, turn: tuple[float, float], unit: float):
+    """Greedy pairs, cheapest first: ({old index: (new index, scale, shift)}, total cost)."""
+    pairs = []
+    for (i, j), pair in candidates.items():
+        cost = _cost(pair, _box(news[j]), turn, unit)
+        if cost is not None:
+            pairs.append((cost * _same_sign_bonus(olds[i], news[j]), i, j))
+    pairs.sort()
+    taken_old = {}
+    taken_new = set()
+    total = 0.0
+    for cost, i, j in pairs:
+        if i in taken_old or j in taken_new:
+            continue
+        scale, shift, moved = candidates[(i, j)]
+        taken_old[i] = (j, scale, shift)
+        taken_new.add(j)
+        total = total + cost
+    return taken_old, total
+
+
+def _same_sign_bonus(old: dict, new: dict) -> float:
+    """Lower cost when the box of this frame already reads the same sign."""
+    factor = 1.0
+    if new.get('family') == old.get('family'):
+        factor = factor * 0.8
+    value = old.get('value_kph')
+    if value is not None and new.get('value_kph') == value:
+        factor = factor * 0.6
+    return factor
+
+
+def _edited(item: dict, proposals: dict) -> bool:
+    """True when the reviewer already changed this box (or drew it): its labels are theirs."""
+    original = proposals.get(item.get('detection_id'))
+    if original is None:
+        return True
+    for key in LABEL_KEYS:
+        if item.get(key) != original.get(key):
+            return True
+    return False
+
+
+def _new_id(taken: set, source_key: str) -> str:
+    base = 'previous-' + source_key.replace('/', '-')
+    number = 1
+    while base + '-' + str(number) in taken:
+        number = number + 1
+    taken.add(base + '-' + str(number))
+    return base + '-' + str(number)
+
+
+def carry_over(previous: list, current: list, *, width: float, height: float, source_key: str,
+               proposals: list | None = None) -> dict:
+    """The boxes of this frame after "Apply previous", and what happened to each previous box.
+
+    ``previous``: the confirmed boxes of the previous frame. ``current``: the boxes of this frame as
+    they are now (the model proposals, or the reviewer's working copy). ``proposals``: the model
+    proposals of this frame, to tell boxes the reviewer changed (kept as they are) from the others.
+    Returns {'detections', 'matched', 'estimated', 'dropped', 'kept'}; a carried box has
+    ``carried_from`` (the previous frame key) and, when its position is a guess, ``check_position``.
+    """
+    unit = width / 1344 if width else 1.0
+    focus = (FOCUS[0] * width, FOCUS[1] * height)
+    by_id = {}
+    for item in proposals or []:
+        if isinstance(item, dict) and isinstance(item.get('detection_id'), str):
+            by_id[item['detection_id']] = item
+    result = [copy.deepcopy(item) for item in current if isinstance(item, dict)]
+    olds = [item for item in previous if isinstance(item, dict) and _box(item) is not None]
+
+    candidates = {}
+    for i, old in enumerate(olds):
+        for j, new in enumerate(result):
+            new_box = _box(new)
+            if new_box is None:
+                continue
+            pair = _pair(_box(old), new_box, focus)
+            if pair is not None:
+                candidates[(i, j)] = pair
+    # In a turn the whole view slides: try no slide and the slide each candidate pair implies, keep the one
+    # that explains most signs (then the smallest slide). One sign alone can always be explained by its slide:
+    # a large one only when nothing else is there, and it still has to have grown like a sign coming closer.
+    turns = [(0.0, 0.0)] + [pair[1] for pair in candidates.values()]
+    best = None
+    for turn in turns:
+        slide = math.hypot(turn[0], turn[1])
+        if slide > MAX_TURN * width:
+            continue
+        taken_old, total = _assign(olds, result, candidates, turn, unit)
+        score = (len(taken_old), -(total + slide / (TURN_COST * width)))
+        if best is None or score > best[0]:
+            best = (score, taken_old)
+    taken_old = best[1] if best is not None else {}
+
+    matched = 0
+    kept = 0
+    for i, (j, scale, shift) in taken_old.items():
+        target = result[j]
+        if _edited(target, by_id):
+            kept = kept + 1
+            continue
+        _take_labels(target, olds[i], source_key)
+        matched = matched + 1
+
+    ids = {item.get('detection_id') for item in result if isinstance(item.get('detection_id'), str)}
+    ids.update(by_id)
+    taken_new = {j for j, scale, shift in taken_old.values()}
+    estimated = 0
+    dropped = 0
+    for i, old in enumerate(olds):
+        # A box the reviewer marked "not a sign" is only carried onto a box of this frame.
+        if i in taken_old or old.get('family') == 'not_a_sign':
+            continue
+        box = _box(old)
+        if taken_old:
+            # Moved like the nearest sign that was found (same gantry, same distance: same move).
+            center = _center(box)
+            nearest = min(taken_old, key=lambda k: math.dist(center, _center(_box(olds[k]))))
+            j, scale, shift = taken_old[nearest]
+            moved = (focus[0] + scale * (center[0] - focus[0]) + shift[0],
+                     focus[1] + scale * (center[1] - focus[1]) + shift[1])
+            half_w = (box[2] - box[0]) * scale / 2
+            half_h = (box[3] - box[1]) * scale / 2
+            box = [moved[0] - half_w, moved[1] - half_h, moved[0] + half_w, moved[1] + half_h]
+        area = (box[2] - box[0]) * (box[3] - box[1])
+        clipped = [max(0.0, box[0]), max(0.0, box[1]), min(float(width), box[2]), min(float(height), box[3])]
+        inside = max(0.0, clipped[2] - clipped[0]) * max(0.0, clipped[3] - clipped[1])
+        if clipped[2] - clipped[0] < MIN_SIDE or clipped[3] - clipped[1] < MIN_SIDE or inside < MIN_INSIDE * area:
+            dropped = dropped + 1
+            continue
+        # A box of this frame where the sign should be (the growth was off, a proposal smaller than the
+        # reviewer's box): that is the sign, at a position the model found.
+        snap = _covering(clipped, result, taken_new)
+        if snap is not None:
+            taken_new.add(snap)
+            if _edited(result[snap], by_id):
+                kept = kept + 1
+            else:
+                _take_labels(result[snap], old, source_key)
+                matched = matched + 1
+            continue
+        item = {'bbox_xyxy': [round(value, 1) for value in clipped], 'score': None, 'model_label': None,
+                'class_id': None, 'review_state': 'pending', 'visibility': 'unknown', 'occlusion': 'unknown'}
+        for key in CARRIED_KEYS:
+            if key in old:
+                item[key] = copy.deepcopy(old[key])
+        item['value_state'] = 'unknown' if item.get('value_kph') is None else 'reviewed'
+        item['detection_id'] = _new_id(ids, source_key)
+        item[FROM_FIELD] = source_key
+        item[CHECK_FIELD] = True
+        result.append(item)
+        estimated = estimated + 1
+
+    # A model box left over on a sign that already has its carried box is the same sign twice: the
+    # reviewer would delete it (a proposal left out is recorded as rejected).
+    duplicates = []
+    for j, item in enumerate(result):
+        if j in taken_new or item.get(FROM_FIELD) or _edited(item, by_id) or _box(item) is None:
+            continue
+        for other in result:
+            if other.get(FROM_FIELD) and _box(other) is not None and _overlap(_box(item), _box(other)) >= DUPLICATE:
+                duplicates.append(j)
+                break
+    for j in reversed(duplicates):
+        del result[j]
+    return {'detections': result, 'matched': matched, 'estimated': estimated, 'dropped': dropped, 'kept': kept,
+            'duplicates': len(duplicates)}
+
+
+def _take_labels(target: dict, old: dict, source_key: str) -> None:
+    """The labels of the previous box on a box of this frame, whose position stays."""
+    # Closer, a number unreadable before may be readable now: a value the model reads here is kept.
+    read_here = target.get('value_kph')
+    keep_reading = (old.get('value_kph') is None and isinstance(read_here, int) and not isinstance(read_here, bool)
+                    and old.get('family') in VALUE_FAMILIES + ('unreadable',)
+                    and target.get('family') in VALUE_FAMILIES)
+    reading = (target.get('family'), read_here)
+    for key in CARRIED_KEYS:
+        if key in old:
+            target[key] = copy.deepcopy(old[key])
+    if keep_reading:
+        if old.get('family') == 'unreadable':
+            target['family'] = reading[0]
+        target['value_kph'] = reading[1]
+    target['value_state'] = 'unknown' if target.get('value_kph') is None else 'reviewed'
+    target.pop(CHECK_FIELD, None)
+    target[FROM_FIELD] = source_key
+
+
+def _overlap(a: list[float], b: list[float]) -> float:
+    """Shared area over the area of the smaller box (the page's overlap): 1 when one holds the other."""
+    w = min(a[2], b[2]) - max(a[0], b[0])
+    h = min(a[3], b[3]) - max(a[1], b[1])
+    if w <= 0 or h <= 0:
+        return 0.0
+    smaller = min((a[2] - a[0]) * (a[3] - a[1]), (b[2] - b[0]) * (b[3] - b[1]))
+    return w * h / smaller if smaller > 0 else 0.0
+
+
+def _covering(box: list[float], boxes: list, taken: set) -> int | None:
+    """The free box of this frame that is where ``box`` was placed, of a similar size, or None."""
+    best = None
+    for j, item in enumerate(boxes):
+        other = _box(item)
+        if j in taken or other is None:
+            continue
+        ratio = _size(other) / _size(box)
+        share = _overlap(box, other)
+        if share >= SNAP and 0.5 <= ratio <= 2 and (best is None or share > best[0]):
+            best = (share, j)
+    return None if best is None else best[1]
+
+
+def unchecked_boxes(detections) -> list[int]:
+    """1-based numbers of the boxes still waiting for their position to be checked."""
+    numbers = []
+    if not isinstance(detections, list):
+        return numbers
+    for index, item in enumerate(detections):
+        if isinstance(item, dict) and item.get(CHECK_FIELD):
+            numbers.append(index + 1)
+    return numbers

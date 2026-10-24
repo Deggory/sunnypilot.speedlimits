@@ -1,8 +1,10 @@
-// Keyboard shortcuts: ← → frame, Enter confirm, N new box, H second reading, Del (or Backspace) remove, Esc cancel.
+// Keyboard shortcuts: ← → frame (with Shift: the frame before or after in the filter), Enter confirm, N new box, P apply previous, H second reading, Del (or Backspace)
+// remove, Esc cancel.
 import {onBeforeUnmount, onMounted} from 'vue';
+import {applyPrevious} from './carry';
 import {confirmFrame} from './confirm';
 import {cancelAll, removeSelected, toggleDrawing, toggleHints} from './edits';
-import {go} from './navigation';
+import {go, step} from './navigation';
 import {report, state} from './store';
 
 // Enter on these buttons just pressed with the mouse still confirms, as the shortcut list says.
@@ -37,11 +39,13 @@ export function useKeyboard(): void {
     switch (event.key) {
       case 'ArrowLeft':
         event.preventDefault();
-        go(-1);
+        if (event.shiftKey) go(-1);
+        else step(-1);
         break;
       case 'ArrowRight':
         event.preventDefault();
-        go(1);
+        if (event.shiftKey) go(1);
+        else step(1);
         break;
       case 'Enter':
         event.preventDefault();
@@ -51,6 +55,13 @@ export function useKeyboard(): void {
       case 'N':
         event.preventDefault();
         toggleDrawing();
+        break;
+      case 'p':
+      case 'P':
+        if (report.apiBase) {
+          event.preventDefault();
+          void applyPrevious();
+        }
         break;
       case 'h':
       case 'H':

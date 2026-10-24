@@ -36,8 +36,15 @@ def test_the_dataset_summary_counts_frames_objects_families_and_reviewers(root, 
     assert {item['label'] for item in summary['families']} == {'Speed limit', 'Not a sign', 'Other sign'}
     assert summary['per_route'][0] == {'route': 'r1', 'frames': 1, 'objects': 2, 'speed_signs': 1, 'human': 1, 'ai': 1}
     assert summary['split']['counts'] == {'train': 2, 'test': 1} and summary['split']['warnings'] == ['w']
+    # An import made before changed frames were replaced: they were left unapplied.
     assert summary['last_import'] == {'at': summary['last_import']['at'], 'new_frames': 1, 'already': 4,
-                                      'changed_after_import': 2, 'warnings': []}
+                                      'changed_after_import': 2, 'replaced_frames': 0, 'removed_frames': 0,
+                                      'warnings': []}
+    (root / 'logs' / 'import.json').write_text(json.dumps({
+        'imported_frame_count': 1, 'already_imported_frame_count': 4, 'replaced_frame_count': 2,
+        'changed_after_import': ['a', 'b'], 'removed_withdrawn_frame_count': 3}))
+    imported = Panel(root, repo=checkout).dataset_summary()['last_import']
+    assert (imported['changed_after_import'], imported['replaced_frames'], imported['removed_frames']) == (0, 2, 3)
 
 
 def test_training_starts_list_imagenet_random_stable_and_finished_runs(root, checkout):

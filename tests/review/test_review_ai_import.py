@@ -250,7 +250,9 @@ def test_page_export_of_an_ai_review_imports_like_the_database(site, capsys):
     assert restored['reviewer_kind'] == 'ai' and restored['channel'] == 'rest'
     body = {'reviewer': restored['reviewer'], 'detections': restored['detections'], 'site_group': None,
             'encounter_id': None}
-    exported = page_export_row(rows['0/0'], body, restored['review_timestamp'], reviewer_kind='ai',
+    # The row as the server gives it to the page: with its GPS position and proposed country (none here).
+    row = dict(rows['0/0'], gps=None, country_proposed=None, country_from=None)
+    exported = page_export_row(row, body, restored['review_timestamp'], reviewer_kind='ai',
                                channel=restored['channel'])
     assert exported == review['payload']
     page = server.request('GET', f'/route/{ROUTE}/')[2].decode()

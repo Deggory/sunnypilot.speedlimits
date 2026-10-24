@@ -2,10 +2,10 @@
 // The editor of the selected box: zoom (its corners move the box too), speed signs, other value, type, road,
 // details.
 import {computed, ref, useTemplateRef, watchEffect} from 'vue';
-import {BOOLEAN_FIELDS, FAMILIES, QUICK_VALUES, ROADS, SELECT_FIELDS, familyHasValue, type BooleanField,
-  type SelectField} from './catalog';
+import {BOOLEAN_FIELDS, FAMILIES, QUICK_VALUES, ROADS, SELECT_FIELDS, SIGN_KIND_GROUPS, familyHasValue,
+  type BooleanField, type SelectField} from './catalog';
 import {coarsePointer, releaseFocus} from './dom';
-import {setFamily, setField, setValue} from './edits';
+import {setFamily, setField, setKind, setValue} from './edits';
 import {vFill} from './fill';
 import {handlesOf, sceneScale, zoomView, type Rect} from './overlay';
 import {finishDrag, onPointerDown, onPointerMove, onTouchStart} from './pointer';
@@ -41,7 +41,7 @@ const box = computed(() => {
   const b = props.detection?.bbox_xyxy;
   return b ? {x: b[0], y: b[1], width: b[2] - b[0], height: b[3] - b[1]} : null;
 });
-const resizing = computed(() => state.drag?.kind === 'resize' && state.drag.svg === 'zoom');
+const resizing = computed(() => (state.drag?.kind === 'resize' || state.drag?.kind === 'move') && state.drag.svg === 'zoom');
 
 const usual = FAMILIES.filter((family) => !family.minor);
 const minor = FAMILIES.filter((family) => family.minor);
@@ -139,6 +139,15 @@ function booleanChanged(key: BooleanField, event: Event): void {
               :aria-pressed="detection?.family === family.id" :data-family="family.id"
               :title="family.id === 'not_a_sign' ? 'Stays as a negative example; to remove a wrong box use ✕' : undefined"
               @click="setFamily(family.id); releaseFocus($event)">{{ family.label }}</button>
+    </div>
+    <!-- Other signs by kind: a button makes the box an "Other sign" of that kind. -->
+    <div class="kinds" id="signKinds">
+      <div v-for="group in SIGN_KIND_GROUPS" :key="group.label" class="kind-group" role="group" :aria-label="group.label">
+        <span class="kind-group-label">{{ group.label }}</span>
+        <button v-for="kind in group.kinds" :key="kind.id" type="button" class="chip kind"
+                :aria-pressed="detection?.family === 'other_sign' && detection?.sign_type === kind.id"
+                :data-kind="kind.id" @click="setKind(kind.id); releaseFocus($event)">{{ kind.chip }}</button>
+      </div>
     </div>
     <p class="field-label">Road</p>
     <div class="segmented" id="roads" role="group" aria-label="Which road it applies to">

@@ -63,3 +63,25 @@ def test_reclassify_codex_reviews_as_ai(tmp_path, capsys):
             assert provenance['review_channel'] == 'web'
         else:
             assert record['reviewer'] == 'Cristian' and provenance['label_basis'] == 'human_review'
+
+
+def test_frames_reclassified_after_their_import_are_replaced_as_ai_reviews(tmp_path, capsys):
+    rows = make_report(tmp_path)
+    store = ReviewStore(db_path(tmp_path))
+    save(tmp_path, store, rows[0], 'Codex')
+    save(tmp_path, store, rows[1], 'Cristian')
+    output = tmp_path / 'objects.jsonl'
+    first = import_from_db(tmp_path, output, store=store)
+    assert first['imported_frame_count'] == 2 and first['imported_ai_frame_count'] == 0
+    # Imported as a person's review, then marked as what it was: an AI review.
+    code, report = run(capsys, tmp_path, '--reviewer', 'Codex')
+    assert code == 0 and report['reviewers']['Codex']['frames'] == 1
+    result = import_from_db(tmp_path, output, store=store)
+    assert result['replaced_frame_count'] == 1 and result['already_imported_frame_count'] == 1
+    assert [item['frame_key'] for item in result['changed_after_import']] == ['0/0']
+    bases = {}
+    for record in load_jsonl(output):
+        bases.setdefault(record['output_index'], set()).add((record['reviewer'], record['provenance']['label_basis']))
+    assert bases == {0: {('ai/Codex', 'ai_review')}, 1: {('Cristian', 'human_review')}}
+    archived = load_jsonl(next((tmp_path / 'annotations' / 'replaced').glob('*.jsonl')))
+    assert {(r['reviewer'], r['provenance']['label_basis']) for r in archived} == {('Codex', 'human_review')}
