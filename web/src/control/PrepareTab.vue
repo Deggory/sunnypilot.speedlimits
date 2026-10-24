@@ -17,12 +17,18 @@ const emit = defineEmits<{run: [name: ActionName, state: ActionState, start?: un
   details: [job: Job]}>();
 
 /** Who proposes the signs, kept in this browser. */
-const PROPOSERS: {key: Proposer; label: string}[] = [{key: 'vietnam', label: 'Vietnamese YOLO'}, {key: 'ours', label: 'Our networks'}];
+const PROPOSERS: {key: Proposer; label: string}[] = [{key: 'vietnam', label: 'Vietnamese YOLO'}, {key: 'ours', label: 'Our networks'},
+  {key: 'qwen', label: 'Qwen3-VL'}];
 const PROPOSER_TEXT: Record<Proposer, string> = {
   vietnam: 'A ready-made model from Hugging Face, trained on Vietnamese signs, on the CPU. It proposed about 31% of the signs reviewers kept.',
   ours: 'Our cutter and classifier, trained on your reviews, on the GPU. On the test roads they find 81% of the speed signs; the signs they still miss stay missed in the proposals.',
+  qwen: 'Qwen3-VL-8B (Alibaba), a model that sees images and is asked for every sign of the frame, on the GPU: a few seconds per frame, '
+    + 'no score on its boxes, never measured on our signs yet.',
 };
-const proposer = ref<Proposer>(localStorage.getItem('nnslr-proposer') === 'ours' ? 'ours' : 'vietnam');
+const stored = localStorage.getItem('nnslr-proposer');
+const proposer = ref<Proposer>(stored === 'ours' || stored === 'qwen' ? stored : 'vietnam');
+/** Why the chosen proposer cannot run here, if it cannot. */
+const unavailable = computed(() => proposer.value === 'qwen' ? props.status?.proposers?.qwen ?? null : null);
 watch(proposer, (value) => localStorage.setItem('nnslr-proposer', value));
 /** Routes with proposals and nothing confirmed yet: those "Propose again" can redo. */
 const unstarted = computed(() => (props.status?.routes ?? []).filter((row) => row.state === 'revisionare' && row.confirmed === 0).length);
@@ -60,6 +66,7 @@ const total = computed(() => counts.value.reduce((sum, item) => sum + item.count
       <span class="proposer-label">Signs proposed by</span>
       <Segmented v-model="proposer" :options="PROPOSERS" label="Who proposes the signs"/>
       <p class="figure-note">{{ PROPOSER_TEXT[proposer] }}</p>
+      <p v-if="unavailable" class="figure-note proposer-missing">{{ unavailable }}</p>
     </div>
     <ActionList :items="ACTIONS" :actions="status?.actions ?? null"
                 @run="(name, state) => emit('run', name, state, undefined, name === 'prepare' ? {proposer} : undefined)"/>

@@ -1315,9 +1315,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_pre.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_pre.add_argument("--confidence", type=float, default=None,
                        help="lowest score of a box (default 0.25 for vietnam, 0.1 for ours)")
-    p_pre.add_argument("--proposer", choices=("vietnam", "ours"), default=os.environ.get("NNSLR_PROPOSER") or "vietnam",
+    p_pre.add_argument("--proposer", choices=("vietnam", "ours", "qwen"), default=os.environ.get("NNSLR_PROPOSER") or "vietnam",
                        help="vietnam: the Vietnamese traffic-sign YOLO of Hugging Face; ours: the cutter and the "
-                            "classifier trained here (GPU environment). Default: NNSLR_PROPOSER or vietnam")
+                            "classifier trained here; qwen: Qwen3-VL-8B (scripts/setup_vlm.sh); ours and qwen use the "
+                            "GPU environment. Default: NNSLR_PROPOSER or vietnam")
     p_pre.set_defaults(func=_cmd_preannotate)
     p_review = sub.add_parser("review", help="serve the review pages; confirmed frames are saved in <data-root>/annotations/review.sqlite")
     p_review.add_argument("--route", help="open this route directly; default: the index of every route with a report")

@@ -199,7 +199,33 @@ def suppress_overlaps(detections: list[dict], threshold: float = .5) -> list[dic
 
 # Who proposes the signs of a route (nnslr preannotate --proposer, the choice of the Prepare tab).
 PROPOSERS = {'vietnam': 'Vietnamese traffic-sign YOLO (Hugging Face)',
-             'ours': 'Our cutter and classifier'}
+             'ours': 'Our cutter and classifier',
+             'qwen': 'Qwen3-VL-8B, a model that sees images'}
+# Qwen3-VL-8B-Instruct as scripts/setup_vlm.sh installs it (its four weight files), inside the data root.
+VLM_REPOSITORY = 'Qwen/Qwen3-VL-8B-Instruct'
+VLM_REVISION = '0c351dd01ed87e9c1b53cbc748cba10e6187ff3b'
+VLM_SHARDS = {'model-00001-of-00004.safetensors': 4902275944, 'model-00002-of-00004.safetensors': 4915962496,
+              'model-00003-of-00004.safetensors': 4999831048, 'model-00004-of-00004.safetensors': 2716270024}
+
+
+def vlm_dir(root: Path) -> Path:
+    return Path(root) / 'models' / 'vlm' / 'Qwen3-VL-8B-Instruct'
+
+
+def vlm_missing(root: Path) -> str | None:
+    """Why Qwen3-VL cannot propose on this server, or None: its weight files with their sizes, and the packages of
+    the GPU environment (scripts/setup_vlm.sh installs both)."""
+    folder = vlm_dir(root)
+    for name, size in VLM_SHARDS.items():
+        path = folder / name
+        if not path.is_file() or path.stat().st_size != size:
+            return (f'Qwen3-VL is not installed yet: {name} is missing or incomplete in data/models/vlm/'
+                    'Qwen3-VL-8B-Instruct; copy its four weight files there, then run scripts/setup_vlm.sh')
+    if not any((GPU_PYTHON.parent.parent / 'lib').glob('python*/site-packages/transformers')):
+        return 'Qwen3-VL needs transformers in .venv-gpu (scripts/setup_vlm.sh)'
+    return None
+
+
 # Our networks need torch: the GPU environment of this repository.
 GPU_PYTHON = Path(__file__).resolve().parents[2] / '.venv-gpu' / 'bin' / 'python'
 
@@ -231,14 +257,23 @@ def run_preannotation(route: str, *, data_root: Path | None = None, confidence: 
                       python_executable: str | None = None, proposer: str = 'vietnam') -> dict:
     if proposer not in PROPOSERS:
         raise PreannotationError('proposer must be one of ' + ', '.join(PROPOSERS))
-    if confidence is None:
+    if confidence is None and proposer != 'qwen':
         # Our cutter must miss nothing (its false boxes are dropped by the classifier); the YOLO keeps its own.
         confidence = .1 if proposer == 'ours' else .25
-    if not math.isfinite(confidence) or not 0 < confidence <= 1:
+    if proposer != 'qwen' and (not math.isfinite(confidence) or not 0 < confidence <= 1):
         raise PreannotationError('confidence must be in (0, 1]')
     root=resolve_data_root(data_root)
     frames=discover_frames(root,route)
-    if proposer == 'ours':
+    if proposer == 'qwen':
+        missing = vlm_missing(root)
+        if missing:
+            raise PreannotationError(missing)
+        python=python_executable or str(GPU_PYTHON)
+        model={'repository': VLM_REPOSITORY, 'revision': VLM_REVISION, 'proposer': 'qwen', 'path': str(vlm_dir(root)),
+               'model_card_license': 'apache-2.0', 'training_domain': 'general images and text (Alibaba)',
+               'swiss_validation': 'not_established'}
+        road_model=None; worker='nnslr_tools._vlm_proposer'
+    elif proposer == 'ours':
         python=python_executable or str(GPU_PYTHON)
         check=subprocess.run([python,'-c','import torch, torchvision'],capture_output=True,text=True)
         if check.returncode:
@@ -256,7 +291,7 @@ def run_preannotation(route: str, *, data_root: Path | None = None, confidence: 
     base.mkdir(parents=True,exist_ok=True)
     run_id=datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'-'+uuid.uuid4().hex[:8]
     pending=base/('.pending-'+run_id); pending.mkdir()
-    if proposer == 'ours':
+    if proposer in ('ours', 'qwen'):
         model_info, road_info, ocr_info = model, None, None
         request={'schema_version':1,'run_id':run_id,'route_id':route,'data_root':str(root),'model':model,
                  'confidence':confidence,'frames':frames,'output':str(pending)}

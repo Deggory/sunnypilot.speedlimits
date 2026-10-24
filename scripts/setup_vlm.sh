@@ -7,6 +7,9 @@ set -euo pipefail
 #   1. installs transformers, accelerate and qwen-vl-utils (pinned) into the GPU environment (.venv-gpu); nothing
 #      already installed there changes version (checked with pip --dry-run on 25 Oct 2026);
 #   2. downloads the model at a pinned revision (about 17.5 GB) into $DATA_ROOT/models/vlm/Qwen3-VL-8B-Instruct;
+#      the files already there are checked (size, and the sha256 of the four weight files) and kept, so they can be
+#      downloaded elsewhere on a faster line and copied in (only the four model-0000N-of-00004.safetensors are
+#      large); a wrong file is downloaded again;
 #   3. loads it on the GPU in float16 (the V100 has no bfloat16) and asks it about one reviewed frame.
 #
 # usage: scripts/setup_vlm.sh            (again: only what is missing is done)
@@ -33,11 +36,37 @@ echo "== 1/3 Python packages in $VENV"
 echo "== 2/3 $MODEL_ID at $REVISION into $TARGET"
 mkdir -p "$TARGET"
 "$VENV/bin/python" - "$MODEL_ID" "$REVISION" "$TARGET" <<'PY'
-import sys
-from huggingface_hub import snapshot_download
+import hashlib, sys
+from pathlib import Path
+from huggingface_hub import HfApi, hf_hub_download
 model_id, revision, target = sys.argv[1:]
-path = snapshot_download(model_id, revision=revision, local_dir=target)
-print("model files in", path)
+# The sha256 of the weight files at this revision (Hugging Face LFS ids), to accept a copy brought in by hand.
+SHA256 = {
+    "model-00001-of-00004.safetensors": "d5d0aef0eb170fc7453a296c43c0849a56f510555d3588e4fd662bb35490aefa",
+    "model-00002-of-00004.safetensors": "8be88fb5501e4d5719a6d4cc212e6a13480330e74f3e8c77daa1a68f199106b5",
+    "model-00003-of-00004.safetensors": "83de00eafe6e0d57ccd009dbcf71c9974d74df2f016c27afb7e95aafd16b2192",
+    "model-00004-of-00004.safetensors": "0a88b98e9f96270973f567e6a2c103ede6ccdf915ca3075e21c755604d0377a5",
+}
+def sha256(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(16 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+files = [item for item in HfApi().list_repo_tree(model_id, revision=revision) if hasattr(item, "size")]
+for item in files:
+    path = Path(target) / item.path
+    if path.is_file() and path.stat().st_size == item.size and (item.path not in SHA256 or sha256(path) == SHA256[item.path]):
+        print("kept", item.path)
+        continue
+    if path.is_file():
+        print("wrong or incomplete, downloaded again:", item.path)
+        path.unlink()
+    hf_hub_download(model_id, item.path, revision=revision, local_dir=target)
+    if item.path in SHA256 and sha256(path) != SHA256[item.path]:
+        sys.exit("checksum mismatch after download: " + item.path)
+    print("downloaded", item.path)
+print("model files in", target)
 PY
 echo "$REVISION" > "$TARGET/REVISION"
 

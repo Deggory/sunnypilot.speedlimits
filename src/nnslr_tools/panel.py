@@ -70,7 +70,7 @@ CUTTER_FAMILY = 'all'
 # The options an action takes, besides a training's start and the run to resume (checked by Panel.start).
 ACTION_OPTIONS = {'train_cutter': ('size', 'families'), 'prepare': ('proposer',), 'prepare_again': ('proposer',)}
 # Who proposes the signs of a route (nnslr preannotate --proposer): the choice of the Prepare tab.
-PROPOSERS = ('vietnam', 'ours')
+PROPOSERS = ('vietnam', 'ours', 'qwen')
 
 
 def _run_of(log: Path, action: str = 'train') -> str | None:
@@ -331,6 +331,9 @@ class Panel:
             payload['reviewed_routes'] = sum(1 for row in rows if row['confirmed'])
             payload['next_action'] = _next_action(payload['next_step'])
         payload['actions'] = self._action_states(payload, activities)
+        # Who can propose the signs on this server (the choice of the Prepare tab), and why not.
+        from nnslr_tools.preannotate import vlm_missing
+        payload['proposers'] = {'qwen': vlm_missing(self.root)}
         # The choices of "Train the cutter", for its buttons.
         payload['cutter_options'] = {'sizes': list(CUTTER_SIZES), 'size': CUTTER_SIZE, 'families': list(CUTTER_FAMILIES),
                                      'family': CUTTER_FAMILY}
@@ -715,6 +718,11 @@ class Panel:
                 raise PanelError(400, 'bad_option', 'Only preparing routes takes a proposer.')
             if proposer not in PROPOSERS:
                 raise PanelError(400, 'bad_option', 'Unknown proposer: ' + ', '.join(PROPOSERS) + '.')
+            if proposer == 'qwen':
+                from nnslr_tools.preannotate import vlm_missing
+                missing = vlm_missing(self.root)
+                if missing:
+                    raise PanelError(409, 'not_available', missing + '.')
             start_env['NNSLR_PROPOSER'] = proposer
         if action == 'train_cutter':
             size = (options or {}).get('size') or CUTTER_SIZE

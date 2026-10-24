@@ -80,7 +80,11 @@ Installs `torch==2.14.0` and `torchvision==0.29.0` from the CUDA 12.6 index (the
 scripts/setup_vlm.sh               # again: only what is missing; --no-test while the GPU is busy
 ```
 
-Adds `transformers`, `accelerate` and `qwen-vl-utils` to `.venv-gpu` (no installed package changes version) and downloads [Qwen/Qwen3-VL-8B-Instruct](https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct) (Apache-2.0, about 17.5 GB) at a pinned revision into `data/models/vlm/Qwen3-VL-8B-Instruct`. It then loads it on the GPU in float16 (the V100 has no bfloat16, about 17 GB of memory) and asks it about one frame. It is there to be measured as a reader of the cutter's boxes and as a proposer; nothing uses it yet.
+Adds `transformers`, `accelerate` and `qwen-vl-utils` to `.venv-gpu` (no installed package changes version) and downloads [Qwen/Qwen3-VL-8B-Instruct](https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct) (Apache-2.0, about 17.5 GB) at a pinned revision into `data/models/vlm/Qwen3-VL-8B-Instruct`. It then loads it on the GPU in float16 (the V100 has no bfloat16, about 17 GB of memory) and asks it about one frame.
+
+On a slow line, download the four weight files elsewhere (`model-00001-of-00004.safetensors` … `model-00004-of-00004.safetensors` of that revision, 17.5 GB together) and copy them into `data/models/vlm/Qwen3-VL-8B-Instruct/`; then run the script: it checks the sha256 of each file, keeps the right ones and downloads only what is missing or wrong.
+
+Once installed, it is the third choice of **Signs proposed by** on the Prepare tab (`nnslr preannotate --proposer qwen`); until then that choice says what is missing.
 
 ### Publishing a model on Hugging Face
 

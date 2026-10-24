@@ -10,7 +10,7 @@ export interface CutterOptions {
   families: CutterFamilies;
 }
 /** Who proposes the signs of a route (nnslr preannotate --proposer). */
-export type Proposer = 'vietnam' | 'ours';
+export type Proposer = 'vietnam' | 'ours' | 'qwen';
 /** The options of an action: the cutter's size and signs, or the proposer of a preparation. */
 export interface ActionOptions {
   size?: string;
@@ -250,6 +250,8 @@ export interface PanelStatus {
   training_starts: TrainingStart[];
   /** The choices of “Train the cutter”: its input sizes and the default one, what it finds and the default. */
   cutter_options?: {sizes: string[]; size: string; families: CutterFamilies[]; family: CutterFamilies};
+  /** Why a proposer cannot run on this server (null: it can). */
+  proposers?: {qwen: string | null};
 }
 
 /** POST /api/panel/run/<action> */
