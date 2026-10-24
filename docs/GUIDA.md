@@ -199,6 +199,7 @@ Per cambiare una pagina: modifica `web/src` (o il template), lancia `helpers/bui
 | `scripts/install_review_service.sh` | installa/aggiorna/toglie il servizio `speedlimits-web` | systemd, `/etc/speedlimits-web.env`, `.env` |
 | `scripts/setup_v100_training_env.sh` | crea `.venv-gpu` (lo lancia anche `helpers/3_train.sh`) | installa pacchetti |
 | `scripts/run_v100_baseline.sh` | training completo (lo lancia `helpers/3_train.sh`) | GPU |
+| `scripts/run_experiment_b.sh <nome>` | esperimento B ([NEURAL_NETWORK.md](NEURAL_NETWORK.md), passo 2): allena una dopo l'altra le varianti `crop`, `crop_geom` e `full` di `nnslr experiment-b` sui box revisionati e stampa il confronto (lettura, other_road, macro-F1, astensioni) su test e sulle righe umane; prima `nnslr experiment-b --variant full --dry-run` (solo CPU) | GPU, scrive in `data/runs/<nome>/experiment-b/` |
 | `scripts/publish_model.sh` | pubblica un bundle su Hugging Face | upload pubblico |
 
 ## 5. Problemi comuni

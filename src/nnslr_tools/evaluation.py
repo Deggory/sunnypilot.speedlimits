@@ -11,6 +11,7 @@ import math
 from pathlib import Path
 from typing import Any
 
+from nnslr_tools.checkpoints import safe_torch_load
 from nnslr_tools.training import (
     _require_detector_stack,
     _require_training_stack,
@@ -147,7 +148,7 @@ def human_reviewed_metrics(items: list[dict[str, Any]], metrics) -> dict[str, An
 
 
 def _load_checkpoint(torch, checkpoint_path: Path, expected_task: str) -> dict[str, Any]:
-    payload = torch.load(Path(checkpoint_path), map_location="cpu", weights_only=True)
+    payload = safe_torch_load(Path(checkpoint_path))
     if not isinstance(payload, dict) or payload.get("task") != expected_task:
         raise ValueError(f"checkpoint_task_mismatch: expected {expected_task}")
     if not isinstance(payload.get("state_dict"), dict):

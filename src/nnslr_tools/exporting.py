@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from nnslr_tools.checkpoints import safe_torch_load
 from nnslr_tools.training import _require_detector_stack, _require_training_stack
 
 
@@ -119,7 +120,7 @@ def export_detector_onnx(
         ssdlite320_mobilenet_v3_large,
     ) = _require_detector_stack()
 
-    checkpoint = torch.load(Path(checkpoint_path), map_location="cpu", weights_only=True)
+    checkpoint = safe_torch_load(Path(checkpoint_path))
     contract = detector_io_contract(
         checkpoint,
         input_width=input_width,
@@ -225,7 +226,7 @@ def export_reader_onnx(
     verify: bool = True,
 ) -> dict[str, Any]:
     torch, _, _, _, _, _, mobilenet_v3_small = _require_training_stack()
-    checkpoint = torch.load(Path(checkpoint_path), map_location="cpu", weights_only=True)
+    checkpoint = safe_torch_load(Path(checkpoint_path))
     if not isinstance(checkpoint, dict) or checkpoint.get("task") != "reader":
         raise ValueError("checkpoint_task_mismatch: expected reader")
     contract = reader_io_contract(checkpoint)

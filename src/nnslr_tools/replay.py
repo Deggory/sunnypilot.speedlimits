@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from nnslr_tools.checkpoints import safe_torch_load
 from nnslr_tools.training import _require_detector_stack, _require_training_stack
 
 
@@ -131,8 +132,8 @@ def _load_models(detector_checkpoint: Path, reader_checkpoint: Path, device_name
         raise ValueError("cuda_unavailable")
     device = torch.device(device_name)
 
-    detector_payload = torch.load(Path(detector_checkpoint), map_location="cpu", weights_only=True)
-    reader_payload = torch.load(Path(reader_checkpoint), map_location="cpu", weights_only=True)
+    detector_payload = safe_torch_load(Path(detector_checkpoint))
+    reader_payload = safe_torch_load(Path(reader_checkpoint))
     if detector_payload.get("task") != "detector":
         raise ValueError("checkpoint_task_mismatch: expected detector")
     if reader_payload.get("task") != "reader":

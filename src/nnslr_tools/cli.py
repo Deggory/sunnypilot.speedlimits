@@ -813,6 +813,52 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
 # [evaluation-baseline] - END
 
 
+# [experiment-b] - START
+def _cmd_experiment_b(args: argparse.Namespace) -> int:
+    from nnslr_tools.context_experiment import (
+        ExperimentConfig,
+        dry_run_summary,
+        prepare_experiment_b,
+        train_experiment_b,
+    )
+    from nnslr_tools.preannotate import resolve_data_root
+
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    kind = args.dataset_kind
+    default_dataset = (
+        root / "datasets" / "training_candidate_dataset" / "objects.jsonl"
+        if kind == "training-candidate"
+        else root / "annotations" / "objects.jsonl"
+    )
+    dataset = Path(args.dataset) if args.dataset else default_dataset
+    splits = Path(args.splits) if args.splits else root / "splits" / "latest.json"
+    plan = prepare_experiment_b(dataset, splits, root, dataset_kind=kind, limit=args.limit)
+
+    if args.dry_run:
+        print(json.dumps(dry_run_summary(plan, args.variant), indent=2, sort_keys=True))
+        return 0 if plan["trainable"] else 1
+
+    if not args.output:
+        raise ValueError("--output is required for a real experiment run")
+    config = ExperimentConfig(
+        variant=args.variant,
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        learning_rate=args.learning_rate,
+        weight_decay=args.weight_decay,
+        crop_size=args.crop_size,
+        num_workers=args.num_workers,
+        seed=args.seed,
+        device=args.device,
+        pretrained=args.pretrained,
+        amp=not args.no_amp,
+    )
+    result = train_experiment_b(plan, root, Path(args.output), config)
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+# [experiment-b] - END
+
+
 # [hard-example-mining] - START
 def _cmd_mine_hard_examples(args: argparse.Namespace) -> int:
     from nnslr_tools.hard_examples import mine_file
@@ -1290,6 +1336,39 @@ def build_parser() -> argparse.ArgumentParser:
     p_eval.add_argument("--output", help="optional JSON report path")
     p_eval.set_defaults(func=_cmd_evaluate)
     # [evaluation-baseline] - END
+
+    # [experiment-b] - START
+    p_expb = sub.add_parser(
+        "experiment-b",
+        help="experiment B on the reviewed boxes: reading and whom a sign applies to, from the crop alone, "
+             "with the box geometry and car speed, or with the scene too; --dry-run for CPU-only counts",
+    )
+    p_expb.add_argument("dataset", nargs="?", help="canonical dataset JSONL; defaults from --dataset-kind")
+    p_expb.add_argument("--variant", choices=("crop", "crop_geom", "full"), required=True,
+                        help="crop: the box crop only; crop_geom: + box geometry and car speed; "
+                             "full: + the whole frame pooled at the box")
+    p_expb.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+    p_expb.add_argument("--splits", help="frozen split JSON; default: <data-root>/splits/latest.json")
+    p_expb.add_argument("--dataset-kind", choices=("gold", "training-candidate"), default="gold")
+    p_expb.add_argument("--dry-run", action="store_true",
+                        help="validate and print the counts without importing torch or touching a GPU")
+    p_expb.add_argument("--output", help="new output directory; required unless --dry-run")
+    p_expb.add_argument("--device", choices=("cuda", "cpu"), default="cuda")
+    p_expb.add_argument("--epochs", type=int, default=20)
+    p_expb.add_argument("--batch-size", type=int, default=32,
+                        help="frames per batch, each with all its boxes (default: 32)")
+    p_expb.add_argument("--learning-rate", type=float, default=3e-4)
+    p_expb.add_argument("--weight-decay", type=float, default=1e-4)
+    p_expb.add_argument("--crop-size", type=int, default=96, help="side of the square box crop (default: 96)")
+    p_expb.add_argument("--num-workers", type=int, default=4)
+    p_expb.add_argument("--seed", type=int, default=0)
+    p_expb.add_argument("--limit", type=int, default=None,
+                        help="keep only the first N frames of each partition (smoke runs, not a measure)")
+    p_expb.add_argument("--pretrained", action="store_true",
+                        help="start the MobileNetV3-small backbones from torchvision ImageNet weights")
+    p_expb.add_argument("--no-amp", action="store_true", help="disable CUDA automatic mixed precision")
+    p_expb.set_defaults(func=_cmd_experiment_b)
+    # [experiment-b] - END
 
     # [hard-example-mining] - START
     p_mine = sub.add_parser(

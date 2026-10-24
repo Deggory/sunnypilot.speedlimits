@@ -453,7 +453,7 @@ def gpu_smoke(device_index: int = 0) -> dict[str, Any]:
     props = torch.cuda.get_device_properties(device)
     return {
         "status": "available",
-        "torch_version": torch.__version__,
+        "torch_version": str(torch.__version__),
         "torch_cuda_runtime": torch.version.cuda,
         "device_index": device_index,
         "device_name": props.name,
@@ -816,7 +816,7 @@ def train_detector(
                         "torchvision.models.MobileNet_V3_Large_Weights.IMAGENET1K_V1"
                         if config.pretrained_backbone else "random"
                     ),
-                    "torch_version": torch.__version__,
+                    "torch_version": str(torch.__version__),
                     "torchvision_version": torchvision.__version__,
                 }, best_path)
 
@@ -853,7 +853,7 @@ def train_detector(
             "training_plan": str(plan_path),
             "device": str(device),
             "gpu": gpu,
-            "torch_version": torch.__version__,
+            "torch_version": str(torch.__version__),
             "torchvision_version": torchvision.__version__,
             "initialization": "imagenet1k_v1" if config.pretrained_backbone else "random",
             "initialization_source": (
@@ -1167,7 +1167,7 @@ def train_reader(
                         "torchvision.models.MobileNet_V3_Small_Weights.IMAGENET1K_V1"
                         if config.pretrained else "random"
                     ),
-                    "torch_version": torch.__version__,
+                    "torch_version": str(torch.__version__),
                     "torchvision_version": torchvision.__version__,
                 }, best_path)
 
@@ -1209,7 +1209,7 @@ def train_reader(
             "training_plan": str(plan_path),
             "device": str(device),
             "gpu": gpu,
-            "torch_version": torch.__version__,
+            "torch_version": str(torch.__version__),
             "torchvision_version": torchvision.__version__,
             "initialization": "imagenet1k_v1" if config.pretrained else "random",
             "initialization_source": (

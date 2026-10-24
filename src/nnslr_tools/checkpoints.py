@@ -27,11 +27,25 @@ def atomic_torch_save(payload: dict[str, Any], destination: Path) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def torch_load(path: Path) -> dict[str, Any]:
-    """Only load tensor/state-dict checkpoints (never arbitrary pickled objects)."""
+def safe_torch_load(path: Path) -> Any:
+    """torch.load with weights_only=True (tensors and plain data, never arbitrary pickled objects).
+
+    Checkpoints written before 24 Oct 2026 hold torch.__version__ as a TorchVersion, which the safe loader
+    refuses: that one class, a plain str subclass, is allowed.
+    """
     import torch
 
-    checkpoint = torch.load(path, map_location="cpu", weights_only=True)
+    allowed = []
+    version_class = getattr(getattr(torch, "torch_version", None), "TorchVersion", None)
+    if version_class is not None:
+        allowed.append(version_class)
+    with torch.serialization.safe_globals(allowed):
+        return torch.load(Path(path), map_location="cpu", weights_only=True)
+
+
+def torch_load(path: Path) -> dict[str, Any]:
+    """Only load tensor/state-dict checkpoints (never arbitrary pickled objects)."""
+    checkpoint = safe_torch_load(path)
     if not isinstance(checkpoint, dict):
         raise ValueError("checkpoint must contain a dictionary")
     return checkpoint
