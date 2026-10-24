@@ -75,6 +75,8 @@ input::placeholder { color: var(--placeholder); }
 .progress-short { display: none; }
 .reviewer { display: flex; align-items: center; flex: none; }
 .reviewer input { width: 140px; }
+.reviewer.as { gap: 4px; font-size: 13px; color: var(--muted); white-space: nowrap; }
+.reviewer.as strong { color: var(--fg); font-weight: 650; }
 /* No name yet: dashed until filled, red once a save needed it. */
 .reviewer input:placeholder-shown { border-style: dashed; border-color: var(--hover-line); background: transparent; }
 .reviewer input.need { border-style: solid; border-color: var(--bad); box-shadow: 0 0 0 4px var(--bad-soft); }

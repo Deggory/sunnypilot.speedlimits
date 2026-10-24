@@ -1,7 +1,9 @@
 <script setup lang="ts">
 // The one-row bar on top: brand, route picker, filters, route progress, reviewer name and the Account menu
 // (none in the offline report, which has no account).
-import {computed, useTemplateRef, watch} from 'vue';
+import {computed, onMounted, ref, useTemplateRef, watch} from 'vue';
+import {api} from '../common/api';
+import type {AuthState} from '../common/auth-types';
 import {thousands} from '../common/format';
 import AccountMenu from '../components/AccountMenu.vue';
 import BrandMark from '../components/BrandMark.vue';
@@ -57,6 +59,18 @@ function typed(event: Event): void {
   writeLocal('nnslr-reviewer', state.reviewer.trim());
 }
 
+// Signed in with an account: the reviews carry its name, and there is no field to type another one.
+const signedUser = ref<string | null>(null);
+onMounted(() => {
+  if (!online) return;
+  api<AuthState>('/api/auth/state').then((auth) => {
+    if (!auth.user) return;
+    signedUser.value = auth.user;
+    state.reviewer = auth.user;
+    state.reviewerNeeded = false;
+  }).catch(() => undefined);
+});
+
 // A save needed the name: the field takes the focus.
 watch(() => state.reviewerFocus, () => reviewerInput.value?.focus(), {flush: 'sync'});
 </script>
@@ -89,7 +103,10 @@ watch(() => state.reviewerFocus, () => reviewerInput.value?.focus(), {flush: 'sy
         <div class="progress-bar"><span id="progressBar" :style="{width: barWidth}"></span></div>
       </div>
       <span class="progress-short" id="progressShort" aria-hidden="true">{{ counts.done }}/{{ counts.total }}</span>
-      <div class="reviewer">
+      <div v-if="signedUser" class="reviewer as" :title="'Your confirmations are saved as ' + signedUser">
+        Reviewing as <strong>{{ signedUser }}</strong>
+      </div>
+      <div v-else class="reviewer">
         <label for="reviewer" class="sr-only">Reviewer</label>
         <input ref="reviewerInput" type="text" id="reviewer" :class="{need: state.reviewerNeeded}" maxlength="100"
                placeholder="Reviewer" autocomplete="name" spellcheck="false" :value="state.reviewer" @input="typed">
