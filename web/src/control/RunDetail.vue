@@ -22,7 +22,7 @@ import SplitSection from './SplitSection.vue';
 import TrainingCharts from './TrainingCharts.vue';
 import WatchSection from './WatchSection.vue';
 
-const props = defineProps<{summary: RunSummary; detail: RunDetail | null; loading: boolean; error: string}>();
+const props = defineProps<{summary: RunSummary; detail: RunDetail | null; loading: boolean; error: string; noWatch?: boolean}>();
 /** The summary is refreshed with the list every 10 s; the detail is asked again only when the run changed. */
 const run = computed((): RunSummary => props.summary);
 const detail = computed(() => props.detail?.name === props.summary.name ? props.detail : null);
@@ -182,7 +182,7 @@ const where = computed(() => {
     <CutterSection v-if="detail.cutter_run" :sizes="detail.cutter_run.sizes" :comparison="detail.cutter_run.comparison"/>
     <ClassifierSection v-if="classifierRun && hasClassifierEval" :evaluations="classifierRun.evaluations"/>
     <ChainSection v-if="classifierRun && hasChain" :chains="classifierRun.chains"/>
-    <WatchSection v-if="detail.watch?.length" :run="run.name" :models="detail.watch" :version="run.version"/>
+    <WatchSection v-if="!noWatch && detail.watch?.length" :run="run.name" :models="detail.watch" :version="run.version"/>
     <TrainingCharts v-if="curves" :progress="curves" :running="run.state === 'running'" :nets="nets" title="Training curves"/>
     <NegativesSection v-if="classifierRun" :negatives="classifierRun.negatives"
                       :by-source="detail.dataset?.classifier?.negatives ?? classifierTraining?.negatives?.by_split ?? null"/>
