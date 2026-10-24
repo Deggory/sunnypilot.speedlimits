@@ -6,6 +6,7 @@ Standard library only, read-only: it never writes in the data root or in the rev
   python -m helpers.route_status                    (table + next step)
   python -m helpers.route_status --todo=extract     (one route per line: still to extract)
   python -m helpers.route_status --todo=preannotate (extracted, without a pre-annotation report)
+  python -m helpers.route_status --todo=repropose   (with a report, but no frame ever reviewed: safe to propose again)
 """
 from __future__ import annotations
 
@@ -80,6 +81,22 @@ def _line_count(path: Path) -> int:
             return sum(1 for line in handle if line.strip())
     except OSError:
         return 0
+
+
+def reviewed_routes(root: Path) -> set[str] | None:
+    """The routes with any review row, on any of their runs (confirmed or not); None when the database cannot be
+    read, so that nothing is proposed again on a guess."""
+    database = root / "annotations/review.sqlite"
+    if not database.is_file():
+        return set()
+    try:
+        connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
+        try:
+            return {route for (route,) in connection.execute("SELECT DISTINCT route_id FROM frame_reviews")}
+        finally:
+            connection.close()
+    except sqlite3.Error:
+        return None
 
 
 def review_counts(root: Path, since: str | None) -> tuple[Counter, Counter]:
@@ -204,12 +221,17 @@ def print_table(rows: list[dict]) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--todo", choices=("extract", "preannotate"),
+    parser.add_argument("--todo", choices=("extract", "preannotate", "repropose"),
                         help="print only the routes that still need this step, one per line")
     parser.add_argument("--json", action="store_true", help="every route as JSON")
     args = parser.parse_args()
     rows = route_rows(data_root(), videos_dir())
-    if args.todo:
+    if args.todo == "repropose":
+        reviewed = reviewed_routes(data_root())
+        for row in rows:
+            if reviewed is not None and row["run_id"] and row["route"] not in reviewed:
+                print(row["route"])
+    elif args.todo:
         wanted = "estrarre" if args.todo == "extract" else "preannotare"
         for row in rows:
             if row["state"] == wanted:

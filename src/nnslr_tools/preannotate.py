@@ -197,27 +197,79 @@ def suppress_overlaps(detections: list[dict], threshold: float = .5) -> list[dic
     return keep
 
 
-def run_preannotation(route: str, *, data_root: Path | None = None, confidence: float = .25,
-                      python_executable: str | None = None) -> dict:
+# Who proposes the signs of a route (nnslr preannotate --proposer, the choice of the Prepare tab).
+PROPOSERS = {'vietnam': 'Vietnamese traffic-sign YOLO (Hugging Face)',
+             'ours': 'Our cutter and classifier'}
+# Our networks need torch: the GPU environment of this repository.
+GPU_PYTHON = Path(__file__).resolve().parents[2] / '.venv-gpu' / 'bin' / 'python'
+
+
+def our_networks(root: Path) -> dict:
+    """The cutter and the classifier that propose with --proposer ours: those in use (Models tab); without a
+    classifier in use, the newest classifier with "not a sign" trained here."""
+    from nnslr_tools.chain import resolve_model
+    try:
+        cutter = resolve_model('active', 'cutter', root)
+    except ValueError as exc:
+        raise PreannotationError(f'no cutter to propose with: {exc}') from exc
+    try:
+        classifier = resolve_model('active', 'classifier', root)
+        chosen = 'in use'
+    except ValueError:
+        found = sorted((root / 'runs').glob('*/classifier/reader-best.pt'), key=lambda path: path.stat().st_mtime)
+        if not found:
+            raise PreannotationError('no classifier to propose with: train one on the Train tab')
+        classifier = {'path': found[-1], 'id': 'classifier:' + found[-1].parents[1].name + '/classifier'}
+        chosen = 'newest (none in use)'
+    return {'repository': 'ours', 'proposer': 'ours', 'training_domain': 'our reviewed Swiss drives',
+            'cutter': cutter['id'] or str(cutter['path']), 'cutter_path': str(cutter['path']),
+            'classifier': classifier['id'] or str(classifier['path']), 'classifier_path': str(classifier['path']),
+            'classifier_chosen': chosen}
+
+
+def run_preannotation(route: str, *, data_root: Path | None = None, confidence: float | None = None,
+                      python_executable: str | None = None, proposer: str = 'vietnam') -> dict:
+    if proposer not in PROPOSERS:
+        raise PreannotationError('proposer must be one of ' + ', '.join(PROPOSERS))
+    if confidence is None:
+        # Our cutter must miss nothing (its false boxes are dropped by the classifier); the YOLO keeps its own.
+        confidence = .1 if proposer == 'ours' else .25
     if not math.isfinite(confidence) or not 0 < confidence <= 1:
         raise PreannotationError('confidence must be in (0, 1]')
     root=resolve_data_root(data_root)
     frames=discover_frames(root,route)
-    python=python_executable or sys.executable
-    check=subprocess.run([python,'-c','import numpy, PIL, onnxruntime, rapidocr'],capture_output=True,text=True)
-    if check.returncode:
-        raise PreannotationError('preannotation dependencies missing; in the nnslr environment run: python -m pip install ".[preannotate]"')
-    model=ensure_model(root)
-    road_model=ensure_road_model(root)
+    if proposer == 'ours':
+        python=python_executable or str(GPU_PYTHON)
+        check=subprocess.run([python,'-c','import torch, torchvision'],capture_output=True,text=True)
+        if check.returncode:
+            raise PreannotationError('our networks need the GPU environment (.venv-gpu with torch): see docs/INSTALL.md')
+        model=our_networks(root); road_model=None; worker='nnslr_tools._chain_proposer'
+    else:
+        python=python_executable or sys.executable
+        check=subprocess.run([python,'-c','import numpy, PIL, onnxruntime, rapidocr'],capture_output=True,text=True)
+        if check.returncode:
+            raise PreannotationError('preannotation dependencies missing; in the nnslr environment run: python -m pip install ".[preannotate]"')
+        model=ensure_model(root)
+        road_model=ensure_road_model(root)
+        worker='nnslr_tools._preannotate_worker'
     base=_inside(root,root/'derived/preannotations'/route)
     base.mkdir(parents=True,exist_ok=True)
     run_id=datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'-'+uuid.uuid4().hex[:8]
     pending=base/('.pending-'+run_id); pending.mkdir()
-    request={'schema_version':1,'run_id':run_id,'route_id':route,'data_root':str(root),'model_path':str(model),
-             'model':MODEL_INFO,'road_model_path':str(road_model),'road_model':ROAD_MODEL_INFO,
-             'ocr':OCR_INFO,'confidence':confidence,'frames':frames,'output':str(pending)}
+    if proposer == 'ours':
+        model_info, road_info, ocr_info = model, None, None
+        request={'schema_version':1,'run_id':run_id,'route_id':route,'data_root':str(root),'model':model,
+                 'confidence':confidence,'frames':frames,'output':str(pending)}
+    else:
+        model_info, road_info, ocr_info = MODEL_INFO, ROAD_MODEL_INFO, OCR_INFO
+        request={'schema_version':1,'run_id':run_id,'route_id':route,'data_root':str(root),'model_path':str(model),
+                 'model':MODEL_INFO,'road_model_path':str(road_model),'road_model':ROAD_MODEL_INFO,
+                 'ocr':OCR_INFO,'confidence':confidence,'frames':frames,'output':str(pending)}
     request_path=pending/'request.json'; request_path.write_text(json.dumps(request,allow_nan=False))
-    proc=subprocess.run([python,'-m','nnslr_tools._preannotate_worker',str(request_path)],capture_output=False)
+    env=dict(os.environ)
+    # The worker imports nnslr_tools from this checkout, also from the GPU environment.
+    env['PYTHONPATH']=str(Path(__file__).resolve().parents[1])+(os.pathsep+env['PYTHONPATH'] if env.get('PYTHONPATH') else '')
+    proc=subprocess.run([python,'-m',worker,str(request_path)],capture_output=False,env=env)
     if proc.returncode:
         raise PreannotationError(f'preannotation failed; previous results preserved; diagnostic request: {request_path}')
     report=pending/'preannotations.jsonl'
@@ -229,8 +281,8 @@ def run_preannotation(route: str, *, data_root: Path | None = None, confidence: 
     device='cpu'
     if rows and rows[0].get('inference',{}).get('provider')=='CUDAExecutionProvider':
         device='cuda'
-    summary={'schema_version':1,'run_id':run_id,'route_id':route,'model':MODEL_INFO,
-             'road_model':ROAD_MODEL_INFO,'ocr':OCR_INFO,
+    summary={'schema_version':1,'run_id':run_id,'route_id':route,'proposer':proposer,'model':model_info,
+             'road_model':road_info,'ocr':ocr_info,
              'confidence':confidence,'device':device,'frame_count':len(rows),
              'frames_with_proposals':sum(bool(r['detections']) for r in rows),
              'proposal_count':sum(len(r['detections']) for r in rows),

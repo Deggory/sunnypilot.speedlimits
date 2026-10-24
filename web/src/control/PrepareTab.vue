@@ -1,9 +1,10 @@
 <script setup lang="ts">
 // Prepare: from the drives on the comma to frames with the proposed signs. The two actions, the download or
 // preparation running (or the last one), the routes.
-import {computed} from 'vue';
+import {computed, ref, watch} from 'vue';
 import {plural} from '../common/format';
-import type {ActionName, ActionState, Job, PanelStatus, RouteState} from '../common/panel-types';
+import type {ActionName, ActionOptions, ActionState, Job, PanelStatus, Proposer, RouteState} from '../common/panel-types';
+import Segmented from './Segmented.vue';
 import ActionList from './ActionList.vue';
 import JobProgress from './JobProgress.vue';
 import {jobOf, PREPARE_ACTIONS, terminalActivities} from './jobs';
@@ -12,7 +13,21 @@ import RouteTable from './RouteTable.vue';
 import TerminalActivity from './TerminalActivity.vue';
 
 const props = defineProps<{status: PanelStatus | null}>();
-defineEmits<{run: [name: ActionName, state: ActionState]; stop: [job: Job]; details: [job: Job]}>();
+const emit = defineEmits<{run: [name: ActionName, state: ActionState, start?: undefined, options?: ActionOptions]; stop: [job: Job];
+  details: [job: Job]}>();
+
+/** Who proposes the signs, kept in this browser. */
+const PROPOSERS: {key: Proposer; label: string}[] = [{key: 'vietnam', label: 'Vietnamese YOLO'}, {key: 'ours', label: 'Our networks'}];
+const PROPOSER_TEXT: Record<Proposer, string> = {
+  vietnam: 'A ready-made model from Hugging Face, trained on Vietnamese signs, on the CPU. It proposed about 31% of the signs reviewers kept.',
+  ours: 'Our cutter and classifier, trained on your reviews, on the GPU. On the test roads they find 81% of the speed signs; the signs they still miss stay missed in the proposals.',
+};
+const proposer = ref<Proposer>(localStorage.getItem('nnslr-proposer') === 'ours' ? 'ours' : 'vietnam');
+watch(proposer, (value) => localStorage.setItem('nnslr-proposer', value));
+/** Routes with proposals and nothing confirmed yet: those "Propose again" can redo. */
+const unstarted = computed(() => (props.status?.routes ?? []).filter((row) => row.state === 'revisionare' && row.confirmed === 0).length);
+const PROPOSE_ACTIONS = computed((): [ActionName, string][] => unstarted.value ? [['prepare_again',
+  'Gives new proposals to the ' + plural(unstarted.value, 'route') + ' nobody has started reviewing, with the proposer chosen above. Routes in review stay as they are.']] : []);
 
 const ACTIONS: [ActionName, string][] = [
   ['fetch', 'Copies the new drives from the comma into the video folder, segment by segment; the routes already prepared stay as they are.'],
@@ -41,7 +56,15 @@ const total = computed(() => counts.value.reduce((sum, item) => sum + item.count
         <li v-for="item in counts.filter((entry) => entry.count)" :key="item.state"><strong>{{ item.count }}</strong> {{ item.label }}</li>
       </ul>
     </div>
-    <ActionList :items="ACTIONS" :actions="status?.actions ?? null" @run="(name, state) => $emit('run', name, state)"/>
+    <div class="proposer">
+      <span class="proposer-label">Signs proposed by</span>
+      <Segmented v-model="proposer" :options="PROPOSERS" label="Who proposes the signs"/>
+      <p class="figure-note">{{ PROPOSER_TEXT[proposer] }}</p>
+    </div>
+    <ActionList :items="ACTIONS" :actions="status?.actions ?? null"
+                @run="(name, state) => emit('run', name, state, undefined, name === 'prepare' ? {proposer} : undefined)"/>
+    <ActionList v-if="PROPOSE_ACTIONS.length" :items="PROPOSE_ACTIONS" :actions="status?.actions ?? null"
+                @run="(name, state) => emit('run', name, state, undefined, {proposer})"/>
   </section>
 
   <section v-if="job || activities.length" class="live-section" :class="{now: job?.state === 'running' || activities.length > 0}" aria-labelledby="prepare-job-title">

@@ -1313,7 +1313,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_pre = sub.add_parser("preannotate", help="propose sign boxes/values on all extracted route frames (CPU)")
     p_pre.add_argument("--route", required=True)
     p_pre.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
-    p_pre.add_argument("--confidence", type=float, default=.25)
+    p_pre.add_argument("--confidence", type=float, default=None,
+                       help="lowest score of a box (default 0.25 for vietnam, 0.1 for ours)")
+    p_pre.add_argument("--proposer", choices=("vietnam", "ours"), default=os.environ.get("NNSLR_PROPOSER") or "vietnam",
+                       help="vietnam: the Vietnamese traffic-sign YOLO of Hugging Face; ours: the cutter and the "
+                            "classifier trained here (GPU environment). Default: NNSLR_PROPOSER or vietnam")
     p_pre.set_defaults(func=_cmd_preannotate)
     p_review = sub.add_parser("review", help="serve the review pages; confirmed frames are saved in <data-root>/annotations/review.sqlite")
     p_review.add_argument("--route", help="open this route directly; default: the index of every route with a report")
@@ -1729,7 +1733,7 @@ def _cmd_dataset(args: argparse.Namespace) -> int:
 def _cmd_preannotate(args: argparse.Namespace) -> int:
     from nnslr_tools.preannotate import run_preannotation
     result = run_preannotation(args.route, data_root=Path(args.data_root) if args.data_root else None,
-                               confidence=args.confidence)
+                               confidence=args.confidence, proposer=args.proposer)
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 

@@ -7,7 +7,9 @@
 #      and reads where the car was at each frame and in which country       (nnslr gps)
 # Already done work is skipped, so it can be run after every fetch. Next: helpers/2_review.sh.
 #
-# Usage: helpers/1_prepare.sh [--jobs=<n>] [--background] [<route> ...]
+# Usage: helpers/1_prepare.sh [--jobs=<n>] [--background] [--again] [<route> ...]
+#   helpers/1_prepare.sh --again             (proposes again the routes nobody has reviewed a frame of yet,
+#                                             e.g. after choosing another proposer)
 #   helpers/1_prepare.sh                     (tutte le route nuove, una alla volta)
 #   helpers/1_prepare.sh --jobs=4            (4 route in parallelo: piu' core, piu' veloce)
 #   helpers/1_prepare.sh --background        (continua anche se chiudi la ssh)
@@ -17,6 +19,8 @@
 # would leave its reviews on the old one, and they would no longer be imported. Segments of
 # it that arrive later stay unused (helpers/status.sh shows them).
 # Every route writes its own log in data/logs/prepare/<route>.log.
+# Who proposes the signs: NNSLR_PROPOSER=vietnam (the Vietnamese YOLO of Hugging Face, default) or ours (our
+# cutter and classifier, on the GPU), the choice of the Prepare tab.
 # -h, --help: this help.
 # Env: COMMA_VIDEOS_DIR (default ../comma-videos next to this repo), NNSLR_DATA_ROOT (default data/)
 
@@ -63,6 +67,15 @@ prepare_route() {
   local route="$1"
   local log="$LOG_DIR/$route.log"
   local worked=0
+  if [ "${PREPARE_AGAIN:-0}" = 1 ]; then
+    # Only a route nobody has reviewed a frame of: a new report would leave reviews on the old one.
+    todo repropose | grep -qx "$route" || { echo "$route: gia' in revisione, non la ripropongo"; return 0; }
+    echo "$route: propongo di nuovo i cartelli (${NNSLR_PROPOSER:-vietnam})..."
+    "$NN" preannotate --route "$route" < /dev/null >> "$log" 2>&1 \
+      || { echo "$route: pre-annotazione fallita (vedi $log)"; return 1; }
+    echo "$route: pronta per la revisione"
+    return 0
+  fi
   if todo extract | grep -qx "$route"; then
     echo "$route: estraggo i frame..."
     "$NN" extract-frames --route "$route" --overwrite < /dev/null >> "$log" 2>&1 \
@@ -94,6 +107,8 @@ while [ $# -gt 0 ]; do
     usage
   elif [ "$1" = "--background" ]; then
     background=1
+  elif [ "$1" = "--again" ]; then
+    export PREPARE_AGAIN=1
   elif [[ "$1" == --jobs=* ]]; then
     jobs="${1#--jobs=}"
   elif [[ "$1" == --one=* ]]; then
@@ -128,6 +143,7 @@ fi
 
 if [ "$background" -eq 1 ]; then
   args=(--jobs="$jobs" "${routes[@]}")
+  [ "${PREPARE_AGAIN:-0}" != 1 ] || args+=(--again)
   nohup "$0" "${args[@]}" < /dev/null > "$DATA_ROOT/logs/prepare.log" 2>&1 &
   echo "Partito in background (pid $!). Segui con:  tail -f $DATA_ROOT/logs/prepare.log"
   echo "A che punto sei:  helpers/status.sh"
@@ -139,7 +155,11 @@ echo "== a. collego i video di $COMMA_VIDEOS_DIR"
   || die "nnslr link-videos fallito: vedi $LOG_DIR/link-videos.json e .err"
 
 if [ "${#routes[@]}" -eq 0 ]; then
-  mapfile -t routes < <( (todo extract; todo preannotate) | sed '/^$/d' | sort -u)
+  if [ "${PREPARE_AGAIN:-0}" = 1 ]; then
+    mapfile -t routes < <(todo repropose | sed '/^$/d' | sort -u)
+  else
+    mapfile -t routes < <( (todo extract; todo preannotate) | sed '/^$/d' | sort -u)
+  fi
 fi
 if [ "${#routes[@]}" -eq 0 ]; then
   rm -f "$LOG_DIR/batch.json"

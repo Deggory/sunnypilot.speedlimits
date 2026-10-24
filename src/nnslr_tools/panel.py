@@ -68,7 +68,9 @@ CUTTER_SIZE = '960x544'
 CUTTER_FAMILIES = ('all', 'speed')
 CUTTER_FAMILY = 'all'
 # The options an action takes, besides a training's start and the run to resume (checked by Panel.start).
-ACTION_OPTIONS = {'train_cutter': ('size', 'families')}
+ACTION_OPTIONS = {'train_cutter': ('size', 'families'), 'prepare': ('proposer',), 'prepare_again': ('proposer',)}
+# Who proposes the signs of a route (nnslr preannotate --proposer): the choice of the Prepare tab.
+PROPOSERS = ('vietnam', 'ours')
 
 
 def _run_of(log: Path, action: str = 'train') -> str | None:
@@ -89,6 +91,8 @@ ACTIONS = {
     # Every route still on the comma, over ssh with this machine's key (Host comma in ~/.ssh/config).
     'fetch': {'label': 'Download from the comma', 'group': 'fetch', 'command': ['helpers/fetch_comma_segments.sh']},
     'prepare': {'label': 'Prepare new routes', 'group': 'prepare', 'command': ['helpers/1_prepare.sh']},
+    # The routes nobody has reviewed a frame of, proposed again (after choosing another proposer).
+    'prepare_again': {'label': 'Propose again', 'group': 'prepare', 'command': ['helpers/1_prepare.sh', '--again']},
     'dataset': {'label': 'Import reviews', 'group': 'train',
                 'command': ['helpers/3_train.sh', '--dataset-only']},
     # The whole pipeline: import, split, the detector and the reader, evaluation, export, bundle.
@@ -705,6 +709,13 @@ class Panel:
         for key in ('size', 'families'):
             if (options or {}).get(key) is not None and key not in ACTION_OPTIONS.get(action, ()):
                 raise PanelError(400, 'bad_option', 'Only "Train the cutter" takes a ' + ('size' if key == 'size' else 'choice of signs') + '.')
+        proposer = (options or {}).get('proposer')
+        if proposer is not None:
+            if action not in ('prepare', 'prepare_again'):
+                raise PanelError(400, 'bad_option', 'Only preparing routes takes a proposer.')
+            if proposer not in PROPOSERS:
+                raise PanelError(400, 'bad_option', 'Unknown proposer: ' + ', '.join(PROPOSERS) + '.')
+            start_env['NNSLR_PROPOSER'] = proposer
         if action == 'train_cutter':
             size = (options or {}).get('size') or CUTTER_SIZE
             families = (options or {}).get('families') or CUTTER_FAMILY

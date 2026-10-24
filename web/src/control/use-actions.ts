@@ -1,7 +1,7 @@
 // Starting an action of the control pages (a job in the background) and stopping a running job, each asked
 // first in the confirm dialog when it is long, remote or disruptive.
 import {messageOf, post} from '../common/api';
-import type {ActionName, ActionState, CutterOptions, Job, StartedJob, TrainingStart} from '../common/panel-types';
+import type {ActionName, ActionOptions, ActionState, Job, StartedJob, TrainingStart} from '../common/panel-types';
 import {askConfirm, type ConfirmOptions} from '../composables/confirm';
 import {toast} from '../composables/toast';
 import type {InjectionKey} from 'vue';
@@ -10,7 +10,12 @@ import type {InjectionKey} from 'vue';
 export const RESUME_JOB: InjectionKey<(job: Job) => Promise<void>> = Symbol('resume-job');
 
 /** The question before an action; null: it starts at the click (preparing, importing the reviews). */
-function question(name: ActionName, state: ActionState, start: TrainingStart | null, options: CutterOptions | null): ConfirmOptions | null {
+/** The proposer as the Prepare tab names it. */
+function proposerName(proposer: string | undefined): string {
+  return proposer === 'ours' ? 'our cutter and classifier' : 'the Vietnamese YOLO of Hugging Face';
+}
+
+function question(name: ActionName, state: ActionState, start: TrainingStart | null, options: ActionOptions | null): ConfirmOptions | null {
   if (name === 'train' || name === 'train_continue') {
     const from = start ? ' It starts from: ' + start.label + '.' : '';
     return {title: 'Train the whole pipeline?', action: 'Start training',
@@ -26,6 +31,11 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
     return {title: 'Train the classifier?', action: 'Start training',
       text: 'Mines the false boxes of the cutter in use, trains the classifier with “not a sign” on the GPU, then measures it '
         + 'alone and in the chain: it takes hours. Its run is a new one, named by the time it starts.'};
+  }
+  if (name === 'prepare_again') {
+    return {title: 'Propose the signs again?', action: 'Propose again',
+      text: 'The routes nobody has reviewed a frame of get new proposals from ' + proposerName(options?.proposer)
+        + '. Routes already in review are left as they are.'};
   }
   if (name === 'fetch') {
     return {title: state.label + '?', action: 'Download',
@@ -43,7 +53,7 @@ export function usePanelActions(refresh: () => Promise<void>) {
   /** start: where a training starts (the selector of the Train tab); the server's default without it. options: the
    * cutter's size and signs. */
   async function run(name: ActionName, state: ActionState, start: TrainingStart | null = null,
-    options: CutterOptions | null = null): Promise<void> {
+    options: ActionOptions | null = null): Promise<void> {
     const ask = question(name, state, start, options);
     if (ask !== null && !await askConfirm(ask)) return;
     try {

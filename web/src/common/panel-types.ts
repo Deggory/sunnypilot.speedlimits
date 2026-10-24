@@ -1,6 +1,6 @@
 // GET /api/panel/status (nnslr_tools.panel.Panel.status): the control pages (Overview, Prepare, Train).
 
-export type ActionName = 'fetch' | 'prepare' | 'dataset' | 'train' | 'train_continue' | 'train_resume' | 'train_classifier'
+export type ActionName = 'fetch' | 'prepare' | 'prepare_again' | 'dataset' | 'train' | 'train_continue' | 'train_resume' | 'train_classifier'
   | 'train_cutter' | 'update';
 /** What a cutter learns to find: every sign (the speed signs and the other signs) or the speed signs only. */
 export type CutterFamilies = 'all' | 'speed';
@@ -8,6 +8,14 @@ export type CutterFamilies = 'all' | 'speed';
 export interface CutterOptions {
   size: string;
   families: CutterFamilies;
+}
+/** Who proposes the signs of a route (nnslr preannotate --proposer). */
+export type Proposer = 'vietnam' | 'ours';
+/** The options of an action: the cutter's size and signs, or the proposer of a preparation. */
+export interface ActionOptions {
+  size?: string;
+  families?: CutterFamilies;
+  proposer?: Proposer;
 }
 export type JobState = 'running' | 'ok' | 'failed' | 'interrupted';
 export type RouteState = 'collegare' | 'estrarre' | 'preannotare' | 'revisionare' | 'importare' | 'pronta';
