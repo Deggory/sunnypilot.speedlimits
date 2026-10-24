@@ -109,7 +109,7 @@ Other signs were mostly taken for variable displays: the AI reviewer used to lea
 - **It called every other sign "not a sign".** The training had 34 other signs against 5,906 "not a sign" crops, and many of those crops were real signs:
   - before the rule to box other signs, the AI reviewer removed the other-sign proposals: 1,339 of the 1,434 removed proposals of train were proposed as other signs, mostly pedestrian crossings, give way, no parking and direction signs;
   - about 15 of the 40 highest-scoring cutter boxes mined in those frames were real signs: no entry, no overtaking, roadworks, end of motorway.
-- **Fixed:** in those frames, removed other-sign proposals and mined boxes scoring 0.3 or more are no longer "not a sign" (`BOXES_OTHER_SIGNS`, `mine-negatives --sign-score`). A second run with the 1344 × 760 cutter is measuring the fix.
+- **Fixed:** in those frames, removed other-sign proposals and mined boxes scoring 0.3 or more are no longer "not a sign" (`BOXES_OTHER_SIGNS`, `mine-negatives --sign-score`). Run `2026-10-24_1835-classifier` (cutter 1344 × 760, score 0.1, test) measures the fix: other signs read right went from 0 to **18 of 54**; speed signs found and read right **66%** (53 of 80; old reader 68%); the cutter's 210 false boxes per frame drop to **0.49**. In train, 650 likely signs were left out of the mined boxes.
 - Those 1,339 removed proposals are other signs waiting for their kind: reviewing them would give the classifier its first real set of other signs.
 
 **Experiment B (run `2026-10-24_expB`, on the reviewed boxes)**
