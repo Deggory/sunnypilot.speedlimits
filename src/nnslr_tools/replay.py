@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from nnslr_tools.checkpoints import safe_torch_load
+from nnslr_tools.checkpoints import build_detector, detector_is_wide, safe_torch_load
 from nnslr_tools.training import _require_detector_stack, _require_training_stack
 
 
@@ -144,11 +144,7 @@ def _load_models(detector_checkpoint: Path, reader_checkpoint: Path, device_name
     ):
         raise ValueError("checkpoint_provenance_mismatch")
 
-    detector = ssdlite320_mobilenet_v3_large(
-        weights=None,
-        weights_backbone=None,
-        num_classes=2,
-    )
+    detector = build_detector(wide=detector_is_wide(detector_payload["state_dict"]))
     detector.load_state_dict(detector_payload["state_dict"], strict=True)
     detector.to(device).eval()
 

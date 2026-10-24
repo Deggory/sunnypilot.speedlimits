@@ -43,6 +43,34 @@ def safe_torch_load(path: Path) -> Any:
         return torch.load(Path(path), map_location="cpu", weights_only=True)
 
 
+# A weight of the SSDlite head whose size tells the detector's tail: 960 channels when the MobileNetV3 backbone
+# started from ImageNet, 480 otherwise (torchvision reduces the tail without pretrained backbone weights).
+DETECTOR_TAIL_KEY = "head.regression_head.module_list.1.0.0.weight"
+
+
+def detector_is_wide(state_dict: dict[str, Any]) -> bool:
+    """True when detector weights were trained with the full tail (backbone started from ImageNet)."""
+    weight = state_dict.get(DETECTOR_TAIL_KEY)
+    return weight is not None and int(weight.shape[0]) == 960
+
+
+def build_detector(*, wide: bool):
+    """The two-class SSDlite320 MobileNetV3 detector, with the tail of the weights it will load.
+
+    torchvision builds the full tail only when it is given pretrained backbone weights: asking for them builds
+    the same shape as a training started from ImageNet (they are overwritten by the weights loaded next; the
+    file comes from the torch cache, downloaded once by the training).
+    """
+    from torchvision.models import MobileNet_V3_Large_Weights
+    from torchvision.models.detection import ssdlite320_mobilenet_v3_large
+
+    return ssdlite320_mobilenet_v3_large(
+        weights=None,
+        weights_backbone=MobileNet_V3_Large_Weights.IMAGENET1K_V1 if wide else None,
+        num_classes=2,
+    )
+
+
 def torch_load(path: Path) -> dict[str, Any]:
     """Only load tensor/state-dict checkpoints (never arbitrary pickled objects)."""
     checkpoint = safe_torch_load(path)

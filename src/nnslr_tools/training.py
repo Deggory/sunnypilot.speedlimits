@@ -21,7 +21,8 @@ import time
 from typing import Any
 
 from nnslr_tools import tracking
-from nnslr_tools.checkpoints import atomic_torch_save, model_weights, stable_weights, torch_load
+from nnslr_tools.checkpoints import (atomic_torch_save, build_detector, detector_is_wide, model_weights,
+                                     stable_weights, torch_load)
 from nnslr_tools.progress import report as report_progress
 from nnslr_tools.annotations import load_jsonl, validate_dataset
 from nnslr_tools.splits import validate_splits
@@ -686,6 +687,14 @@ def train_detector(
     best_path = output_dir / "detector-best.pt"
     global_step = 0
 
+    def match_detector_tail(model, optimizer, weights):
+        # Weights trained from ImageNet have the full tail: a run continued or resumed from them needs that shape.
+        if detector_is_wide(weights) == detector_is_wide(model.state_dict()):
+            return model, optimizer
+        model = build_detector(wide=detector_is_wide(weights)).to(device)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
+        return model, optimizer
+
     start_epoch = 0
     if mode == "continue":
         if init_from is not None:
@@ -699,6 +708,7 @@ def train_detector(
             raise ValueError("stable weight task/architecture mismatch")
         if saved.get("classes") != ["background", "speed_sign"]:
             raise ValueError("stable detector classes mismatch")
+        model, optimizer = match_detector_tail(model, optimizer, model_weights(saved))
         model.load_state_dict(model_weights(saved), strict=True)
         print(f"continue detector from weights: {origin}")
     elif mode == "resume":
@@ -716,6 +726,7 @@ def train_detector(
         start_epoch = saved.get("epoch")
         if not isinstance(start_epoch, int) or not 0 <= start_epoch < config.epochs:
             raise ValueError("invalid or already completed resume epoch")
+        model, optimizer = match_detector_tail(model, optimizer, model_weights(saved))
         model.load_state_dict(model_weights(saved), strict=True)
         optimizer.load_state_dict(saved["optimizer"])
         scaler.load_state_dict(saved["scaler"])
