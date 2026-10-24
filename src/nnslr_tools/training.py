@@ -395,6 +395,8 @@ def _tracking_config(plan: dict[str, Any], config: Any, architecture: str) -> di
 @dataclass(frozen=True)
 class TrainConfig:
     epochs: int = 20
+    # Stop when the validation has not improved for this many epochs (0: never stop early).
+    patience: int = 5
     batch_size: int = 64
     learning_rate: float = 3e-4
     weight_decay: float = 1e-4
@@ -468,6 +470,8 @@ def gpu_smoke(device_index: int = 0) -> dict[str, Any]:
 @dataclass(frozen=True)
 class DetectorTrainConfig:
     epochs: int = 20
+    # Stop when the validation loss has not improved for this many epochs (0: never stop early).
+    patience: int = 5
     batch_size: int = 8
     learning_rate: float = 1e-4
     weight_decay: float = 1e-4
@@ -750,6 +754,8 @@ def train_detector(
         _tracking_config(plan, config, "ssdlite320_mobilenet_v3_large"),
     )
     try:
+        stale = 0
+        stopped_early = None
         for epoch in range(start_epoch, config.epochs):
             epoch_number = epoch + 1
             epoch_start = time.perf_counter()
@@ -799,7 +805,8 @@ def train_detector(
             }
             history.append(epoch_result)
 
-            if val_loss < best_validation_loss:
+            improved = val_loss < best_validation_loss
+            if improved:
                 best_validation_loss = val_loss
                 torch.save({
                     "format_version": 1,
@@ -835,6 +842,13 @@ def train_detector(
             # One line per epoch: the panel of the review site reads the progress from the log.
             print(f"detector epoch {epoch_number}/{config.epochs} train_loss {epoch_result['train_loss']:.4f} "
                   f"val_loss {val_loss:.4f} {time.perf_counter() - epoch_start:.0f}s", flush=True)
+            # Early stop: the best weights are already saved; more epochs would only memorise the training images.
+            stale = 0 if improved else stale + 1
+            if config.patience and stale >= config.patience and epoch_number < config.epochs:
+                stopped_early = epoch_number
+                print(f"detector stops early after epoch {epoch_number}: validation loss not better for "
+                      f"{stale} epochs (best {best_validation_loss:.4f})", flush=True)
+                break
 
         gpu = None
         if device.type == "cuda":
@@ -849,6 +863,7 @@ def train_detector(
             "architecture": "ssdlite320_mobilenet_v3_large",
             "classes": ["background", "speed_sign"],
             "best_validation_loss": best_validation_loss,
+            "stopped_early_after_epoch": stopped_early,
             "checkpoint": str(best_path),
             "training_plan": str(plan_path),
             "device": str(device),
@@ -1076,6 +1091,8 @@ def train_reader(
         _tracking_config(plan, config, "mobilenet_v3_small"),
     )
     try:
+        stale = 0
+        stopped_early = None
         for epoch in range(start_epoch, config.epochs):
             epoch_number = epoch + 1
             epoch_start = time.perf_counter()
@@ -1149,7 +1166,8 @@ def train_reader(
             }
             history.append(epoch_result)
 
-            if epoch_result["validation_accuracy"] > best_accuracy:
+            improved = epoch_result["validation_accuracy"] > best_accuracy
+            if improved:
                 best_accuracy = epoch_result["validation_accuracy"]
                 torch.save({
                     "format_version": 1,
@@ -1191,6 +1209,12 @@ def train_reader(
                   f"train_accuracy {epoch_result['train_accuracy']:.4f} "
                   f"val_accuracy {epoch_result['validation_accuracy']:.4f} "
                   f"{time.perf_counter() - epoch_start:.0f}s", flush=True)
+            stale = 0 if improved else stale + 1
+            if config.patience and stale >= config.patience and epoch_number < config.epochs:
+                stopped_early = epoch_number
+                print(f"reader stops early after epoch {epoch_number}: validation accuracy not better for "
+                      f"{stale} epochs (best {best_accuracy:.4f})", flush=True)
+                break
 
         gpu = None
         if device.type == "cuda":
@@ -1205,6 +1229,7 @@ def train_reader(
             "architecture": "mobilenet_v3_small",
             "classes": classes,
             "best_validation_accuracy": best_accuracy,
+            "stopped_early_after_epoch": stopped_early,
             "checkpoint": str(best_path),
             "training_plan": str(plan_path),
             "device": str(device),

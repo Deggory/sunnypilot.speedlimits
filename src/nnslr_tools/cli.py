@@ -710,6 +710,7 @@ def _cmd_train(args: argparse.Namespace) -> int:
     if args.task == "detector":
         config = DetectorTrainConfig(
             epochs=args.epochs,
+            patience=args.patience,
             batch_size=args.batch_size if args.batch_size is not None else 8,
             learning_rate=args.learning_rate if args.learning_rate is not None else 1e-4,
             weight_decay=args.weight_decay,
@@ -725,6 +726,7 @@ def _cmd_train(args: argparse.Namespace) -> int:
     else:
         config = TrainConfig(
             epochs=args.epochs,
+            patience=args.patience,
             batch_size=args.batch_size if args.batch_size is not None else 64,
             learning_rate=args.learning_rate if args.learning_rate is not None else 3e-4,
             weight_decay=args.weight_decay,
@@ -1294,6 +1296,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_train.add_argument("--output", help="new output directory; required unless --dry-run")
     p_train.add_argument("--device", choices=("cuda", "cpu"), default="cuda")
     p_train.add_argument("--epochs", type=int, default=20)
+    p_train.add_argument("--patience", type=int, default=5,
+                         help="stop when the validation has not improved for this many epochs (0: never); "
+                              "the best epoch is the one kept either way")
     p_train.add_argument("--batch-size", type=int, default=None,
                          help="default: reader 64, detector 8")
     p_train.add_argument("--learning-rate", type=float, default=None,
