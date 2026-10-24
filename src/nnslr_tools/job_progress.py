@@ -142,7 +142,8 @@ TASK_STEPS = {'import': 'import', 'validate': 'split', 'split': 'split', 'detect
               'reader': 'reader', 'evaluate': 'evaluate', 'hard_examples': 'export', 'export': 'export'}
 
 
-def with_step_progress(result: dict, action: str, record: dict | None, setup_line: str = '') -> dict:
+def with_step_progress(result: dict, action: str, record: dict | None, setup_line: str = '',
+                       download: dict | None = None) -> dict:
     """Adds 'step_progress' ({'done', 'total', 'percent', 'text'}) for the current step of a running job:
     from the last report of a command (when it belongs to that step) or, while the GPU environment is
     made, the last line of its log. With a count, the job's percent counts it too."""
@@ -160,6 +161,12 @@ def with_step_progress(result: dict, action: str, record: dict | None, setup_lin
             reached = sum(weights[step['key']] for step in result['steps'] if step['state'] == 'done')
             result = {**result, 'percent': round((reached + weights[current] * min(done, total) / total) * 100
                                                  / sum(weights.values()), 1)}
+    elif current == 'gpu_env' and download is not None and download['written']:
+        # The file pip is downloading: the GPU environment has several, of sizes known only when they start.
+        written, total = download['written'], download['total']
+        step_progress = {'done': round(written / 1e6), 'total': round(total / 1e6),
+                         'percent': round(min(written, total) * 100 / total, 1),
+                         'text': f"Downloading {download['name']} · {written / 1e6:.0f} of {total / 1e6:.0f} MB"}
     elif current == 'gpu_env' and setup_line:
         step_progress = {'done': 0, 'total': 0, 'percent': None, 'text': setup_line[:200]}
     return {**result, 'step_progress': step_progress}

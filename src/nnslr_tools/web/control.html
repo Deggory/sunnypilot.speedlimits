@@ -141,7 +141,17 @@ display:flex;flex-direction:column}
 .jp-mark{position:relative;z-index:1;width:22px;height:22px;border-radius:50%;flex:none;display:grid;place-items:center;
 border:1.5px solid var(--line-strong);background:var(--surface);color:var(--muted);font-size:11px;font-weight:700;font-variant-numeric:tabular-nums}
 .jp-mark svg{width:12px;height:12px}
+.jp-step-body{flex:1;min-width:0;display:grid;grid-template-columns:1fr auto;column-gap:8px;align-items:baseline}
 .jp-step-label{padding-top:2px;line-height:1.35;min-width:0}
+/* The percent of each step: 100% when done, the count of the current one while it runs. */
+.jp-step-pct{font-size:12px;font-weight:650;color:var(--muted);font-variant-numeric:tabular-nums}
+.jp-steps li.current .jp-step-pct{color:var(--rev)}
+.jp-step-bar{grid-column:1 / -1;height:4px;margin:6px 0 2px;border-radius:2px;background:var(--surface-3);overflow:hidden;position:relative}
+.jp-step-bar span{display:block;height:100%;border-radius:2px;background:var(--rev);transition:width .6s ease}
+.jp-step-bar.indeterminate span{position:absolute;width:30%;animation:jp-step-slide 1.4s ease-in-out infinite}
+@keyframes jp-step-slide{0%{left:-30%}100%{left:100%}}
+.jp-step-text{grid-column:1 / -1;font-size:12px;font-weight:400;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media (prefers-reduced-motion:reduce){.jp-step-bar.indeterminate span{animation:none;left:0}}
 .jp-steps li.done{color:var(--fg)}
 .jp-steps li.done .jp-mark{background:var(--ok);border-color:var(--ok);color:var(--on-ok)}
 .jp-steps li.current{color:var(--fg);font-weight:650}

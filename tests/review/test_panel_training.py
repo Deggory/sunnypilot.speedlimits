@@ -78,3 +78,13 @@ def test_a_bad_or_unavailable_start_is_refused(root, checkout, monkeypatch):
     with pytest.raises(PanelError) as other:
         panel.start('prepare', {'start': 'random'})
     assert other.value.status == 400
+
+
+def test_jobs_keep_their_temporary_files_in_the_data_root(root, checkout, monkeypatch):
+    """Not in /tmp: the service's private /tmp is emptied at every restart of the site."""
+    (checkout / 'helpers' / '3_train.sh').write_text('#!/usr/bin/env bash\necho "tmp=$TMPDIR"\n')
+    panel = Panel(root, repo=checkout)
+    monkeypatch.setattr(panel, 'activities', lambda: [])
+    job = panel.start('train')
+    finished(panel, job['id'])
+    assert f'tmp={root / "tmp"}' in full_log(panel, job['id']) and (root / 'tmp').is_dir()

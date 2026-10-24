@@ -89,7 +89,7 @@ const barKind = computed(() => ({ok: 'ok', failed: 'bad', interrupted: 'warn', r
         </div>
         <MiniMachine v-if="running && system" :system="system"/>
       </div>
-      <JobSteps v-if="steps.length" :steps="steps"/>
+      <JobSteps v-if="steps.length" :steps="steps" :current="job.state === 'running' ? job.progress.step_progress : null"/>
     </div>
   </article>
 </template>

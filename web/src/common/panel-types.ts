@@ -33,6 +33,14 @@ export interface TrainingCurve {
   points: EpochPoint[];
 }
 
+export interface StepProgress {
+  done: number;
+  total: number;
+  /** 0-100, or null when the step only says what it is doing. */
+  percent: number | null;
+  text: string;
+}
+
 export interface JobProgress {
   steps: JobStep[];
   /** 0-100 when known from steps, epochs or finished routes; null otherwise (never a guess). */
@@ -40,6 +48,8 @@ export interface JobProgress {
   /** e.g. "detector · epoch 5 of 20", "2 of 5 routes ready". */
   detail: string;
   last_line: string;
+  /** A running job: how far its current step is (images checked, batches, the file being downloaded). */
+  step_progress?: StepProgress | null;
   /** Training only: the curves of the detector and of the reader, one point per epoch done. */
   curves: Partial<Record<'detector' | 'reader', TrainingCurve>>;
 }

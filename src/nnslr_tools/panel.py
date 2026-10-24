@@ -18,6 +18,7 @@ import os
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import threading
 import time
@@ -36,6 +37,8 @@ PROGRESS_BYTES = 4 * 1024 * 1024
 # Written by helpers/1_prepare.sh when it starts: the routes of that run, for the progress.
 BATCH_FILE = 'logs/prepare/batch.json'
 HISTORY = 12
+# A download announced by pip in the GPU setup log.
+DOWNLOADING = re.compile(r'Downloading (\S+?)(?:\.whl)? \(([0-9.]+) (kB|MB|GB)\)')
 RUN_NAME = re.compile(r'[A-Za-z0-9._-]+')
 STABLE_CHECK_SECONDS = 600
 JOB_ID = re.compile(r'[0-9]{8}-[0-9]{6}-[a-z_]+')
@@ -300,18 +303,23 @@ class Panel:
         cached = self._progress.get(job['id'])
         # A preparation's percent changes without its log growing: never cached while it runs.
         if cached is not None and cached[:2] == key and not (job['action'] == 'prepare' and job['state'] == 'running'):
-            return cached[2]
+            result = cached[2]
+        else:
+            result = self._read_progress(job, preparation)
+            self._progress[job['id']] = (key[0], key[1], result)
+        # The progress inside the current step changes without the log growing: never from the cache.
+        if job['state'] == 'running':
+            result = self._with_step_progress(result, job['action'], job['started_at'])
+        return result
+
+    def _read_progress(self, job: dict, preparation: dict | None) -> dict:
         try:
             with (self.logs / (job['id'] + '.log')).open('rb') as log:
                 log.seek(max(0, job['size'] - PROGRESS_BYTES))
                 text = log.read().decode('utf-8', 'replace')
         except OSError:
             text = ''
-        result = progress(job['action'], job['state'], text, preparation if job['action'] == 'prepare' else None)
-        self._progress[job['id']] = (key[0], key[1], result)
-        if job['state'] == 'running':
-            result = self._with_step_progress(result, job['action'], job['started_at'])
-        return result
+        return progress(job['action'], job['state'], text, preparation if job['action'] == 'prepare' else None)
 
     def _with_step_progress(self, result: dict, action: str, started_at: str) -> dict:
         """The progress inside the current step: the last report of a command (logs/progress.json, written
@@ -324,13 +332,43 @@ class Panel:
         if record is not None and not (isinstance(record.get('at'), (int, float)) and record['at'] >= started):
             record = None
         setup = ''
+        download = None
         try:
             with (self.root / 'logs' / 'setup-gpu.log').open('rb') as log:
-                log.seek(max(0, log.seek(0, 2) - 4096))
-                setup = last_line(log.read().decode('utf-8', 'replace'))
+                log.seek(max(0, log.seek(0, 2) - 8192))
+                tail = log.read().decode('utf-8', 'replace')
+            setup = last_line(tail)
+            download = self._download(tail)
         except OSError:
             pass
-        return with_step_progress(result, action, record, setup)
+        return with_step_progress(result, action, record, setup, download)
+
+    def _download(self, setup_log: str) -> dict | None:
+        """The file pip is downloading for the GPU environment: its name and size from the log
+        ("Downloading torch-....whl (906.4 MB)"), and how much is already written, from the size of the
+        temporary file pip has open (seen through /proc, whatever /tmp the job has)."""
+        found = DOWNLOADING.findall(setup_log)
+        if not found:
+            return None
+        name, size, unit = found[-1]
+        total = float(size) * {'kB': 1e3, 'MB': 1e6, 'GB': 1e9}[unit]
+        written = 0
+        for entry in Path('/proc').iterdir():
+            if not entry.name.isdigit():
+                continue
+            try:
+                command = (entry / 'cmdline').read_bytes()
+                if b'pip' not in command or b'install' not in command:
+                    continue
+                for handle in (entry / 'fd').iterdir():
+                    target = os.readlink(handle)
+                    if '/tmp' in target and not target.endswith(('.py', '.pyc', '.so')):
+                        info = os.stat(handle)
+                        if stat.S_ISREG(info.st_mode) and info.st_size <= total * 1.05:
+                            written = max(written, info.st_size)
+            except OSError:
+                continue
+        return {'name': name.split('-')[0], 'written': written, 'total': total}
 
     def _action_states(self, payload: dict, activities: list[dict]) -> dict:
         running = self._running_groups(activities)
@@ -587,7 +625,11 @@ class Panel:
             command = list(ACTIONS[action]['command']) + start_args
             if action == 'prepare':
                 command.append('--jobs=' + os.environ.get(PREPARE_JOBS_ENV, '2'))
-            environment = dict(os.environ, NNSLR_DATA_ROOT=str(self.root), **start_env)
+            # Temporary files in the data root, not in /tmp: the service has a private /tmp (PrivateTmp)
+            # that systemd empties at every restart, which broke a pip download of a running training.
+            temporary = self.root / 'tmp'
+            temporary.mkdir(parents=True, exist_ok=True)
+            environment = dict(os.environ, NNSLR_DATA_ROOT=str(self.root), TMPDIR=str(temporary), **start_env)
             if fetch_python:
                 environment[FETCH_PYTHON_ENV] = fetch_python
             with path.open('wb') as log:
