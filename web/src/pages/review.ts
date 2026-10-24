@@ -5,7 +5,7 @@
 // confirm (saving), overlay and pointer (the photo), boxes, editor, edits, hints, timeline, topbar, messages,
 // export, keyboard, layout, render.
 import {byId} from '../common/dom';
-import {initThemeSwitch} from '../common/theme';
+import {initAccountMenu} from '../common/account-menu';
 import {discardChanges, confirmFrame, withdrawFrame} from '../review/confirm';
 import {one, readLocal} from '../review/dom';
 import {initEditor} from '../review/editor';
@@ -70,7 +70,7 @@ function restore(): void {
 
 function start(): void {
   setRenderer(renderPage);
-  initThemeSwitch();
+  initAccountMenu();
   initTopbar();
   initControls();
   initEditor();
@@ -87,7 +87,7 @@ function start(): void {
     brand.removeAttribute('href');
     brand.removeAttribute('title');
     // A report opened without the server has no account.
-    one('.account-btn').hidden = true;
+    one('.account-menu').hidden = true;
     byId('storageNote').textContent = OFFLINE_NOTE;
   }
   renderRoutes();

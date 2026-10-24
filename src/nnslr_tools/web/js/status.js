@@ -77,11 +77,13 @@
   var KEY = "nnslr-theme";
   var CHANGED = "nnslr-theme";
   var root = document.documentElement;
-  function isDark() {
-    const theme = root.dataset["theme"];
-    if (theme === "light") return false;
-    if (theme === "auto") return !matchMedia("(prefers-color-scheme: light)").matches;
-    return true;
+  function storedTheme() {
+    try {
+      const value = localStorage.getItem(KEY);
+      if (value === "light" || value === "auto") return value;
+    } catch {
+    }
+    return "dark";
   }
   function setTheme(theme) {
     try {
@@ -95,20 +97,111 @@
   function onThemeChange(listener) {
     document.addEventListener(CHANGED, listener);
   }
-  function initThemeSwitch() {
-    const button = document.getElementById("theme-toggle");
-    if (button === null) return;
+
+  // web/src/common/account-menu.ts
+  var THEMES = [["dark", "Scuro"], ["light", "Chiaro"], ["auto", "Automatico"]];
+  function themeChoice() {
+    const group = node("div", "segmented");
+    group.setAttribute("role", "radiogroup");
+    group.setAttribute("aria-label", "Aspetto");
+    const buttons = THEMES.map(([theme, label]) => {
+      const button = node("button", "", label);
+      button.type = "button";
+      button.setAttribute("role", "radio");
+      button.addEventListener("click", () => setTheme(theme));
+      return { theme, button };
+    });
     const show = () => {
-      const dark = isDark();
-      const title = dark ? "Passa al tema chiaro" : "Passa al tema scuro";
-      button.classList.toggle("is-light", !dark);
-      button.setAttribute("aria-pressed", String(!dark));
-      button.title = title;
-      button.setAttribute("aria-label", title);
+      const current = storedTheme();
+      for (const { theme, button } of buttons) button.setAttribute("aria-checked", String(theme === current));
     };
-    button.addEventListener("click", () => setTheme(isDark() ? "light" : "dark"));
     onThemeChange(show);
     show();
+    group.append(...buttons.map(({ button }) => button));
+    return group;
+  }
+  function who(state, error) {
+    const head = node("div", "pop-head");
+    const avatar = node("span", "pop-avatar", (state?.user ?? "?").slice(0, 1).toUpperCase());
+    avatar.setAttribute("aria-hidden", "true");
+    const text = node("div", "pop-who");
+    if (state === null) {
+      text.append(node("strong", "", "Account"), node("span", "", error || "Caricamento…"));
+    } else if (state.local) {
+      text.append(node("strong", "", "Questo computer"), node("span", "", "Sito su 127.0.0.1, senza accesso"));
+    } else {
+      const sessions = state.sessions ?? 1;
+      text.append(
+        node("strong", "", state.user ?? ""),
+        node("span", "", sessions > 1 ? "Connesso da " + sessions + " browser" : "Connesso da questo browser")
+      );
+    }
+    head.append(avatar, text);
+    return head;
+  }
+  async function signOut(everywhere) {
+    if (everywhere && !window.confirm("Uscire da tutti i browser, compreso questo?")) return;
+    try {
+      await post(everywhere ? "/api/auth/logout-all" : "/api/auth/logout");
+    } catch {
+    }
+    location.replace("/");
+  }
+  function menuButton(label, className, action) {
+    const button = node("button", "pop-item " + className, label);
+    button.type = "button";
+    button.addEventListener("click", action);
+    return button;
+  }
+  function fill(pop, state, error = "") {
+    const appearance = node("div", "pop-section");
+    appearance.append(node("div", "pop-label", "Aspetto"), themeChoice());
+    const items = node("div", "pop-section pop-items");
+    const settings = node("a", "pop-item", "Password e browser connessi");
+    settings.href = "/account";
+    items.appendChild(settings);
+    if (state !== null && !state.local) {
+      items.append(
+        menuButton("Esci", "", () => void signOut(false)),
+        menuButton("Esci da tutti i browser", "danger", () => void signOut(true))
+      );
+    }
+    pop.replaceChildren(who(state, error), appearance, items);
+  }
+  function initAccountMenu() {
+    const button = document.getElementById("account-btn");
+    const pop = document.getElementById("account-pop");
+    if (button === null || pop === null) return;
+    let state = null;
+    const open = () => {
+      fill(pop, state);
+      pop.hidden = false;
+      button.setAttribute("aria-expanded", "true");
+      api("/api/auth/state").then((answer) => {
+        state = answer;
+        if (!pop.hidden) fill(pop, state);
+      }).catch((problem) => {
+        if (!pop.hidden && state === null) fill(pop, null, problem instanceof Error ? problem.message : String(problem));
+      });
+      pop.querySelector('[aria-checked="true"]')?.focus();
+    };
+    const close = (refocus) => {
+      if (pop.hidden) return;
+      pop.hidden = true;
+      button.setAttribute("aria-expanded", "false");
+      if (refocus) button.focus();
+    };
+    button.addEventListener("click", () => pop.hidden ? open() : close(false));
+    document.addEventListener("click", (event) => {
+      const target = event.target;
+      if (!pop.contains(target) && !button.contains(target)) close(false);
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !pop.hidden) {
+        event.stopPropagation();
+        close(true);
+      }
+    }, true);
   }
 
   // web/src/common/toast.ts
@@ -285,9 +378,9 @@
       row.append(pill("in corso", "run"), node("span", "what grow", activity.label), node("span", "sub", "pid " + activity.pid));
       if (activity.label === "preparazione" && prep && prep.percent !== null) {
         const bar = node("div", "bar run");
-        const fill = node("span");
-        fill.style.width = prep.percent + "%";
-        bar.appendChild(fill);
+        const fill2 = node("span");
+        fill2.style.width = prep.percent + "%";
+        bar.appendChild(fill2);
         row.append(bar, node(
           "span",
           "sub",
@@ -419,7 +512,7 @@
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && log.id) closeLog();
   });
-  initThemeSwitch();
+  initAccountMenu();
   void refresh();
   window.setInterval(() => void refresh(), 4e3);
 })();

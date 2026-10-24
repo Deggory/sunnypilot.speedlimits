@@ -488,7 +488,7 @@ def make_handler(app: ReviewApp):
                 page = render_index(app.route_summaries(), db_path(app.root), nonce)
                 self._send(200, 'text/html; charset=utf-8', page.encode('utf-8'),
                            "default-src 'none'; script-src 'nonce-" + nonce + "'; style-src 'unsafe-inline'; "
-                           "base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+                           "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
                 return
             if path == '/api/routes':
                 self._json(200, {'routes': app.route_summaries()})
@@ -881,7 +881,7 @@ def make_handler(app: ReviewApp):
                 nonce = secrets.token_urlsafe(18)
                 self._send(status, 'text/html; charset=utf-8', render_problem(status, message, nonce).encode('utf-8'),
                            "default-src 'none'; script-src 'nonce-" + nonce + "'; style-src 'unsafe-inline'; "
-                           "base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+                           "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 
         def _redirect(self, location, cookie):
             extra = [('Location', location)]

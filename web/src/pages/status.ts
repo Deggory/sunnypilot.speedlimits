@@ -3,7 +3,7 @@ import {api, messageOf, post} from '../common/api';
 import {byId, node, pill, setBar, unchanged} from '../common/dom';
 import {clock} from '../common/format';
 import type {ActionName, Job, JobState, LogChunk, PanelStatus, StartedJob} from '../common/panel-types';
-import {initThemeSwitch} from '../common/theme';
+import {initAccountMenu} from '../common/account-menu';
 import {toast} from '../common/toast';
 
 const JOB_STATE: Record<JobState, [string, string]> = {
@@ -327,6 +327,6 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && log.id) closeLog();
 });
 
-initThemeSwitch();
+initAccountMenu();
 void refresh();
 window.setInterval(() => void refresh(), 4000);

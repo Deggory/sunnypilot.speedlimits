@@ -80,7 +80,6 @@ input::placeholder { color: var(--placeholder); }
 .reviewer input.need { border-style: solid; border-color: var(--bad); box-shadow: 0 0 0 4px var(--bad-soft); }
 
 /* Dark/light switch and Account link (shared.css) at the end of the toolbar. */
-.topbar .theme-toggle { margin-left: -4px; }
 
 /* ---------- page: canvas + inspector ---------- */
 /* Not the centred column of shared.css: the canvas takes the whole width. */
@@ -475,7 +474,8 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
 @media (max-width: 640px) {
   /* Header: sign, route, "0/2160" and reviewer on one row, the filters on the next; the route progress is
      also the header's bottom line. It scrolls away with the page. */
-  .topbar { position: static; padding-left: max(12px, env(safe-area-inset-left, 0px)); padding-right: max(12px, env(safe-area-inset-right, 0px)); }
+  /* Not sticky on a phone, but above the photo: the Account menu opens over it. */
+  .topbar { position: relative; z-index: 8; padding-left: max(12px, env(safe-area-inset-left, 0px)); padding-right: max(12px, env(safe-area-inset-right, 0px)); }
   .topbar-inner { position: relative; padding-block: 6px 8px; gap: 6px 8px; }
   .brand-mark { width: 30px; height: 30px; border-width: 3.5px; font-size: 11px; }
   .route-pick { order: 1; flex: 1 1 0; }
@@ -484,9 +484,7 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
   .reviewer { order: 3; }
   .topbar .reviewer input { width: 80px; min-height: 40px; padding: 3px 8px; font-size: 16px; }
   .reviewer input::placeholder { font-size: 14px; }
-  .theme-toggle { order: 4; }
-  .account-btn { order: 5; }
-  .topbar .theme-toggle { margin-left: 0; }
+  .account-menu { order: 5; }
   .topbar .icon-btn { width: 34px; height: 34px; }
   /* Five filters (with "AI · N") fit 390px; on a narrower screen the row scrolls, the page never does. */
   .filters { order: 6; flex: 1 1 100%; display: flex; min-width: 0; overflow-x: auto; scrollbar-width: none; }
@@ -533,7 +531,7 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
   .mobilebar .keycap { display: none; }
 }
 @media (max-height: 500px) and (max-width: 980px) {
-  .topbar { position: static; }
+  .topbar { position: relative; z-index: 8; }
   #scene { max-height: calc(100vh - 96px); }
 }
 /* Key caps and shortcuts only where there is a keyboard: hidden on touch screens. */

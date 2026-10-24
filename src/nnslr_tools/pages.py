@@ -10,8 +10,8 @@ Placeholders of the templates:
 
 - ``__NNSLR_THEME__``: the inline script that applies the dark / light choice before the first paint;
 - ``__NNSLR_SHARED_CSS__``, ``__NNSLR_SITE_CSS__``: the two style sheets;
-- ``__NNSLR_TOPBAR__``: brand, live state, theme switch, Account icon and tabs;
-- ``__NNSLR_BAR_END__``: only the theme switch and the Account icon (the review page has its own bar);
+- ``__NNSLR_TOPBAR__``: brand, live state, Account menu and tabs;
+- ``__NNSLR_BAR_END__``: only the Account menu (the review page has its own bar);
 - ``__NNSLR_SCRIPT__``: the page script; ``__NNSLR_NONCE__``: the nonce, where a template needs it;
 - ``__NNSLR_DATA__``: the frames of the review page.
 """
@@ -30,22 +30,18 @@ SITE_TABS = (('route', '/', 'Route'), ('panel', '/pannello', 'Pannello'), ('stat
 # (web/src/common/theme.ts changes it).
 THEME_HEAD = ('<script nonce="{nonce}">try{{var t=localStorage.getItem(\'nnslr-theme\');'
               'if(t===\'light\'||t===\'auto\')document.documentElement.dataset.theme=t}}catch(e){{}}</script>')
-THEME_SWITCH = (
-    '<button class="icon-btn theme-toggle" type="button" id="theme-toggle" aria-pressed="false"'
-    ' aria-label="Passa al tema chiaro" title="Passa al tema chiaro">'
-    '<svg class="i-sun" viewBox="0 0 20 20" aria-hidden="true">'
-    '<circle cx="10" cy="10" r="3.6" fill="none" stroke="currentColor" stroke-width="1.8"/>'
-    '<path d="M10 1.8v2.2M10 16v2.2M1.8 10H4M16 10h2.2M4.2 4.2l1.6 1.6M14.2 14.2l1.6 1.6M4.2 15.8l1.6-1.6'
-    'M14.2 5.8l1.6-1.6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>'
-    '<svg class="i-moon" viewBox="0 0 20 20" aria-hidden="true">'
-    '<path d="M16.5 12.6A7 7 0 0 1 7.4 3.5a7 7 0 1 0 9.1 9.1z" fill="none" stroke="currentColor"'
-    ' stroke-width="1.8" stroke-linejoin="round"/></svg></button>')
-ACCOUNT_ICON = (
-    '<a class="icon-btn account-btn" href="/account"{current} aria-label="Account" title="Account">'
+# The Account icon at the right of every top bar: a menu with who is signed in, the appearance (dark, light,
+# automatic), the account settings and sign out; web/src/common/account-menu.ts fills it when it opens.
+ACCOUNT_MENU = (
+    '<div class="account-menu">'
+    '<button class="icon-btn account-btn{current}" type="button" id="account-btn" aria-haspopup="dialog"'
+    ' aria-expanded="false" aria-controls="account-pop" aria-label="Account e impostazioni" title="Account">'
     '<svg viewBox="0 0 20 20" aria-hidden="true">'
     '<circle cx="10" cy="7" r="3.4" fill="none" stroke="currentColor" stroke-width="1.8"/>'
     '<path d="M3.6 17.2c.9-3.1 3.4-4.8 6.4-4.8s5.5 1.7 6.4 4.8" fill="none" stroke="currentColor"'
-    ' stroke-width="1.8" stroke-linecap="round"/></svg></a>')
+    ' stroke-width="1.8" stroke-linecap="round"/></svg></button>'
+    '<div class="account-pop" id="account-pop" role="dialog" aria-label="Account e impostazioni" hidden></div>'
+    '</div>')
 LIVE = ('<span class="live" role="status"><span class="dot" id="live-dot"></span>'
         '<span id="live-text">connessione…</span></span>')
 # Groups of the route list, in this order: the work in progress first, finished routes last.
@@ -67,14 +63,14 @@ def page_script(page: str, nonce: str) -> str:
 
 
 def bar_end(current: str = '') -> str:
-    """The theme switch and the Account icon, at the right of every top bar."""
-    return THEME_SWITCH + ACCOUNT_ICON.format(current=' aria-current="page"' if current == 'account' else '')
+    """The Account menu, at the right of every top bar."""
+    return ACCOUNT_MENU.format(current=' current' if current == 'account' else '')
 
 
 def top_bar(current: str = '', *, live: bool = False, signed_in: bool = True) -> str:
-    """Brand, live state, theme switch, Account icon and tabs. current: the key of the tab to mark, or
-    'account'. The sign-in page (signed_in=False) shows only the brand and the switch."""
-    end = bar_end(current) if signed_in else THEME_SWITCH
+    """Brand, live state, Account menu and tabs. current: the key of the tab to mark, or 'account'.
+    The sign-in page (signed_in=False) shows only the brand."""
+    end = bar_end(current) if signed_in else ''
     bar = ('<header class="topbar"><div class="topbar-inner">'
            '<a class="brand" href="/" title="Elenco delle route"><span class="brand-mark" aria-hidden="true">50</span>'
            '<span class="brand-name">Speed limits</span></a>' + (LIVE if live else '') + end + '</div>')
@@ -150,7 +146,7 @@ def render_account(nonce: str, signed_in_browser: bool) -> str:
 
 
 def simple_page(title: str, current: str, nonce: str, main: str) -> str:
-    """A page without a template of its own: the frame, the content, the theme switch script."""
+    """A page without a template of its own: the frame, the content, the script of the Account menu."""
     return '\n'.join([
         '<!doctype html><html lang="it"><head><meta charset="utf-8">',
         '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">',

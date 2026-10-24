@@ -17,15 +17,53 @@
     return element;
   }
 
+  // web/src/common/api.ts
+  var ApiError = class extends Error {
+    constructor(message, status) {
+      super(message);
+      __publicField(this, "status", status);
+    }
+  };
+  async function api(path, options = {}, signIn = false) {
+    const response = await fetch(path, { credentials: "same-origin", cache: "no-store", ...options });
+    if (response.status === 401 && !signIn) {
+      location.replace("/");
+      throw new ApiError("Sessione finita.", 401);
+    }
+    let data;
+    try {
+      data = await response.json();
+    } catch {
+      data = { message: "Risposta non valida dal server (HTTP " + response.status + ")." };
+    }
+    if (!response.ok) {
+      const problem = data;
+      throw new ApiError(problem.message || "HTTP " + response.status, response.status);
+    }
+    return data;
+  }
+  function post(path, body = {}, signIn = false) {
+    return api(
+      path,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+      signIn
+    );
+  }
+  function messageOf(error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+
   // web/src/common/theme.ts
   var KEY = "nnslr-theme";
   var CHANGED = "nnslr-theme";
   var root = document.documentElement;
-  function isDark() {
-    const theme = root.dataset["theme"];
-    if (theme === "light") return false;
-    if (theme === "auto") return !matchMedia("(prefers-color-scheme: light)").matches;
-    return true;
+  function storedTheme() {
+    try {
+      const value = localStorage.getItem(KEY);
+      if (value === "light" || value === "auto") return value;
+    } catch {
+    }
+    return "dark";
   }
   function setTheme(theme) {
     try {
@@ -39,25 +77,111 @@
   function onThemeChange(listener) {
     document.addEventListener(CHANGED, listener);
   }
-  function initThemeSwitch() {
-    const button = document.getElementById("theme-toggle");
-    if (button === null) return;
+
+  // web/src/common/account-menu.ts
+  var THEMES = [["dark", "Scuro"], ["light", "Chiaro"], ["auto", "Automatico"]];
+  function themeChoice() {
+    const group = node("div", "segmented");
+    group.setAttribute("role", "radiogroup");
+    group.setAttribute("aria-label", "Aspetto");
+    const buttons = THEMES.map(([theme, label2]) => {
+      const button = node("button", "", label2);
+      button.type = "button";
+      button.setAttribute("role", "radio");
+      button.addEventListener("click", () => setTheme(theme));
+      return { theme, button };
+    });
     const show = () => {
-      const dark = isDark();
-      const title = dark ? "Passa al tema chiaro" : "Passa al tema scuro";
-      button.classList.toggle("is-light", !dark);
-      button.setAttribute("aria-pressed", String(!dark));
-      button.title = title;
-      button.setAttribute("aria-label", title);
+      const current = storedTheme();
+      for (const { theme, button } of buttons) button.setAttribute("aria-checked", String(theme === current));
     };
-    button.addEventListener("click", () => setTheme(isDark() ? "light" : "dark"));
     onThemeChange(show);
     show();
+    group.append(...buttons.map(({ button }) => button));
+    return group;
   }
-
-  // web/src/common/api.ts
-  function messageOf(error) {
-    return error instanceof Error ? error.message : String(error);
+  function who(state2, error) {
+    const head = node("div", "pop-head");
+    const avatar = node("span", "pop-avatar", (state2?.user ?? "?").slice(0, 1).toUpperCase());
+    avatar.setAttribute("aria-hidden", "true");
+    const text = node("div", "pop-who");
+    if (state2 === null) {
+      text.append(node("strong", "", "Account"), node("span", "", error || "Caricamento…"));
+    } else if (state2.local) {
+      text.append(node("strong", "", "Questo computer"), node("span", "", "Sito su 127.0.0.1, senza accesso"));
+    } else {
+      const sessions = state2.sessions ?? 1;
+      text.append(
+        node("strong", "", state2.user ?? ""),
+        node("span", "", sessions > 1 ? "Connesso da " + sessions + " browser" : "Connesso da questo browser")
+      );
+    }
+    head.append(avatar, text);
+    return head;
+  }
+  async function signOut(everywhere) {
+    if (everywhere && !window.confirm("Uscire da tutti i browser, compreso questo?")) return;
+    try {
+      await post(everywhere ? "/api/auth/logout-all" : "/api/auth/logout");
+    } catch {
+    }
+    location.replace("/");
+  }
+  function menuButton(label2, className, action) {
+    const button = node("button", "pop-item " + className, label2);
+    button.type = "button";
+    button.addEventListener("click", action);
+    return button;
+  }
+  function fill(pop, state2, error = "") {
+    const appearance = node("div", "pop-section");
+    appearance.append(node("div", "pop-label", "Aspetto"), themeChoice());
+    const items = node("div", "pop-section pop-items");
+    const settings = node("a", "pop-item", "Password e browser connessi");
+    settings.href = "/account";
+    items.appendChild(settings);
+    if (state2 !== null && !state2.local) {
+      items.append(
+        menuButton("Esci", "", () => void signOut(false)),
+        menuButton("Esci da tutti i browser", "danger", () => void signOut(true))
+      );
+    }
+    pop.replaceChildren(who(state2, error), appearance, items);
+  }
+  function initAccountMenu() {
+    const button = document.getElementById("account-btn");
+    const pop = document.getElementById("account-pop");
+    if (button === null || pop === null) return;
+    let state2 = null;
+    const open = () => {
+      fill(pop, state2);
+      pop.hidden = false;
+      button.setAttribute("aria-expanded", "true");
+      api("/api/auth/state").then((answer) => {
+        state2 = answer;
+        if (!pop.hidden) fill(pop, state2);
+      }).catch((problem) => {
+        if (!pop.hidden && state2 === null) fill(pop, null, problem instanceof Error ? problem.message : String(problem));
+      });
+      pop.querySelector('[aria-checked="true"]')?.focus();
+    };
+    const close = (refocus) => {
+      if (pop.hidden) return;
+      pop.hidden = true;
+      button.setAttribute("aria-expanded", "false");
+      if (refocus) button.focus();
+    };
+    button.addEventListener("click", () => pop.hidden ? open() : close(false));
+    document.addEventListener("click", (event) => {
+      const target = event.target;
+      if (!pop.contains(target) && !button.contains(target)) close(false);
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !pop.hidden) {
+        event.stopPropagation();
+        close(true);
+      }
+    }, true);
   }
 
   // web/src/review/dom.ts
@@ -1202,7 +1326,7 @@
   }
 
   // web/src/review/editor.ts
-  function fill(input, value) {
+  function fill2(input, value) {
     if (document.activeElement !== input) input.value = value;
   }
   function choice(className, text, pressed, onClick) {
@@ -1243,7 +1367,7 @@
     unknown.title = "Numero non leggibile";
     unknown.setAttribute("aria-label", "Numero non leggibile");
     quick.append(unknown);
-    fill(byId("value"), d.value_kph === null || d.value_kph === void 0 ? "" : String(d.value_kph));
+    fill2(byId("value"), d.value_kph === null || d.value_kph === void 0 ? "" : String(d.value_kph));
   }
   function renderRoads(d) {
     const roads = byId("roads");
@@ -1256,12 +1380,12 @@
     }
   }
   function renderDetails(d) {
-    for (const key of SELECT_FIELDS) fill(byId(key), d[key] ?? "unknown");
+    for (const key of SELECT_FIELDS) fill2(byId(key), d[key] ?? "unknown");
     for (const key of BOOLEAN_FIELDS) {
       const value = d[key];
-      fill(byId(key), value === true ? "true" : value === false ? "false" : "unknown");
+      fill2(byId(key), value === true ? "true" : value === false ? "false" : "unknown");
     }
-    fill(byId("notes"), d.notes ?? "");
+    fill2(byId("notes"), d.notes ?? "");
   }
   function renderEditor(row, work) {
     const d = work.detections[state.selected];
@@ -1278,8 +1402,8 @@
     byId("evidence").textContent = d.model_label ? "Proposta del modello: " + d.model_label : "Riquadro aggiunto a mano.";
   }
   function renderFrameFields(row, work) {
-    fill(byId("site_group"), work.site_group ?? row.site_group ?? "");
-    fill(byId("encounter_id"), work.encounter_id ?? row.encounter_id ?? "");
+    fill2(byId("site_group"), work.site_group ?? row.site_group ?? "");
+    fill2(byId("encounter_id"), work.encounter_id ?? row.encounter_id ?? "");
   }
   function initEditor() {
     const valueInput = byId("value");
@@ -1787,8 +1911,8 @@
     if (!s) return ["", ""];
     if (status === "done" && aiConfirmed(key)) {
       const via = s.channel === "mcp" ? "MCP" : s.channel === "rest" ? "REST" : "";
-      const who = s.reviewer || "un’AI";
-      return ["Salvato ✓ · revisione " + s.revision + " · " + who + " (AI" + (via ? " · " + via : "") + ")", "ok"];
+      const who2 = s.reviewer || "un’AI";
+      return ["Salvato ✓ · revisione " + s.revision + " · " + who2 + " (AI" + (via ? " · " + via : "") + ")", "ok"];
     }
     if (status === "done") {
       return ["Salvato ✓ · revisione " + s.revision + (s.reviewer ? " · " + s.reviewer : ""), "ok"];
@@ -2072,7 +2196,7 @@
   }
   function start() {
     setRenderer(renderPage);
-    initThemeSwitch();
+    initAccountMenu();
     initTopbar();
     initControls();
     initEditor();
@@ -2088,7 +2212,7 @@
       const brand = byId("brand");
       brand.removeAttribute("href");
       brand.removeAttribute("title");
-      one(".account-btn").hidden = true;
+      one(".account-menu").hidden = true;
       byId("storageNote").textContent = OFFLINE_NOTE;
     }
     renderRoutes();

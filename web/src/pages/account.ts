@@ -1,25 +1,8 @@
-// Account: who is signed in, sign out, change the password, the appearance (dark, light, automatic).
+// Account: who is signed in, sign out, change the password (the appearance is in the Account menu).
 import {api, messageOf, post} from '../common/api';
 import type {AuthAnswer, AuthState} from '../common/auth-types';
 import {byId} from '../common/dom';
-import {initThemeSwitch, onThemeChange, setTheme, storedTheme, type Theme} from '../common/theme';
-
-const choice = byId('theme-choice');
-
-function showTheme(): void {
-  const theme = storedTheme();
-  for (const button of choice.querySelectorAll<HTMLElement>('[data-theme-choice]')) {
-    button.setAttribute('aria-checked', String(button.dataset['themeChoice'] === theme));
-  }
-}
-
-choice.addEventListener('click', (event) => {
-  const button = (event.target as Element).closest<HTMLElement>('[data-theme-choice]');
-  const theme = button?.dataset['themeChoice'];
-  if (theme === 'dark' || theme === 'light' || theme === 'auto') setTheme(theme satisfies Theme);
-});
-onThemeChange(showTheme);
-showTheme();
+import {initAccountMenu} from '../common/account-menu';
 
 function render(state: AuthState): void {
   let text = 'Connesso come ' + (state.user ?? '') + '.';
@@ -64,7 +47,7 @@ byId<HTMLFormElement>('password-form').addEventListener('submit', async (event) 
   }
 });
 
-initThemeSwitch();
+initAccountMenu();
 api<AuthState>('/api/auth/state').then(render).catch((problem: unknown) => {
   byId('admin-sub').textContent = messageOf(problem);
 });

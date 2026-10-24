@@ -1,5 +1,6 @@
 // Dark (the default, as distill-web) or light. The choice is kept in this browser; the inline script in the
-// <head> of every page (pages.py, THEME_HEAD) applies it before the first paint, this module changes it.
+// <head> of every page (pages.py, THEME_HEAD) applies it before the first paint, this module changes it
+// (from the Account menu, account-menu.ts).
 
 export type Theme = 'dark' | 'light' | 'auto';
 const KEY = 'nnslr-theme';
@@ -37,21 +38,4 @@ export function setTheme(theme: Theme): void {
 
 export function onThemeChange(listener: () => void): void {
   document.addEventListener(CHANGED, listener);
-}
-
-/** The dark / light switch at the right of the top bar (#theme-toggle), when the page has it. */
-export function initThemeSwitch(): void {
-  const button = document.getElementById('theme-toggle');
-  if (button === null) return;
-  const show = (): void => {
-    const dark = isDark();
-    const title = dark ? 'Passa al tema chiaro' : 'Passa al tema scuro';
-    button.classList.toggle('is-light', !dark);
-    button.setAttribute('aria-pressed', String(!dark));
-    button.title = title;
-    button.setAttribute('aria-label', title);
-  };
-  button.addEventListener('click', () => setTheme(isDark() ? 'light' : 'dark'));
-  onThemeChange(show);
-  show();
 }

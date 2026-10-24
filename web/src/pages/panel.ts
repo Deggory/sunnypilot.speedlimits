@@ -4,7 +4,7 @@ import {api, messageOf} from '../common/api';
 import {byId, unchanged} from '../common/dom';
 import {clock} from '../common/format';
 import type {PanelStatus} from '../common/panel-types';
-import {initThemeSwitch} from '../common/theme';
+import {initAccountMenu} from '../common/account-menu';
 import type {ActionContext} from '../panel/actions';
 import {renderHero} from '../panel/hero';
 import {followJob, renderJobCards} from '../panel/jobs';
@@ -45,6 +45,6 @@ async function refresh(): Promise<void> {
   }
 }
 
-initThemeSwitch();
+initAccountMenu();
 void refresh();
 window.setInterval(() => void refresh(), 4000);

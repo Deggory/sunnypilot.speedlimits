@@ -184,18 +184,38 @@ border-radius:14px;background:var(--surface-2);border:1px solid var(--line-stron
 .sheet.open ~ .toast{bottom:auto;top:16px}
 body.sheet-open{overflow:hidden}
 @media (prefers-reduced-motion:reduce){.pill.run::before{animation:none}.bar span,.btn,.tabs a,.sheet,.sheet-backdrop{transition:none}}
-/* The dark / light switch at the right of the top bar (the Account page also offers Automatico). */
+/* The Account menu at the right of the top bar (account-menu.ts): who is signed in, the appearance, the
+   settings and sign out, in a panel under the icon (a sheet across the width on a phone). */
 .icon-btn{appearance:none;border:0;width:32px;height:32px;border-radius:50%;background:var(--surface-2);color:var(--muted);
 cursor:pointer;flex:none;display:grid;place-items:center;transition:color .2s,background .2s}
 .icon-btn:hover{color:var(--fg);background:var(--surface-3)}
-a.icon-btn{text-decoration:none}
 .icon-btn svg{width:18px;height:18px}
-.live + .theme-toggle{margin-left:4px}
-/* Without a live status the switch itself goes to the right. */
-.brand + .theme-toggle{margin-left:auto}
-.icon-btn[aria-current="page"]{color:var(--tab-on-fg);background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--tab-on-ring)}
-.theme-toggle .i-moon,.theme-toggle.is-light .i-sun{display:none}
-.theme-toggle.is-light .i-moon{display:block}
+.icon-btn[aria-expanded="true"],.icon-btn.current{color:var(--tab-on-fg);background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--tab-on-ring)}
+.account-menu{position:relative;flex:none}
+.live + .account-menu{margin-left:4px}
+.brand + .account-menu{margin-left:auto}
+.account-pop{position:absolute;right:0;top:calc(100% + 10px);z-index:30;width:300px;padding:6px;border-radius:16px;
+background:var(--surface);border:1px solid var(--line-strong);box-shadow:var(--pop-shadow);display:flex;flex-direction:column}
+.pop-head{display:flex;align-items:center;gap:12px;padding:10px 10px 12px}
+.pop-avatar{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;flex:none;font-weight:700;
+color:var(--tab-on-fg);background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--tab-on-ring)}
+.pop-who{display:flex;flex-direction:column;min-width:0}
+.pop-who strong{font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pop-who span{font-size:12.5px;color:var(--muted)}
+.pop-section{border-top:1px solid var(--line);padding:10px}
+.pop-label{font-size:12px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+.pop-section .segmented{display:flex;gap:4px;padding:4px;background:var(--surface-2);border:1px solid var(--line);border-radius:12px}
+.pop-section .segmented button{flex:1;appearance:none;border:0;background:none;color:var(--muted);font:inherit;font-weight:600;
+font-size:13.5px;padding:7px 6px;border-radius:9px;cursor:pointer;min-height:36px}
+.pop-section .segmented button[aria-checked="true"]{color:var(--tab-on-fg);background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--tab-on-ring)}
+.pop-items{display:flex;flex-direction:column;padding:6px 4px}
+.pop-item{appearance:none;border:0;background:none;font:inherit;font-size:14.5px;font-weight:500;color:var(--fg);
+text-align:left;text-decoration:none;padding:10px;border-radius:10px;cursor:pointer;min-height:42px;display:flex;align-items:center}
+.pop-item:hover{background:var(--surface-2)}
+.pop-item.danger{color:var(--bad)}
+@media (max-width:480px){
+  .account-pop{position:fixed;left:12px;right:12px;top:calc(env(safe-area-inset-top,0px) + 58px);width:auto}
+}
 @media (pointer:coarse){.icon-btn{width:40px;height:40px}}
 
 /* On a phone the bar keeps the brand, the dot and the two icons; the time of the last update stays in the dot's title. */

@@ -2,7 +2,6 @@
 import {api, messageOf, post} from '../common/api';
 import type {AuthState} from '../common/auth-types';
 import {byId} from '../common/dom';
-import {initThemeSwitch} from '../common/theme';
 
 type View = 'form-login' | 'form-code' | 'form-setup';
 const VIEWS: View[] = ['form-login', 'form-code', 'form-setup'];
@@ -78,7 +77,6 @@ guard('form-setup', 'setup-submit', 'setup-error', async () => {
 byId('auth-back').addEventListener('click', () => show('form-code'));
 byId('auth-transport').hidden = location.protocol === 'https:';
 
-initThemeSwitch();
 api<AuthState>('/api/auth/state', {}, true).then((state) => {
   if (state.signed_in) done();
   else show(state.configured ? 'form-login' : 'form-code');

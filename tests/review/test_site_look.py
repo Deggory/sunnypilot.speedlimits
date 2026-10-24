@@ -1,5 +1,5 @@
-"""The pages of the site: one shared look (shared.css, the tokens of distill-web), the tabs, the theme
-switch, the Account icon, the Stato page, and the scripts built from the TypeScript of web/src."""
+"""The pages of the site: one shared look (shared.css, the tokens of distill-web), the tabs, the Account
+menu (appearance, settings, sign out), the Stato page, and the scripts built from the TypeScript of web/src."""
 from __future__ import annotations
 
 import os
@@ -29,7 +29,7 @@ PAGES = [('/', 'Route'), ('/stato', 'Stato'), ('/pannello', 'Pannello'), ('/acco
 
 
 @pytest.mark.parametrize('path, tab', PAGES)
-def test_every_page_has_the_shared_look_the_switch_and_its_script(served, path, tab):
+def test_every_page_has_the_shared_look_the_account_menu_and_its_script(served, path, tab):
     status, response, data = served.request('GET', path)
     page = data.decode()
     nonce = response.getheader('Content-Security-Policy').split("'nonce-")[1].split("'")[0]
@@ -37,7 +37,8 @@ def test_every_page_has_the_shared_look_the_switch_and_its_script(served, path, 
     assert f'<script nonce="{nonce}">try{{var t=localStorage.getItem(\'nnslr-theme\')' in page
     assert page.count(f'<script nonce="{nonce}">') == 2
     assert asset('shared.css') in page
-    assert 'id="theme-toggle"' in page and 'class="icon-btn account-btn" href="/account"' in page
+    # The theme choice is in the Account menu, not a separate switch.
+    assert 'id="account-btn"' in page and 'id="account-pop"' in page and 'theme-toggle' not in page
     assert '__NNSLR_' not in page.replace('"server": false', '')
     tabs = re.search(r'<nav class="tabs".*?</nav>', page, re.S)
     if tab is not None:
