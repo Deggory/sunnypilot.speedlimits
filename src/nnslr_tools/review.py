@@ -785,8 +785,10 @@ def make_handler(app: ReviewApp):
                     return
                 body = self._read_json()
                 if run:
-                    # The only option: where a training starts ({"start": key}, checked by Panel.start).
-                    options = {'start': body['start']} if isinstance(body, dict) and isinstance(body.get('start'), str) else None
+                    # The options: where a training starts ({"start": key}) and the run to resume ({"run": name}),
+                    # both checked by Panel.start.
+                    options = {key: body[key] for key in ('start', 'run')
+                               if isinstance(body, dict) and isinstance(body.get(key), str)} or None
                     job = app.panel.start(run.group(1), options)
                     print(f'Pannello: avviata {job["label"]} ({job["id"]})', flush=True)
                     self._json(200, {'ok': True, **job})

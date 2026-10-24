@@ -2,7 +2,7 @@
 // Overview, Prepare, Train, Evaluate: one app, the tab shown follows the address (tabs.ts). One status for all tabs
 // (/api/panel/status every 4 s, which also feeds the machine's history), the actions, and the sheet with the
 // details of a job. Evaluate reads the training runs itself (/api/panel/runs).
-import {computed, ref, watch} from 'vue';
+import {computed, provide, ref, watch} from 'vue';
 import type {Job} from '../common/panel-types';
 import ToastHost from '../components/ToastHost.vue';
 import {usePanelStatus} from '../composables/panel-status';
@@ -14,11 +14,13 @@ import OverviewTab from './OverviewTab.vue';
 import PrepareTab from './PrepareTab.vue';
 import {currentTab, markBusy, useTabRouting, type ControlTab} from './tabs';
 import TrainTab from './TrainTab.vue';
-import {usePanelActions} from './use-actions';
+import {RESUME_JOB, usePanelActions} from './use-actions';
 
 useTabRouting();
 const {status, refresh} = usePanelStatus((value) => recordMachine(value.system));
-const {run, stop} = usePanelActions(refresh);
+const {run, stop, resume} = usePanelActions(refresh);
+// "Resume" on the card of a stopped training, wherever the card is shown.
+provide(RESUME_JOB, resume);
 
 /** The job in the sheet, by id: the sheet shows its latest copy from the status. */
 const shownId = ref<string | null>(null);

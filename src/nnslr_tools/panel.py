@@ -46,6 +46,20 @@ JOB_ID = re.compile(r'[0-9]{8}-[0-9]{6}-[a-z_]+')
 FINISHED = re.compile(r'== finito con codice (\d+)\s*$')
 # Runs the helper and appends its exit code as the last line of the log.
 WRAPPER = '"$@"; code=$?; echo; echo "== finito con codice $code"; exit $code'
+# A training run's name, as helpers/3_train.sh writes it: "== d. training <run> (<mode>) -> ...".
+RUN_NAME = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,99}')
+RUN_LINE = re.compile(r'^== d\. training (\S+) \(', re.M)
+
+
+def _run_of(log: Path) -> str | None:
+    """The run a training job wrote to, from the start of its log (the line comes after the import)."""
+    try:
+        with log.open('rb') as handle:
+            head = handle.read(65536).decode('utf-8', 'replace')
+    except OSError:
+        return None
+    match = RUN_LINE.search(head)
+    return match.group(1) if match and RUN_NAME.fullmatch(match.group(1)) else None
 
 ACTIONS = {
     # Every route still on the comma, over ssh with this machine's key (Host comma in ~/.ssh/config).
@@ -56,6 +70,8 @@ ACTIONS = {
     'train': {'label': 'Train', 'group': 'train', 'command': ['helpers/3_train.sh']},
     'train_continue': {'label': 'Train from the stable model', 'group': 'train',
                        'command': ['helpers/3_train.sh', '--continue']},
+    # The steps a stopped training still misses, on the same run ({'run': name}: helpers/3_train.sh --resume).
+    'train_resume': {'label': 'Resume the training', 'group': 'train', 'command': ['helpers/3_train.sh']},
     # git pull + restart of this server (KillMode=process: the action itself survives the restart).
     # --no-link: the link with the token must not land in the log.
     'update': {'label': 'Update the code', 'group': 'update', 'command': ['helpers/update.sh', '--no-link']},
@@ -212,6 +228,7 @@ class Panel:
                 state = 'interrupted'
             started = datetime.strptime(job_id[:15], '%Y%m%d-%H%M%S')
             result.append({'id': job_id, 'action': action, 'label': ACTIONS[action]['label'],
+                           'run': _run_of(path) if ACTIONS[action]['group'] == 'train' else None,
                            'started': started.strftime('%Y-%m-%d %H:%M:%S'),
                            # The same moment with the server's offset, for the elapsed time in the page.
                            'started_at': started.astimezone().isoformat(timespec='seconds'),
@@ -601,6 +618,13 @@ class Panel:
             raise PanelError(404, 'unknown_action', 'Unknown action.')
         start_env = {}
         start_args = []
+        resumed = (options or {}).get('run')
+        if action == 'train_resume':
+            if not isinstance(resumed, str) or not RUN_NAME.fullmatch(resumed) or not (self.root / 'runs' / resumed).is_dir():
+                raise PanelError(400, 'bad_option', 'Unknown run to resume.')
+            start_args.append('--resume=' + resumed)
+        elif resumed is not None:
+            raise PanelError(400, 'bad_option', 'Only "Resume the training" takes a run.')
         start = (options or {}).get('start')
         if start is not None:
             if action != 'train':

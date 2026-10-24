@@ -27,7 +27,7 @@ PREPARE_STEPS = (('link', 'Link the videos', 5), ('frames', 'Extract the frames 
 FETCH_STEPS = (('fetch', 'Download the drives from the comma', 100),)
 UPDATE_STEPS = (('update', 'Update the code and restart the site', 100),)
 STEPS = {'fetch': FETCH_STEPS, 'prepare': PREPARE_STEPS, 'dataset': DATASET_STEPS, 'train': TRAIN_STEPS,
-         'train_continue': TRAIN_STEPS, 'update': UPDATE_STEPS}
+         'train_continue': TRAIN_STEPS, 'train_resume': TRAIN_STEPS, 'update': UPDATE_STEPS}
 
 # The sub-steps of scripts/run_v100_baseline.sh ("== 4/10 ...") and the step they belong to.
 PIPELINE = {1: 'checks', 2: 'checks', 3: 'checks', 4: 'detector', 5: 'reader', 6: 'evaluate', 7: 'export',
@@ -126,7 +126,7 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
     detail = ''
     if finished_ok:
         percent = 100.0
-    elif action in ('train', 'train_continue', 'dataset'):
+    elif action in ('train', 'train_continue', 'train_resume', 'dataset'):
         total = sum(weight for _, _, weight in steps)
         reached = sum(weight for key, _, weight in steps if key in done)
         if inside is not None:
@@ -183,7 +183,7 @@ def with_step_progress(result: dict, action: str, record: dict | None, setup_lin
         step_progress = {'done': done, 'total': total, 'percent': round(min(done, total) * 100 / total, 1),
                          'text': str(record.get('text') or '')}
         steps = STEPS.get(action, ())
-        if action in ('train', 'train_continue', 'dataset') and steps:
+        if action in ('train', 'train_continue', 'train_resume', 'dataset') and steps:
             weights = {key: weight for key, _, weight in steps}
             reached = sum(weights[step['key']] for step in result['steps'] if step['state'] == 'done')
             result = {**result, 'percent': round((reached + weights[current] * min(done, total) / total) * 100

@@ -3,19 +3,24 @@
 // know it), the steps, what it is doing, the time it has been running (ticking) and, when the percent is
 // known, about how long is left; Stop and Details (the log in the sheet); while it runs, the machine in small
 // under the buttons. A finished job shows how it ended.
-import {computed} from 'vue';
+import {computed, inject} from 'vue';
 import type {Job, SystemInfo} from '../common/panel-types';
 import Icon from '../components/Icon.vue';
 import {useNow} from '../composables/now';
 import JobSteps from './JobSteps.vue';
 import {elapsedText, failedStep, JOB_STATE, roughText, startedAt, startedWhen} from './jobs';
 import MiniMachine from './MiniMachine.vue';
+import {RESUME_JOB} from './use-actions';
 
 const props = defineProps<{job: Job; heading?: string | undefined; system?: SystemInfo | null | undefined}>();
 defineEmits<{details: [job: Job]; stop: [job: Job]}>();
 const now = useNow();
 
 const running = computed(() => props.job.state === 'running');
+const resumeJob = inject(RESUME_JOB, null);
+// A training that stopped after writing its run: the missing steps can run again on that run.
+const resumable = computed(() => resumeJob !== null && Boolean(props.job.run)
+  && (props.job.state === 'failed' || props.job.state === 'interrupted') && props.job.action.startsWith('train'));
 const state = computed(() => JOB_STATE[props.job.state]);
 const percent = computed(() => {
   const value = props.job.state === 'ok' ? 100 : props.job.progress.percent;
@@ -86,6 +91,7 @@ const barKind = computed(() => ({ok: 'ok', failed: 'bad', interrupted: 'warn', r
         <div class="jp-actions">
           <button class="btn small" type="button" @click="$emit('details', job)"><Icon name="details"/>Details</button>
           <button v-if="running && job.stoppable" class="btn small danger" type="button" @click="$emit('stop', job)"><Icon name="stop"/>Stop</button>
+          <button v-if="resumable" class="btn small primary" type="button" @click="resumeJob?.(job)"><Icon name="resume"/>Resume</button>
         </div>
         <MiniMachine v-if="running && system" :system="system"/>
       </div>

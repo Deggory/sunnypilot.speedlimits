@@ -10,6 +10,52 @@ from nnslr_tools.checkpoints import build_detector, detector_is_wide, safe_torch
 from nnslr_tools.training import _require_detector_stack, _require_training_stack
 
 
+def _export_onnx(module, example, output_path: Path, *, input_names: list[str], output_names: list[str]) -> None:
+    """Write ``module`` as ONNX: with torch.export (dynamo) first, else with the TorchScript exporter.
+
+    torch 2.14 cannot torch.export the SSDlite detector with its post-processing (non-maximum suppression has
+    data-dependent shapes); the TorchScript exporter (opset 17) handles it, and the parity check that follows
+    compares the result with PyTorch either way.
+    """
+    import torch
+
+    try:
+        program = torch.onnx.export(module, (example,), input_names=input_names, output_names=output_names,
+                                    dynamo=True, external_data=False)
+        program.save(str(output_path))
+        return
+    except ImportError as exc:
+        raise ValueError(
+            "onnx_dependencies_missing: install onnx and onnxscript in the training environment"
+        ) from exc
+    except Exception as exc:  # torch.export refuses the graph: the TorchScript exporter below
+        print(f"torch.export could not export {type(module).__name__} ({type(exc).__name__}); "
+              f"using the TorchScript ONNX exporter", flush=True)
+    torch.onnx.export(module, (example,), str(output_path), input_names=input_names, output_names=output_names,
+                      dynamo=False, opset_version=17)
+
+
+def _matched_detections(expected, actual, np, *, box_tolerance: float = 0.05,
+                        score_tolerance: float = 1e-4) -> tuple[bool, bool, bool]:
+    """(boxes, scores, labels) agree between two detector outputs, matching boxes one to one."""
+    expected_boxes, expected_scores, expected_labels = expected
+    actual_boxes, actual_scores, actual_labels = actual
+    if sorted(expected_labels.tolist()) != sorted(actual_labels.tolist()):
+        return False, False, False
+    free = list(range(len(actual_boxes)))
+    boxes_ok = scores_ok = True
+    for index in range(len(expected_boxes)):
+        candidates = [j for j in free if actual_labels[j] == expected_labels[index]]
+        if not candidates:
+            return False, False, False
+        distance = [float(np.abs(actual_boxes[j] - expected_boxes[index]).max()) for j in candidates]
+        best = candidates[int(np.argmin(distance))]
+        free.remove(best)
+        boxes_ok = boxes_ok and min(distance) <= box_tolerance
+        scores_ok = scores_ok and abs(float(actual_scores[best]) - float(expected_scores[index])) <= score_tolerance
+    return boxes_ok, scores_ok, True
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with Path(path).open("rb") as handle:
@@ -145,20 +191,7 @@ def export_detector_onnx(
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    try:
-        program = torch.onnx.export(
-            wrapper,
-            (example,),
-            input_names=["images"],
-            output_names=["boxes", "scores", "labels"],
-            dynamo=True,
-            external_data=False,
-        )
-        program.save(str(output_path))
-    except ImportError as exc:
-        raise ValueError(
-            "onnx_dependencies_missing: install onnx and onnxscript in the training environment"
-        ) from exc
+    _export_onnx(wrapper, example, output_path, input_names=["images"], output_names=["boxes", "scores", "labels"])
 
     try:
         import onnx
@@ -180,9 +213,11 @@ def export_detector_onnx(
         import numpy as np
         expected_np = [tensor.detach().cpu().numpy() for tensor in expected]
         shape_match = all(a.shape == b.shape for a, b in zip(expected_np, actual))
-        boxes_match = shape_match and np.allclose(expected_np[0], actual[0], rtol=1e-3, atol=1e-3)
-        scores_match = shape_match and np.allclose(expected_np[1], actual[1], rtol=1e-4, atol=1e-5)
-        labels_match = shape_match and np.array_equal(expected_np[2], actual[2])
+        # Boxes with nearly equal scores may come out in another order: each PyTorch box is matched to the
+        # closest ONNX box of the same label instead of being compared position by position.
+        boxes_match = scores_match = labels_match = False
+        if shape_match:
+            boxes_match, scores_match, labels_match = _matched_detections(expected_np, actual, np)
         passed = bool(shape_match and boxes_match and scores_match and labels_match)
         verification = {
             "enabled": True,
@@ -238,20 +273,7 @@ def export_reader_onnx(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     example = torch.randn(1, 3, input_size, input_size, dtype=torch.float32)
 
-    try:
-        program = torch.onnx.export(
-            model,
-            (example,),
-            input_names=["images"],
-            output_names=["logits"],
-            dynamo=True,
-            external_data=False,
-        )
-        program.save(str(output_path))
-    except ImportError as exc:
-        raise ValueError(
-            "onnx_dependencies_missing: install onnx and onnxscript in the training environment"
-        ) from exc
+    _export_onnx(model, example, output_path, input_names=["images"], output_names=["logits"])
 
     try:
         import onnx

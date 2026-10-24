@@ -95,3 +95,24 @@ def test_jobs_keep_their_temporary_files_in_the_data_root(root, checkout, monkey
     job = panel.start('train')
     finished(panel, job['id'])
     assert f'tmp={root / "tmp"}' in full_log(panel, job['id']) and (root / 'tmp').is_dir()
+
+
+def test_a_stopped_training_can_be_resumed_on_its_run(root, checkout):
+    from nnslr_tools.panel import PanelError, _run_of
+    panel = Panel(root, repo=checkout)
+    logs = root / 'logs' / 'panel'
+    logs.mkdir(parents=True, exist_ok=True)
+    log = logs / '20261024-145218-train.log'
+    log.write_text('== helpers/3_train.sh\n== a. importo\n== d. training 2026-10-24_1452 (fresh) -> /x\n')
+    assert _run_of(log) == '2026-10-24_1452'
+    for bad in ({}, {'run': '../etc'}, {'run': 'missing-run'}):
+        try:
+            panel.start('train_resume', bad)
+        except PanelError as error:
+            assert error.status == 400
+        else:
+            raise AssertionError('accepted ' + repr(bad))
+    try:
+        panel.start('train', {'run': '2026-10-24_1452'})
+    except PanelError as error:
+        assert error.status == 400

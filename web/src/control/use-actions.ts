@@ -4,6 +4,10 @@ import {messageOf, post} from '../common/api';
 import type {ActionName, ActionState, Job, StartedJob, TrainingStart} from '../common/panel-types';
 import {askConfirm, type ConfirmOptions} from '../composables/confirm';
 import {toast} from '../composables/toast';
+import type {InjectionKey} from 'vue';
+
+/** The resume() of the control app, for the job cards (provided by ControlApp.vue). */
+export const RESUME_JOB: InjectionKey<(job: Job) => Promise<void>> = Symbol('resume-job');
 
 /** The question before an action; null: it starts at the click (preparing, importing the reviews). */
 function question(name: ActionName, state: ActionState, start: TrainingStart | null): ConfirmOptions | null {
@@ -52,5 +56,21 @@ export function usePanelActions(refresh: () => Promise<void>) {
     void refresh();
   }
 
-  return {run, stop};
+  /** "Resume": the steps a stopped training still misses, on the same run (helpers/3_train.sh --resume). */
+  async function resume(job: Job): Promise<void> {
+    if (!job.run) return;
+    const ok = await askConfirm({title: 'Resume “' + job.run + '”?', action: 'Resume',
+      text: 'Only the steps still missing run again, on the same run: what is done stays.'});
+    if (!ok) return;
+    try {
+      const started = await post<StartedJob>('/api/panel/run/train_resume', {run: job.run});
+      toast('Started: ' + started.label);
+      await refresh();
+    } catch (error) {
+      toast(messageOf(error), true);
+      void refresh();
+    }
+  }
+
+  return {run, stop, resume};
 }

@@ -1,6 +1,6 @@
 // GET /api/panel/status (nnslr_tools.panel.Panel.status): the control pages (Overview, Prepare, Train).
 
-export type ActionName = 'fetch' | 'prepare' | 'dataset' | 'train' | 'train_continue' | 'update';
+export type ActionName = 'fetch' | 'prepare' | 'dataset' | 'train' | 'train_continue' | 'train_resume' | 'update';
 export type JobState = 'running' | 'ok' | 'failed' | 'interrupted';
 export type RouteState = 'collegare' | 'estrarre' | 'preannotare' | 'revisionare' | 'importare' | 'pronta';
 
@@ -65,6 +65,8 @@ export interface Job {
   state: JobState;
   code: number | null;
   stoppable: boolean;
+  /** The training run the job wrote to (data/runs/<run>), when it got that far; null otherwise. */
+  run?: string | null;
   /** Bytes of the log so far. */
   size: number;
   progress: JobProgress;
