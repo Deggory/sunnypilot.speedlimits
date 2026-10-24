@@ -20,6 +20,7 @@ import shutil
 import signal
 import subprocess
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -185,9 +186,13 @@ class Panel:
 
     # -- the machine ---------------------------------------------------------------------------
     def system(self) -> dict:
-        info = {'gpu': None, 'disk': None, 'cpus': os.cpu_count(), 'load': None}
+        """The machine, for the Stato page (as distill-web's Status): GPU, CPU per core, RAM, disk."""
+        info = {'gpu': None, 'disk': None, 'cpus': os.cpu_count(), 'load': None, 'loads': None,
+                'cpu': _cpu_usage(), 'memory': _memory()}
         try:
-            info['load'] = round(os.getloadavg()[0], 1)
+            loads = os.getloadavg()
+            info['load'] = round(loads[0], 1)
+            info['loads'] = [round(value, 2) for value in loads]
         except OSError:
             pass
         try:
@@ -195,14 +200,25 @@ class Panel:
             info['disk'] = {'free_gb': round(usage.free / 1e9, 1), 'total_gb': round(usage.total / 1e9, 1)}
         except OSError:
             pass
-        gpu = _nvidia(['--query-gpu=name,utilization.gpu,memory.used,memory.total', '--format=csv,noheader,nounits'])
+        gpu = _nvidia(['--query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw',
+                       '--format=csv,noheader,nounits'])
         if gpu:
             fields = [part.strip() for part in gpu.splitlines()[0].split(',')]
-            if len(fields) == 4:
-                apps = _nvidia(['--query-compute-apps=pid', '--format=csv,noheader']) or ''
+            if len(fields) == 6:
+                apps = _nvidia(['--query-compute-apps=pid,process_name,used_memory', '--format=csv,noheader,nounits']) or ''
+                process_list = []
+                for line in apps.splitlines():
+                    parts = line.split(',')
+                    if len(parts) < 3:
+                        continue
+                    pid = parts[0].strip()
+                    process_list.append({'pid': int(pid) if pid.isdigit() else None,
+                                         'name': ','.join(parts[1:-1]).strip(), 'memory_mb': _number(parts[-1])})
+                # 'processes' stays a count: the training actions refuse a busy GPU with it.
                 info['gpu'] = {'name': fields[0], 'utilization': _number(fields[1]),
                                'memory_used_mb': _number(fields[2]), 'memory_total_mb': _number(fields[3]),
-                               'processes': len([line for line in apps.splitlines() if line.strip()])}
+                               'temperature': _number(fields[4]), 'power_w': _number(fields[5]),
+                               'processes': len(process_list), 'process_list': process_list}
         return info
 
     # -- everything for the page ---------------------------------------------------------------
@@ -472,6 +488,70 @@ def _exit_code(path: Path) -> int | None:
         return None
     match = FINISHED.search(tail)
     return int(match.group(1)) if match else None
+
+
+# The last /proc/stat sample: the CPU use is the busy share of the time between two status calls.
+_cpu_sample = {'times': None}
+_cpu_lock = threading.Lock()
+
+
+def _proc_stat(text: str) -> list[tuple[int, int]]:
+    """(busy, total) jiffies of the whole CPU (first) and of every core."""
+    rows = []
+    for line in text.splitlines():
+        if not line.startswith('cpu'):
+            continue
+        try:
+            numbers = [int(value) for value in line.split()[1:]]
+        except ValueError:
+            continue
+        if len(numbers) < 4:
+            continue
+        # idle + iowait are not busy; guest time is already inside user and nice.
+        idle = numbers[3] + (numbers[4] if len(numbers) > 4 else 0)
+        total = sum(numbers[:8])
+        rows.append((total - idle, total))
+    return rows
+
+
+def _cpu_usage() -> dict | None:
+    """{'total': %, 'cores': [%, ...]} since the previous call; None on the first call or without /proc."""
+    try:
+        current = _proc_stat(Path('/proc/stat').read_text())
+    except OSError:
+        return None
+    with _cpu_lock:
+        previous = _cpu_sample['times']
+        _cpu_sample['times'] = current
+    if previous is None or len(previous) != len(current):
+        # The first call after a start: a short second sample, so the page shows a value at once.
+        time.sleep(0.25)
+        return _cpu_usage()
+    percents = []
+    for (busy, total), (old_busy, old_total) in zip(current, previous):
+        elapsed = total - old_total
+        percents.append(round(max(0.0, min(100.0, (busy - old_busy) * 100 / elapsed)), 1) if elapsed > 0 else 0.0)
+    return {'total': percents[0], 'cores': percents[1:]}
+
+
+def _memory() -> dict | None:
+    """RAM from /proc/meminfo (inside the LXC it is the container's own memory)."""
+    try:
+        text = Path('/proc/meminfo').read_text()
+    except OSError:
+        return None
+    values = {}
+    for line in text.splitlines():
+        name, separator, rest = line.partition(':')
+        parts = rest.split()
+        if separator and parts and parts[0].isdigit():
+            values[name.strip()] = int(parts[0]) * 1024
+    if 'MemTotal' not in values or 'MemAvailable' not in values:
+        return None
+    total = values['MemTotal']
+    available = values['MemAvailable']
+    return {'total_gb': round(total / 1e9, 1), 'available_gb': round(available / 1e9, 1),
+            'used_percent': round((total - available) * 100 / total, 1)}
 
 
 def _nvidia(arguments: list[str]) -> str | None:

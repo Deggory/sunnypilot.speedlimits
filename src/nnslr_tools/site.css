@@ -1,0 +1,311 @@
+/* Route list, sign-in, account and error pages. Read on every request (review.py, _site_style): a change here is
+   live at the next page load. The look of distill-web: the tokens and the frame below are copied from
+   openpilot.distill (web/static/app.css) and are the same in review.html, panel.html and status.html. */
+/* Copied from openpilot.distill web/static/app.css (the look shared by distill-web and perception-web).
+   Keep in step with it. Dark is the default; <html data-theme="light"> or "auto" picks the light one. */
+:root{--bg:#0b0f16;--bg-glow:rgba(59,130,246,.16);--surface:#161b24;--surface-2:#1c2230;--surface-3:#232b3b;
+--fg:#e8ecf3;--muted:#9aa4b2;--line:rgba(255,255,255,.08);--line-strong:rgba(255,255,255,.14);
+--accent:#3b82f6;--accent-hover:#5b97f8;--accent-soft:rgba(59,130,246,.16);
+--ok:#4ade80;--ok-soft:rgba(74,222,128,.13);--todo:#fbbf24;--todo-soft:rgba(251,191,36,.13);--rev:#60a5fa;
+--rev-soft:rgba(96,165,250,.15);--imp:#c084fc;--imp-soft:rgba(192,132,252,.14);--bad:#f87171;--bad-soft:rgba(248,113,113,.14);
+--focus:#3b82f6;--term-bg:#080b10;--term-fg:#d7dde3;--series:#4f8ff7;--series-raw:#4f8ff7;--grid:rgba(255,255,255,.06);
+--shadow:0 1px 0 rgba(255,255,255,.04) inset,0 10px 30px rgba(0,0,0,.35);
+--card-grad:linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,0) 60%);color-scheme:dark;
+--topbar-bg:rgba(11,15,22,.72);--placeholder:#6b7484;--hover-line:rgba(255,255,255,.24);--danger-line:rgba(248,113,113,.5);
+--backdrop:rgba(3,6,12,.6);--pop-shadow:0 12px 36px rgba(0,0,0,.5);--tip-shadow:0 8px 24px rgba(0,0,0,.45);
+--sheet-shadow:0 -10px 40px rgba(0,0,0,.5);--auth-shadow:0 30px 80px rgba(0,0,0,.35);--tab-on-fg:#fff;
+--tab-on-ring:rgba(59,130,246,.45);--banner-line:rgba(96,165,250,.35);--error-line:rgba(248,113,113,.4);
+--error-fg:#fecaca;--on-ok:#052e14;--spark-gpu:#34c759;--spark-cpu:#3b8cff;
+--font-ui:system-ui,-apple-system,"SF Pro Text","Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+--font-data:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+/* The light palette: chosen in Settings, or the system one when nothing is chosen. */
+:root[data-theme="light"]{--bg:#f3f6fb;--bg-glow:rgba(37,99,235,.10);--surface:#ffffff;--surface-2:#f6f8fc;--surface-3:#eaeff7;
+--fg:#0f172a;--muted:#5b6577;--line:rgba(15,23,42,.09);--line-strong:rgba(15,23,42,.15);
+--accent:#2563eb;--accent-hover:#1d4ed8;--accent-soft:rgba(37,99,235,.10);
+--ok:#15803d;--ok-soft:rgba(22,163,74,.11);--todo:#b45309;--todo-soft:rgba(217,119,6,.12);--rev:#1d4ed8;
+--rev-soft:rgba(37,99,235,.10);--imp:#7e22ce;--imp-soft:rgba(147,51,234,.10);--bad:#dc2626;--bad-soft:rgba(220,38,38,.09);
+--focus:#2563eb;--term-bg:#0f172a;--term-fg:#e2e8f0;--series:#2563eb;--series-raw:#2563eb;--grid:rgba(15,23,42,.07);
+--shadow:0 1px 2px rgba(15,23,42,.05),0 8px 24px rgba(15,23,42,.06);
+--card-grad:linear-gradient(180deg,rgba(255,255,255,.6),rgba(255,255,255,0) 60%);color-scheme:light;
+--topbar-bg:rgba(255,255,255,.78);--placeholder:#8a93a3;--hover-line:rgba(15,23,42,.22);--danger-line:rgba(220,38,38,.45);
+--backdrop:rgba(15,23,42,.35);--pop-shadow:0 12px 36px rgba(15,23,42,.16);--tip-shadow:0 8px 24px rgba(15,23,42,.14);
+--sheet-shadow:0 -10px 40px rgba(15,23,42,.16);--auth-shadow:0 30px 80px rgba(15,23,42,.12);--tab-on-fg:#1d4ed8;
+--tab-on-ring:rgba(37,99,235,.30);--banner-line:rgba(37,99,235,.28);--error-line:rgba(220,38,38,.35);
+--error-fg:#991b1b;--on-ok:#fff;--spark-gpu:#16a34a;--spark-cpu:#2563eb}
+@media (prefers-color-scheme:light){:root[data-theme="auto"]{--bg:#f3f6fb;--bg-glow:rgba(37,99,235,.10);--surface:#ffffff;--surface-2:#f6f8fc;--surface-3:#eaeff7;
+--fg:#0f172a;--muted:#5b6577;--line:rgba(15,23,42,.09);--line-strong:rgba(15,23,42,.15);
+--accent:#2563eb;--accent-hover:#1d4ed8;--accent-soft:rgba(37,99,235,.10);
+--ok:#15803d;--ok-soft:rgba(22,163,74,.11);--todo:#b45309;--todo-soft:rgba(217,119,6,.12);--rev:#1d4ed8;
+--rev-soft:rgba(37,99,235,.10);--imp:#7e22ce;--imp-soft:rgba(147,51,234,.10);--bad:#dc2626;--bad-soft:rgba(220,38,38,.09);
+--focus:#2563eb;--term-bg:#0f172a;--term-fg:#e2e8f0;--series:#2563eb;--series-raw:#2563eb;--grid:rgba(15,23,42,.07);
+--shadow:0 1px 2px rgba(15,23,42,.05),0 8px 24px rgba(15,23,42,.06);
+--card-grad:linear-gradient(180deg,rgba(255,255,255,.6),rgba(255,255,255,0) 60%);color-scheme:light;
+--topbar-bg:rgba(255,255,255,.78);--placeholder:#8a93a3;--hover-line:rgba(15,23,42,.22);--danger-line:rgba(220,38,38,.45);
+--backdrop:rgba(15,23,42,.35);--pop-shadow:0 12px 36px rgba(15,23,42,.16);--tip-shadow:0 8px 24px rgba(15,23,42,.14);
+--sheet-shadow:0 -10px 40px rgba(15,23,42,.16);--auth-shadow:0 30px 80px rgba(15,23,42,.12);--tab-on-fg:#1d4ed8;
+--tab-on-ring:rgba(37,99,235,.30);--banner-line:rgba(37,99,235,.28);--error-line:rgba(220,38,38,.35);
+--error-fg:#991b1b;--on-ok:#fff;--spark-gpu:#16a34a;--spark-cpu:#2563eb}}
+/* speedlimits-web additions, dark (default): one colour per meaning on every page.
+   --sus purple = suspicious only; --warn orange = to confirm / unsaved / warning; --has amber = frames with proposals. */
+:root{--sus:#c084fc;--sus-soft:rgba(192,132,252,.14);--warn:#fb923c;--warn-soft:rgba(251,146,60,.14);
+--has:#d9a93a;--none-cell:#2a3242;--disabled:#5d6675;--stage:#05070b;
+--sign-face:#ffffff;--sign-ink:#111111;--sign-ring:#e3001b;
+--ov-speed:#ff5964;--ov-cancel:#d4d9df;--ov-other:#ffa94d;--ov-none:#8a929c;--ov-selected:#ffd60a;--ov-hint:#64d2ff;
+--ov-text:#fff3b0;--ov-halo:#0d0f12}
+:root[data-theme="light"]{--sus:#7e22ce;--sus-soft:rgba(147,51,234,.10);--warn:#c2410c;--warn-soft:rgba(234,88,12,.11);
+--has:#e0b13f;--none-cell:#e3e8f0;--disabled:#9aa3b2;--stage:#0b0f16}
+@media (prefers-color-scheme:light){:root[data-theme="auto"]{--sus:#7e22ce;--sus-soft:rgba(147,51,234,.10);--warn:#c2410c;--warn-soft:rgba(234,88,12,.11);
+--has:#e0b13f;--none-cell:#e3e8f0;--disabled:#9aa3b2;--stage:#0b0f16}}
+/* The frame shared with distill-web and perception-web (openpilot.distill web/static/app.css): base, top bar
+   with the tab row, page head, cards, buttons, pills, bars, tables, lists, log sheet, toast. Keep in step. */
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%;background:var(--bg)}
+body{margin:0;min-height:100vh;background:radial-gradient(1200px 520px at 50% -180px,var(--bg-glow),transparent 70%) no-repeat,var(--bg);
+color:var(--fg);font-family:var(--font-ui);font-size:15px;line-height:1.45;-webkit-font-smoothing:antialiased}
+:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+a{color:var(--rev)}
+code,.mono{font-family:var(--font-data);font-size:12.5px}
+code{background:var(--surface-2);border:1px solid var(--line);border-radius:6px;padding:1px 5px;word-break:break-all}
+
+/* top bar: brand and live state, then the tabs (links to the pages of the site) */
+.topbar{position:sticky;top:0;z-index:5;background:var(--topbar-bg);border-bottom:1px solid var(--line);
+-webkit-backdrop-filter:saturate(160%) blur(16px);backdrop-filter:saturate(160%) blur(16px);
+padding:12px max(16px,env(safe-area-inset-right,0px)) 10px max(16px,env(safe-area-inset-left,0px))}
+.topbar-inner{display:flex;align-items:center;gap:10px;max-width:1180px;margin:0 auto;min-height:32px}
+.brand{display:flex;align-items:center;gap:10px;color:inherit;text-decoration:none;min-width:0;flex:none}
+/* Our brand mark is the speed sign, in the place and size of distill's tile. */
+.brand-mark{width:32px;height:32px;border-radius:50%;background:var(--sign-face);border:4px solid var(--sign-ring);display:grid;
+place-items:center;flex:none;color:var(--sign-ink);font-size:12px;font-weight:800;letter-spacing:-.04em;
+font-variant-numeric:tabular-nums;box-shadow:0 4px 14px rgba(227,0,27,.28)}
+.brand-name{margin:0;font-size:19px;font-weight:700;letter-spacing:-.01em;white-space:nowrap}
+.live{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted);min-width:0}
+.live span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px var(--ok-soft);flex:none}
+.dot.off{background:var(--bad);box-shadow:0 0 0 3px var(--bad-soft)}
+.tabs{display:flex;gap:4px;max-width:1180px;margin:10px auto 0;padding:4px;overflow-x:auto;scrollbar-width:none;
+-webkit-overflow-scrolling:touch;background:var(--surface);border:1px solid var(--line);border-radius:14px}
+.tabs::-webkit-scrollbar{display:none}
+.tabs a{color:var(--muted);font-weight:600;font-size:14px;padding:7px 14px;border-radius:10px;white-space:nowrap;
+min-height:36px;display:inline-flex;align-items:center;text-decoration:none;transition:background .2s,color .2s}
+.tabs a:hover{color:var(--fg)}
+.tabs a[aria-current="page"]{color:var(--tab-on-fg);background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--tab-on-ring)}
+
+/* page */
+.page{max-width:1180px;margin:0 auto;padding:20px max(16px,env(safe-area-inset-right,0px))
+calc(56px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:16px}
+.page-head{display:flex;flex-direction:column;gap:6px;max-width:720px;width:100%;margin:4px auto 2px;text-align:center}
+.page-title{margin:0;font-size:30px;font-weight:750;letter-spacing:-.02em;line-height:1.15;color:var(--fg)}
+.page-sub{margin:0;color:var(--muted);font-size:15px}
+@media (max-width:420px){.page-title{font-size:26px}}
+.card{background:var(--card-grad),var(--surface);border:1px solid var(--line);border-radius:18px;padding:18px 20px;min-width:0;
+box-shadow:var(--shadow)}
+@media (max-width:480px){.card{padding:16px;border-radius:16px}}
+.card h2,.label{margin:0 0 12px;font-size:13px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+.lead{margin:0 0 12px;color:var(--muted);max-width:75ch}
+.note{font-size:12.5px;color:var(--muted)}
+.empty{color:var(--muted);margin:0}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media (max-width:800px){.grid2{grid-template-columns:1fr}}
+
+/* buttons */
+.buttons{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start}
+.action{display:flex;flex-direction:column;gap:4px;max-width:100%}
+.btn{appearance:none;border:1px solid var(--line-strong);background:var(--surface-2);color:var(--fg);font:inherit;
+font-weight:650;padding:10px 18px;border-radius:12px;cursor:pointer;min-height:44px;text-decoration:none;
+display:inline-flex;align-items:center;justify-content:center;gap:8px;transition:background .2s,border-color .2s,transform .1s}
+.btn:hover:not(:disabled){border-color:var(--hover-line);background:var(--surface-3)}
+.btn:active:not(:disabled){transform:scale(.98)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;box-shadow:0 6px 18px rgba(37,99,235,.3)}
+.btn.primary:hover:not(:disabled){background:var(--accent-hover);border-color:var(--accent-hover)}
+.btn.danger{color:var(--bad);border-color:var(--danger-line);background:transparent}
+.btn.danger:hover:not(:disabled){background:var(--bad-soft);border-color:var(--bad)}
+.btn.small{padding:5px 12px;min-height:34px;font-size:13px;border-radius:10px}
+.btn:disabled{opacity:.45;cursor:not-allowed;box-shadow:none}
+.reason{font-size:12.5px;color:var(--muted);max-width:60ch}
+
+/* bars and pills */
+.bar{height:8px;border-radius:4px;background:var(--surface-3);overflow:hidden}
+.bar span{display:block;height:100%;width:0;border-radius:4px;background:var(--accent);transition:width .4s}
+.bar.ok span{background:var(--ok)}.bar.warn span{background:var(--todo)}.bar.bad span{background:var(--bad)}
+.bar.run span{background:var(--rev)}
+.pills{display:flex;flex-wrap:wrap;gap:6px}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:12.5px;
+font-weight:600;white-space:nowrap;border:1px solid transparent}
+.pill::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.pill.todo{background:var(--todo-soft);color:var(--todo)}.pill.rev{background:var(--rev-soft);color:var(--rev)}
+.pill.imp{background:var(--imp-soft);color:var(--imp)}.pill.ok{background:var(--ok-soft);color:var(--ok)}
+.pill.bad{background:var(--bad-soft);color:var(--bad)}.pill.run{background:var(--rev-soft);color:var(--rev)}
+.pill.warn{background:var(--warn-soft);color:var(--warn)}.pill.sus{background:var(--sus-soft);color:var(--sus)}
+.pill.muted{background:var(--surface-2);color:var(--muted)}
+.pill.run::before{animation:pulse 1.2s infinite}
+@keyframes pulse{50%{opacity:.25}}
+
+/* tables */
+.table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{text-align:left;font-size:11.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;
+padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:10px;border-bottom:1px solid var(--line);vertical-align:middle}
+tr:last-child td{border-bottom:none}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.mono{font-family:var(--font-data);font-size:12.5px;white-space:nowrap}
+
+/* lists */
+.list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.item{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 14px;border:1px solid var(--line);
+border-radius:14px;background:var(--surface-2)}
+.item .what{font-weight:600}
+.item .sub{color:var(--muted);font-size:12.5px;font-variant-numeric:tabular-nums}
+.item .grow{flex:1;min-width:0}
+
+/* log sheet and toast */
+.sheet-backdrop{position:fixed;inset:0;z-index:19;background:var(--backdrop);opacity:0;pointer-events:none;
+transition:opacity .25s ease;-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px)}
+.sheet-backdrop.open{opacity:1;pointer-events:auto}
+.sheet{position:fixed;left:50%;bottom:0;z-index:20;width:min(760px,100%);max-height:86vh;display:flex;flex-direction:column;
+background:var(--surface);color:var(--fg);border-radius:22px 22px 0 0;border:1px solid var(--line);border-bottom:0;box-shadow:var(--sheet-shadow);
+transform:translate(-50%,105%);transition:transform .32s cubic-bezier(.2,.8,.2,1);visibility:hidden;
+padding-bottom:env(safe-area-inset-bottom,0px)}
+.sheet.open{transform:translate(-50%,0);visibility:visible}
+.sheet-grabber{width:38px;height:5px;border-radius:3px;background:var(--line-strong);margin:8px auto 4px;flex:none}
+.sheet-head{display:flex;align-items:center;gap:10px;padding:8px 20px 12px;flex:none}
+.sheet-head .grow{flex:1;min-width:0}
+.sheet-head h2{margin:0;font-size:20px;font-weight:650;letter-spacing:-.01em;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sheet-body{overflow:auto;padding:0 20px 20px;-webkit-overflow-scrolling:touch}
+/* The output of a job, as plain text on the card colour: never a black terminal. */
+.term{margin:0;min-height:120px;max-height:60vh;overflow:auto;padding:12px 14px;border-radius:12px;background:var(--surface-2);
+border:1px solid var(--line);color:var(--muted);font-family:var(--font-data);font-size:12px;line-height:1.5;white-space:pre-wrap;word-break:break-word}
+.toast{position:fixed;right:16px;bottom:calc(24px + env(safe-area-inset-bottom,0px));z-index:30;max-width:min(460px,calc(100vw - 32px));padding:12px 14px;
+border-radius:14px;background:var(--surface-2);border:1px solid var(--line-strong);box-shadow:var(--pop-shadow);display:none}
+.toast.show{display:block}.toast.error{border-color:var(--bad);color:var(--bad)}
+.sheet.open ~ .toast{bottom:auto;top:16px}
+body.sheet-open{overflow:hidden}
+@media (prefers-reduced-motion:reduce){.pill.run::before{animation:none}.bar span,.btn,.tabs a,.sheet,.sheet-backdrop{transition:none}}
+/* The dark / light switch at the right of the top bar (the Account page also offers Automatico). */
+.icon-btn{appearance:none;border:0;width:32px;height:32px;border-radius:50%;background:var(--surface-2);color:var(--muted);
+cursor:pointer;flex:none;display:grid;place-items:center;transition:color .2s,background .2s}
+.icon-btn:hover{color:var(--fg);background:var(--surface-3)}
+a.icon-btn{text-decoration:none}
+.icon-btn svg{width:18px;height:18px}
+.live + .theme-toggle{margin-left:4px}
+/* Without a live status the switch itself goes to the right. */
+.brand + .theme-toggle{margin-left:auto}
+.icon-btn[aria-current="page"]{color:var(--tab-on-fg);background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--tab-on-ring)}
+.theme-toggle .i-moon,.theme-toggle.is-light .i-sun{display:none}
+.theme-toggle.is-light .i-moon{display:block}
+@media (pointer:coarse){.icon-btn{width:40px;height:40px}}
+
+/* On a phone the bar keeps the brand, the dot and the two icons; the time of the last update stays in the dot's title. */
+@media (max-width:480px){.live span:last-child{display:none}}
+
+/* -- the pages of review.py (route list, error pages) and login.html / account.html -------------- */
+.group-title{display:flex;align-items:baseline;gap:8px;margin:8px 0 0;font-size:13px;font-weight:600;letter-spacing:.05em;
+text-transform:uppercase;color:var(--muted)}
+.group-title .n{color:var(--muted);font-weight:500;letter-spacing:0}
+/* Route list: one card per group, one row per route; the whole row is the link. */
+.cards{list-style:none;margin:0;padding:0;background:var(--card-grad),var(--surface);border:1px solid var(--line);
+border-radius:18px;box-shadow:var(--shadow);overflow:hidden}
+.cards > li + li{border-top:1px solid var(--line)}
+.card-row{display:grid;grid-template-columns:16px minmax(220px,1.25fr) minmax(120px,1fr) 176px 120px;
+grid-template-areas:"icon route bar count open" "icon stats bar count open";column-gap:22px;row-gap:3px;align-items:center;
+padding:14px 20px;color:inherit;text-decoration:none;transition:background .15s}
+.card-row:hover{background:var(--surface-2)}
+.card-row:focus-visible{outline-offset:-3px}
+/* Status icon: open ring to start, half ring in progress, check done. */
+.state-icon{grid-area:icon;width:14px;height:14px;border-radius:50%;border:1.5px solid var(--muted);display:grid;
+place-items:center;color:var(--on-ok);font-size:9px;font-weight:800;line-height:1}
+.card-row.doing .state-icon{border-color:var(--accent);background:linear-gradient(90deg,var(--accent) 50%,transparent 50%);
+box-shadow:inset 0 0 0 2px var(--surface)}
+.card-row.done .state-icon{border:0;background:var(--ok)}
+.route{grid-area:route;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--font-data);
+font-size:13.5px;font-weight:600}
+/* Each figure keeps its words together; the dot in front of the first figure of a line is clipped. */
+.stats{grid-area:stats;display:flex;flex-wrap:wrap;column-gap:14px;overflow:hidden;font-size:12.5px;color:var(--muted);
+font-variant-numeric:tabular-nums}
+.stats span{margin-left:-14px;white-space:nowrap}
+.stats span::before{content:"·";display:inline-block;width:14px;text-align:center}
+.stats .sus{color:var(--sus);font-weight:600}
+.card-row .bar{grid-area:bar}
+.card-row.done .bar span{background:var(--ok)}
+.count{grid-area:count;justify-self:end;text-align:right;white-space:nowrap;font-size:14px;font-weight:650;
+font-variant-numeric:tabular-nums}
+.count .unit{font-weight:400;color:var(--muted)}
+.card-row.done .route,.card-row.done .count{color:var(--muted)}
+.open{grid-area:open;justify-self:end;min-width:110px}
+.card-row:hover .open:not(.primary){border-color:var(--hover-line);background:var(--surface-3)}
+.card-row:hover .open.primary{background:var(--accent-hover);border-color:var(--accent-hover)}
+
+/* Empty list, error pages, account */
+.state-box{display:flex;flex-direction:column;gap:10px;max-width:640px;width:100%}
+.state-box.center{margin:40px auto;max-width:480px;text-align:center;align-items:center}
+.state-box h1{margin:0;font-size:24px;font-weight:700;letter-spacing:-.02em}
+.state-box h2{margin:0}
+.state-box p{margin:0;color:var(--muted)}
+.state-box .code{font-size:12px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+
+/* [site-login] - START */
+/* Sign-in card, as distill's. A hidden step stays hidden even where a rule sets display. */
+.auth-card [hidden],.auth-form[hidden]{display:none!important}
+.auth-card{max-width:420px;width:100%;margin:48px auto 24px;padding:26px 24px 22px;border-radius:22px;
+background:var(--card-grad),var(--surface);border:1px solid var(--line);box-shadow:var(--auth-shadow);
+display:flex;flex-direction:column;gap:14px}
+.auth-logo{align-self:center;width:44px;height:44px;font-size:15px;border-width:5px}
+.auth-head{display:flex;align-items:center;justify-content:center;position:relative}
+.auth-head.idle{display:none}
+.auth-back{position:absolute;left:0;top:-4px;width:32px;height:32px;border-radius:50%;border:0;background:var(--surface-2);
+color:var(--muted);font:inherit;font-size:18px;line-height:1;cursor:pointer}
+.auth-steps{display:flex;gap:6px}
+.auth-steps span{width:7px;height:7px;border-radius:50%;background:var(--line-strong)}
+.auth-steps span.on{background:var(--accent)}
+.auth-title{margin:0;text-align:center;font-size:28px;font-weight:750;letter-spacing:-.02em;line-height:1.15}
+.auth-sub{margin:-6px 0 6px;text-align:center;color:var(--muted)}
+.auth-form{display:flex;flex-direction:column;gap:14px}
+.field{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--muted);font-weight:500}
+.field input{font:inherit;font-size:16px;color:var(--fg);background:var(--surface-2);border:1px solid var(--line-strong);
+border-radius:12px;padding:10px 12px;min-height:44px;width:100%;transition:border-color .2s,box-shadow .2s}
+.field input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 4px var(--accent-soft)}
+.auth-error{color:var(--bad);font-size:14px}
+.auth-ok{color:var(--ok);font-size:14px}
+.auth-error:empty,.auth-ok:empty{display:none}
+.auth-foot{text-align:center;padding-top:12px;border-top:1px solid var(--line)}
+/* The old names of the buttons in login.html and account.html. */
+.button{appearance:none;border:1px solid var(--line-strong);background:var(--surface-2);color:var(--fg);font:inherit;
+font-weight:650;padding:10px 18px;border-radius:12px;cursor:pointer;min-height:44px;transition:background .2s,border-color .2s}
+.button:hover:not(:disabled){border-color:var(--hover-line);background:var(--surface-3)}
+.button.primary{background:var(--accent);border-color:var(--accent);color:#fff;box-shadow:0 6px 18px rgba(37,99,235,.3)}
+.button.primary:hover:not(:disabled){background:var(--accent-hover);border-color:var(--accent-hover)}
+.button.danger{color:var(--bad);border-color:var(--danger-line);background:transparent}
+.button.danger:hover:not(:disabled){background:var(--bad-soft);border-color:var(--bad)}
+.button:disabled{opacity:.45;cursor:not-allowed}
+.settings{max-width:720px}
+.settings .state-box{max-width:none}
+.settings .auth-form{max-width:420px}
+.settings .auth-form .button.primary{align-self:flex-start}
+/* Appearance: dark, light, as the system (as distill's Settings). */
+.segmented{display:inline-flex;gap:4px;padding:4px;background:var(--surface-2);border:1px solid var(--line);border-radius:12px;align-self:flex-start}
+.segmented button{appearance:none;border:0;background:none;color:var(--muted);font:inherit;font-weight:600;font-size:14px;
+padding:7px 16px;border-radius:9px;cursor:pointer;min-height:36px}
+.segmented button[aria-checked="true"]{color:var(--tab-on-fg);background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--tab-on-ring)}
+/* [site-login] - END */
+
+/* Technical details, out of the way */
+.foot{font-size:13px;color:var(--muted)}
+.foot summary{display:inline-flex;align-items:center;gap:6px;padding:4px 0;cursor:pointer;list-style:none}
+.foot summary::-webkit-details-marker{display:none}
+.foot summary::after{content:"›";font-size:16px;line-height:1;transition:transform .2s}
+.foot[open] summary::after{transform:rotate(90deg)}
+.foot summary:hover{color:var(--fg)}
+.foot p{margin:8px 0 0}
+
+@media (max-width:900px){
+  .card-row{grid-template-columns:16px minmax(0,1fr) auto;grid-template-areas:"icon route open" ". count count" ". bar bar" ". stats stats";
+    column-gap:12px;row-gap:6px;padding:14px 16px}
+  .count{justify-self:start;text-align:left;font-size:13.5px}
+  .open{min-width:0}
+}
+@media (max-width:480px){
+  .brand-name{font-size:17px}
+  .cards{border-radius:16px}
+  .auth-card{margin:20px auto}
+}

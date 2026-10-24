@@ -3,18 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="color-scheme" content="light">
-<title>Revisione cartelli · Accesso</title>
+<meta name="color-scheme" content="light dark">
+<script nonce="__NNSLR_NONCE__">try{var t=localStorage.getItem('nnslr-theme');if(t==='light'||t==='auto')document.documentElement.dataset.theme=t}catch(e){}</script>
+<title>Speed limits · Accesso</title>
 <style>__NNSLR_STYLE__</style>
 </head>
 <body>
 <!-- [site-login] - START -->
 <header class="topbar"><div class="topbar-inner">
-  <span class="brand"><span class="brand-mark" aria-hidden="true">50</span><span class="brand-name">Revisione cartelli</span></span>
+  <span class="brand"><span class="brand-mark" aria-hidden="true">50</span><span class="brand-name">Speed limits</span></span>
+  <button class="icon-btn theme-toggle" type="button" id="theme-toggle" aria-pressed="false" aria-label="Passa al tema chiaro" title="Passa al tema chiaro"><svg class="i-sun" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3.6" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M10 1.8v2.2M10 16v2.2M1.8 10H4M16 10h2.2M4.2 4.2l1.6 1.6M14.2 14.2l1.6 1.6M4.2 15.8l1.6-1.6M14.2 5.8l1.6-1.6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><svg class="i-moon" viewBox="0 0 20 20" aria-hidden="true"><path d="M16.5 12.6A7 7 0 0 1 7.4 3.5a7 7 0 1 0 9.1 9.1z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></button>
 </div></header>
 <main class="page">
   <section class="auth-card" aria-labelledby="auth-title">
-    <div class="auth-head">
+    <span class="brand-mark auth-logo" aria-hidden="true">50</span>
+    <div class="auth-head idle" id="auth-head">
       <button class="auth-back" type="button" id="auth-back" aria-label="Indietro" hidden>‹</button>
       <div class="auth-steps" id="auth-steps" aria-hidden="true" hidden><span></span><span></span></div>
     </div>
@@ -70,6 +73,7 @@
     const setup = view !== 'form-login';
     byId('auth-steps').hidden = !setup;
     byId('auth-back').hidden = view !== 'form-setup';
+    byId('auth-head').classList.toggle('idle', !setup);
     const dots = byId('auth-steps').children;
     dots[0].className = view === 'form-code' ? 'on' : '';
     dots[1].className = view === 'form-setup' ? 'on' : '';
@@ -133,6 +137,7 @@
   }).catch((problem) => { byId('auth-sub').textContent = problem.message; });
 })();
 </script>
+<script nonce="__NNSLR_NONCE__">(function(){var b=document.getElementById('theme-toggle');if(!b)return;var r=document.documentElement;function dark(){var t=r.dataset.theme;if(t==='light')return false;if(t==='auto')return!matchMedia('(prefers-color-scheme: light)').matches;return true}function show(){var d=dark();b.classList.toggle('is-light',!d);b.setAttribute('aria-pressed',String(!d));b.title=d?'Passa al tema chiaro':'Passa al tema scuro';b.setAttribute('aria-label',b.title)}b.addEventListener('click',function(){var next=dark()?'light':'dark';try{localStorage.setItem('nnslr-theme',next)}catch(e){}if(next==='dark')delete r.dataset.theme;else r.dataset.theme=next;show()});document.addEventListener('nnslr-theme',show);show()})();</script>
 <!-- [site-login] - END -->
 </body>
 </html>

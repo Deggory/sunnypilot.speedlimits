@@ -66,7 +66,8 @@ def test_status_explains_why_each_action_is_not_available(root, checkout, monkey
                                             'reason': 'nessuna route nuova da preparare'}
     assert status['actions']['dataset']['reason'] == 'nessun fotogramma confermato'
     assert status['actions']['train']['allowed'] is False
-    assert set(status['system']) == {'gpu', 'disk', 'cpus', 'load'}
+    # The machine for the Stato page: GPU, CPU per core, RAM, disk, as distill-web's Status.
+    assert set(status['system']) == {'gpu', 'disk', 'cpus', 'load', 'loads', 'cpu', 'memory'}
 
 
 def test_action_runs_in_background_and_keeps_its_exit_code(root, checkout):

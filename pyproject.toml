@@ -67,7 +67,7 @@ where = ["src"]
 # [nnslr-t2] - END
 [tool.setuptools.package-data]
 "nnslr_tools" = ["fixtures/*.json", "fixtures/t2/*.json", "review.html", "panel.html", "login.html",
-                 "account.html"]
+                 "account.html", "status.html", "site.css"]
 "speed_vision_core" = ["py.typed"]
 
 [tool.pytest.ini_options]

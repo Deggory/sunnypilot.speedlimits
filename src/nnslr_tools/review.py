@@ -318,237 +318,10 @@ class ReviewApp(ReviewService):
         return summaries
 
 
-# Style of the route index and of the error pages: the same tokens, top bar and cards as the
-# review page. Light only, on white.
-INDEX_STYLE = """
-:root {
-  --bg: #ffffff;
-  --surface: #ffffff;
-  --surface-2: #f5f5f7;
-  --fill: rgba(118, 118, 128, 0.12);
-  --fill-strong: rgba(118, 118, 128, 0.22);
-  --seg-on: #ffffff;
-  --fg: #1d1d1f;
-  --muted: #6e6e73;
-  --line: rgba(0, 0, 0, 0.08);
-  --bar: rgba(251, 251, 253, 0.78);
-  --stage: #0b0b0c;
-  --accent: #0071e3;
-  --button: #0071e3;
-  --on-accent: #ffffff;
-  --yellow: #f5b800;
-  --todo: #86868b;
-  --ok: #1f8a3b;
-  --ok-fill: #34c759;
-  --ok-tint: rgba(52, 199, 89, 0.14);
-  --warn: #b85000;
-  --warn-fill: #ff9f0a;
-  --warn-tint: rgba(255, 159, 10, 0.15);
-  --danger: #d70015;
-  --danger-fill: #ff3b30;
-  --danger-tint: rgba(255, 59, 48, 0.1);
-  --sus: #8944ab;
-  --sus-fill: #af52de;
-  --sus-tint: rgba(175, 82, 222, 0.1);
-  --hint: #0066cc;
-  --hint-tint: rgba(0, 113, 227, 0.07);
-  --focus: #0071e3;
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.03), 0 6px 20px rgba(0, 0, 0, 0.05);
-  --card-border: rgba(0, 0, 0, 0.08);
-  --sign-face: #ffffff;
-  --sign-ink: #111111;
-  --sign-ring: #e3001b;
-  /* Overlay colours sit on the dark photo stage. */
-  --ov-speed: #ff5964;
-  --ov-cancel: #d4d9df;
-  --ov-other: #ffa94d;
-  --ov-none: #8a929c;
-  --ov-selected: #ffd60a;
-  --ov-hint: #64d2ff;
-  --ov-text: #fff3b0;
-  --ov-halo: #0d0f12;
-  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", "Segoe UI", Roboto, Arial, sans-serif;
-  --font-data: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-  --radius: 18px;
-  --control: 32px;
-  color-scheme: light;
-}
-
-* { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
-html, body { min-height: 100%; }
-body {
-  margin: 0;
-  background: var(--bg);
-  color: var(--fg);
-  font-family: var(--font-ui);
-  font-size: 15px;
-  line-height: 1.45;
-  letter-spacing: -0.006em;
-  overflow-x: hidden;
-  -webkit-font-smoothing: antialiased;
-}
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0 0 auto;
-  height: env(safe-area-inset-top, 0px);
-  z-index: 10;
-  background: var(--bar);
-}
-:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
-
-/* Top bar: the same as on the review page, brand in the same place. */
-.topbar {
-  position: sticky;
-  top: env(safe-area-inset-top, 0px);
-  z-index: 5;
-  background: var(--bar);
-  -webkit-backdrop-filter: saturate(180%) blur(20px);
-  backdrop-filter: saturate(180%) blur(20px);
-  border-bottom: 1px solid var(--line);
-  padding-left: max(20px, env(safe-area-inset-left, 0px));
-  padding-right: max(20px, env(safe-area-inset-right, 0px));
-}
-.topbar-inner { display: flex; align-items: center; gap: 18px; height: 52px; max-width: 1600px; margin: 0 auto; }
-.brand { display: flex; align-items: center; gap: 10px; min-width: 0; color: inherit; text-decoration: none; flex: none; }
-.brand-mark {
-  width: 26px; height: 26px; border-radius: 50%;
-  background: var(--sign-face); border: 3.5px solid var(--sign-ring);
-  display: grid; place-items: center; flex: none;
-  color: var(--sign-ink); font-weight: 700; font-size: 10px; font-variant-numeric: tabular-nums;
-}
-.brand-name { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; white-space: nowrap; }
-.topnav { display: inline-flex; gap: 2px; background: var(--fill); border-radius: 9px; padding: 2px; flex: none; }
-.topnav a {
-  display: inline-flex; align-items: center; min-height: 28px; padding: 4px 14px; border-radius: 7px;
-  font-size: 13px; font-weight: 500; color: var(--fg); text-decoration: none; white-space: nowrap;
-}
-.topnav a:hover { background: var(--fill); }
-.topnav a[aria-current="page"] {
-  background: var(--seg-on); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(0, 0, 0, 0.04); font-weight: 600;
-}
-
-/* Page */
-.page {
-  max-width: 1600px;
-  margin: 0 auto;
-  padding-block: 40px 56px;
-  padding-left: max(20px, env(safe-area-inset-left, 0px));
-  padding-right: max(20px, env(safe-area-inset-right, 0px));
-}
-.page-head { margin: 0 0 28px; }
-.page-title { margin: 0; font-size: 34px; line-height: 1.12; font-weight: 700; letter-spacing: -0.022em; }
-.lead { margin: 8px 0 0; font-size: 17px; color: var(--muted); max-width: 62ch; }
-code { font-family: var(--font-data); font-size: 12.5px; background: var(--fill); border-radius: 6px; padding: 2px 6px; overflow-wrap: anywhere; }
-
-/* Route cards: the whole card is the link. */
-.cards {
-  list-style: none; margin: 0; padding: 0;
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 20px;
-}
-.card {
-  display: flex; flex-direction: column; height: 100%;
-  background: var(--surface); border: 1px solid var(--card-border); border-radius: var(--radius); box-shadow: var(--shadow);
-  padding: 22px 24px 20px; color: inherit; text-decoration: none;
-  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
-}
-.card:hover { transform: translateY(-2px); box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05), 0 14px 36px rgba(0, 0, 0, 0.1); }
-.route { font-family: var(--font-data); font-size: 12.5px; color: var(--muted); word-break: break-all; }
-.count { margin-top: 10px; font-size: 26px; line-height: 1.15; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
-.count .unit { color: var(--muted); font-weight: 500; }
-.bar { display: block; height: 4px; margin-top: 14px; border-radius: 2px; background: var(--fill); overflow: hidden; }
-.bar span { display: block; height: 100%; background: var(--ok-fill); border-radius: 2px; }
-/* Each figure keeps its words together; the dot in front of the first figure of a line is clipped. */
-.stats {
-  display: flex; flex-wrap: wrap; column-gap: 16px; row-gap: 2px; overflow: hidden;
-  margin-top: 12px; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums;
-}
-.stats span { margin-left: -16px; white-space: nowrap; }
-.stats span::before { content: "·"; display: inline-block; width: 16px; text-align: center; color: var(--muted); font-weight: 400; }
-.stats .sus { color: var(--sus); font-weight: 600; }
-.open { margin-top: 18px; font-size: 15px; font-weight: 600; color: var(--accent); }
-.open.again { color: var(--muted); font-weight: 500; }
-
-/* Empty index and error pages */
-.state-box {
-  background: var(--surface); border: 1px solid var(--card-border); border-radius: var(--radius); box-shadow: var(--shadow);
-  padding: 32px 28px; max-width: 720px; display: flex; flex-direction: column; gap: 12px;
-}
-.state-box.center { margin: 32px auto; }
-.state-box h1, .state-box h2 { margin: 0; font-size: 24px; line-height: 1.2; font-weight: 600; letter-spacing: -0.02em; }
-.state-box p { margin: 0; color: var(--muted); max-width: 62ch; }
-.state-box .code { font-size: 13px; }
-.back { align-self: flex-start; margin-top: 6px; color: var(--accent); font-weight: 500; text-decoration: none; }
-.back:hover { text-decoration: underline; }
-
-/* [site-login] - START */
-/* Sign-in card and account forms. A hidden step stays hidden even where a rule sets display. */
-.auth-card [hidden], .auth-form[hidden] { display: none !important; }
-.auth-card {
-  max-width: 440px; margin: 24px auto; background: var(--surface); border: 1px solid var(--card-border);
-  border-radius: var(--radius); box-shadow: var(--shadow); padding: 28px 28px 24px; display: flex; flex-direction: column; gap: 12px;
-}
-.auth-head { display: flex; align-items: center; justify-content: center; position: relative; min-height: 24px; }
-.auth-back {
-  position: absolute; left: 0; top: -4px; width: 32px; height: 32px; border-radius: 50%; border: 0;
-  background: var(--fill); color: var(--fg); font: inherit; font-size: 20px; line-height: 1; cursor: pointer;
-}
-.auth-steps { display: flex; gap: 6px; }
-.auth-steps span { width: 7px; height: 7px; border-radius: 50%; background: var(--fill-strong); }
-.auth-steps span.on { background: var(--accent); }
-.auth-title { margin: 0; text-align: center; font-size: 28px; line-height: 1.15; font-weight: 700; letter-spacing: -0.02em; }
-.auth-sub { margin: 0 0 6px; text-align: center; color: var(--muted); }
-.auth-form { display: flex; flex-direction: column; gap: 12px; }
-.field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 500; color: var(--muted); }
-.field input {
-  font: inherit; font-size: 16px; color: var(--fg); background: var(--surface-2); border: 1px solid var(--line);
-  border-radius: 10px; padding: 10px 12px; min-height: 44px;
-}
-.field input:focus { outline: 2px solid var(--focus); outline-offset: 0; background: var(--surface); }
-.note { margin: 0; font-size: 13px; color: var(--muted); }
-.auth-error { color: var(--danger); font-size: 14px; }
-.auth-error:empty, .auth-ok:empty { display: none; }
-.auth-ok { color: var(--ok); font-size: 14px; }
-.auth-foot { text-align: center; }
-.buttons { display: flex; flex-wrap: wrap; gap: 10px; }
-.button {
-  appearance: none; font: inherit; font-size: 15px; font-weight: 600; min-height: 44px; padding: 10px 18px;
-  border-radius: 12px; border: 1px solid var(--line); background: var(--fill); color: var(--fg); cursor: pointer;
-}
-.button.primary { background: var(--button); border-color: var(--button); color: var(--on-accent); }
-.button.danger { color: var(--danger); background: var(--danger-tint); border-color: transparent; }
-.button:disabled { opacity: 0.5; cursor: default; }
-.state-box + .state-box { margin-top: 20px; }
-/* [site-login] - END */
-
-/* Technical details, out of the way */
-.foot { margin-top: 48px; font-size: 13px; color: var(--muted); }
-.foot summary { display: inline-flex; align-items: center; gap: 6px; padding: 4px 0; cursor: pointer; list-style: none; }
-.foot summary::-webkit-details-marker { display: none; }
-.foot summary::after { content: "›"; font-size: 16px; line-height: 1; transition: transform 0.2s ease; }
-.foot[open] summary::after { transform: rotate(90deg); }
-.foot summary:hover { color: var(--fg); }
-.foot p { margin: 8px 0 0; }
-
-@media (max-width: 640px) {
-  .brand-name { display: none; }
-  .page { padding-block: 28px 40px; }
-  .page-head { margin-bottom: 20px; }
-  .page-title { font-size: 28px; }
-  .lead { font-size: 15px; }
-  .cards { gap: 14px; }
-  .card { padding: 18px 20px; }
-  .state-box { padding: 24px 20px; }
-  .state-box.center { margin: 8px auto; }
-}
-@media (pointer: coarse) {
-  .topnav a { min-height: 36px; }
-}
-@media (prefers-reduced-motion: reduce) {
-  * { transition: none !important; animation: none !important; }
-}
-"""
+def _site_style() -> str:
+    """Style of the route index, sign-in, account and error pages: site.css, read on every request so a
+    change to it is live at the next page load. Same tokens and top bar as the review page and the panel."""
+    return files('nnslr_tools').joinpath('site.css').read_text()
 
 
 def _plural(count: int, one: str, many: str) -> str:
@@ -557,27 +330,41 @@ def _plural(count: int, one: str, many: str) -> str:
     return str(count) + ' ' + many
 
 
-def _page_head(title: str, current: str = '') -> list[str]:
-    """Head and top bar of the server pages. current is 'route' on the route list, 'account' on the
-    account page, '' elsewhere."""
-    route_link = '<a href="/">Route</a>'
-    if current == 'route':
-        route_link = '<a href="/" aria-current="page">Route</a>'
-    # [site-login] - START
-    account_link = '<a href="/account"' + (' aria-current="page"' if current == 'account' else '') + '>Account</a>'
-    # [site-login] - END
+# Dark (the default, as distill-web and perception-web) or the light look chosen on the Account page,
+# read before the first paint. The pages served from html files carry the same line.
+THEME_SCRIPT = ('<script nonce="{nonce}">try{{var t=localStorage.getItem(\'nnslr-theme\');'
+                'if(t===\'light\'||t===\'auto\')document.documentElement.dataset.theme=t}}catch(e){{}}</script>')
+# The tabs of the site, the same on every page: (current key, address, label).
+SITE_TABS = (('route', '/', 'Route'), ('panel', '/pannello', 'Pannello'), ('status', '/stato', 'Stato'))
+# At the right of the top bar on every page: the dark / light switch and the Account icon (not a tab).
+THEME_TOGGLE = '<button class="icon-btn theme-toggle" type="button" id="theme-toggle" aria-pressed="false" aria-label="Passa al tema chiaro" title="Passa al tema chiaro"><svg class="i-sun" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3.6" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M10 1.8v2.2M10 16v2.2M1.8 10H4M16 10h2.2M4.2 4.2l1.6 1.6M14.2 14.2l1.6 1.6M4.2 15.8l1.6-1.6M14.2 5.8l1.6-1.6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><svg class="i-moon" viewBox="0 0 20 20" aria-hidden="true"><path d="M16.5 12.6A7 7 0 0 1 7.4 3.5a7 7 0 1 0 9.1 9.1z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></button>'
+ACCOUNT_LINK = '<a class="icon-btn account-btn" href="/account" aria-label="Account" title="Account"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="7" r="3.4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3.6 17.2c.9-3.1 3.4-4.8 6.4-4.8s5.5 1.7 6.4 4.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></a>'
+THEME_TOGGLE_SCRIPT = '<script nonce="{nonce}">(function(){{var b=document.getElementById(\'theme-toggle\');if(!b)return;var r=document.documentElement;function dark(){{var t=r.dataset.theme;if(t===\'light\')return false;if(t===\'auto\')return!matchMedia(\'(prefers-color-scheme: light)\').matches;return true}}function show(){{var d=dark();b.classList.toggle(\'is-light\',!d);b.setAttribute(\'aria-pressed\',String(!d));b.title=d?\'Passa al tema chiaro\':\'Passa al tema scuro\';b.setAttribute(\'aria-label\',b.title)}}b.addEventListener(\'click\',function(){{var next=dark()?\'light\':\'dark\';try{{localStorage.setItem(\'nnslr-theme\',next)}}catch(e){{}}if(next===\'dark\')delete r.dataset.theme;else r.dataset.theme=next;show()}});show()}})();</script>'
+
+
+def _page_tail(nonce: str = '') -> str:
+    """End of the server pages: the script of the dark / light switch."""
+    return (THEME_TOGGLE_SCRIPT.format(nonce=nonce) if nonce else '') + '</body></html>'
+
+
+def _page_head(title: str, current: str = '', nonce: str = '') -> list[str]:
+    """Head, top bar and tabs of the server pages. current is the key of the tab to mark, '' for none."""
+    tabs = ''
+    for key, href, label in SITE_TABS:
+        tabs += '<a href="' + href + '"' + (' aria-current="page"' if key == current else '') + '>' + label + '</a>'
+    theme = THEME_SCRIPT.format(nonce=nonce) if nonce else ''
     return [
         '<!doctype html><html lang="it"><head><meta charset="utf-8">',
         '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">',
-        '<meta name="color-scheme" content="light">',
+        '<meta name="color-scheme" content="light dark">',
+        theme,
         '<title>' + html.escape(title) + '</title>',
-        '<style>' + INDEX_STYLE + '</style></head><body>',
+        '<style>' + _site_style() + '</style></head><body>',
         '<header class="topbar"><div class="topbar-inner">'
         '<a class="brand" href="/" title="Elenco delle route"><span class="brand-mark" aria-hidden="true">50</span>'
-        '<span class="brand-name">Revisione cartelli</span></a>'
-        '<nav class="topnav" aria-label="Sezioni">' + route_link + '<a href="/pannello">Pannello</a>'
-        + account_link + '</nav>'
-        '</div></header>',
+        '<span class="brand-name">Speed limits</span></a>'
+        + THEME_TOGGLE + ACCOUNT_LINK.replace('<a ', '<a aria-current="page" ' if current == 'account' else '<a ', 1)
+        + '</div><nav class="tabs" aria-label="Sezioni">' + tabs + '</nav></header>',
     ]
 
 
@@ -585,6 +372,11 @@ def _page_head(title: str, current: str = '') -> list[str]:
 def render_panel(nonce: str) -> str:
     """The control panel page; it loads its data from /api/panel/status."""
     return files('nnslr_tools').joinpath('panel.html').read_text().replace('__NNSLR_NONCE__', nonce)
+
+
+def render_status(nonce: str) -> str:
+    """The Stato page (the machine and the jobs, as distill-web's Status); data from /api/panel/status."""
+    return files('nnslr_tools').joinpath('status.html').read_text().replace('__NNSLR_NONCE__', nonce)
 # [control-panel] - END
 
 
@@ -592,93 +384,118 @@ def render_panel(nonce: str) -> str:
 def render_login(nonce: str) -> str:
     """The sign-in page (also the first visit, which creates the administrator)."""
     page = files('nnslr_tools').joinpath('login.html').read_text()
-    return page.replace('__NNSLR_STYLE__', INDEX_STYLE).replace('__NNSLR_NONCE__', nonce)
+    return page.replace('__NNSLR_STYLE__', _site_style()).replace('__NNSLR_NONCE__', nonce)
 
 
 def render_account(nonce: str, signed_in_browser: bool) -> str:
     """The account page: who is signed in, sign out, change the password."""
-    lines = _page_head('Revisione cartelli · Account', 'account')
+    lines = _page_head('Speed limits · Account', 'account', nonce)
     if not signed_in_browser:
-        lines.append('<main class="page"><div class="state-box center"><h1>Account</h1><p>Questo sito è avviato '
+        lines.append('<main class="page"><div class="card state-box center"><h1>Account</h1><p>Questo sito è avviato '
                      'solo per questo computer (127.0.0.1): non chiede di accedere. Sulla rete di casa (servizio '
-                     '<code>speedlimits-web</code>) si entra con nome e password.</p></div></main></body></html>')
+                     '<code>speedlimits-web</code>) si entra con nome e password.</p></div></main>' + _page_tail(nonce))
         return '\n'.join(lines)
     lines.append(files('nnslr_tools').joinpath('account.html').read_text().replace('__NNSLR_NONCE__', nonce))
     return '\n'.join(lines)
 # [site-login] - END
 
 
-def render_index(summaries: list[dict], database: Path) -> str:
-    lines = _page_head('Revisione cartelli · Route', 'route')
+# Groups of the route list, in this order: the work in progress first, finished routes last.
+ROUTE_GROUPS = (('doing', 'In corso'), ('todo', 'Da iniziare'), ('done', 'Completate'))
+
+
+def _route_state(confirmed: int, total: int) -> str:
+    if total and confirmed >= total:
+        return 'done'
+    if confirmed == 0:
+        return 'todo'
+    return 'doing'
+
+
+def _route_row(summary: dict) -> str:
+    total = summary['frame_count']
+    confirmed = summary['confirmed_count']
+    percent = 0
+    if total:
+        percent = round(confirmed * 100 / total)
+    state = _route_state(confirmed, total)
+    # What opening the route means: carry on (the one obvious action), start, or look again at a finished one.
+    action_class = 'btn small open'
+    action = 'Inizia →'
+    if state == 'doing':
+        action_class = 'btn small primary open'
+        action = 'Riprendi →'
+    elif state == 'done':
+        action_class = 'btn small open again'
+        action = 'Ricontrolla'
+    suspicious = summary.get('suspicious_count', 0)
+    hint_frames = summary.get('hint_frames', 0)
+    stats = ['<span>' + _plural(total, 'fotogramma', 'fotogrammi') + '</span>',
+             '<span>' + str(summary['frames_with_proposals']) + ' con proposte</span>']
+    if suspicious:
+        stats.append('<span class="sus">' + _plural(suspicious, 'sospetto', 'sospetti') + '</span>')
+    else:
+        stats.append('<span>0 sospetti</span>')
+    if hint_frames:
+        stats.append('<span>' + str(hint_frames) + ' con seconda lettura</span>')
+    route = html.escape(summary['route_id'])
+    return ('<li><a class="card-row ' + state + '" href="' + html.escape(summary['url']) + '">'
+            + '<span class="state-icon" aria-hidden="true">' + ('✓' if state == 'done' else '') + '</span>'
+            + '<span class="route" title="' + route + '">' + route + '</span>'
+            + '<span class="count">' + str(confirmed) + ' di ' + str(total)
+            + ' <span class="unit">confermati</span></span>'
+            + '<span class="bar" aria-hidden="true"><span style="width:' + str(percent) + '%"></span></span>'
+            + '<span class="stats">' + ''.join(stats) + '</span>'
+            + '<span class="' + action_class + '">' + action + '</span></a></li>')
+
+
+def render_index(summaries: list[dict], database: Path, nonce: str = '') -> str:
+    lines = _page_head('Speed limits · Route', 'route', nonce)
     lines.append('<main class="page">')
-    lines.append('<div class="page-head"><h1 class="page-title">Route</h1>'
-                 '<p class="lead">Scegli una route da revisionare. Ogni conferma viene salvata subito '
-                 'sul server.</p></div>')
+    lines.append('<header class="page-head"><h1 class="page-title">Route</h1>'
+                 '<p class="page-sub">Scegli una route da revisionare. Ogni conferma viene salvata subito '
+                 'sul server.</p></header>')
     if not summaries:
-        lines.append('<div class="state-box"><h2>Nessuna route da revisionare</h2><p>Prepara una route con '
+        lines.append('<div class="card state-box"><h2>Nessuna route da revisionare</h2><p>Prepara una route con '
                      '<code>nnslr extract-frames</code> e <code>nnslr preannotate</code>, poi ricarica questa '
                      'pagina.</p></div>')
     else:
-        lines.append('<ul class="cards">')
+        grouped = {key: [] for key, _ in ROUTE_GROUPS}
         for summary in summaries:
-            total = summary['frame_count']
-            confirmed = summary['confirmed_count']
-            percent = 0
-            if total:
-                percent = round(confirmed * 100 / total)
-            # What opening the route means: start, carry on, or look again at a finished one.
-            card_class = 'card'
-            action_class = 'open'
-            action = 'Riprendi →'
-            if confirmed == 0:
-                action = 'Inizia →'
-            elif total and confirmed >= total:
-                card_class = 'card done'
-                action_class = 'open again'
-                action = 'Ricontrolla →'
-            suspicious = summary.get('suspicious_count', 0)
-            hint_frames = summary.get('hint_frames', 0)
-            stats = ['<span>' + _plural(total, 'fotogramma', 'fotogrammi') + '</span>',
-                     '<span>' + str(summary['frames_with_proposals']) + ' con proposte</span>']
-            if suspicious:
-                stats.append('<span class="sus">' + _plural(suspicious, 'sospetto', 'sospetti') + '</span>')
-            else:
-                stats.append('<span>0 sospetti</span>')
-            if hint_frames:
-                stats.append('<span>' + str(hint_frames) + ' con seconda lettura</span>')
-            lines.append(
-                '<li><a class="' + card_class + '" href="' + html.escape(summary['url']) + '">'
-                + '<span class="route">' + html.escape(summary['route_id']) + '</span>'
-                + '<span class="count">' + str(confirmed) + ' di ' + str(total)
-                + ' <span class="unit">confermati</span></span>'
-                + '<span class="bar" aria-hidden="true"><span style="width:' + str(percent) + '%"></span></span>'
-                + '<span class="stats">' + ''.join(stats) + '</span>'
-                + '<span class="' + action_class + '">' + action + '</span></a></li>')
-        lines.append('</ul>')
+            grouped[_route_state(summary['confirmed_count'], summary['frame_count'])].append(summary)
+        for key, title in ROUTE_GROUPS:
+            if not grouped[key]:
+                continue
+            lines.append('<section class="group" aria-labelledby="group-' + key + '">'
+                         '<h2 class="group-title" id="group-' + key + '">' + title
+                         + ' <span class="n">' + str(len(grouped[key])) + '</span></h2><ul class="cards">')
+            for summary in grouped[key]:
+                lines.append(_route_row(summary))
+            lines.append('</ul></section>')
     lines.append('<details class="foot"><summary>Dettagli tecnici</summary>'
                  '<p>Database delle revisioni: <code>' + html.escape(str(database)) + '</code></p></details>')
-    lines.append('</main></body></html>')
+    lines.append('</main>' + _page_tail(nonce))
     return '\n'.join(lines)
 
 
-def render_problem(status: int, message: str) -> str:
+def render_problem(status: int, message: str, nonce: str = '') -> str:
     if status == 404:
         title = 'Pagina non trovata'
     elif status == 403:
         title = 'Accesso negato'
     else:
         title = 'Errore'
-    lines = _page_head('Revisione cartelli · ' + title)
-    lines.append('<main class="page"><div class="state-box center">')
+    lines = _page_head('Speed limits · ' + title, '', nonce)
+    lines.append('<main class="page"><div class="card state-box center">')
+    lines.append('<p class="code">Codice HTTP ' + str(status) + '</p>')
     lines.append('<h1>' + html.escape(title) + '</h1>')
     # "Pagina non trovata." under the title "Pagina non trovata" would only repeat it.
     if message.rstrip('.') != title:
         lines.append('<p>' + html.escape(message) + '</p>')
-    lines.append('<p class="code">Codice HTTP ' + str(status) + '</p>')
     # Every 403 page (token missing or wrong, host not allowed) would come back here from the list.
     if status != 403:
-        lines.append('<a class="back" href="/">← Elenco delle route</a>')
-    lines.append('</div></main></body></html>')
+        lines.append('<a class="btn back" href="/">← Elenco delle route</a>')
+    lines.append('</div></main>' + _page_tail(nonce))
     return '\n'.join(lines)
 
 
@@ -870,10 +687,11 @@ def make_handler(app: ReviewApp):
                 return
             # [site-login] - END
             if path == '/' or path == '/index.html':
-                page = render_index(app.route_summaries(), db_path(app.root))
+                nonce = secrets.token_urlsafe(18)
+                page = render_index(app.route_summaries(), db_path(app.root), nonce)
                 self._send(200, 'text/html; charset=utf-8', page.encode('utf-8'),
-                           "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; "
-                           "form-action 'none'; frame-ancestors 'none'")
+                           "default-src 'none'; script-src 'nonce-" + nonce + "'; style-src 'unsafe-inline'; "
+                           "base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
                 return
             if path == '/api/routes':
                 self._json(200, {'routes': app.route_summaries()})
@@ -884,6 +702,12 @@ def make_handler(app: ReviewApp):
                 csp = ("default-src 'none'; script-src 'nonce-" + nonce + "'; style-src 'unsafe-inline'; "
                        "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
                 self._send(200, 'text/html; charset=utf-8', render_panel(nonce).encode('utf-8'), csp)
+                return
+            if path == '/stato':
+                nonce = secrets.token_urlsafe(18)
+                csp = ("default-src 'none'; script-src 'nonce-" + nonce + "'; style-src 'unsafe-inline'; "
+                       "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+                self._send(200, 'text/html; charset=utf-8', render_status(nonce).encode('utf-8'), csp)
                 return
             if path == '/api/panel/status':
                 self._json(200, app.panel.status())
@@ -1257,9 +1081,10 @@ def make_handler(app: ReviewApp):
             if api:
                 self._json(status, {'ok': False, 'error': reason, 'message': message})
             else:
-                self._send(status, 'text/html; charset=utf-8', render_problem(status, message).encode('utf-8'),
-                           "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; "
-                           "form-action 'none'; frame-ancestors 'none'")
+                nonce = secrets.token_urlsafe(18)
+                self._send(status, 'text/html; charset=utf-8', render_problem(status, message, nonce).encode('utf-8'),
+                           "default-src 'none'; script-src 'nonce-" + nonce + "'; style-src 'unsafe-inline'; "
+                           "base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 
         def _redirect(self, location, cookie):
             extra = [('Location', location)]

@@ -1,356 +1,391 @@
 <!doctype html>
 <html lang="it">
 <head>
+<script nonce="__NNSLR_NONCE__">try{var t=localStorage.getItem('nnslr-theme');if(t==='light'||t==='auto')document.documentElement.dataset.theme=t}catch(e){}</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="color-scheme" content="light">
-<title>Revisione cartelli · Pannello</title>
+<meta name="color-scheme" content="light dark">
+<title>Speed limits · Pannello</title>
 <style>
-:root {
-  --bg: #ffffff;
-  --surface: #ffffff;
-  --surface-2: #f5f5f7;
-  --fill: rgba(118, 118, 128, 0.12);
-  --fill-strong: rgba(118, 118, 128, 0.22);
-  --seg-on: #ffffff;
-  --fg: #1d1d1f;
-  --muted: #6e6e73;
-  --line: rgba(0, 0, 0, 0.08);
-  --bar: rgba(251, 251, 253, 0.78);
-  --stage: #0b0b0c;
-  --accent: #0071e3;
-  --button: #0071e3;
-  --on-accent: #ffffff;
-  --yellow: #f5b800;
-  --todo: #86868b;
-  --ok: #1f8a3b;
-  --ok-fill: #34c759;
-  --ok-tint: rgba(52, 199, 89, 0.14);
-  --warn: #b85000;
-  --warn-fill: #ff9f0a;
-  --warn-tint: rgba(255, 159, 10, 0.15);
-  --danger: #d70015;
-  --danger-fill: #ff3b30;
-  --danger-tint: rgba(255, 59, 48, 0.1);
-  --sus: #8944ab;
-  --sus-fill: #af52de;
-  --sus-tint: rgba(175, 82, 222, 0.1);
-  --hint: #0066cc;
-  --hint-tint: rgba(0, 113, 227, 0.07);
-  --focus: #0071e3;
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.03), 0 6px 20px rgba(0, 0, 0, 0.05);
-  --card-border: rgba(0, 0, 0, 0.08);
-  --sign-face: #ffffff;
-  --sign-ink: #111111;
-  --sign-ring: #e3001b;
-  /* Overlay colours sit on the dark photo stage. */
-  --ov-speed: #ff5964;
-  --ov-cancel: #d4d9df;
-  --ov-other: #ffa94d;
-  --ov-none: #8a929c;
-  --ov-selected: #ffd60a;
-  --ov-hint: #64d2ff;
-  --ov-text: #fff3b0;
-  --ov-halo: #0d0f12;
-  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", "Segoe UI", Roboto, Arial, sans-serif;
-  --font-data: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-  --radius: 18px;
-  --control: 32px;
-  color-scheme: light;
-}
+/* Copied from openpilot.distill web/static/app.css (the look shared by distill-web and perception-web).
+   Keep in step with it. Dark is the default; <html data-theme="light"> or "auto" picks the light one. */
+:root{--bg:#0b0f16;--bg-glow:rgba(59,130,246,.16);--surface:#161b24;--surface-2:#1c2230;--surface-3:#232b3b;
+--fg:#e8ecf3;--muted:#9aa4b2;--line:rgba(255,255,255,.08);--line-strong:rgba(255,255,255,.14);
+--accent:#3b82f6;--accent-hover:#5b97f8;--accent-soft:rgba(59,130,246,.16);
+--ok:#4ade80;--ok-soft:rgba(74,222,128,.13);--todo:#fbbf24;--todo-soft:rgba(251,191,36,.13);--rev:#60a5fa;
+--rev-soft:rgba(96,165,250,.15);--imp:#c084fc;--imp-soft:rgba(192,132,252,.14);--bad:#f87171;--bad-soft:rgba(248,113,113,.14);
+--focus:#3b82f6;--term-bg:#080b10;--term-fg:#d7dde3;--series:#4f8ff7;--series-raw:#4f8ff7;--grid:rgba(255,255,255,.06);
+--shadow:0 1px 0 rgba(255,255,255,.04) inset,0 10px 30px rgba(0,0,0,.35);
+--card-grad:linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,0) 60%);color-scheme:dark;
+--topbar-bg:rgba(11,15,22,.72);--placeholder:#6b7484;--hover-line:rgba(255,255,255,.24);--danger-line:rgba(248,113,113,.5);
+--backdrop:rgba(3,6,12,.6);--pop-shadow:0 12px 36px rgba(0,0,0,.5);--tip-shadow:0 8px 24px rgba(0,0,0,.45);
+--sheet-shadow:0 -10px 40px rgba(0,0,0,.5);--auth-shadow:0 30px 80px rgba(0,0,0,.35);--tab-on-fg:#fff;
+--tab-on-ring:rgba(59,130,246,.45);--banner-line:rgba(96,165,250,.35);--error-line:rgba(248,113,113,.4);
+--error-fg:#fecaca;--on-ok:#052e14;--spark-gpu:#34c759;--spark-cpu:#3b8cff;
+--font-ui:system-ui,-apple-system,"SF Pro Text","Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+--font-data:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+/* The light palette: chosen in Settings, or the system one when nothing is chosen. */
+:root[data-theme="light"]{--bg:#f3f6fb;--bg-glow:rgba(37,99,235,.10);--surface:#ffffff;--surface-2:#f6f8fc;--surface-3:#eaeff7;
+--fg:#0f172a;--muted:#5b6577;--line:rgba(15,23,42,.09);--line-strong:rgba(15,23,42,.15);
+--accent:#2563eb;--accent-hover:#1d4ed8;--accent-soft:rgba(37,99,235,.10);
+--ok:#15803d;--ok-soft:rgba(22,163,74,.11);--todo:#b45309;--todo-soft:rgba(217,119,6,.12);--rev:#1d4ed8;
+--rev-soft:rgba(37,99,235,.10);--imp:#7e22ce;--imp-soft:rgba(147,51,234,.10);--bad:#dc2626;--bad-soft:rgba(220,38,38,.09);
+--focus:#2563eb;--term-bg:#0f172a;--term-fg:#e2e8f0;--series:#2563eb;--series-raw:#2563eb;--grid:rgba(15,23,42,.07);
+--shadow:0 1px 2px rgba(15,23,42,.05),0 8px 24px rgba(15,23,42,.06);
+--card-grad:linear-gradient(180deg,rgba(255,255,255,.6),rgba(255,255,255,0) 60%);color-scheme:light;
+--topbar-bg:rgba(255,255,255,.78);--placeholder:#8a93a3;--hover-line:rgba(15,23,42,.22);--danger-line:rgba(220,38,38,.45);
+--backdrop:rgba(15,23,42,.35);--pop-shadow:0 12px 36px rgba(15,23,42,.16);--tip-shadow:0 8px 24px rgba(15,23,42,.14);
+--sheet-shadow:0 -10px 40px rgba(15,23,42,.16);--auth-shadow:0 30px 80px rgba(15,23,42,.12);--tab-on-fg:#1d4ed8;
+--tab-on-ring:rgba(37,99,235,.30);--banner-line:rgba(37,99,235,.28);--error-line:rgba(220,38,38,.35);
+--error-fg:#991b1b;--on-ok:#fff;--spark-gpu:#16a34a;--spark-cpu:#2563eb}
+@media (prefers-color-scheme:light){:root[data-theme="auto"]{--bg:#f3f6fb;--bg-glow:rgba(37,99,235,.10);--surface:#ffffff;--surface-2:#f6f8fc;--surface-3:#eaeff7;
+--fg:#0f172a;--muted:#5b6577;--line:rgba(15,23,42,.09);--line-strong:rgba(15,23,42,.15);
+--accent:#2563eb;--accent-hover:#1d4ed8;--accent-soft:rgba(37,99,235,.10);
+--ok:#15803d;--ok-soft:rgba(22,163,74,.11);--todo:#b45309;--todo-soft:rgba(217,119,6,.12);--rev:#1d4ed8;
+--rev-soft:rgba(37,99,235,.10);--imp:#7e22ce;--imp-soft:rgba(147,51,234,.10);--bad:#dc2626;--bad-soft:rgba(220,38,38,.09);
+--focus:#2563eb;--term-bg:#0f172a;--term-fg:#e2e8f0;--series:#2563eb;--series-raw:#2563eb;--grid:rgba(15,23,42,.07);
+--shadow:0 1px 2px rgba(15,23,42,.05),0 8px 24px rgba(15,23,42,.06);
+--card-grad:linear-gradient(180deg,rgba(255,255,255,.6),rgba(255,255,255,0) 60%);color-scheme:light;
+--topbar-bg:rgba(255,255,255,.78);--placeholder:#8a93a3;--hover-line:rgba(15,23,42,.22);--danger-line:rgba(220,38,38,.45);
+--backdrop:rgba(15,23,42,.35);--pop-shadow:0 12px 36px rgba(15,23,42,.16);--tip-shadow:0 8px 24px rgba(15,23,42,.14);
+--sheet-shadow:0 -10px 40px rgba(15,23,42,.16);--auth-shadow:0 30px 80px rgba(15,23,42,.12);--tab-on-fg:#1d4ed8;
+--tab-on-ring:rgba(37,99,235,.30);--banner-line:rgba(37,99,235,.28);--error-line:rgba(220,38,38,.35);
+--error-fg:#991b1b;--on-ok:#fff;--spark-gpu:#16a34a;--spark-cpu:#2563eb}}
+/* speedlimits-web additions, dark (default): one colour per meaning on every page.
+   --sus purple = suspicious only; --warn orange = to confirm / unsaved / warning; --has amber = frames with proposals. */
+:root{--sus:#c084fc;--sus-soft:rgba(192,132,252,.14);--warn:#fb923c;--warn-soft:rgba(251,146,60,.14);
+--has:#d9a93a;--none-cell:#2a3242;--disabled:#5d6675;--stage:#05070b;
+--sign-face:#ffffff;--sign-ink:#111111;--sign-ring:#e3001b;
+--ov-speed:#ff5964;--ov-cancel:#d4d9df;--ov-other:#ffa94d;--ov-none:#8a929c;--ov-selected:#ffd60a;--ov-hint:#64d2ff;
+--ov-text:#fff3b0;--ov-halo:#0d0f12}
+:root[data-theme="light"]{--sus:#7e22ce;--sus-soft:rgba(147,51,234,.10);--warn:#c2410c;--warn-soft:rgba(234,88,12,.11);
+--has:#e0b13f;--none-cell:#e3e8f0;--disabled:#9aa3b2;--stage:#0b0f16}
+@media (prefers-color-scheme:light){:root[data-theme="auto"]{--sus:#7e22ce;--sus-soft:rgba(147,51,234,.10);--warn:#c2410c;--warn-soft:rgba(234,88,12,.11);
+--has:#e0b13f;--none-cell:#e3e8f0;--disabled:#9aa3b2;--stage:#0b0f16}}
+/* The frame shared with distill-web and perception-web (openpilot.distill web/static/app.css): base, top bar
+   with the tab row, page head, cards, buttons, pills, bars, tables, lists, log sheet, toast. Keep in step. */
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%;background:var(--bg)}
+body{margin:0;min-height:100vh;background:radial-gradient(1200px 520px at 50% -180px,var(--bg-glow),transparent 70%) no-repeat,var(--bg);
+color:var(--fg);font-family:var(--font-ui);font-size:15px;line-height:1.45;-webkit-font-smoothing:antialiased}
+:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+a{color:var(--rev)}
+code,.mono{font-family:var(--font-data);font-size:12.5px}
+code{background:var(--surface-2);border:1px solid var(--line);border-radius:6px;padding:1px 5px;word-break:break-all}
 
-* { box-sizing: border-box; }
-[hidden] { display: none !important; }
-html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
-html, body { min-height: 100%; }
-body {
-  margin: 0;
-  background: var(--bg);
-  color: var(--fg);
-  font-family: var(--font-ui);
-  font-size: 15px;
-  line-height: 1.45;
-  letter-spacing: -0.006em;
-  overflow-x: hidden;
-  -webkit-font-smoothing: antialiased;
-}
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0 0 auto;
-  height: env(safe-area-inset-top, 0px);
-  z-index: 10;
-  background: var(--bar);
-}
-button { font: inherit; letter-spacing: inherit; }
-:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
-a { color: var(--accent); }
+/* top bar: brand and live state, then the tabs (links to the pages of the site) */
+.topbar{position:sticky;top:0;z-index:5;background:var(--topbar-bg);border-bottom:1px solid var(--line);
+-webkit-backdrop-filter:saturate(160%) blur(16px);backdrop-filter:saturate(160%) blur(16px);
+padding:12px max(16px,env(safe-area-inset-right,0px)) 10px max(16px,env(safe-area-inset-left,0px))}
+.topbar-inner{display:flex;align-items:center;gap:10px;max-width:1180px;margin:0 auto;min-height:32px}
+.brand{display:flex;align-items:center;gap:10px;color:inherit;text-decoration:none;min-width:0;flex:none}
+/* Our brand mark is the speed sign, in the place and size of distill's tile. */
+.brand-mark{width:32px;height:32px;border-radius:50%;background:var(--sign-face);border:4px solid var(--sign-ring);display:grid;
+place-items:center;flex:none;color:var(--sign-ink);font-size:12px;font-weight:800;letter-spacing:-.04em;
+font-variant-numeric:tabular-nums;box-shadow:0 4px 14px rgba(227,0,27,.28)}
+.brand-name{margin:0;font-size:19px;font-weight:700;letter-spacing:-.01em;white-space:nowrap}
+.live{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted);min-width:0}
+.live span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px var(--ok-soft);flex:none}
+.dot.off{background:var(--bad);box-shadow:0 0 0 3px var(--bad-soft)}
+.tabs{display:flex;gap:4px;max-width:1180px;margin:10px auto 0;padding:4px;overflow-x:auto;scrollbar-width:none;
+-webkit-overflow-scrolling:touch;background:var(--surface);border:1px solid var(--line);border-radius:14px}
+.tabs::-webkit-scrollbar{display:none}
+.tabs a{color:var(--muted);font-weight:600;font-size:14px;padding:7px 14px;border-radius:10px;white-space:nowrap;
+min-height:36px;display:inline-flex;align-items:center;text-decoration:none;transition:background .2s,color .2s}
+.tabs a:hover{color:var(--fg)}
+.tabs a[aria-current="page"]{color:var(--tab-on-fg);background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--tab-on-ring)}
 
-/* Top bar: the same as on the review page, brand in the same place. */
-.topbar {
-  position: sticky;
-  top: env(safe-area-inset-top, 0px);
-  z-index: 5;
-  background: var(--bar);
-  -webkit-backdrop-filter: saturate(180%) blur(20px);
-  backdrop-filter: saturate(180%) blur(20px);
-  border-bottom: 1px solid var(--line);
-  padding-left: max(20px, env(safe-area-inset-left, 0px));
-  padding-right: max(20px, env(safe-area-inset-right, 0px));
-}
-.topbar-inner { display: flex; align-items: center; gap: 18px; height: 52px; max-width: 1600px; margin: 0 auto; }
-.brand { display: flex; align-items: center; gap: 10px; min-width: 0; color: inherit; text-decoration: none; flex: none; }
-.brand-mark {
-  width: 26px; height: 26px; border-radius: 50%;
-  background: var(--sign-face); border: 3.5px solid var(--sign-ring);
-  display: grid; place-items: center; flex: none;
-  color: var(--sign-ink); font-weight: 700; font-size: 10px; font-variant-numeric: tabular-nums;
-}
-.brand-name { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; white-space: nowrap; }
-.topnav { display: inline-flex; gap: 2px; background: var(--fill); border-radius: 9px; padding: 2px; flex: none; }
-.topnav a {
-  display: inline-flex; align-items: center; min-height: 28px; padding: 4px 14px; border-radius: 7px;
-  font-size: 13px; font-weight: 500; color: var(--fg); text-decoration: none; white-space: nowrap;
-}
-.topnav a:hover { background: var(--fill); }
-.topnav a[aria-current="page"] {
-  background: var(--seg-on); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(0, 0, 0, 0.04); font-weight: 600;
-}
-.live { margin-left: auto; display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
-#live-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--ok-fill); box-shadow: 0 0 0 3px var(--ok-tint); }
-.dot.off { background: var(--danger-fill); box-shadow: 0 0 0 3px var(--danger-tint); }
+/* page */
+.page{max-width:1180px;margin:0 auto;padding:20px max(16px,env(safe-area-inset-right,0px))
+calc(56px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:16px}
+.page-head{display:flex;flex-direction:column;gap:6px;max-width:720px;width:100%;margin:4px auto 2px;text-align:center}
+.page-title{margin:0;font-size:30px;font-weight:750;letter-spacing:-.02em;line-height:1.15;color:var(--fg)}
+.page-sub{margin:0;color:var(--muted);font-size:15px}
+@media (max-width:420px){.page-title{font-size:26px}}
+.card{background:var(--card-grad),var(--surface);border:1px solid var(--line);border-radius:18px;padding:18px 20px;min-width:0;
+box-shadow:var(--shadow)}
+@media (max-width:480px){.card{padding:16px;border-radius:16px}}
+.card h2,.label{margin:0 0 12px;font-size:13px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+.lead{margin:0 0 12px;color:var(--muted);max-width:75ch}
+.note{font-size:12.5px;color:var(--muted)}
+.empty{color:var(--muted);margin:0}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media (max-width:800px){.grid2{grid-template-columns:1fr}}
 
-/* Page */
-.page {
-  max-width: 1600px;
-  margin: 0 auto;
-  padding-block: 40px 56px;
-  padding-left: max(20px, env(safe-area-inset-left, 0px));
-  padding-right: max(20px, env(safe-area-inset-right, 0px));
-  display: flex; flex-direction: column; gap: 20px;
-}
-.page-head { margin-bottom: 8px; }
-.page-title { margin: 0; font-size: 34px; line-height: 1.12; font-weight: 700; letter-spacing: -0.022em; }
-.lead { margin: 8px 0 0; font-size: 17px; color: var(--muted); max-width: 62ch; }
-.card {
-  background: var(--surface); border: 1px solid var(--card-border); border-radius: var(--radius); box-shadow: var(--shadow);
-  padding: 22px 24px; min-width: 0;
-}
-.group { display: flex; flex-direction: column; gap: 12px; margin-top: 20px; min-width: 0; }
-.group-title { margin: 0; font-size: 21px; line-height: 1.2; font-weight: 600; letter-spacing: -0.018em; }
-code { font-family: var(--font-data); font-size: 12.5px; background: var(--fill); border-radius: 6px; padding: 2px 6px; overflow-wrap: anywhere; }
-.readonly { display: none; margin: 0; border-radius: 12px; background: var(--warn-tint); color: var(--warn); padding: 10px 16px; font-size: 13.5px; font-weight: 500; }
-.readonly.show { display: block; }
+/* buttons */
+.buttons{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start}
+.action{display:flex;flex-direction:column;gap:4px;max-width:100%}
+.btn{appearance:none;border:1px solid var(--line-strong);background:var(--surface-2);color:var(--fg);font:inherit;
+font-weight:650;padding:10px 18px;border-radius:12px;cursor:pointer;min-height:44px;text-decoration:none;
+display:inline-flex;align-items:center;justify-content:center;gap:8px;transition:background .2s,border-color .2s,transform .1s}
+.btn:hover:not(:disabled){border-color:var(--hover-line);background:var(--surface-3)}
+.btn:active:not(:disabled){transform:scale(.98)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;box-shadow:0 6px 18px rgba(37,99,235,.3)}
+.btn.primary:hover:not(:disabled){background:var(--accent-hover);border-color:var(--accent-hover)}
+.btn.danger{color:var(--bad);border-color:var(--danger-line);background:transparent}
+.btn.danger:hover:not(:disabled){background:var(--bad-soft);border-color:var(--bad)}
+.btn.small{padding:5px 12px;min-height:34px;font-size:13px;border-radius:10px}
+.btn:disabled{opacity:.45;cursor:not-allowed;box-shadow:none}
+.reason{font-size:12.5px;color:var(--muted);max-width:60ch}
 
-/* Buttons: pills on the grey fill, the main one in blue. */
-.btn {
-  appearance: none; border: 0; background: var(--fill); color: var(--fg); border-radius: 999px;
-  padding: 6px 16px; font-size: 14px; font-weight: 500; min-height: var(--control);
-  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  white-space: nowrap; text-decoration: none; cursor: pointer; transition: background 0.15s ease;
-}
-.btn:hover:not(:disabled) { background: var(--fill-strong); }
-.btn:disabled { opacity: 0.35; cursor: not-allowed; }
-.btn.primary { background: var(--button); color: var(--on-accent); font-weight: 600; }
-.btn.primary:hover:not(:disabled) { background: #0077ed; }
-.btn.danger { color: var(--danger); }
-.btn.small { padding: 4px 12px; font-size: 13px; min-height: 28px; }
-.reason { margin-top: 5px; font-size: 12px; color: var(--muted); }
+/* bars and pills */
+.bar{height:8px;border-radius:4px;background:var(--surface-3);overflow:hidden}
+.bar span{display:block;height:100%;width:0;border-radius:4px;background:var(--accent);transition:width .4s}
+.bar.ok span{background:var(--ok)}.bar.warn span{background:var(--todo)}.bar.bad span{background:var(--bad)}
+.bar.run span{background:var(--rev)}
+.pills{display:flex;flex-wrap:wrap;gap:6px}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:12.5px;
+font-weight:600;white-space:nowrap;border:1px solid transparent}
+.pill::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.pill.todo{background:var(--todo-soft);color:var(--todo)}.pill.rev{background:var(--rev-soft);color:var(--rev)}
+.pill.imp{background:var(--imp-soft);color:var(--imp)}.pill.ok{background:var(--ok-soft);color:var(--ok)}
+.pill.bad{background:var(--bad-soft);color:var(--bad)}.pill.run{background:var(--rev-soft);color:var(--rev)}
+.pill.warn{background:var(--warn-soft);color:var(--warn)}.pill.sus{background:var(--sus-soft);color:var(--sus)}
+.pill.muted{background:var(--surface-2);color:var(--muted)}
+.pill.run::before{animation:pulse 1.2s infinite}
+@keyframes pulse{50%{opacity:.25}}
 
-/* Next step */
-.hero { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px 32px; align-items: center; padding: 28px 32px; }
-.hero .kicker { font-size: 14px; font-weight: 600; color: var(--accent); }
-.hero.prepare .kicker { color: var(--warn); }
-.hero.review .kicker { color: var(--accent); }
-.hero.train .kicker { color: var(--sus); }
-.hero.done .kicker { color: var(--ok); }
-.hero .title { margin-top: 4px; font-size: 28px; line-height: 1.15; font-weight: 700; letter-spacing: -0.022em; }
-.hero .text { margin-top: 6px; color: var(--muted); max-width: 66ch; }
-.hero .text:empty { display: none; }
-.hero .actions { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
-.hero .actions:empty { display: none; }
-.hero .actions .btn { min-height: 40px; padding: 8px 20px; font-size: 15px; }
+/* tables */
+.table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{text-align:left;font-size:11.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;
+padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:10px;border-bottom:1px solid var(--line);vertical-align:middle}
+tr:last-child td{border-bottom:none}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.mono{font-family:var(--font-data);font-size:12.5px;white-space:nowrap}
 
-/* The three steps */
-.steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
-.step { display: flex; flex-direction: column; gap: 10px; }
-.step.attention { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 8px 28px rgba(0, 113, 227, 0.12); }
-.step-head { display: flex; align-items: center; gap: 10px; }
-.step-num {
-  width: 26px; height: 26px; border-radius: 50%; flex: none; display: grid; place-items: center;
-  background: var(--fill); color: var(--fg); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums;
-}
-.step.attention .step-num { background: var(--button); color: var(--on-accent); }
-.step h3 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.015em; }
-.step .big { margin-top: 6px; font-size: 26px; line-height: 1.15; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
-.step .sub { color: var(--muted); font-size: 13.5px; }
-.step .buttons { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px 8px; margin-top: auto; padding-top: 12px; }
-.goal { display: flex; gap: 4px; }
-.goal span { flex: 1; height: 4px; border-radius: 2px; background: var(--fill); }
-.goal span.on { background: var(--ok-fill); }
-.bar { height: 4px; border-radius: 2px; background: var(--fill); overflow: hidden; }
-.bar span { display: block; height: 100%; background: var(--ok-fill); border-radius: 2px; transition: width 0.4s ease; }
-.bar.warn span { background: var(--warn-fill); }
-.bar.bad span { background: var(--danger-fill); }
+/* lists */
+.list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.item{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 14px;border:1px solid var(--line);
+border-radius:14px;background:var(--surface-2)}
+.item .what{font-weight:600}
+.item .sub{color:var(--muted);font-size:12.5px;font-variant-numeric:tabular-nums}
+.item .grow{flex:1;min-width:0}
 
-/* Machine */
-.system { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; }
-.metric { display: flex; flex-direction: column; gap: 8px; }
-.metric h3 { margin: 0; font-size: 13px; font-weight: 600; color: var(--muted); }
-.metric .value { font-size: 22px; line-height: 1.2; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
-.metric .sub { color: var(--muted); font-size: 12.5px; }
-.metric .sub:empty { display: none; }
-#prep { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+/* log sheet and toast */
+.sheet-backdrop{position:fixed;inset:0;z-index:19;background:var(--backdrop);opacity:0;pointer-events:none;
+transition:opacity .25s ease;-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px)}
+.sheet-backdrop.open{opacity:1;pointer-events:auto}
+.sheet{position:fixed;left:50%;bottom:0;z-index:20;width:min(760px,100%);max-height:86vh;display:flex;flex-direction:column;
+background:var(--surface);color:var(--fg);border-radius:22px 22px 0 0;border:1px solid var(--line);border-bottom:0;box-shadow:var(--sheet-shadow);
+transform:translate(-50%,105%);transition:transform .32s cubic-bezier(.2,.8,.2,1);visibility:hidden;
+padding-bottom:env(safe-area-inset-bottom,0px)}
+.sheet.open{transform:translate(-50%,0);visibility:visible}
+.sheet-grabber{width:38px;height:5px;border-radius:3px;background:var(--line-strong);margin:8px auto 4px;flex:none}
+.sheet-head{display:flex;align-items:center;gap:10px;padding:8px 20px 12px;flex:none}
+.sheet-head .grow{flex:1;min-width:0}
+.sheet-head h2{margin:0;font-size:20px;font-weight:650;letter-spacing:-.01em;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sheet-body{overflow:auto;padding:0 20px 20px;-webkit-overflow-scrolling:touch}
+.term{margin:0;min-height:200px;max-height:60vh;overflow:auto;padding:14px;border-radius:14px;background:var(--term-bg);
+color:var(--term-fg);font-family:var(--font-data);font-size:12.5px;line-height:1.5;white-space:pre-wrap;word-break:break-word}
+.toast{position:fixed;right:16px;bottom:calc(24px + env(safe-area-inset-bottom,0px));z-index:30;max-width:min(460px,calc(100vw - 32px));padding:12px 14px;
+border-radius:14px;background:var(--surface-2);border:1px solid var(--line-strong);box-shadow:var(--pop-shadow);display:none}
+.toast.show{display:block}.toast.error{border-color:var(--bad);color:var(--bad)}
+.sheet.open ~ .toast{bottom:auto;top:16px}
+body.sheet-open{overflow:hidden}
+@media (prefers-reduced-motion:reduce){.pill.run::before{animation:none}.bar span,.btn,.tabs a,.sheet,.sheet-backdrop{transition:none}}
+/* The dark / light switch at the right of the top bar (the Account page also offers Automatico). */
+.icon-btn{appearance:none;border:0;width:32px;height:32px;border-radius:50%;background:var(--surface-2);color:var(--muted);
+cursor:pointer;flex:none;display:grid;place-items:center;transition:color .2s,background .2s}
+.icon-btn:hover{color:var(--fg);background:var(--surface-3)}
+a.icon-btn{text-decoration:none}
+.icon-btn svg{width:18px;height:18px}
+.live + .theme-toggle{margin-left:4px}
+/* Without a live status the switch itself goes to the right. */
+.brand + .theme-toggle{margin-left:auto}
+.icon-btn[aria-current="page"]{color:var(--tab-on-fg);background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--tab-on-ring)}
+.theme-toggle .i-moon,.theme-toggle.is-light .i-sun{display:none}
+.theme-toggle.is-light .i-moon{display:block}
+@media (pointer:coarse){.icon-btn{width:40px;height:40px}}
 
-/* Status chips */
-.pills { display: flex; flex-wrap: wrap; gap: 6px; }
-.pill {
-  display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px;
-  font-size: 12.5px; font-weight: 600; white-space: nowrap; background: var(--fill); color: var(--muted);
-}
-.pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
-.pill.todo { background: var(--warn-tint); color: var(--warn); }
-.pill.rev { background: var(--hint-tint); color: var(--accent); }
-.pill.imp { background: var(--sus-tint); color: var(--sus); }
-.pill.ok { background: var(--ok-tint); color: var(--ok); }
-.pill.bad { background: var(--danger-tint); color: var(--danger); }
-.pill.run { background: var(--hint-tint); color: var(--accent); }
-.pill.run::before { animation: pulse 1.2s ease-in-out infinite; }
-@keyframes pulse { 50% { opacity: 0.25; } }
+/* On a phone the bar keeps the brand, the dot and the two icons; the time of the last update stays in the dot's title. */
+@media (max-width:480px){.live span:last-child{display:none}}
 
-/* Routes table: hairline rows, no boxes. */
-.table-card { padding: 6px 24px 8px; }
-.table-wrap { overflow-x: auto; }
-.table-wrap:has(#routes:empty) { display: none; }
-table { width: 100%; border-collapse: collapse; font-size: 14px; }
-th {
-  text-align: left; font-size: 12.5px; font-weight: 500; color: var(--muted);
-  padding: 12px 12px 10px; border-bottom: 1px solid var(--line); white-space: nowrap;
-}
-td { padding: 13px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
-th:first-child, td:first-child { padding-left: 0; }
-th:last-child, td:last-child { padding-right: 0; }
-tbody tr:last-child td { border-bottom: 0; }
-td.num { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
-th.num { text-align: right; }
-td.route { font-family: var(--font-data); font-size: 13px; white-space: nowrap; }
-.reviewed { display: flex; align-items: center; gap: 10px; min-width: 160px; }
-.reviewed .bar { flex: 1; }
-.reviewed .num { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.note { display: block; margin-top: 4px; font-size: 12px; color: var(--muted); }
-.empty { margin: 0; color: var(--muted); }
-.table-card .empty { padding: 14px 0; }
+/* Pannello only, after the shared frame. */
+.page-head{margin-bottom:4px}
+.banner{margin:0;padding:12px 16px;border-radius:14px;background:var(--warn-soft);color:var(--fg);border:1px solid var(--warn);display:none}
+.banner.show{display:block}
+.live.off{color:var(--bad)}
+/* Disabled step buttons stay legible (flat, muted text): the reason under them explains why. */
+.steps .btn:disabled,.hero .btn:disabled{opacity:1;background:transparent;border-color:var(--line);color:var(--muted)}
+.hero .btn.primary:disabled{background:var(--accent-soft);border-color:var(--tab-on-ring);color:var(--tab-on-fg)}
+.reason{margin:0}
 
-/* Actions started from the panel */
-#update-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
-.jobs { list-style: none; margin: 16px 0 0; padding: 0; border-top: 1px solid var(--line); }
-.jobs:empty { display: none; }
-.job { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
-.job:last-child { border-bottom: 0; padding-bottom: 0; }
-.job .what { font-weight: 600; }
-.job .when { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
-.job .spacer { flex: 1; }
-#jobs-empty { margin-top: 14px; font-size: 14px; }
+/* Colour of a step, shared by the 'Prossimo passo' card and the step that needs attention:
+   blue review (an action), amber prepare (machine work waiting), green train / done (ready). */
+.k-review{--k:var(--rev);--k-soft:var(--rev-soft)}
+.k-prepare{--k:var(--todo);--k-soft:var(--todo-soft)}
+.k-train,.k-done{--k:var(--ok);--k-soft:var(--ok-soft)}
 
-/* Log drawer: always dark, like a terminal. */
-.terminal {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; height: min(55vh, 520px);
-  display: none; flex-direction: column; color-scheme: dark;
-  background: #161618; color: #e5e5ea; border-radius: 16px 16px 0 0;
-  box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.28);
-  padding-bottom: env(safe-area-inset-bottom, 0px);
-}
-.terminal.open { display: flex; }
-.terminal header {
-  display: flex; align-items: center; gap: 10px; padding: 10px 16px 10px 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08); font-size: 14px;
-}
-.terminal header strong { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.terminal header .spacer { flex: 1; }
-.terminal .btn { background: rgba(118, 118, 128, 0.24); color: #f5f5f7; }
-.terminal .btn:hover:not(:disabled) { background: rgba(118, 118, 128, 0.38); }
-.terminal .pill.run { background: rgba(100, 210, 255, 0.12); color: #64d2ff; }
-.terminal pre {
-  margin: 0; flex: 1; overflow: auto; padding: 14px 20px; font-family: var(--font-data); font-size: 12.5px;
-  line-height: 1.55; white-space: pre-wrap; word-break: break-word;
-}
-.toast {
-  position: fixed; right: 20px; bottom: 20px; z-index: 30; max-width: min(420px, calc(100vw - 40px));
-  padding: 12px 16px; border-radius: 14px; background: var(--surface); border: 1px solid var(--card-border);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06), 0 12px 36px rgba(0, 0, 0, 0.16); font-size: 14px; display: none;
-}
-.toast.show { display: block; }
-.toast.error { color: var(--danger); }
-.terminal.open ~ .toast { bottom: calc(min(55vh, 520px) + 16px); }
+/* Next step: a soft wash in the step's colour and a coloured eyebrow. */
+.hero{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px 28px;align-items:center;
+background:linear-gradient(100deg,var(--k-soft,transparent),transparent 72%),var(--card-grad),var(--surface);
+border-color:color-mix(in srgb,var(--k,var(--line)) 40%,transparent)}
+.hero .kicker{display:inline-flex;align-items:center;gap:8px;margin:0 0 6px;color:var(--k,var(--muted))}
+.hero .kicker::before{content:"";width:8px;height:8px;border-radius:50%;background:currentColor}
+.hero .title{font-size:22px;line-height:1.2;font-weight:700;letter-spacing:-.015em}
+.hero .text{margin-top:4px;color:var(--muted);max-width:70ch}
+.hero .text:empty{display:none}
+.hero .actions{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+.hero .actions:empty{display:none}
 
-@media (max-width: 1100px) {
-  .system { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+/* The three steps. Each card: head, figure, meter, text, then a foot (buttons + one reason line)
+   at the bottom, so the three button rows line up. */
+.steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.step{display:flex;flex-direction:column;gap:10px}
+.step>*{min-width:0}
+.step.attention{border-color:color-mix(in srgb,var(--k) 55%,transparent);box-shadow:0 0 0 3px var(--k-soft),var(--shadow)}
+.step-head{display:flex;align-items:center;gap:10px}
+.step-head h2{margin:0}
+.step-num{width:24px;height:24px;border-radius:50%;flex:none;display:grid;place-items:center;
+background:var(--surface-2);border:1px solid var(--line-strong);color:var(--muted);font-size:12px;font-weight:700;font-variant-numeric:tabular-nums}
+.step.attention .step-num{background:var(--k-soft);border-color:var(--k);color:var(--k)}
+.step .big{font-size:22px;line-height:1.2;font-weight:700;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+.big-note{display:block;margin-top:2px;font-size:13.5px;font-weight:500;letter-spacing:0;color:var(--muted)}
+.step .sub{font-size:13px;color:var(--muted)}
+.step-foot{margin-top:auto;padding-top:8px;display:flex;flex-direction:column;gap:8px}
+/* Distill's buttons are wide: one per row, full width, rather than a ragged wrap. */
+.step-foot .buttons{flex-direction:column;align-items:stretch}
+/* One line, always there (empty or not), so the cards keep the same foot height. */
+.step-foot .reason{min-height:18px;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:none}
+/* Where subgrid exists the five parts line up across the cards, not only the foot. */
+@supports (grid-template-rows:subgrid){
+  @media (min-width:901px){
+    .steps{grid-template-rows:repeat(5,auto)}
+    .step{display:grid;grid-row:span 5;grid-template-rows:subgrid;grid-template-columns:minmax(0,1fr);row-gap:10px}
+    .step>.step-head{grid-row:1}
+    .step>.big{grid-row:2}
+    .step>.bar,.step>.goal{grid-row:3;align-self:center}
+    .step>.sub{grid-row:4}
+    .step>.step-foot{grid-row:5;margin-top:0}
+  }
 }
-@media (max-width: 900px) {
-  .steps { grid-template-columns: minmax(0, 1fr); }
+.goal{display:flex;gap:4px}
+.goal span{flex:1;height:8px;border-radius:4px;background:var(--surface-3)}
+.goal span.on{background:var(--ok)}
+
+/* A job started from a step: a card in that step, as distill's (no shell: the raw log stays folded
+   in "Dettagli tecnici"). */
+.job-live:empty{display:none}
+.job-live{margin-top:6px}
+.jobcard{border-radius:16px;padding:14px 16px;background:var(--surface-2);border:1px solid var(--line);display:flex;flex-direction:column;gap:10px;min-width:0}
+.jobcard-head{display:flex;align-items:center;gap:10px;min-width:0}
+.jobcard-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.jobcard-bar{height:8px;border-radius:4px;background:var(--surface-3);overflow:hidden;position:relative}
+.jobcard-bar span{display:block;height:100%;width:0;border-radius:4px;background:var(--accent);transition:width .6s ease}
+.jobcard.ok .jobcard-bar span{background:var(--ok)}.jobcard.bad .jobcard-bar span{background:var(--bad)}
+.jobcard.warn .jobcard-bar span{background:var(--warn)}
+.jobcard-bar.indeterminate span{width:35%!important;position:absolute;animation:live-slide 1.4s ease-in-out infinite}
+@keyframes live-slide{0%{left:-35%}100%{left:100%}}
+.jobcard-sub{color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
+.jobcard-line{margin:0;color:var(--muted);font-size:13px;overflow-wrap:anywhere}
+.jobcard-line:empty{display:none}
+.jobcard-foot{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap}
+.jobcard-foot a{font-size:13.5px;font-weight:600;text-decoration:none}
+.jobcard-foot a:hover{text-decoration:underline}
+.jobcard-foot .grow{flex:1}
+.jobcard details{flex-basis:100%;order:2}
+.jobcard summary{cursor:pointer;font-size:13px;color:var(--muted);width:max-content}
+.jobcard summary:hover{color:var(--fg)}
+/* The raw log, folded: plain small text on the card, not a terminal. */
+.jobcard-log{margin:8px 0 0;max-height:220px;overflow:auto;padding:10px 12px;border-radius:10px;background:var(--surface);
+border:1px solid var(--line);color:var(--muted);font-family:var(--font-data);font-size:12px;line-height:1.5;white-space:pre-wrap;word-break:break-word}
+.spinner{width:16px;height:16px;border-radius:50%;border:2.5px solid var(--line-strong);border-top-color:var(--rev);flex:none;
+animation:live-spin .8s linear infinite}
+@keyframes live-spin{to{transform:rotate(360deg)}}
+
+/* Pills: 'da revisionare' neutral and 'da importare' green, both with a hollow dot (not done yet). */
+.pill.hollow::before{background:transparent;box-shadow:inset 0 0 0 1.5px currentColor}
+
+/* Routes table: the route column has a fixed width, numbers right-aligned. */
+.table-card{padding:18px 0 4px}
+.table-card h2{padding:0 20px}
+table{table-layout:fixed}
+col.c-route{width:200px}
+col.c-seg{width:100px}
+col.c-frames{width:120px}
+col.c-objects{width:124px}
+col.c-state{width:228px}
+th{overflow:hidden;text-overflow:ellipsis}
+th:first-child,td:first-child{padding-left:20px}
+th:last-child,td:last-child{padding-right:20px}
+tbody tr:hover td{background:var(--accent-soft)}
+.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.route{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+td.route a{font-family:var(--font-data);font-size:12.5px;color:var(--fg);text-decoration:none}
+td.route a:hover{color:var(--rev);text-decoration:underline;text-underline-offset:2px}
+td.none{color:var(--muted)}
+/* Bar, then the count in a fixed right-aligned slot, so every bar ends at the same x. */
+.reviewed{display:flex;align-items:center;gap:10px}
+.reviewed .bar{flex:1;min-width:40px}
+.reviewed .num{flex:none;width:11ch;font-size:12.5px;color:var(--muted)}
+td .note{display:block;margin-top:4px;font-size:12px}
+.table-card .empty{padding:0 20px 14px}
+
+@media (max-width:1100px){
+  col.c-route{width:180px}
+  col.c-seg{width:92px}
+  col.c-objects{width:112px}
+  col.c-state{width:200px}
 }
-@media (max-width: 720px) {
-  .hero { grid-template-columns: minmax(0, 1fr); padding: 22px 24px; }
-  .hero .actions { align-items: stretch; }
+@media (max-width:900px){
+  .steps{grid-template-columns:minmax(0,1fr)}
+  .step-foot .reason{white-space:normal}
+  .step-foot .reason:empty{display:none}
 }
-@media (max-width: 980px), (pointer: coarse) {
-  :root { --control: 40px; }
-  .btn.small { min-height: 36px; }
-  .topnav a { min-height: 36px; }
+@media (max-width:720px){
+  .hero{grid-template-columns:minmax(0,1fr)}
+  .hero .actions{align-items:stretch}
 }
-@media (max-width: 640px) {
-  .brand-name { display: none; }
-  .topbar-inner { gap: 12px; }
-  .page { padding-block: 28px 40px; gap: 16px; }
-  .page-head { margin-bottom: 4px; }
-  .page-title { font-size: 28px; }
-  .lead { font-size: 15px; }
-  .group { margin-top: 16px; }
-  .group-title { font-size: 19px; }
-  .card { padding: 18px 20px; }
-  .hero { padding: 20px; }
-  .hero .title { font-size: 24px; }
-  .step .big { font-size: 22px; }
-  .system { gap: 12px; }
-  .metric { padding: 16px; }
-  .metric .value { font-size: 19px; }
-  /* Route, Revisionati and Stato only: the other columns would need a horizontal scroll.
-     Revisionati and Stato keep their natural width; the route takes the rest and ends in "…" if it must. */
-  th:nth-child(2), td:nth-child(2), th:nth-child(3), td:nth-child(3), th:nth-child(5), td:nth-child(5) { display: none; }
-  .table-card { padding: 4px 16px 6px; }
-  th { padding: 10px 8px 8px; }
-  td { padding: 12px 8px; }
-  td.route { font-size: 12px; max-width: 0; width: 100%; overflow: hidden; text-overflow: ellipsis; }
-  .reviewed { min-width: 0; flex-direction: column; align-items: stretch; gap: 5px; }
-  .reviewed .bar { flex: none; order: 2; }
-  .pill { padding: 3px 9px; font-size: 12px; }
-  .terminal header { padding-left: 16px; }
-  .terminal pre { padding: 12px 16px; }
+@media (max-width:640px){
+  .hero .title{font-size:20px}
+  .step .big{font-size:20px}
+  /* Route, Confermati and Stato only; the route drops its leading zeros (still in the link title). */
+  col.c-seg,col.c-frames,col.c-objects,
+  th:nth-child(2),td:nth-child(2),th:nth-child(3),td:nth-child(3),th:nth-child(5),td:nth-child(5){display:none}
+  col.c-route{width:35%}
+  col.c-state{width:39%}
+  th{padding:8px 6px;font-size:10.5px;letter-spacing:0}
+  td{padding:10px 6px;vertical-align:top}
+  th:first-child,td:first-child{padding-left:14px}
+  th:last-child,td:last-child{padding-right:14px}
+  .table-card h2{padding:0 14px}
+  td.route a{font-size:11.5px}
+  .rid-pad,.pill-long{display:none}
+  .jobcard-label{white-space:normal}
+  .reviewed{flex-direction:column;align-items:stretch;gap:6px}
+  .reviewed .bar{order:2;min-width:0;flex:none}
+  .reviewed .num{width:auto;text-align:left;font-size:11px}
+  td .pill{font-size:11.5px;padding:2px 7px;gap:5px}
 }
-@media (prefers-reduced-motion: reduce) {
-  * { transition: none !important; animation: none !important; }
-}
+@media (max-width:480px){.table-card{padding:16px 0 4px}}
+@media (prefers-reduced-motion:reduce){.goal span,.bar span,.jobcard-bar span{transition:none}.jobcard-bar span,.spinner{animation:none!important}}
 </style>
 </head>
 <body>
 <header class="topbar"><div class="topbar-inner">
-  <a class="brand" href="/" title="Elenco delle route"><span class="brand-mark" aria-hidden="true">50</span><span class="brand-name">Revisione cartelli</span></a>
-  <nav class="topnav" aria-label="Sezioni"><a href="/">Route</a><a href="/pannello" aria-current="page">Pannello</a><a href="/account">Account</a></nav>
-  <span class="live" role="status"><span class="dot" id="live-dot"></span><span id="live-text">connessione…</span></span>
-</div></header>
+  <a class="brand" href="/" title="Elenco delle route"><span class="brand-mark" aria-hidden="true">50</span><span class="brand-name">Speed limits</span></a>
+  <span class="live" role="status"><span class="dot" id="live-dot"></span><span id="live-text">…</span></span>
+  <button class="icon-btn theme-toggle" type="button" id="theme-toggle" aria-pressed="false" aria-label="Passa al tema chiaro" title="Passa al tema chiaro"><svg class="i-sun" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3.6" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M10 1.8v2.2M10 16v2.2M1.8 10H4M16 10h2.2M4.2 4.2l1.6 1.6M14.2 14.2l1.6 1.6M4.2 15.8l1.6-1.6M14.2 5.8l1.6-1.6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><svg class="i-moon" viewBox="0 0 20 20" aria-hidden="true"><path d="M16.5 12.6A7 7 0 0 1 7.4 3.5a7 7 0 1 0 9.1 9.1z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></button>
+  <a class="icon-btn account-btn" href="/account" aria-label="Account" title="Account"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="7" r="3.4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3.6 17.2c.9-3.1 3.4-4.8 6.4-4.8s5.5 1.7 6.4 4.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></a>
+</div>
+<nav class="tabs" aria-label="Sezioni"><a href="/">Route</a><a href="/pannello" aria-current="page">Pannello</a><a href="/stato">Stato</a></nav>
+</header>
 
 <main class="page">
   <div class="page-head">
     <h1 class="page-title">Pannello</h1>
-    <p class="lead">Prepara, revisiona, allena: lo stato del lavoro e della macchina, aggiornato da solo.</p>
+    <p class="page-sub">Prepara, revisiona, allena: a che punto è il lavoro e qual è il prossimo passo.</p>
   </div>
 
-  <div class="readonly" id="readonly">Pannello in sola lettura: su questo server i pulsanti sono disattivati.</div>
+  <div class="banner" id="readonly">Pannello in sola lettura: su questo server i pulsanti sono disattivati.</div>
 
   <section class="card hero" id="hero" aria-labelledby="hero-title">
     <div>
-      <div class="kicker">Prossimo passo</div>
+      <h2 class="kicker">Prossimo passo</h2>
       <div class="title" id="hero-title">…</div>
       <div class="text" id="hero-text"></div>
     </div>
@@ -358,90 +393,59 @@ td.route { font-family: var(--font-data); font-size: 13px; white-space: nowrap; 
   </section>
 
   <section class="steps" aria-label="I tre passi">
-    <article class="card step" id="step-prepare">
-      <div class="step-head"><span class="step-num">1</span><h3>Prepara</h3></div>
+    <article class="card step k-prepare" id="step-prepare">
+      <div class="step-head"><span class="step-num">1</span><h2>Prepara</h2></div>
       <div class="big" id="prepare-big">–</div>
-      <div class="sub" id="prepare-sub">Giri dal comma → frame → cartelli proposti, tutto automatico.</div>
-      <div class="buttons" id="prepare-buttons"></div>
+      <div class="sub" id="prepare-sub">Giri dal comma → fotogrammi → cartelli proposti, tutto automatico.</div>
+      <div class="step-foot"><div class="buttons" id="prepare-buttons"></div><p class="reason" id="prepare-reason"></p>
+        <div class="job-live" id="prepare-live" aria-live="polite"></div></div>
     </article>
-    <article class="card step" id="step-review">
-      <div class="step-head"><span class="step-num">2</span><h3>Revisiona</h3></div>
+    <article class="card step k-review" id="step-review">
+      <div class="step-head"><span class="step-num">2</span><h2>Revisiona</h2></div>
       <div class="big" id="review-big">–</div>
-      <div class="bar" aria-hidden="true"><span id="review-bar" style="width:0"></span></div>
+      <div class="bar ok" aria-hidden="true"><span id="review-bar" style="width:0"></span></div>
       <div class="sub" id="review-sub">Confermi o correggi i cartelli: l'unico passo a mano.</div>
-      <div class="buttons"><a class="btn" href="/">Apri la revisione →</a></div>
+      <div class="step-foot"><div class="buttons"><a class="btn" href="/">Elenco delle route →</a></div><p class="reason"></p></div>
     </article>
-    <article class="card step" id="step-train">
-      <div class="step-head"><span class="step-num">3</span><h3>Allena</h3></div>
+    <article class="card step k-train" id="step-train">
+      <div class="step-head"><span class="step-num">3</span><h2>Allena</h2></div>
       <div class="big" id="train-big">–</div>
       <div class="goal" id="train-goal" aria-hidden="true"></div>
       <div class="sub" id="train-sub">Revisioni → dataset → modello, sulla GPU.</div>
-      <div class="buttons" id="train-buttons"></div>
+      <div class="step-foot"><div class="buttons" id="train-buttons"></div><p class="reason" id="train-reason"></p>
+        <div class="job-live" id="train-live" aria-live="polite"></div></div>
     </article>
   </section>
 
-  <section class="group" aria-labelledby="system-title">
-    <h2 class="group-title" id="system-title">Macchina</h2>
-    <div class="system">
-      <div class="card metric"><h3>GPU</h3><div class="value" id="gpu-value">–</div>
-        <div class="bar" aria-hidden="true"><span id="gpu-bar" style="width:0"></span></div><div class="sub" id="gpu-sub"></div></div>
-      <div class="card metric"><h3>Disco</h3><div class="value" id="disk-value">–</div>
-        <div class="bar" aria-hidden="true"><span id="disk-bar" style="width:0"></span></div><div class="sub" id="disk-sub"></div></div>
-      <div class="card metric"><h3>CPU</h3><div class="value" id="cpu-value">–</div>
-        <div class="bar" aria-hidden="true"><span id="cpu-bar" style="width:0"></span></div><div class="sub" id="cpu-sub"></div></div>
-      <div class="card metric"><h3>In corso</h3><div class="pills" id="activities"></div>
-        <div id="prep" hidden><div class="bar" aria-hidden="true"><span id="prep-bar" style="width:0"></span></div>
-          <div class="sub" id="prep-sub"></div></div></div>
-    </div>
-  </section>
-
-  <section class="group" aria-labelledby="routes-title">
-    <h2 class="group-title" id="routes-title">Route</h2>
-    <div class="card table-card">
-      <div class="table-wrap"><table>
-        <thead><tr><th>Route</th><th class="num">Segmenti</th><th class="num">Frame</th><th>Revisionati</th>
-          <th class="num">Oggetti</th><th>Stato</th></tr></thead>
-        <tbody id="routes"></tbody>
-      </table></div>
-      <p class="empty" id="routes-empty" hidden>Nessuna route: scarica i giri con <strong>Scarica dal comma</strong> (passo 1).</p>
-    </div>
-  </section>
-
-  <section class="group" aria-labelledby="jobs-title">
-    <h2 class="group-title" id="jobs-title">Azioni dal pannello</h2>
-    <div class="card">
-      <div class="buttons" id="update-buttons"></div>
-      <ul class="jobs" id="jobs"></ul>
-      <p class="empty" id="jobs-empty" hidden>Nessuna azione ancora: i pulsanti qui sopra le avviano in background.</p>
-    </div>
+  <section class="card table-card" aria-labelledby="routes-title">
+    <h2 id="routes-title">Route</h2>
+    <div class="table-wrap" id="routes-wrap"><table>
+      <colgroup><col class="c-route"><col class="c-seg"><col class="c-frames"><col class="c-reviewed"><col class="c-objects"><col class="c-state"></colgroup>
+      <thead><tr><th>ID</th><th class="num" title="Segmenti estratti su quelli arrivati">Segmenti</th><th class="num">Fotogrammi</th>
+        <th>Confermati</th><th class="num" title="Oggetti di questa route già nel dataset">Nel dataset</th><th>Stato</th></tr></thead>
+      <tbody id="routes"></tbody>
+    </table></div>
+    <p class="empty" id="routes-empty" hidden>Nessuna route: scarica i giri con <strong>Scarica dal comma</strong> (passo 1).</p>
   </section>
 </main>
 
-<section class="terminal" id="terminal" aria-label="Log">
-  <header><strong id="term-title">Log</strong><span class="pill run" id="term-state" hidden>in corso</span>
-    <span class="spacer"></span><button class="btn small" id="term-follow" type="button" aria-pressed="true">Segui</button>
-    <button class="btn small" id="term-close" type="button">Chiudi</button></header>
-  <pre id="term-text" tabindex="0"></pre>
-</section>
 <div class="toast" id="toast" role="alert"></div>
-
 <script nonce="__NNSLR_NONCE__">
 (function () {
   'use strict';
+  // State of a route: label, pill classes, and a prefix dropped on phones.
   const STATE = {
     collegare: ['da collegare', 'todo'], estrarre: ['da estrarre', 'todo'], preannotare: ['da pre-annotare', 'todo'],
-    revisionare: ['da revisionare', 'rev'], importare: ['revisioni nuove', 'imp'], pronta: ['pronta', 'ok']
+    revisionare: ['da revisionare', 'muted hollow'], importare: ['da importare', 'ok hollow', 'pronta '],
+    pronta: ['nel dataset', 'ok']
   };
-  const JOB_STATE = {running: ['in corso', 'run'], ok: ['finita', 'ok'], failed: ['fallita', 'bad'],
-    interrupted: ['interrotta', 'todo']};
   const HERO = {
-    prepare: ['Prepara le route nuove', 'Ci sono video nuovi da trasformare in frame con i cartelli proposti.'],
+    prepare: ['Prepara le route nuove', 'Ci sono video nuovi da trasformare in fotogrammi con i cartelli proposti.'],
     review: ['Revisiona i cartelli', 'Apri le route da revisionare e conferma o correggi i cartelli.'],
     train: ['Allena il modello', 'Le revisioni sono pronte: importale e allena detector e reader sulla GPU.'],
     fetch: ['Scarica nuovi giri', 'Per allenare servono più route: scarica altri giri dal comma.'],
   };
   let status = null;
-  let log = {id: null, offset: 0, timer: null, follow: true};
 
   const byId = (id) => document.getElementById(id);
   function node(tag, className, text) {
@@ -450,11 +454,25 @@ td.route { font-family: var(--font-data); font-size: 13px; white-space: nowrap; 
     if (text !== undefined) element.textContent = text;
     return element;
   }
-  function pill(label, kind) { return node('span', 'pill ' + kind, label); }
-  function setBar(id, percent, kind) {
-    const bar = byId(id);
-    bar.style.width = Math.max(0, Math.min(100, percent)) + '%';
-    bar.parentElement.className = 'bar' + (kind ? ' ' + kind : '');
+  // A pill; the optional prefix is dropped on phones ("pronta da importare" -> "da importare").
+  function pill(label, kind, prefix) {
+    const element = node('span', 'pill ' + kind);
+    if (prefix) element.appendChild(node('span', 'pill-long', prefix));
+    element.append(label);
+    return element;
+  }
+  // Thousands with a dot, also for four digits (toLocaleString('it-IT') leaves 8340 ungrouped).
+  const fmt = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  function setBar(id, percent) {
+    byId(id).style.width = Math.max(0, Math.min(100, percent)) + '%';
+  }
+  // "2026-10-23 18:55:09" -> "18:55" today, otherwise "23/10 18:55".
+  function when(started) {
+    const m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})/.exec(started || '');
+    if (!m) return started || '';
+    const now = new Date();
+    const today = +m[1] === now.getFullYear() && +m[2] === now.getMonth() + 1 && +m[3] === now.getDate();
+    return (today ? '' : m[3] + '/' + m[2] + ' ') + m[4] + ':' + m[5];
   }
 
   async function api(path, options) {
@@ -476,19 +494,29 @@ td.route { font-family: var(--font-data); font-size: 13px; white-space: nowrap; 
 
   function actionButton(name, primary) {
     const state = status.actions[name];
-    const wrap = node('div');
     const button = node('button', 'btn' + (primary ? ' primary' : ''), state.label);
     button.type = 'button';
     button.disabled = !state.allowed;
     button.addEventListener('click', () => run(name));
-    wrap.appendChild(button);
-    if (!state.allowed && state.reason) {
-      const reason = node('div', 'reason', state.reason);
-      reason.id = 'reason-' + name + '-' + Math.random().toString(36).slice(2, 7);
-      button.setAttribute('aria-describedby', reason.id);
-      wrap.appendChild(reason);
-    }
-    return wrap;
+    return button;
+  }
+
+  // Buttons of one card, and why the disabled ones are disabled, in the single reason line under them.
+  // One reason shared by every disabled button is written once, otherwise "label: reason" each.
+  function fillActions(buttonsId, reasonId, names) {
+    const reason = byId(reasonId);
+    const blocked = names.filter((name) => !status.actions[name].allowed && status.actions[name].reason);
+    const reasons = [...new Set(blocked.map((name) => status.actions[name].reason))];
+    const text = reasons.length === 1
+      ? reasons[0].charAt(0).toUpperCase() + reasons[0].slice(1) + '.'
+      : blocked.map((name) => status.actions[name].label + ': ' + status.actions[name].reason).join(' · ');
+    reason.textContent = text;
+    reason.title = text;
+    byId(buttonsId).replaceChildren(...names.map((name) => {
+      const button = actionButton(name, false);
+      if (blocked.includes(name)) button.setAttribute('aria-describedby', reasonId);
+      return button;
+    }));
   }
 
   function renderHero() {
@@ -502,17 +530,24 @@ td.route { font-family: var(--font-data); font-size: 13px; white-space: nowrap; 
     if (action === 'train' && status.next_step.indexOf('tutto pronto') === 0) {
       title = 'Tutto pronto'; text = 'Il dataset è aggiornato: puoi allenare un nuovo modello quando vuoi.'; kind = 'done';
     }
-    hero.className = 'card hero ' + kind;
+    hero.className = 'card hero k-' + kind;
     byId('hero-title').textContent = title;
     byId('hero-text').textContent = text;
-    if (action === 'prepare') actions.appendChild(actionButton('prepare', true));
-    if (action === 'train') actions.appendChild(actionButton('train', true));
     if (action === 'review') {
       const link = node('a', 'btn primary', 'Apri la revisione →');
       link.href = '/';
       actions.appendChild(link);
+    } else if (['prepare', 'train', 'fetch'].includes(action)) {
+      const button = actionButton(action, true);
+      actions.appendChild(button);
+      const state = status.actions[action];
+      if (!state.allowed && state.reason) {
+        const reason = node('p', 'reason', state.reason);
+        reason.id = 'hero-reason';
+        button.setAttribute('aria-describedby', reason.id);
+        actions.appendChild(reason);
+      }
     }
-    if (action === 'fetch') actions.appendChild(actionButton('fetch', true));
     for (const id of ['step-prepare', 'step-review', 'step-train']) byId(id).classList.remove('attention');
     const attention = {prepare: 'step-prepare', review: 'step-review', train: 'step-train'}[action];
     if (attention) byId(attention).classList.add('attention');
@@ -521,145 +556,218 @@ td.route { font-family: var(--font-data); font-size: 13px; white-space: nowrap; 
   function renderSteps() {
     const rows = status.routes;
     const toPrepare = rows.filter((r) => ['collegare', 'estrarre', 'preannotare'].includes(r.state)).length;
-    byId('prepare-big').textContent = toPrepare ? toPrepare + (toPrepare === 1 ? ' route nuova' : ' route nuove') : 'Tutto preparato';
-    byId('prepare-buttons').replaceChildren(actionButton('fetch', false), actionButton('prepare', false));
+    byId('prepare-big').replaceChildren(toPrepare ? toPrepare + (toPrepare === 1 ? ' route nuova' : ' route nuove') : 'Tutto preparato',
+      node('span', 'big-note', toPrepare ? 'da trasformare in fotogrammi' : 'nessun video in attesa'));
+    fillActions('prepare-buttons', 'prepare-reason', ['fetch', 'prepare']);
 
     const reported = rows.filter((r) => r.run_id);
     const frames = reported.reduce((sum, r) => sum + r.report_frames, 0);
     const confirmed = reported.reduce((sum, r) => sum + Math.min(r.confirmed, r.report_frames), 0);
     const toReview = rows.filter((r) => r.state === 'revisionare').length;
-    byId('review-big').textContent = frames ? confirmed + ' / ' + frames + ' frame' : 'Niente da revisionare';
+    const reviewBig = byId('review-big');
+    if (frames) reviewBig.replaceChildren(fmt(confirmed) + ' di ' + fmt(frames), node('span', 'big-note', 'fotogrammi confermati'));
+    else reviewBig.textContent = 'Niente da revisionare';
     setBar('review-bar', frames ? confirmed * 100 / frames : 0);
-    byId('review-sub').textContent = toReview
-      ? toReview + ' route da revisionare.'
-      : 'Confermi o correggi i cartelli: l\'unico passo a mano.';
+    byId('review-sub').textContent = !frames
+      ? 'Confermi o correggi i cartelli: l\'unico passo a mano.'
+      : (toReview ? toReview + ' route ancora da revisionare.' : 'Tutte le route sono revisionate.');
 
+    // reviewed_routes: routes with at least one confirmed frame; min_routes: what the split needs.
+    const reviewed = status.reviewed_routes;
+    const needed = status.min_routes;
     const goal = byId('train-goal');
     goal.replaceChildren();
-    for (let i = 0; i < status.min_routes; i++) goal.appendChild(node('span', i < status.reviewed_routes ? 'on' : ''));
-    byId('train-big').textContent = status.reviewed_routes + ' / ' + status.min_routes + ' route revisionate';
+    for (let i = 0; i < needed; i++) goal.appendChild(node('span', i < reviewed ? 'on' : ''));
+    const big = byId('train-big');
+    if (reviewed >= needed) {
+      big.replaceChildren(reviewed + ' route revisionate', node('span', 'big-note', 'ne bastano ' + needed + ' per allenare'));
+    } else {
+      big.replaceChildren(reviewed + ' di ' + needed + ' route', node('span', 'big-note', 'revisionate, ne servono ' + needed + ' per allenare'));
+    }
     const fresh = rows.reduce((sum, r) => sum + r.new_reviews, 0);
-    byId('train-sub').textContent = (fresh ? fresh + ' frame confermati da importare. ' : '')
-      + (status.reviewed_routes < status.min_routes
-        ? 'Lo split train/validation/test ne vuole almeno ' + status.min_routes + ' indipendenti.'
+    byId('train-sub').textContent = (fresh ? fmt(fresh) + ' fotogrammi confermati da importare. ' : '')
+      + (reviewed < needed
+        ? 'Lo split train/validation/test ne vuole almeno ' + needed + ' indipendenti.'
         : 'Revisioni → dataset → modello, sulla GPU.');
-    const buttons = byId('train-buttons');
-    buttons.replaceChildren(actionButton('dataset', false), actionButton('train', false), actionButton('train_continue', false));
+    fillActions('train-buttons', 'train-reason', ['dataset', 'train', 'train_continue']);
   }
 
-  function renderSystem() {
-    const system = status.system;
-    const gpu = system.gpu;
-    if (gpu) {
-      byId('gpu-value').textContent = gpu.utilization + '%';
-      setBar('gpu-bar', gpu.utilization, gpu.utilization > 85 ? 'warn' : '');
-      byId('gpu-sub').textContent = gpu.name + ' · ' + (gpu.memory_used_mb / 1024).toFixed(1) + ' / '
-        + (gpu.memory_total_mb / 1024).toFixed(0) + ' GB' + (gpu.processes ? ' · ' + gpu.processes + ' processi' : ' · libera');
-    } else {
-      byId('gpu-value').textContent = 'n/d';
-      byId('gpu-sub').textContent = 'nvidia-smi non disponibile';
+  // A job started from a step shows as a card in that step: state, time, progress when known and the
+  // last line of its log as a sentence. The raw log stays folded in "Dettagli tecnici"; Stato has the rest.
+  const LIVE = {'prepare-live': ['fetch', 'prepare'], 'train-live': ['dataset', 'train', 'train_continue']};
+  const JOB_STATE = {running: ['in corso', 'run'], ok: ['finito', 'ok'], failed: ['fallito', 'bad'],
+    interrupted: ['interrotto', 'warn']};
+  const RECENT_MINUTES = 60;  // a finished job stays this long after its start, or until closed
+  const seen = new Set();     // jobs seen running here stay after they end, until closed
+  const tails = {};           // job id -> {size, text, line}
+  let dismissed = new Set();
+  try { dismissed = new Set(JSON.parse(sessionStorage.getItem('nnslr-panel-closed') || '[]')); } catch (error) { /* private mode */ }
+
+  function startedAt(job) {
+    const m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})/.exec(job.started || '');
+    return m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]) : null;
+  }
+  function duration(ms) {
+    const minutes = Math.floor(ms / 60000);
+    if (minutes < 1) return 'meno di un minuto';
+    if (minutes < 60) return minutes + ' min';
+    return Math.floor(minutes / 60) + ' h ' + (minutes % 60) + ' min';
+  }
+  function liveJob(actions) {
+    const jobs = status.jobs.filter((j) => actions.includes(j.action) && !dismissed.has(j.id));
+    const running = jobs.find((j) => j.state === 'running');
+    if (running) { seen.add(running.id); return running; }
+    const last = jobs[0];
+    if (!last) return null;
+    const start = startedAt(last);
+    const recent = start && Date.now() - start < RECENT_MINUTES * 60000;
+    return seen.has(last.id) || recent ? last : null;
+  }
+
+  // The end of the log, read again only when it grew; its last line that says something.
+  async function readTail(job) {
+    const known = tails[job.id];
+    if (known && known.size === job.size) return;
+    const from = Math.max(0, (job.size || 0) - 6000);
+    const data = await api('/api/panel/job/' + job.id + '/log?offset=' + from);
+    let lines = (data.text || '').split('\n');
+    if (from > 0) lines = lines.slice(1);
+    const useful = lines.map((l) => l.trim()).filter((l) => l && !l.startsWith('=='));
+    tails[job.id] = {size: job.size, text: (from > 0 ? '… (inizio tagliato)\n' : '') + lines.join('\n'),
+      line: useful.length ? useful[useful.length - 1] : ''};
+  }
+
+  function jobCard(job) {
+    const state = JOB_STATE[job.state] || [job.state, 'warn'];
+    const card = node('div', 'jobcard ' + state[1]);
+    const head = node('div', 'jobcard-head');
+    if (job.state === 'running') head.appendChild(node('span', 'spinner'));
+    head.append(node('strong', 'jobcard-label', job.label), pill(state[0], state[1]));
+    const bar = node('div', 'jobcard-bar');
+    bar.appendChild(node('span'));
+    const foot = node('div', 'jobcard-foot');
+    const details = node('details');
+    details.append(node('summary', '', 'Dettagli tecnici'), node('pre', 'jobcard-log'));
+    const link = node('a', '', 'Dettagli in Stato →');
+    link.href = '/stato';
+    foot.append(link, node('span', 'grow'));
+    if (job.state === 'running' && job.stoppable) {
+      const stop = node('button', 'btn small danger', 'Ferma');
+      stop.type = 'button';
+      stop.addEventListener('click', () => stopJob(job));
+      foot.appendChild(stop);
+    } else if (job.state !== 'running') {
+      const close = node('button', 'btn small', 'Chiudi');
+      close.type = 'button';
+      close.addEventListener('click', () => {
+        dismissed.add(job.id);
+        try { sessionStorage.setItem('nnslr-panel-closed', JSON.stringify([...dismissed])); } catch (error) { /* ignore */ }
+        renderLive();
+      });
+      foot.appendChild(close);
     }
-    const disk = system.disk;
-    if (disk) {
-      const used = 100 - disk.free_gb * 100 / disk.total_gb;
-      byId('disk-value').textContent = disk.free_gb + ' GB liberi';
-      setBar('disk-bar', used, disk.free_gb < 10 ? 'bad' : (used > 80 ? 'warn' : ''));
-      byId('disk-sub').textContent = 'su ' + disk.total_gb + ' GB';
-    }
-    if (system.cpus) {
-      const load = system.load === null ? 0 : system.load;
-      byId('cpu-value').textContent = system.cpus + ' core';
-      setBar('cpu-bar', load * 100 / system.cpus, load > system.cpus ? 'warn' : '');
-      byId('cpu-sub').textContent = 'carico ' + (system.load === null ? 'n/d' : system.load);
-    }
-    const activities = byId('activities');
-    activities.replaceChildren();
-    if (!status.activities.length) activities.appendChild(node('span', 'reason', 'Niente'));
-    const prep = status.preparation;
-    for (const item of status.activities) {
-      let label = item.label;
-      if (item.label === 'preparazione' && prep && prep.percent !== null) label = label + ' ' + prep.percent + '%';
-      activities.appendChild(pill(label, 'run'));
-    }
-    byId('prep').hidden = !prep;
-    if (prep) {
-      const bar = byId('prep-bar');
-      bar.parentElement.hidden = prep.percent === null;
-      if (prep.percent !== null) setBar('prep-bar', prep.percent, '');
-      const sub = byId('prep-sub');
-      sub.replaceChildren();
-      if (prep.percent !== null) sub.appendChild(node('div', '', prep.routes_done + ' / ' + prep.routes_total + ' route pronte'));
-      for (const work of prep.working) {
-        sub.appendChild(node('div', '', work.route.slice(0, 8) + ' · ' + work.phase + ' ' + work.done + '/' + work.total + ' ' + work.unit));
+    foot.appendChild(details);
+    card.append(head, bar, node('div', 'jobcard-sub'), node('p', 'jobcard-line'), foot);
+    return card;
+  }
+
+  function renderLive() {
+    for (const [boxId, actions] of Object.entries(LIVE)) {
+      const box = byId(boxId);
+      const job = liveJob(actions);
+      if (!job) { box.replaceChildren(); box.dataset.job = ''; continue; }
+      const key = job.id + ':' + job.state + ':' + job.stoppable;
+      if (box.dataset.job !== key) {
+        const open = box.querySelector('details') && box.querySelector('details').open;
+        box.dataset.job = key;
+        box.replaceChildren(jobCard(job));
+        if (open) box.querySelector('details').open = true;
       }
+      const start = startedAt(job);
+      const prep = job.action === 'prepare' && status.preparation;
+      const percent = prep && prep.percent !== null ? prep.percent : null;
+      let sub;
+      if (job.state === 'running') {
+        sub = 'In corso da ' + (start ? duration(Date.now() - start) : '–');
+        if (percent !== null) sub += ' · ' + percent + '% · ' + prep.routes_done + ' di ' + prep.routes_total + ' route pronte';
+      } else {
+        const at = 'Partito alle ' + when(job.started);
+        sub = job.state === 'ok' ? at + ', finito.'
+          : job.state === 'failed' ? at + ', fallito' + (job.code !== null && job.code !== undefined ? ' (codice ' + job.code + ').' : '.')
+          : at + ', fermato.';
+      }
+      box.querySelector('.jobcard-sub').textContent = sub;
+      const bar = box.querySelector('.jobcard-bar');
+      bar.classList.toggle('indeterminate', job.state === 'running' && percent === null);
+      bar.firstChild.style.width = (job.state === 'ok' ? 100 : (percent || 0)) + '%';
+      const tail = tails[job.id];
+      box.querySelector('.jobcard-line').textContent = tail ? tail.line : '';
+      box.querySelector('.jobcard-log').textContent = tail ? tail.text : '';
+      readTail(job).then(() => {
+        if (box.dataset.job !== key) return;
+        box.querySelector('.jobcard-line').textContent = tails[job.id].line;
+        box.querySelector('.jobcard-log').textContent = tails[job.id].text;
+      }).catch(() => { /* the card stays without its last line */ });
     }
+  }
+
+  // Route id as a link to its review; the leading zeros of "0000011e--…" go in their own span,
+  // hidden on phones so the part that tells routes apart stays visible.
+  function routeLink(route) {
+    const link = node('a');
+    link.href = '/route/' + encodeURIComponent(route) + '/';
+    link.title = route;
+    const pad = /^0+(?=[0-9a-f]+--)/.exec(route);
+    if (pad) link.append(node('span', 'rid-pad', pad[0]), route.slice(pad[0].length));
+    else link.textContent = route;
+    return link;
   }
 
   function renderRoutes() {
     const body = byId('routes');
     body.replaceChildren();
     byId('routes-empty').hidden = status.routes.length > 0;
+    byId('routes-wrap').hidden = status.routes.length === 0;
     for (const row of status.routes) {
       const tr = node('tr');
-      tr.appendChild(node('td', 'route', row.route));
+      const id = node('td', 'route');
+      id.appendChild(routeLink(row.route));
+      tr.appendChild(id);
       tr.appendChild(node('td', 'num', row.extracted + ' / ' + row.segments));
-      tr.appendChild(node('td', 'num', String(row.frames)));
+      tr.appendChild(node('td', 'num', fmt(row.frames)));
       const reviewed = node('td');
       if (row.run_id) {
         const box = node('div', 'reviewed');
-        const bar = node('div', 'bar');
+        const bar = node('div', 'bar ok');
         const fill = node('span');
         fill.style.width = (row.report_frames ? Math.min(100, row.confirmed * 100 / row.report_frames) : 0) + '%';
         bar.appendChild(fill);
-        box.append(bar, node('span', 'num', row.confirmed + '/' + row.report_frames));
+        box.append(bar, node('span', 'num', fmt(row.confirmed) + ' / ' + fmt(row.report_frames)));
         reviewed.appendChild(box);
       } else {
+        reviewed.className = 'none';
         reviewed.textContent = '–';
       }
       tr.appendChild(reviewed);
-      tr.appendChild(node('td', 'num', String(row.objects)));
+      tr.appendChild(node('td', 'num', fmt(row.objects)));
       const state = STATE[row.state] || [row.state, 'todo'];
       const cell = node('td');
-      cell.appendChild(pill(state[0], state[1]));
-      if (row.state === 'importare') cell.appendChild(node('span', 'note', row.new_reviews + ' da importare'));
+      cell.appendChild(pill(state[0], state[1], state[2]));
+      if (row.state === 'importare') cell.appendChild(node('span', 'note', fmt(row.new_reviews) + ' fotogrammi nuovi'));
       if (row.run_id && row.segments > row.extracted) {
-        cell.appendChild(node('span', 'note', (row.segments - row.extracted) + ' segmenti arrivati dopo, non usati'));
+        const late = row.segments - row.extracted;
+        cell.appendChild(node('span', 'note', late + (late === 1 ? ' segmento arrivato' : ' segmenti arrivati') + ' dopo, non usati'));
       }
       tr.appendChild(cell);
       body.appendChild(tr);
     }
   }
 
-  function renderJobs() {
-    byId('update-buttons').replaceChildren(actionButton('update', false));
-    const list = byId('jobs');
-    list.replaceChildren();
-    byId('jobs-empty').hidden = status.jobs.length > 0;
-    for (const job of status.jobs) {
-      const item = node('li', 'job');
-      const state = JOB_STATE[job.state] || [job.state, 'todo'];
-      item.append(pill(state[0], state[1]), node('span', 'what', job.label), node('span', 'when', job.started),
-        node('span', 'spacer'));
-      const view = node('button', 'btn small', 'Log');
-      view.type = 'button';
-      view.addEventListener('click', () => openLog(job.id, job.label));
-      item.appendChild(view);
-      if (job.stoppable) {
-        const stop = node('button', 'btn small danger', 'Ferma');
-        stop.type = 'button';
-        stop.addEventListener('click', () => stopJob(job));
-        item.appendChild(stop);
-      }
-      list.appendChild(item);
-    }
-  }
-
-  // Buttons, table and jobs are rebuilt only when their data changes: rebuilding them at every
+  // Buttons and table are rebuilt only when their data changes: rebuilding them at every
   // refresh would lose a click landing at that moment and the keyboard focus.
   let shown = '';
   function render() {
     byId('readonly').classList.toggle('show', !status.actions_enabled);
-    renderSystem();
     const key = JSON.stringify([status.routes, status.actions, status.jobs, status.next_step,
       status.reviewed_routes, status.actions_enabled]);
     if (key !== shown) {
@@ -667,37 +775,37 @@ td.route { font-family: var(--font-data); font-size: 13px; white-space: nowrap; 
       renderHero();
       renderSteps();
       renderRoutes();
-      renderJobs();
     }
-    if (log.id) {
-      const job = status.jobs.find((j) => j.id === log.id);
-      byId('term-state').hidden = !(job && job.state === 'running');
-    }
+    renderLive();
+  }
+
+  // Live status; on phones only the dot shows, its title keeps the text.
+  function live(ok, text) {
+    document.querySelector('.live').classList.toggle('off', !ok);
+    byId('live-dot').className = ok ? 'dot' : 'dot off';
+    byId('live-text').textContent = text;
+    byId('live-dot').title = text;
   }
 
   async function refresh() {
     try {
       status = await api('/api/panel/status');
       render();
-      byId('live-dot').className = 'dot';
-      byId('live-text').textContent = 'aggiornato ' + new Date().toLocaleTimeString('it-IT');
+      live(true, 'aggiornato ' + new Date().toLocaleTimeString('it-IT'));
     } catch (error) {
-      byId('live-dot').className = 'dot off';
-      byId('live-text').textContent = 'non raggiungibile: ' + error.message;
+      live(false, 'non raggiungibile: ' + error.message);
     }
   }
 
   async function run(name) {
     const label = status.actions[name].label;
-    if (name === 'update') {
-      if (!window.confirm(label + ': git pull e riavvio del sito (qualche secondo). Avvio?')) return;
-    } else if (name !== 'prepare' && name !== 'dataset'
-        && !window.confirm(label + ': il training usa la GPU per ore. Avvio?')) return;
+    if (name.startsWith('train') && !window.confirm(label + ': il training usa la GPU per ore. Avvio?')) return;
+    if (name === 'fetch' && !window.confirm(label + ': scarica dal comma i giri nuovi. Avvio?')) return;
     try {
       const job = await api('/api/panel/run/' + name, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'});
+      seen.add(job.id);
       toast('Partito: ' + job.label);
       await refresh();
-      openLog(job.id, job.label);
     } catch (error) {
       toast(error.message, true);
       refresh();
@@ -715,56 +823,10 @@ td.route { font-family: var(--font-data); font-size: 13px; white-space: nowrap; 
     refresh();
   }
 
-  function openLog(id, label) {
-    clearTimeout(log.timer);
-    log = {id: id, offset: 0, timer: null, follow: true};
-    byId('term-title').textContent = 'Log · ' + label;
-    byId('term-text').textContent = '';
-    byId('term-follow').setAttribute('aria-pressed', 'true');
-    byId('terminal').classList.add('open');
-    pollLog();
-  }
-
-  async function pollLog() {
-    const id = log.id;
-    if (!id) return;
-    try {
-      const data = await api('/api/panel/job/' + id + '/log?offset=' + log.offset);
-      if (log.id !== id) return;
-      const pre = byId('term-text');
-      if (data.text) {
-        if (log.offset === 0 && data.offset - data.text.length > 0) pre.textContent = '… (inizio tagliato)\n';
-        pre.textContent += data.text;
-        if (log.follow) pre.scrollTop = pre.scrollHeight;
-      }
-      log.offset = data.offset;
-    } catch (error) {
-      toast(error.message, true);
-      return;
-    }
-    const job = status && status.jobs.find((j) => j.id === id);
-    const running = !job || job.state === 'running';
-    byId('term-state').hidden = !running;
-    log.timer = setTimeout(pollLog, running ? 1500 : 5000);
-  }
-
-  byId('term-close').addEventListener('click', () => {
-    clearTimeout(log.timer);
-    log.id = null;
-    byId('terminal').classList.remove('open');
-  });
-  byId('term-follow').addEventListener('click', (event) => {
-    log.follow = !log.follow;
-    event.currentTarget.setAttribute('aria-pressed', String(log.follow));
-    if (log.follow) byId('term-text').scrollTop = byId('term-text').scrollHeight;
-  });
-  document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && log.id) byId('term-close').click();
-  });
-
   refresh();
   setInterval(refresh, 4000);
 })();
 </script>
+<script nonce="__NNSLR_NONCE__">(function(){var b=document.getElementById('theme-toggle');if(!b)return;var r=document.documentElement;function dark(){var t=r.dataset.theme;if(t==='light')return false;if(t==='auto')return!matchMedia('(prefers-color-scheme: light)').matches;return true}function show(){var d=dark();b.classList.toggle('is-light',!d);b.setAttribute('aria-pressed',String(!d));b.title=d?'Passa al tema chiaro':'Passa al tema scuro';b.setAttribute('aria-label',b.title)}b.addEventListener('click',function(){var next=dark()?'light':'dark';try{localStorage.setItem('nnslr-theme',next)}catch(e){}if(next==='dark')delete r.dataset.theme;else r.dataset.theme=next;show()});document.addEventListener('nnslr-theme',show);show()})();</script>
 </body>
 </html>
