@@ -1,7 +1,7 @@
 <script setup lang="ts">
-// Overview, the home page: the next step, the three phases (the review with Resume review and the route
-// list), what is running now (live, with Stop and the machine in small), or how the last job ended; the
-// machine, the recent jobs, the site.
+// Overview, the home page: the machine in small at the top, the next step, the three phases (the review with
+// Resume review and the route list), what is running now (live, with Stop), or how the last job ended; the
+// recent jobs, the site, the processes on the GPU.
 import {computed} from 'vue';
 import type {ActionName, ActionState, Job, PanelStatus} from '../common/panel-types';
 import ActionList from './ActionList.vue';
@@ -9,7 +9,7 @@ import FlowTiles from './FlowTiles.vue';
 import JobItem from './JobItem.vue';
 import JobProgress from './JobProgress.vue';
 import {terminalActivities} from './jobs';
-import MachineCards from './MachineCards.vue';
+import MiniMachine from './MiniMachine.vue';
 import NextStepCard from './NextStepCard.vue';
 import {nextStep, WAITING} from './next-step';
 import PrepRoutes from './PrepRoutes.vue';
@@ -37,6 +37,7 @@ const gpuProcesses = computed(() => props.status?.system.gpu?.process_list ?? []
     <h1 class="page-title">Overview</h1>
     <p class="page-sub">What the server is doing, how it is, and the next step.</p>
   </header>
+  <MiniMachine v-if="status" class="server-strip" :system="status.system" disk/>
 
   <NextStepCard :next="next" :actions="status?.actions ?? null" :review-href="reviewHref" @run="(name, state) => $emit('run', name, state)"/>
   <FlowTiles :status="status" :attention="next.attention" :busy="busy"/>
@@ -60,11 +61,6 @@ const gpuProcesses = computed(() => props.status?.system.gpu?.process_list ?? []
       </div>
     </div>
     <JobProgress v-if="!running.length && last" :job="last" heading="Last job" @details="$emit('details', $event)" @stop="$emit('stop', $event)"/>
-  </section>
-
-  <section aria-labelledby="machine-title">
-    <h2 class="section-title" id="machine-title">The server</h2>
-    <MachineCards v-if="status" :system="status.system"/>
   </section>
 
   <div class="grid2">

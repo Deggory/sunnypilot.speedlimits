@@ -304,10 +304,8 @@ details[open] summary::after, .tl-toggle[aria-expanded="true"]::after { transfor
 .sign:hover { transform: scale(1.06); }
 .sign.unknown { border: 2px dashed var(--muted); background: var(--surface-2); color: var(--muted); font-size: 18px; box-shadow: none; }
 .sign[aria-pressed="true"] { box-shadow: 0 0 0 3px var(--surface), 0 0 0 6px var(--accent); transform: scale(1.04); }
-.country-line { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); }
-.country-line select { flex: 0 1 220px; min-width: 0; min-height: 34px; }
-.country-src { font-size: 12.5px; }
-.country-src.picked { color: var(--rev); font-weight: 600; }
+.country-line { display: flex; align-items: center; gap: 8px; margin: -4px 0 0; font-size: 13px; color: var(--muted); }
+.country-line .flag { font-size: 18px; line-height: 1; }
 .kinds { display: flex; flex-direction: column; gap: 6px; margin-top: -4px; }
 .kind-group { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .kind-group-label { flex: 0 0 100%; font-size: 11.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); margin-top: 2px; }
@@ -492,7 +490,7 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
   /* Not sticky on a phone, but above the photo: the Account menu opens over it. */
   .topbar { position: relative; z-index: 8; padding-left: max(12px, env(safe-area-inset-left, 0px)); padding-right: max(12px, env(safe-area-inset-right, 0px)); }
   .topbar-inner { position: relative; padding-block: 6px 8px; gap: 6px 8px; }
-  .brand-mark { width: 30px; height: 30px; border-width: 3.5px; font-size: 11px; }
+  .brand-mark { width: 30px; height: 30px; border-radius: 8px; }
   .route-pick { order: 1; flex: 1 1 0; }
   .topbar .route-pick select { min-height: 40px; padding-inline: 8px 4px; font-size: 12px; }
   .progress-short { order: 2; display: block; flex: none; font-size: 13px; font-weight: 750; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }

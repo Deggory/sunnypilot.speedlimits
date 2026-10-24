@@ -1,5 +1,6 @@
 <script setup lang="ts">
 // The sign-in page, also the first visit that creates the administrator (setup code, then name and password).
+import BrandMark from '../components/BrandMark.vue';
 import {nextTick, onMounted, ref, useTemplateRef} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import type {AuthState} from '../common/auth-types';
@@ -75,7 +76,7 @@ onMounted(() => {
 <template>
   <main class="page">
     <section class="auth-card" aria-labelledby="auth-title">
-      <span class="brand-mark auth-logo" aria-hidden="true">50</span>
+      <BrandMark class="auth-logo"/>
       <div v-if="view === 'code' || view === 'setup'" class="auth-head">
         <button v-if="view === 'setup'" class="auth-back" type="button" aria-label="Back" @click="go('code')">‹</button>
         <div class="auth-steps" aria-hidden="true"><span :class="{on: view === 'code'}"></span><span :class="{on: view === 'setup'}"></span></div>

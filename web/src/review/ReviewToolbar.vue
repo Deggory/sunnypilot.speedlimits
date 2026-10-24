@@ -4,6 +4,7 @@
 import {computed, useTemplateRef, watch} from 'vue';
 import {thousands} from '../common/format';
 import AccountMenu from '../components/AccountMenu.vue';
+import BrandMark from '../components/BrandMark.vue';
 import {writeLocal} from './dom';
 import {routeCounts} from './current';
 import {pickFilter} from './navigation';
@@ -63,7 +64,7 @@ watch(() => state.reviewerFocus, () => reviewerInput.value?.focus(), {flush: 'sy
 <template>
   <header ref="header" class="topbar">
     <div class="topbar-inner">
-      <a class="brand" id="brand" :href="online ? '/' : undefined" :title="online ? 'Overview' : undefined"><span class="brand-mark" aria-hidden="true">50</span><span class="brand-name">Speed limits</span></a>
+      <a class="brand" id="brand" :href="online ? '/' : undefined" :title="online ? 'Overview' : undefined"><BrandMark/><span class="brand-name">Speed limits</span></a>
       <div class="route-pick">
         <label for="route" class="sr-only">Route</label>
         <select id="route" :disabled="report.routes.length <= 1" @change="changeRoute">

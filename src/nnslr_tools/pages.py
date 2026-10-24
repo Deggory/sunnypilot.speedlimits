@@ -26,6 +26,13 @@ from pathlib import Path
 from nnslr_tools.gps import country_names
 from nnslr_tools.review_hints import empty_stats
 
+# The logo: a round sign inside the corners of a detection box (the same drawing as
+# web/src/components/BrandMark.vue, for the Vue pages); the tile is .brand-mark of shared.css.
+BRAND_MARK = ('<span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false">'
+              '<path d="M10.5 6.5H7.5v3M24.5 6.5h-3M24.5 6.5v3M7.5 22.5v3h3M24.5 22.5v3h-3" fill="none" '
+              'stroke="#fde047" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>'
+              '<circle cx="16" cy="16" r="6.6" fill="#fff" stroke="#ef4444" stroke-width="2.8"/></svg></span>')
+
 # The tabs of the site: (key of the current page, address, label). Account is the icon at the right.
 # In the order of the work: prepare the routes, review them, train on the reviews.
 SITE_TABS = (('overview', '/', 'Overview'), ('prepare', '/prepare', 'Prepare'), ('review', '/routes', 'Review'),
@@ -81,8 +88,8 @@ def top_bar(current: str = '', *, live: bool = False, signed_in: bool = True) ->
     The sign-in page (signed_in=False) shows only the brand."""
     end = bar_end(current) if signed_in else ''
     bar = ('<header class="topbar"><div class="topbar-inner">'
-           '<a class="brand" href="/" title="Overview"><span class="brand-mark" aria-hidden="true">50</span>'
-           '<span class="brand-name">Speed limits</span></a>' + (LIVE if live else '') + end + '</div>')
+           '<a class="brand" href="/" title="Overview">' + BRAND_MARK
+           + '<span class="brand-name">Speed limits</span></a>' + (LIVE if live else '') + end + '</div>')
     if signed_in:
         tabs = ''.join('<a href="' + href + '"' + (' aria-current="page"' if key == current else '') + '>'
                        + label + '</a>' for key, href, label in SITE_TABS)

@@ -11,8 +11,6 @@ import {releaseFocus} from './dom';
 import Icon from '../components/Icon.vue';
 import {selectedBox} from './current';
 import {countryOf, reasonsOf} from './frames';
-import {setCountry} from './edits';
-import {vFill} from './fill';
 import OtherFields from './OtherFields.vue';
 import SecondReading from './SecondReading.vue';
 import {report, state} from './store';
@@ -23,21 +21,16 @@ const reasons = computed(() => reasonsOf(props.row.frame_key));
 const count = computed(() => props.work.detections.length);
 const carry = computed(() => carryState(props.row));
 const country = computed(() => countryOf(props.row, props.work));
-// The countries of the select by name, with the one of the frame even if the borders do not know it.
-const countryOptions = computed(() => {
-  const options = Object.entries(report.countries).sort((a, b) => a[1].localeCompare(b[1]));
-  for (const code of [props.row.country_proposed, country.value]) {
-    if (code && !(code in report.countries)) options.unshift([code, code]);
-  }
-  return options;
-});
-// Picked by the reviewer: a country other than the GPS one.
-const picked = computed(() => props.work.country !== undefined && props.work.country !== props.row.country_proposed);
-const countrySource = computed(() => {
-  if (picked.value) return 'picked here';
-  if (country.value) return props.row.country_from === 'nearest_fix' ? 'from a nearby GPS fix' : 'from the GPS';
-  if (props.row.gps === undefined) return 'GPS not read for this route';
-  return 'no GPS position';
+/** The flag of a country code: its two letters as regional indicator symbols ("CH" → 🇨🇭). */
+function flagOf(code: string): string {
+  return [...code.toUpperCase()].map((letter) => String.fromCodePoint(0x1f1a5 + letter.charCodeAt(0))).join('');
+}
+// From the GPS, shown only: the reviewer does not choose it (REST and MCP can still send another one).
+const countryText = computed(() => {
+  const code = country.value;
+  if (!code) return props.row.gps === undefined ? 'Country not known yet: GPS not read for this route' : 'Country not known: no GPS position';
+  const source = props.row.country_from === 'nearest_fix' ? 'from the GPS of a nearby frame' : 'from the GPS';
+  return (report.countries[code] ?? code) + ' · ' + source;
 });
 </script>
 
@@ -47,14 +40,7 @@ const countrySource = computed(() => {
       <div class="section-head"><h2>Signs</h2><span class="count" id="boxCount">{{ boxCountText(count) }}</span>
         <button v-if="carry.shown" type="button" class="btn small carry" id="applyPrevious" :disabled="!carry.enabled"
                 :title="carry.title" @click="applyPrevious(); releaseFocus($event)"><Icon name="previous"/>Apply previous</button></div>
-      <div class="country-line">
-        <label for="country">Country</label>
-        <select id="country" v-fill="country ?? ''" @change="setCountry(row, ($event.target as HTMLSelectElement).value)">
-          <option value="">Not known</option>
-          <option v-for="[code, name] in countryOptions" :key="code" :value="code">{{ code }} · {{ name }}</option>
-        </select>
-        <span class="country-src" :class="{picked}">{{ countrySource }}</span>
-      </div>
+      <p class="country-line" id="country" :data-country="country ?? ''"><span v-if="country" class="flag" aria-hidden="true">{{ flagOf(country) }}</span>{{ countryText }}</p>
       <p class="reasons" id="reasons" :hidden="reasons.length === 0"><template v-if="reasons.length > 0"><strong>Suspicious: </strong>{{ reasons.map((reason) => String(reason.text)).join('; ') }}</template></p>
       <p class="filter-note" id="filterNote" :hidden="state.filterNote === ''">{{ state.filterNote }}</p>
       <BoxList :row="row" :work="work"/>

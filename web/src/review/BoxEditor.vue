@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// The editor of the selected box: zoom (its corners move the box too), speed signs, other value, type, road,
-// details.
+// The editor of the selected box: zoom (its corners and inside move the box too), road, speed signs, other
+// value, type and kinds of other signs, details.
 import {computed, ref, useTemplateRef, watchEffect} from 'vue';
 import {BOOLEAN_FIELDS, FAMILIES, QUICK_VALUES, ROADS, SELECT_FIELDS, SIGN_KIND_GROUPS, familyHasValue,
   type BooleanField, type SelectField} from './catalog';
@@ -113,6 +113,12 @@ function booleanChanged(key: BooleanField, event: Event): void {
       </svg>
     </div>
     <p class="evidence" id="evidence">{{ detection?.model_label ? 'Model proposal: ' + detection.model_label : 'Box added by hand.' }}</p>
+    <!-- Asked for nearly every box: right under the zoom. -->
+    <p class="field-label">Road</p>
+    <div class="segmented" id="roads" role="group" aria-label="Which road it applies to">
+      <button v-for="item in ROADS" :key="item.id" type="button" :aria-pressed="road === item.id"
+              :data-applicability="item.id" @click="setField('applicability', item.id); releaseFocus($event)">{{ item.label }}</button>
+    </div>
     <!-- The signs are always there: a number makes the box a speed limit, "?" means the number cannot be read. -->
     <div class="signs" id="quickValues" role="group" aria-label="Speed">
       <button v-for="value in QUICK_VALUES" :key="value" type="button" :class="value >= 100 ? 'sign wide' : 'sign'"
@@ -148,11 +154,6 @@ function booleanChanged(key: BooleanField, event: Event): void {
                 :aria-pressed="detection?.family === 'other_sign' && detection?.sign_type === kind.id"
                 :data-kind="kind.id" @click="setKind(kind.id); releaseFocus($event)">{{ kind.chip }}</button>
       </div>
-    </div>
-    <p class="field-label">Road</p>
-    <div class="segmented" id="roads" role="group" aria-label="Which road it applies to">
-      <button v-for="item in ROADS" :key="item.id" type="button" :aria-pressed="road === item.id"
-              :data-applicability="item.id" @click="setField('applicability', item.id); releaseFocus($event)">{{ item.label }}</button>
     </div>
     <details>
       <summary>Sign details</summary>

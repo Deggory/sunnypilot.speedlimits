@@ -131,14 +131,6 @@ export function setFrameField(row: FrameRow, key: 'site_group' | 'encounter_id',
   changed(row);
 }
 
-/** The country of the frame; the one of its GPS position again when the reviewer picks that one. */
-export function setCountry(row: FrameRow, value: string): void {
-  const work = workOf(row);
-  const picked = value === '' ? null : value;
-  work.country = picked === (row.country_proposed ?? null) ? undefined : picked;
-  changed(row);
-}
-
 /** A box chosen in the list (or on the photo, drawing: false there already): its editor opens. */
 export function selectBox(index: number): void {
   state.selected = index;
