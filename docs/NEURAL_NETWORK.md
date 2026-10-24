@@ -1,69 +1,121 @@
-# The speed-limit network: diagram and plan
+# The speed-limit pipeline: cutter → classifier → decider
 
-A proposal of 24 October 2026, to discuss: nothing here is implemented yet. It starts from Codex's "teacher and student" proposal and from the real data on the server.
+A plan, started on 24 October 2026 from Codex's "teacher and student" proposal, Cristian's scheme of three separate networks, and the real data on the server. The first runs of that day are measured below.
 
-![The network](neural-network.png)
+![The pipeline](neural-network.png)
 
 ## Where things run
 
 **All training happens on the server**, on the V100. The comma never trains anything.
 
-- **The teacher** is a big network. It is trained on the server and only ever runs there: it labels new drives and helps train the student.
-- **The student** is a small network. It is also trained on the server, from the reviews and from the teacher. When it is finished it is copied to the car, and it runs on the comma while driving: it reads the camera and shows the limit. It learns nothing in the car, and it sees only the past, since there are no future frames while driving.
+- **The teacher** is made of big networks. They are trained on the server and only ever run there: they label new drives and help train the student.
+- **The student** is made of small networks. They are also trained on the server, from the reviews and from the teacher. When they are finished they are copied to the car and run on the comma while driving: they read the camera and show the limit. They learn nothing in the car, and see only the past, since there are no future frames while driving.
 
-## The student
+## The student: three networks, each trained and measured on its own
 
-1. **Look at the whole scene.** A backbone with FPN runs on the frame of the main road camera (1344 × 760 on the comma four), scaled down, once per frame, and is shared by everything after it. It gives two things:
-   - the boxes of the signs, at several scales because distant ones are small;
-   - the features of the scene: roads, ramps, gantries.
-2. **Read and place each sign.** For each box found:
-   - the **detail branch** reads the crop cut from the original full-resolution pixels, never from the scaled-down image (today the reader does this);
-   - the **context branch** looks at the scene around the box, where it is and how the car moves;
-   - **fusion** joins the two, and the signs of one frame look at each other (two 80s on the same gantry).
+1. **Cut: the cutter finds every box that could be a sign.**
+   - It looks at the frame of the main road camera (1344 × 760 on the comma four, full resolution), scaled down, plus the band where signs appear.
+   - It must miss nothing. False boxes are fine, because the classifier drops them, so it can be a small network.
+   - It is measured on **signs missed, by size**, and on how many boxes per frame it passes on.
+   - Today's detector plays this role and finds only 6% of the test signs (see the results).
+2. **Classify: the classifier says what each box is.**
+   - It takes the box cut from the full-resolution frame, never from the scaled-down one.
+   - Its answers are a speed value, end of limit, zone, variable display, "?" (a limit it cannot read), another sign with its kind (town entry, direction, give way…), or **not a sign**.
+   - Today's reader plays this role. It still lacks "not a sign": the 2,431 model boxes that reviewers removed, plus the cutter's own mistakes, teach it.
+   - It is measured on right answers per sign.
+3. **Decide: the decider says whom each sign applies to.**
+   - It takes the list of recognised signs with their position and size, the scene as a small image, and the car's speed and steering. The signs of a frame look at each other, as with two 80s on one gantry.
+   - It answers ours, another or abstain, with how sure it is.
+   - Experiment B supports it: position and speed raised the "Another" signs found from 59% to 77%, while the full image made the network memorise places.
+4. **Over time**, with the past only: the same sign is followed across frames, as "Apply previous" does (the tracks of 323 signs are already computed with `nnslr tracks`). The reading improves as the car gets closer, and the sign is either ahead or passed.
+5. **The limit now** is rules and explicit state, not a network, so the reason for a limit is always visible.
+   - The country comes from the GPS, and its rules interpret what the networks read: a town entry in Poland means 50.
+   - The logic is written and tested here, in `speed_vision_core`, and replayed offline on the recorded routes.
+   - Only then does it go into sunnypilot, as a separate change: a process on the comma runs the student, and Speed Limit Assist takes it as a third source next to the OSM map and the car's CAN, which the 3008 does not have. At first the limit is only shown on the screen.
 
-   There are three separate answers: **what it says** (kind and value, or "?"), **whom it applies to** (ours, another, or abstain), and **how sure** it is of each.
-3. **Over time**, with the past only: the same sign is followed from frame to frame, as "Apply previous" does. A small memory per track improves the reading as the car gets closer, and tells whether the sign is ahead or passed.
-4. **The limit that applies now.** This is rules and explicit state, not a network, so the reason for a limit is always visible.
-   - The country comes from the GPS. Country rules interpret what the network reads (a town entry in Poland means 50).
-   - The limit logic is written and tested here, in `speed_vision_core`, and replayed offline on the recorded routes.
-   - Only after that does it go into sunnypilot. That separate change adds a process on the comma that runs the student, and makes Speed Limit Assist take it as a third source next to the OSM map and the car's CAN, which the 3008 does not have. At first the limit is only shown on the screen.
+## Why the cutter needs pixels
 
-## Why the image is scaled down
+The cutter has to find a sign before anything can cut it out, and the median sign is only about 20 px wide in the frame:
 
-The scaled-down image is only used to **find** the signs and to understand the scene. **Reading** always uses the original pixels of the box.
+| Cutter input | A 20 px sign becomes | Cost compared with 320 |
+|---|---|---|
+| 320 × 320 (today, squashed) | about 5 × 8 px | 1× |
+| 640 × 360 | about 10 px | about 2.3× |
+| 960 × 544 | about 14 px | about 5× |
+| 1344 × 760 (full) | 20 px | about 10× |
 
-The reason is the comma's budget: the driving model already uses most of the device, and openpilot's own driving model also works on a reduced image. The full 1344 × 760 frame has about 2.8× the pixels of 768 × 480.
+The cutter only answers "could this be a sign?" and may leave false boxes, so it can stay small. There are three ways to keep it cheap:
+- give it the full resolution only on the band where signs appear;
+- run it a few times a second instead of 20;
+- once a sign is found, follow it with the tracker and crop it at full resolution.
 
-The risk is the distant sign. The median sign is about 20 px wide in the frame; today's detector shrinks the frame to 320 px, which brings it to about 5 px, and 768 px would bring it to about 11 px. There are three ways around this:
-- a second pass at full resolution on the band of the image where the signs are (above the road, around the horizon), which costs far less than the whole frame;
-- running the finder a few times a second instead of 20 times;
-- once a sign is found, following it with the tracker and cropping it at full resolution.
+`scripts/run_detector_sizes.sh` measures each size: signs missed by size at low score thresholds, boxes per frame and time per frame.
 
-The size that is enough is measured, not guessed: how many signs of each size are found at 640, 768 and 1024 pixels, with and without the full-resolution band (step 3 of the plan).
+## First results (24 October 2026)
+
+Measured on the test areas of route 0000012d, which no training sees. 35% of those frames are at dusk; only 7% of the training frames are dark.
+
+**Detector (run `2026-10-24_1452`, input 320 × 320)**
+
+| Sign width | Found |
+|---|---|
+| Under 40 px | 0 of 68 |
+| 40 px and wider | 5 of 12 |
+| All | 6%, with 529 false boxes |
+
+Its validation loss was best at epoch 8 of 20: after that it memorised the training images. Training now stops after 5 epochs without improvement.
+
+**Reader (same run)**
+
+| | Right answers |
+|---|---|
+| All test signs | 71% |
+| Signs reviewed by hand | 60% |
+| Speed limit 60 | 81% |
+| Speed limit, number unreadable | 91% |
+| Other signs | 57% |
+
+Other signs were mostly taken for variable displays: the AI reviewer used to leave them out of the boxes, while people box them. The rule now asks for them too, with their kind.
+
+**Experiment B (run `2026-10-24_expB`, on the reviewed boxes)**
+
+| Variant | Reading on validation | "Another" found on validation | Reading on test |
+|---|---|---|---|
+| crop | 85% | 59% | 62% |
+| crop + position and speed | 82% | 77% | 63% |
+| crop + position + full image | 69% | 59% | 46% |
+
+The full image reached 99.7% on training: it learned the places. The test has no "Another" sign yet, so "whom it applies to" can only be measured on validation, which has 17 cases.
 
 ## Cameras and devices
 
-- The comma four records two road cameras, both 1344 × 760: the main road camera (`fcamera.hevc`) and the wide-angle one (`ecamera.hevc`). We use the main one: its narrower view gives each sign more pixels. The wide one may help later at the moment of passing, when a sign at the side has left the main view.
-- The comma 3X has three cameras (main road, wide road, driver), and its road cameras record 1928 × 1208 with another sensor and lens. A network trained on comma four frames does not work on a 3X by itself. To make it work, every frame is converted into a common "standard camera" from the device's calibration, so a sign at 100 m has the same size on every device (openpilot does this for its driving model); training uses variations of size and colour; and drives recorded with a 3X are added when available.
+- The comma four records two road cameras, both 1344 × 760: the main road camera (`fcamera.hevc`) and the wide-angle one (`ecamera.hevc`). We use the main one, because its narrower view gives each sign more pixels. The wide one may help at the moment of passing, when a sign at the side has left the main view.
+- The comma 3X has three cameras (main road, wide road, driver), and its road cameras record 1928 × 1208 with another sensor and lens. Networks trained on comma four frames do not work on a 3X by themselves. Three things make them work:
+  - every frame is converted into a common "standard camera" from the device's calibration, so a sign at 100 m has the same size on every device, as openpilot does for its driving model;
+  - training uses variations of size and colour;
+  - drives recorded with a 3X are added when available.
 
 ## The teacher
 
-The teacher has the same structure, bigger and at full resolution. It also sees the later frames, the GPS and the map. It is used in three separate ways:
+The teacher has bigger versions of the three networks, at full resolution everywhere. It also sees the later frames, the GPS and the map. It is used in three separate ways:
 - **new labels**, which a person checks on the site;
 - **distillation**: the student also learns how sure the teacher is;
 - **starting weights**.
 
-The test stays human: a route reviewed entirely by hand, never used for training.
+The test stays human: route 0000012d, reviewed by hand, split by place, never trained on.
 
 ## The plan
 
 | Step | What | Why |
 |---|---|---|
-| 1. Data | Route 0000012d reviewed entirely by hand as the test; split by place instead of by route; "Another" cases collected on purpose (ramps, parallel roads, exits), proposed by GPS and map; the link "Apply previous" makes between boxes kept as tracks; later, drives on roads never driven before | 75–100% of every route runs on the same roads as another route, so a split by route does not test new roads; there are only 125 "Another" against 1463 "Ours"; human labels cover few frames |
-| 2. Experiment B | On the boxes already reviewed: today's reader against crop + position + scene, with reading and "whom it applies to" measured apart on the human test, and "Unclear" taught as abstain | It tells whether context teaches "whom it applies to" without hurting the reading, before building the rest |
-| 3. Detector | Boxes found automatically, at several scales and at higher resolution in the upper part of the image; missed signs counted by size | A sign that is not found cannot be recovered later |
-| 4. Time and state | Tracks, "passed or not" and the limit state on whole routes; time with a wrong limit on the screen measured | The limit must stay valid when the sign is out of sight |
-| 5. Comma | Export of the student; latency and memory measured on the device (Cristian installs it) | The driving model comes first |
+| 1. Cutter | Compare input sizes and the full-resolution band; judge on signs missed (by size) at low thresholds and boxes per frame | No sign is cut out if the cutter misses it |
+| 2. Classifier | Add "not a sign" (removed proposals, cutter mistakes) and the kinds of other signs as classes; darker images in training; a button to train it alone | It drops the cutter's false boxes, and the test has many dark frames and other signs |
+| 3. Decider | A small network over the classifier's answers, positions, speed and a small scene image; collect "Another" cases (ramps, parallel roads, exits), proposed from GPS and map | Position helped in experiment B; the full image memorised places; 125 "Another" against 1463 "Ours" |
+| 4. Site | Every network by role (cutter, classifier, decider): versions, numbers, a training button, the version in use; the whole chain measured end to end | Each network is replaced on its own, and the site must show what is in use |
+| 5. Time and state | Tracks, "passed or not" and the limit state on whole routes; time with a wrong limit on the screen measured | The limit must stay valid when the sign is out of sight |
+| 6. Comma | Export of the student; latency and memory measured on the device (Cristian installs it) | The driving model comes first |
+
+Data comes before all of these. Route 0000012d is reviewed by hand as the test, drives on new roads and at night are needed, and the split is by place: 75–100% of every route runs on the same roads as another route.
 
 ## Second opinion (strata)
 
@@ -74,11 +126,13 @@ strata, a local model, agrees on these points:
 - an explicit limit state that says "unknown";
 - 1 frame per second is too sparse for tracking.
 
-It added two points, both taken: "Unclear" should be taught as abstain rather than dropped, and 125 "Another" are too few for a network alone, so that case also needs geometry, rules and targeted collection. It wanted experiment B only after the detector. B deliberately uses reviewed boxes, so it measures context without detector errors, and it stays first.
+It added two points, both taken: "Unclear" is taught as abstain rather than dropped, and 125 "Another" are too few for a network alone, so that case also needs geometry, rules and targeted collection. It also wanted experiment B only after the detector; B was run first anyway, because it uses the reviewed boxes and so measures context without the detector's errors.
 
 ## Decisions taken (24 October 2026)
 
+- **Three networks** (cutter, classifier, decider), each trained, measured and replaced on its own, as Cristian proposed. The cutter favours missing nothing; the classifier drops what is not a sign; the decider works on the recognised signs and their positions.
 - **Test.** Route 0000012d is reviewed entirely by hand: about 800 frames with proposals and 200+ signs, on motorway and in town. The final test also needs drives on new roads.
-- **Split by place.** Areas of about 300 m. Every frame in an area goes to the same partition, whatever route it comes from. The test areas are those of the test route, and frames of any route within about 150 m of them are kept out of training (the buffer). strata asked for 250–500 m areas with a 100–200 m buffer and 150–250 test signs.
-- **"Ours".** The sign is meant for the traffic on the carriageway we drive on, in our direction, whatever the lane. **"Another"** is an exit ramp, a side road, a parallel road or the opposite direction. The network decides which applies; the label only fixes what the answer means. A lane label comes later, if gantries with different values per lane show up.
+- **Split by place.** Areas of about 300 m. Every frame in an area goes to the same partition, whatever route it comes from. The test areas are those of the test route, and frames of any route next to them are kept out of training (the buffer). strata asked for 250–500 m areas with a 100–200 m buffer.
+- **"Ours".** The sign is meant for the traffic on the carriageway we drive on, in our direction, whatever the lane. **"Another"** is an exit ramp, a side road, a parallel road or the opposite direction. The decider answers which applies; the label only fixes what the answer means. A lane label comes later, if gantries with different values per lane show up.
 - **"Unclear"** is taught as "abstain", not dropped.
+- **Other traffic signs** get a box with their kind, from people and from the AI reviewer alike.
