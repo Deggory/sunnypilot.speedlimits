@@ -14,7 +14,19 @@ if ! command -v "$PYTHON" >/dev/null 2>&1; then
   exit 2
 fi
 
-"$PYTHON" -m venv "$VENV"
+# A venv left half made by a failed run (no pip inside) is made again.
+if [ -d "$VENV" ] && [ ! -x "$VENV/bin/pip" ]; then
+  echo "rifaccio $VENV: creato a metà da un tentativo fallito"
+  rm -rf "$VENV"
+fi
+if [ ! -d "$VENV" ]; then
+  # uv when present: it needs no ensurepip, which Debian ships apart (python3.X-venv, not installed here).
+  if command -v uv >/dev/null 2>&1; then
+    uv venv --seed --python "$(command -v "$PYTHON")" "$VENV"
+  else
+    "$PYTHON" -m venv "$VENV"
+  fi
+fi
 "$VENV/bin/python" -m pip install --upgrade pip setuptools wheel
 
 # PyTorch 2.14 is the final release line publishing CUDA 12.6 binaries for
