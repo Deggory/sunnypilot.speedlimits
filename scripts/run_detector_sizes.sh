@@ -27,12 +27,16 @@ set -euo pipefail
 # validation recall at score 0.1. The default boxes are small: the smallest is 0.02 of the image side
 # (NNSLR_DETECTOR_ANCHOR_MIN_RATIO; torchvision's 0.2 is at least 155 x 88 pixels of a 1344 x 760 frame at any
 # input size, since the default boxes are fractions of the image and a larger input only puts them on a finer
-# grid). A size that resumes keeps the settings it started with (they come from its training state).
+# grid). The detector cuts the speed signs and the other traffic signs (NNSLR_CUTTER_FAMILIES=all, the default; speed:
+# the speed signs only, as every detector before), so that the classifier sees the other signs and says what they
+# are; the comparison shows the recall of the speed signs alone too. A size that resumes keeps the settings it
+# started with (they come from its training state).
 #
 # Environment: NNSLR_GPU_INDEX (default 0), NNSLR_DATASET_KIND (gold), NNSLR_GPU_VENV (.venv-gpu),
 # NNSLR_DETECTOR_EPOCHS (20), NNSLR_DETECTOR_PATIENCE (5), NNSLR_DETECTOR_BATCH_SIZE (8), NNSLR_NUM_WORKERS (4),
 # NNSLR_DETECTOR_ANCHOR_MIN_RATIO (0.02), NNSLR_DETECTOR_NEGATIVE_FRACTION (0.1, the share of the frames without
-# signs per epoch), NNSLR_DETECTOR_AUGMENT=0 to train without the photometric augmentation,
+# signs per epoch), NNSLR_CUTTER_FAMILIES (all, or speed), NNSLR_DETECTOR_AUGMENT=0 to train without the
+# photometric augmentation,
 # NNSLR_TRAIN_INIT=random, NNSLR_ALLOW_BUSY_GPU=1 to share a GPU that already has compute processes.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -47,6 +51,7 @@ BATCH_SIZE="${NNSLR_DETECTOR_BATCH_SIZE:-8}"
 NUM_WORKERS="${NNSLR_NUM_WORKERS:-4}"
 ANCHOR_MIN_RATIO="${NNSLR_DETECTOR_ANCHOR_MIN_RATIO:-0.02}"
 NEGATIVE_FRACTION="${NNSLR_DETECTOR_NEGATIVE_FRACTION:-0.1}"
+FAMILIES="${NNSLR_CUTTER_FAMILIES:-all}"
 PARTITIONS=(test validation)
 
 if [[ -z "$RUN_ID" ]]; then
@@ -74,6 +79,11 @@ done
 
 if [[ "$DATASET_KIND" != "gold" && "$DATASET_KIND" != "training-candidate" ]]; then
   echo "error: NNSLR_DATASET_KIND must be gold or training-candidate" >&2
+  exit 2
+fi
+
+if [[ "$FAMILIES" != "all" && "$FAMILIES" != "speed" ]]; then
+  echo "error: NNSLR_CUTTER_FAMILIES must be all or speed" >&2
   exit 2
 fi
 
@@ -159,14 +169,15 @@ fi
 
 # The same settings for every size that starts; a size that resumes takes its own from its training state.
 SETTINGS=(--epochs "$EPOCHS" --patience "$PATIENCE" --batch-size "$BATCH_SIZE" --num-workers "$NUM_WORKERS"
-          --anchor-min-ratio "$ANCHOR_MIN_RATIO" --negative-frame-fraction "$NEGATIVE_FRACTION" --select-by recall)
+          --anchor-min-ratio "$ANCHOR_MIN_RATIO" --negative-frame-fraction "$NEGATIVE_FRACTION" --select-by recall
+          --cutter-families "$FAMILIES")
 if [[ "${NNSLR_TRAIN_INIT:-imagenet}" != "random" ]]; then
   SETTINGS+=(--pretrained)
 fi
 if [[ "${NNSLR_DETECTOR_AUGMENT:-1}" == "0" ]]; then
   SETTINGS+=(--no-augment)
 fi
-SETTINGS_TEXT="input sizes ${SIZES[*]}; smallest default box $ANCHOR_MIN_RATIO of the image side; frames without signs $NEGATIVE_FRACTION per epoch; best epoch by validation recall at score 0.1; ${SETTINGS[*]}"
+SETTINGS_TEXT="input sizes ${SIZES[*]}; boxes of the families $FAMILIES; smallest default box $ANCHOR_MIN_RATIO of the image side; frames without signs $NEGATIVE_FRACTION per epoch; best epoch by validation recall at score 0.1; ${SETTINGS[*]}"
 
 NN="$VENV/bin/nnslr"
 total=$((2 + 2 * ${#SIZES[@]}))
@@ -181,14 +192,15 @@ echo "physical GPU: $GPU_INDEX"
 echo "default boxes: smallest $ANCHOR_MIN_RATIO of the image side (torchvision's: 0.2)"
 echo "sign-free:    $NEGATIVE_FRACTION of the frames without signs per epoch (validation: one fixed draw)"
 echo "best epoch:   validation recall at score 0.1, ties to fewer false boxes per frame"
+echo "boxes:        $FAMILIES (all: the speed signs and the other traffic signs; speed: the speed signs only)"
 echo "settings:     ${SETTINGS[*]}"
 echo "wandb:        project ${WANDB_PROJECT:-sunnypilot.speedlimits}, group $RUN_ID-<size>, mode ${WANDB_MODE:-online}"
 echo
 
 echo "== 1/$total Validate the training and evaluation populations (CPU-only) =="
-"$NN" train --task detector --dataset-kind "$DATASET_KIND" --dry-run
+"$NN" train --task detector --dataset-kind "$DATASET_KIND" --cutter-families "$FAMILIES" --dry-run
 for partition in "${PARTITIONS[@]}"; do
-  "$NN" evaluate --task detector --dataset-kind "$DATASET_KIND" --partition "$partition" --dry-run
+  "$NN" evaluate --task detector --dataset-kind "$DATASET_KIND" --cutter-families "$FAMILIES" --partition "$partition" --dry-run
 done
 mkdir -p "$SIZES_ROOT"
 

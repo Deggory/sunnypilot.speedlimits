@@ -17,11 +17,13 @@ A plan, started on 24 October 2026 from Codex's "teacher and student" proposal, 
    - It looks at the frame of the main road camera (1344 × 760 on the comma four, full resolution), scaled down, plus the band where signs appear.
    - It must miss nothing. False boxes are fine, because the classifier drops them, so it can be a small network.
    - It is measured on **signs missed, by size**, and on how many boxes per frame it passes on.
+   - A new cutter also cuts the other traffic signs (`--cutter-families all`, the default; `speed` is the speed signs only, as before), so that the classifier sees them and says what they are: 34 more boxes in train, 12 in validation and 54 in test, all reviewed by people. Its speed-sign recall is still reported alone (`recall_by_family`), to compare with the older cutters.
    - Today's detector plays this role and finds only 6% of the test signs (see the results).
 2. **Classify: the classifier says what each box is.**
    - It takes the box cut from the full-resolution frame, never from the scaled-down one.
    - Its answers are a speed value, end of limit, zone, variable display, "?" (a limit it cannot read), another sign with its kind (town entry, direction, give way…), or **not a sign**.
    - Today's reader plays this role. It still lacks "not a sign": the 2,431 model boxes that reviewers removed, plus the cutter's own mistakes, teach it.
+   - `scripts/run_classifier.sh` (the **Train the classifier** button) trains it with those classes (`nnslr train --classes v2`): the removed proposals that overlap no kept box (1,988 of the 2,431), the boxes marked "not a sign" and up to 3 × the signs of false boxes mined with the cutter in use (`nnslr mine-negatives`), darker crops and jittered boxes. It then measures it alone and the whole chain on the test (`nnslr evaluate-chain`: signs found **and** read right, false boxes per frame that survive), next to the old reader. Not run yet.
    - It is measured on right answers per sign.
 3. **Decide: the decider says whom each sign applies to.**
    - It takes the list of recognised signs with their position and size, the scene as a small image, and the car's speed and steering. The signs of a frame look at each other, as with two 80s on one gantry.

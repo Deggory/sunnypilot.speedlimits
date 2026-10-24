@@ -127,11 +127,13 @@ OLD_DETECTOR_CONFIG = {"epochs": 20, "patience": 5, "batch_size": 8, "learning_r
 def test_resume_compares_old_runs_with_the_settings_they_had():
     old = OLD_DETECTOR_CONFIG
     # A run saved before these settings existed was trained at 320 x 320, without augmentation, on every frame,
-    # and kept its lowest validation loss.
-    before = DetectorTrainConfig(pretrained_backbone=True, augment=False, negative_frame_fraction=1.0, select_by="loss")
+    # on the speed signs only, and kept its lowest validation loss.
+    before = DetectorTrainConfig(pretrained_backbone=True, augment=False, negative_frame_fraction=1.0, select_by="loss",
+                                 families="speed")
     assert _detector_config_differences(old, before) == []
     assert _detector_config_differences(old, DetectorTrainConfig(pretrained_backbone=True)) == [
-        "augment False -> True", "negative_frame_fraction 1.0 -> 0.1", "select_by 'loss' -> 'recall'"]
+        "augment False -> True", "families 'speed' -> 'all'", "negative_frame_fraction 1.0 -> 0.1",
+        "select_by 'loss' -> 'recall'"]
     saved = dict(DetectorTrainConfig(input_size=(640, 360)).__dict__, input_size=[640, 360])
     assert _detector_config_differences(saved, DetectorTrainConfig(input_size=(640, 360))) == []
     assert _detector_config_differences(saved, DetectorTrainConfig()) == ["input_size (640, 360) -> (320, 320)"]
@@ -251,30 +253,32 @@ def test_sizes_comparison_table_puts_the_cutter_first(tmp_path):
     table = detector_sizes_table(root, ["320x320", "640x360"])
     lines = table.splitlines()
     assert lines[0].startswith("== test: the cutter, recall first (559 frames, 0 confirmed by a person")
-    assert lines[1].split() == ["score", "rows", "size", "recall", "<12", "12-20", "20-40", ">=40", "boxes/frame",
-                                "false/frame", "precision", "F1"]
-    # The lowest threshold first: recall overall and by width, boxes passed on, false ones, then precision.
-    assert lines[2].split() == ["0.05", "all", "320x320", "0.25", "20/80", "1.00", "4/4", "-", "-", "0.21", "16/76",
-                                "12.52", "12.49", "0.003", "0.500"]
+    assert lines[1].split() == ["score", "rows", "size", "recall", "speed", "<12", "12-20", "20-40", ">=40",
+                                "boxes/frame", "false/frame", "precision", "F1"]
+    # The lowest threshold first: recall overall, of the speed signs (a report without families: the same) and by
+    # width, boxes passed on, false ones, then precision.
+    assert lines[2].split() == ["0.05", "all", "320x320", "0.25", "20/80", "0.25", "20/80", "1.00", "4/4", "-", "-",
+                                "0.21", "16/76", "12.52", "12.49", "0.003", "0.500"]
     assert lines[3].split()[:5] == ["0.05", "human", "320x320", "0.40", "4/10"]
     assert lines[4] == ""
     assert lines[5].split()[:5] == ["0.25", "all", "320x320", "0.06", "5/80"]
     assert lines[5].split()[-4:] == ["0.96", "0.95", "0.009", "0.500"]
-    assert lines[6].split() == ["0.25", "human", "320x320"] + ["-"] * 9
+    assert lines[6].split() == ["0.25", "human", "320x320"] + ["-"] * 10
     assert "not evaluated: 640x360" in table and "== validation: not evaluated ==" in table
     cost = lines[lines.index(next(line for line in lines if line.startswith("== cost"))) + 1:]
     assert "Tesla V100-PCIE-32GB" in table
     assert cost[0].split() == ["size", "ms/frame", "s/epoch", "gpu_peak_GB", "best_epoch", "chosen_by", "val_recall",
-                               "sign_free/epoch", "augmentation", "default_box_min"]
-    # A result.json from before the selection and the share of frames without signs: loss, every frame.
-    assert cost[1].split() == ["320x320", "4.3", "95", "3.0", "2/3", "loss", "-", "1.00", "on", "0.20"]
+                               "sign_free/epoch", "augmentation", "default_box_min", "families"]
+    # A result.json from before the selection, the share of frames without signs and the families: loss, every
+    # frame, the speed signs.
+    assert cost[1].split() == ["320x320", "4.3", "95", "3.0", "2/3", "loss", "-", "1.00", "on", "0.20", "speed"]
     assert cost[2].split() == ["640x360", "-", "no", "result.json"]
     _write(root / "640x360" / "result.json", {
         "best_validation_loss": 1.4, "best_epoch": 3, "best_validation_recall": 0.4125, "anchor_min_ratio": 0.02,
         "selection": {"by": "recall"}, "config": {"negative_frame_fraction": 0.1}, "augmentation": None,
         "history": [{"epoch": epoch, "validation_loss": 1.5, "seconds": 120.0} for epoch in range(1, 9)]})
     table = detector_sizes_table(root, ["320x320", "640x360"]).splitlines()
-    assert table[-1].split() == ["640x360", "-", "120", "-", "3/8", "recall", "0.412", "0.10", "off", "0.02"]
+    assert table[-1].split() == ["640x360", "-", "120", "-", "3/8", "recall", "0.412", "0.10", "off", "0.02", "speed"]
 
 
 # ---------------------------------------------------------------- with torch, in a subprocess, CPU only
@@ -473,8 +477,13 @@ def test_tiny_cpu_detector_at_a_non_square_size(tmp_path, capsys, torch_python):
                  str(output.parent))
     assert table.returncode == 0, table.stderr[-3000:]
     assert re.search(r"^0\.05\s+all\s+96x64\s", table.stdout, re.M)
-    assert re.search(rf"^96x64\s+[0-9.]+\s+[0-9]+\s+-\s+{expected['epoch']}/2\s+recall\s+[0-9.]+\s+0\.50\s+on\s+0\.05$",
-                     table.stdout, re.M), table.stdout
+    assert re.search(rf"^96x64\s+[0-9.]+\s+[0-9]+\s+-\s+{expected['epoch']}/2\s+recall\s+[0-9.]+\s+0\.50\s+on\s+0\.05"
+                     rf"\s+all$", table.stdout, re.M), table.stdout
+    # A new cutter cuts the speed and the other signs; its report gives the speed signs alone too.
+    assert result["families"] == "all" and result["config"]["families"] == "all"
+    assert report["families"] == "all" and report["recall_by_family"]["speed"]["truth"] == report["truth_box_count"]
+    assert report["by_score_threshold"]["0.1"]["recall_by_family"]["speed"]["truth"] == report["truth_box_count"]
+    assert report["images"][0]["truth_families"] == ["maximum_speed"] * report["images"][0]["truth_count"]
 
     if subprocess.run([torch_python, "-c", "import onnx, onnxruntime, onnxscript"], capture_output=True).returncode:
         pytest.skip("onnx/onnxruntime/onnxscript missing: export not checked")

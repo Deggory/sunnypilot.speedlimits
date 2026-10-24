@@ -8,11 +8,24 @@ that would be consumed by a GPU run.
 
 The first baseline trains only the sign reader on reviewed bounding-box crops.
 It does not train a detector and it does not produce an on-vehicle bundle.
+
+The reader has two class schemes (``class_scheme``, recorded in the plan, the training state and the
+checkpoint; what has none is v1):
+
+- v1, the reader of the first runs: the reviewed boxes of signs, labelled ``family:value``
+  (``maximum_speed:60``, ``maximum_speed:unknown``, ``cancellation``, ``other_sign``, ...);
+- v2, the classifier of the pipeline (cutter -> classifier -> decider, docs/NEURAL_NETWORK.md): the same
+  labels, the kind of an other sign (``other_sign:give_way`` when the review says it, else ``other_sign``),
+  and ``not_a_sign``, learnt from boxes that are not signs: the proposals a reviewer removed, the boxes a
+  reviewer marked "not a sign" and the false boxes of the cutter mined by nnslr_tools.chain.mine_negatives.
+  Its training crops are photometrically augmented (darker, lower contrast) and their boxes jittered, as the
+  cutter's boxes are never exact.
 """
 from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
+from datetime import datetime
 import hashlib
 import json
 import math
@@ -27,15 +40,38 @@ from nnslr_tools.checkpoints import (DEFAULT_DETECTOR_ANCHOR_MIN_RATIO, DEFAULT_
                                      build_detector, detector_is_wide, model_weights, stable_weights, torch_load)
 from nnslr_tools.progress import report as report_progress
 from nnslr_tools.annotations import load_jsonl, validate_dataset
+from nnslr_tools.sign_types import SIGN_TYPES
 from nnslr_tools.splits import validate_splits
 
 TRAINING_SCHEMA_VERSION = 1
 ELIGIBLE_REVIEW_STATES = frozenset({"accepted", "corrected"})
 TRAIN_SPLIT = "train"
 VALIDATION_SPLIT = "validation"
+# The partitions the classifier's negatives come from, each from its own frames only (never the buffer).
+NEGATIVE_PARTITIONS = ("train", "validation", "test")
 # ImageNet normalization of the reader crops (also undone for the wandb crops).
 READER_NORMALIZE_MEAN = (.485, .456, .406)
 READER_NORMALIZE_STD = (.229, .224, .225)
+
+# -- the class schemes of the reader ---------------------------------------------------------------------
+CLASS_SCHEMES = ("v1", "v2")
+NOT_A_SIGN = "not_a_sign"
+OTHER_SIGN = "other_sign"
+# Where a not_a_sign crop of the v2 scheme comes from: a proposal a reviewer removed (review_state rejected), a
+# false box of the cutter (nnslr_tools.chain.mine_negatives), a box a reviewer kept and marked "not a sign".
+NEGATIVE_SOURCES = ("rejected", "mined", "reviewed")
+# A removed proposal or a mined box is a negative only when it overlaps no box a reviewer kept by this IoU or
+# more: a proposal removed as a duplicate of a kept one, or drawn again, still frames a sign.
+NEGATIVE_MAX_IOU = 0.1
+# The kind of an other sign is a class of its own from this many training crops; rarer kinds are folded into
+# "other_sign" in every partition (a class seen once or twice is learnt from nothing and measured on noise).
+MIN_KIND_TRAIN_CROPS = 3
+# The review rule of 24 October 2026 (commit 6344a8b): from then on the AI reviewer boxes the other traffic signs
+# too, with their kind. Before it, a frame an AI reviewed may hold an other sign without a box, so a box there
+# that overlaps nothing reviewed may still be a sign: the negatives of such frames are the noisiest.
+OTHER_SIGN_RULE_AT = "2026-10-24T15:33:17Z"
+# Who reviewed a frame and when, for the negatives: a person; an AI after the rule above; an AI before it.
+REVIEW_TIERS = ("human", "ai_after_rule", "ai_before_rule", "other")
 
 
 def _sha256(path: Path) -> str:
@@ -69,12 +105,162 @@ def _reader_label(row: dict[str, Any]) -> str | None:
     return None
 
 
+def _classifier_label(row: dict[str, Any]) -> str | None:
+    """The v2 label of a reviewed box: the v1 label, the kind of an other sign (``other_sign:<kind>`` when the
+    review gives one, else ``other_sign``), and ``not_a_sign`` for a kept box a reviewer marked so."""
+    if row.get("review_state") not in ELIGIBLE_REVIEW_STATES:
+        return None
+    bbox = row.get("bbox_xyxy")
+    if not isinstance(bbox, list) or len(bbox) != 4:
+        return None
+    family = row.get("sign_family")
+    if family == NOT_A_SIGN:
+        return NOT_A_SIGN
+    if family == OTHER_SIGN:
+        kind = row.get("sign_type")
+        return f"{OTHER_SIGN}:{kind}" if isinstance(kind, str) and kind in SIGN_TYPES else OTHER_SIGN
+    return _reader_label(row)
+
+
+def scheme_label(row: dict[str, Any], class_scheme: str) -> str | None:
+    """The label of a reviewed box in a class scheme (v1: _reader_label, v2: _classifier_label)."""
+    if class_scheme not in CLASS_SCHEMES:
+        raise ValueError(f"unknown class scheme {class_scheme!r}: one of {', '.join(CLASS_SCHEMES)}")
+    return _classifier_label(row) if class_scheme == "v2" else _reader_label(row)
+
+
+def family_label(label: str) -> str:
+    """A label as the v1 reader names it: the kind of an other sign dropped (``other_sign:give_way`` ->
+    ``other_sign``), every other label unchanged. Compares the classifier with the old reader."""
+    return OTHER_SIGN if str(label).startswith(OTHER_SIGN + ":") else str(label)
+
+
+def checkpoint_class_scheme(checkpoint: dict[str, Any]) -> str:
+    """The class scheme of a reader checkpoint, plan or result; v1 when it does not say (written before v2)."""
+    scheme = checkpoint.get("class_scheme", "v1") if isinstance(checkpoint, dict) else "v1"
+    if scheme not in CLASS_SCHEMES:
+        raise ValueError(f"unknown class scheme {scheme!r}")
+    return scheme
+
+
 def _label_basis(row: dict[str, Any]) -> str | None:
     """Who confirmed a row: human_review, ai_review or model_review (provenance.label_basis)."""
     provenance = row.get("provenance")
     if not isinstance(provenance, dict):
         return None
     return provenance.get("label_basis")
+
+
+def _timestamp(value: Any) -> datetime | None:
+    """An ISO review timestamp ("2026-10-24T02:58:45.917Z") as an aware datetime; None when it is not one."""
+    if not isinstance(value, str):
+        return None
+    try:
+        moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return moment if moment.tzinfo is not None else None
+
+
+def review_tier(label_basis: str | None, reviewed_at: str | None) -> str:
+    """REVIEW_TIERS of a frame: reviewed by a person, by an AI after OTHER_SIGN_RULE_AT, by an AI before it."""
+    if label_basis == "human_review":
+        return "human"
+    if label_basis == "ai_review":
+        moment = _timestamp(reviewed_at)
+        rule = _timestamp(OTHER_SIGN_RULE_AT)
+        return "ai_after_rule" if moment is not None and moment >= rule else "ai_before_rule"
+    return "other"
+
+
+def box_overlap(a: list[float], b: list[float]) -> float:
+    """IoU of two boxes x1, y1, x2, y2 (the same measure as nnslr_tools.evaluation.box_iou)."""
+    ix = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
+    iy = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+    intersection = ix * iy
+    union = (max(0.0, a[2] - a[0]) * max(0.0, a[3] - a[1]) + max(0.0, b[2] - b[0]) * max(0.0, b[3] - b[1])
+             - intersection)
+    return 0.0 if union <= 0 else intersection / union
+
+
+def reviewed_frames(rows: list[dict[str, Any]], assignments: dict[str, Any]) -> list[dict[str, Any]]:
+    """The reviewed frames of a dataset with their partition, in a stable order.
+
+    A frame (one image, by its sha256) is in the partition of the rows a reviewer kept (accepted or corrected;
+    the split groups identical images, so they all share one). The removed proposals (review_state rejected)
+    have no assignment of their own: they follow their frame. Each frame keeps its kept rows (``kept``, a
+    whole-frame "no sign" row included), the boxes of the removed proposals (``rejected``), who reviewed it
+    (``label_basis``: one basis, or "mixed"), when (``reviewed_at``, the latest review time) and its
+    REVIEW_TIERS ``tier``. A frame without any kept row has no partition and is left out.
+    """
+    grouped: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        key = row.get("image_sha256")
+        if not isinstance(key, str):
+            continue
+        frame = grouped.setdefault(key, {
+            "image_path": row.get("image_path"), "image_sha256": key, "width": row.get("width"),
+            "height": row.get("height"), "route_id": row.get("route_id"), "segment_index": row.get("segment_index"),
+            "output_index": row.get("output_index"), "split": None, "kept": [], "rejected": [],
+            "label_bases": set(), "reviewed_at": None})
+        if row.get("review_state") in ELIGIBLE_REVIEW_STATES:
+            split = assignments.get(row.get("annotation_id"))
+            if isinstance(split, str):
+                if frame["split"] not in (None, split):
+                    raise ValueError("inconsistent_frame_group: one image in two partitions")
+                frame["split"] = split
+            frame["kept"].append(row)
+            frame["label_bases"].add(_label_basis(row))
+            stamp = row.get("review_timestamp")
+            if _timestamp(stamp) is not None and (frame["reviewed_at"] is None
+                                                  or _timestamp(stamp) > _timestamp(frame["reviewed_at"])):
+                frame["reviewed_at"] = stamp
+        elif row.get("review_state") == "rejected" and isinstance(row.get("bbox_xyxy"), list):
+            frame["rejected"].append(row)
+    frames = []
+    for frame in grouped.values():
+        if frame["split"] is None:
+            continue
+        bases = frame.pop("label_bases")
+        frame["label_basis"] = next(iter(bases)) if len(bases) == 1 else "mixed"
+        frame["tier"] = review_tier(frame["label_basis"], frame["reviewed_at"])
+        frames.append(frame)
+    frames.sort(key=lambda f: (str(f["route_id"]), f["segment_index"] if isinstance(f["segment_index"], int) else -1,
+                               str(f["image_path"])))
+    return frames
+
+
+def frame_boxes(frame: dict[str, Any]) -> list[list[float]]:
+    """Every box a reviewer saw in a frame: the kept ones (any family) and the removed proposals."""
+    return ([list(row["bbox_xyxy"]) for row in frame["kept"] if isinstance(row.get("bbox_xyxy"), list)]
+            + [list(row["bbox_xyxy"]) for row in frame["rejected"]])
+
+
+def negative_id(image_sha256: str, box: list[float]) -> str:
+    """A stable id of a negative box (mined boxes have no annotation id): its image and its box to 0.1 px."""
+    text = json.dumps([image_sha256, [round(float(value), 1) for value in box]])
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+NEGATIVES_KIND = "classifier_negatives"
+
+
+def read_negatives(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """The header and the rows of a negatives file of nnslr mine-negatives (JSONL: a header line first)."""
+    lines = [line for line in Path(path).read_text(encoding="utf-8").splitlines() if line.strip()]
+    if not lines:
+        raise ValueError(f"negatives_invalid: empty file {path}")
+    header = json.loads(lines[0])
+    if not isinstance(header, dict) or header.get("kind") != "header" or header.get("task") != NEGATIVES_KIND:
+        raise ValueError("negatives_invalid: the first line is not the header of nnslr mine-negatives")
+    rows = []
+    for number, line in enumerate(lines[1:], 2):
+        row = json.loads(line)
+        if (not isinstance(row, dict) or row.get("kind") != "negative" or not isinstance(row.get("bbox_xyxy"), list)
+                or len(row["bbox_xyxy"]) != 4 or not isinstance(row.get("image_sha256"), str)):
+            raise ValueError(f"negatives_invalid: line {number}")
+        rows.append(row)
+    return header, rows
 
 
 def _safe_image_path(data_root: Path, image_path: str) -> Path:
@@ -122,28 +308,19 @@ def _load_split_document(split_path: Path, data_root: Path) -> tuple[Path, dict[
     return target, resolved
 
 
-def prepare_reader_training(
-    dataset_path: Path,
-    split_path: Path,
-    data_root: Path,
-    *,
-    dataset_kind: str = "gold",
-) -> dict[str, Any]:
-    """Validate inputs and build the immutable reader-training plan.
-
-    No torch/Pillow import and no GPU access happens here.
-    """
+def load_reviewed_dataset(dataset_path: Path, split_path: Path, data_root: Path, *,
+                          dataset_kind: str = "gold") -> dict[str, Any]:
+    """The dataset rows and the frozen split, both checked (no torch): {rows, dataset_sha256, split_path,
+    split_sha256, assignments}. The common start of every plan."""
     dataset_path = Path(dataset_path)
-    split_path = Path(split_path)
     data_root = Path(data_root)
-
     rows = load_jsonl(dataset_path)
     validation = validate_dataset(rows, data_root, dataset_kind=dataset_kind)
     if not validation.get("valid"):
         reasons = sorted({str(e.get("reason", "dataset_invalid")) for e in validation.get("errors", [])})
         raise ValueError("dataset_invalid: " + ",".join(reasons))
 
-    resolved_split_path, split_doc = _load_split_document(split_path, data_root)
+    resolved_split_path, split_doc = _load_split_document(Path(split_path), data_root)
     split_errors = validate_splits(
         rows,
         split_doc,
@@ -157,6 +334,43 @@ def prepare_reader_training(
     assignments = split_doc.get("assignments")
     if not isinstance(assignments, dict):
         raise ValueError("split_invalid: assignments")
+    return {"rows": rows, "dataset_sha256": validation["dataset_sha256"], "split_path": resolved_split_path,
+            "split_sha256": _sha256(resolved_split_path), "assignments": assignments}
+
+
+def prepare_reader_training(
+    dataset_path: Path,
+    split_path: Path,
+    data_root: Path,
+    *,
+    dataset_kind: str = "gold",
+    class_scheme: str = "v1",
+    negatives_path: Path | None = None,
+) -> dict[str, Any]:
+    """Validate inputs and build the immutable reader-training plan.
+
+    No torch/Pillow import and no GPU access happens here.
+
+    class_scheme v1 is the reader as it always was. v2 (the classifier) adds the kinds of the other signs and
+    the not_a_sign crops (see _classifier_negatives); negatives_path is the file of nnslr mine-negatives for
+    the cutter's false boxes (without it, only the removed proposals and the boxes marked "not a sign").
+    """
+    if class_scheme not in CLASS_SCHEMES:
+        raise ValueError(f"unknown class scheme {class_scheme!r}: one of {', '.join(CLASS_SCHEMES)}")
+    if negatives_path is not None and class_scheme != "v2":
+        raise ValueError("negatives are crops of the v2 classifier: use --classes v2")
+    dataset_path = Path(dataset_path)
+    split_path = Path(split_path)
+    data_root = Path(data_root)
+
+    loaded = load_reviewed_dataset(dataset_path, split_path, data_root, dataset_kind=dataset_kind)
+    rows = loaded["rows"]
+    validation = {"dataset_sha256": loaded["dataset_sha256"]}
+    resolved_split_path = loaded["split_path"]
+    assignments = loaded["assignments"]
+    if class_scheme == "v2":
+        return _prepare_classifier(loaded, dataset_path, split_path, data_root, dataset_kind=dataset_kind,
+                                   negatives_path=negatives_path)
 
     records: list[dict[str, Any]] = []
     skipped = Counter()
@@ -217,6 +431,7 @@ def prepare_reader_training(
     return {
         "schema_version": TRAINING_SCHEMA_VERSION,
         "task": "reader",
+        "class_scheme": "v1",
         "dataset_kind": dataset_kind,
         "dataset_path": str(dataset_path),
         "dataset_sha256": validation["dataset_sha256"],
@@ -234,6 +449,203 @@ def prepare_reader_training(
     }
 
 
+def _record(row: dict[str, Any], split: str, label: str, source: str, **extra: Any) -> dict[str, Any]:
+    """A crop of the classifier plan: the fields of a v1 record, where it comes from and who reviewed it."""
+    return {
+        "annotation_id": row.get("annotation_id"),
+        "split": split,
+        "image_path": row.get("image_path"),
+        "image_sha256": row.get("image_sha256"),
+        "bbox_xyxy": [float(value) for value in row["bbox_xyxy"]],
+        "label": label,
+        "sign_family": row.get("sign_family"),
+        "sign_type": row.get("sign_type"),
+        "value_state": row.get("value_state"),
+        "value_kph": row.get("value_kph"),
+        "route_id": row.get("route_id"),
+        "segment_index": row.get("segment_index"),
+        "decoded_frame_index": row.get("decoded_frame_index"),
+        "label_basis": _label_basis(row),
+        "source": source,
+        **extra,
+    }
+
+
+def classifier_positives(rows: list[dict[str, Any]], assignments: dict[str, Any]) -> Counter:
+    """The sign crops of the v2 scheme (every label but not_a_sign) per partition: what the negatives are
+    counted against."""
+    counts: Counter = Counter()
+    for row in rows:
+        label = _classifier_label(row)
+        split = assignments.get(row.get("annotation_id"))
+        if label is not None and label != NOT_A_SIGN and isinstance(split, str):
+            counts[split] += 1
+    return counts
+
+
+def _classifier_negatives(frames: list[dict[str, Any]], skipped: Counter) -> list[dict[str, Any]]:
+    """The removed proposals of the frames of train, validation and test that are crops of not_a_sign: a box a
+    reviewer took away and that overlaps no kept box (IoU < NEGATIVE_MAX_IOU; a duplicate on a sign, or a box
+    drawn again, still frames a sign). Noted with who reviewed the frame and when (tier)."""
+    found = []
+    for frame in frames:
+        if frame["split"] not in NEGATIVE_PARTITIONS:
+            skipped["rejected_outside_train_validation_test"] += len(frame["rejected"])
+            continue
+        kept = [row["bbox_xyxy"] for row in frame["kept"] if isinstance(row.get("bbox_xyxy"), list)]
+        for row in frame["rejected"]:
+            if any(box_overlap(row["bbox_xyxy"], box) >= NEGATIVE_MAX_IOU for box in kept):
+                skipped["rejected_overlaps_a_kept_box"] += 1
+                continue
+            found.append(_record(row, frame["split"], NOT_A_SIGN, "rejected", tier=frame["tier"],
+                                 frame_label_basis=frame["label_basis"], proposal_family=row.get("sign_family"),
+                                 negative_id=negative_id(row["image_sha256"], row["bbox_xyxy"])))
+    return found
+
+
+def _mined_negatives(negatives_path: Path, loaded: dict[str, Any], frames: list[dict[str, Any]],
+                     data_root: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """The not_a_sign crops of a negatives file, checked against this plan: the same dataset and split, every
+    box in the partition its frame has here, every image inside the data root."""
+    header, rows = read_negatives(negatives_path)
+    if header.get("dataset_sha256") != loaded["dataset_sha256"] or header.get("split_sha256") != loaded["split_sha256"]:
+        raise ValueError("negatives_mismatch: the negatives were mined on another dataset or split; mine them again")
+    partition = {frame["image_sha256"]: frame for frame in frames}
+    found = []
+    for row in rows:
+        frame = partition.get(row["image_sha256"])
+        if frame is None or frame["split"] != row.get("split") or row.get("split") not in NEGATIVE_PARTITIONS:
+            raise ValueError(f"negatives_mismatch: {row.get('image_path')} is not a frame of {row.get('split')}")
+        _safe_image_path(data_root, frame["image_path"])
+        found.append({
+            "annotation_id": None, "split": frame["split"], "image_path": frame["image_path"],
+            "image_sha256": frame["image_sha256"], "bbox_xyxy": [float(value) for value in row["bbox_xyxy"]],
+            "label": NOT_A_SIGN, "sign_family": None, "sign_type": None, "value_state": None, "value_kph": None,
+            "route_id": frame["route_id"], "segment_index": frame["segment_index"], "decoded_frame_index": None,
+            "label_basis": frame["label_basis"], "source": "mined", "tier": frame["tier"],
+            "frame_label_basis": frame["label_basis"], "score": row.get("score"),
+            "negative_id": row.get("negative_id") or negative_id(frame["image_sha256"], row["bbox_xyxy"]),
+        })
+    summary = {"file": str(negatives_path), "sha256": _sha256(Path(negatives_path)), "cutter": header.get("cutter"),
+               "settings": header.get("settings"), "counts": header.get("counts")}
+    return found, summary
+
+
+def _prepare_classifier(loaded: dict[str, Any], dataset_path: Path, split_path: Path, data_root: Path, *,
+                        dataset_kind: str, negatives_path: Path | None) -> dict[str, Any]:
+    """The v2 plan (see prepare_reader_training): the sign crops with their v2 labels, the kinds too rare to
+    learn folded into other_sign, and the not_a_sign crops of each partition from its own frames only."""
+    rows = loaded["rows"]
+    assignments = loaded["assignments"]
+    frames = reviewed_frames(rows, assignments)
+    records: list[dict[str, Any]] = []
+    skipped = Counter()
+    for row in rows:
+        label = _classifier_label(row)
+        if label is None:
+            skipped["not_classifier_eligible"] += 1
+            continue
+        split_name = assignments.get(row.get("annotation_id"))
+        if not isinstance(split_name, str):
+            skipped["missing_split"] += 1
+            continue
+        if not isinstance(row.get("image_path"), str):
+            skipped["missing_image_path"] += 1
+            continue
+        if label == NOT_A_SIGN and split_name not in NEGATIVE_PARTITIONS:
+            skipped["reviewed_not_a_sign_outside_train_validation_test"] += 1
+            continue
+        records.append(_record(row, split_name, label, "reviewed"))
+    records += _classifier_negatives(frames, skipped)
+    negatives_file = None
+    if negatives_path is not None:
+        mined, negatives_file = _mined_negatives(Path(negatives_path), loaded, frames, data_root)
+        records += mined
+    for path in sorted({record["image_path"] for record in records}):
+        if not _safe_image_path(data_root, path).is_file():
+            raise ValueError(f"missing_image: {path}")
+
+    # A kind of other sign with too few training crops is not a class: it is folded into other_sign everywhere.
+    kinds = Counter(record["label"] for record in records
+                    if record["split"] == TRAIN_SPLIT and record["label"].startswith(OTHER_SIGN + ":"))
+    every_kind = {record["label"] for record in records if record["label"].startswith(OTHER_SIGN + ":")}
+    folded = {label: OTHER_SIGN for label in sorted(every_kind) if kinds[label] < MIN_KIND_TRAIN_CROPS}
+    for record in records:
+        if record["label"] in folded:
+            record["label"] = OTHER_SIGN
+
+    train_labels = sorted({r["label"] for r in records if r["split"] == TRAIN_SPLIT})
+    val_labels = sorted({r["label"] for r in records if r["split"] == VALIDATION_SPLIT})
+    unseen_validation = sorted(set(val_labels) - set(train_labels))
+    counts_by_split = Counter(r["split"] for r in records)
+    counts_by_class = Counter(r["label"] for r in records if r["split"] == TRAIN_SPLIT)
+    positives = Counter(r["split"] for r in records if r["label"] != NOT_A_SIGN)
+    negatives: dict[str, dict[str, int]] = {}
+    by_basis: dict[str, dict[str, dict[str, int]]] = {}
+    by_tier: dict[str, dict[str, dict[str, int]]] = {}
+    for record in records:
+        if record["label"] != NOT_A_SIGN:
+            continue
+        split, source = record["split"], record["source"]
+        cell = negatives.setdefault(split, {name: 0 for name in NEGATIVE_SOURCES})
+        cell[source] += 1
+        basis = str(record.get("frame_label_basis") or record.get("label_basis") or "unknown")
+        by_basis.setdefault(split, {}).setdefault(source, {}).setdefault(basis, 0)
+        by_basis[split][source][basis] += 1
+        tier = str(record.get("tier") or review_tier(record.get("label_basis"), None))
+        by_tier.setdefault(split, {}).setdefault(source, {}).setdefault(tier, 0)
+        by_tier[split][source][tier] += 1
+
+    trainable = (
+        counts_by_split[TRAIN_SPLIT] > 0
+        and counts_by_split[VALIDATION_SPLIT] > 0
+        and len(train_labels) >= 2
+        and NOT_A_SIGN in train_labels
+        and not unseen_validation
+    )
+    limitations = [
+        "classifier_on_reviewed_boxes_and_negatives",
+        "bbox_crops_require_reviewed_localization",
+        "no_runtime_bundle",
+    ]
+    if negatives_path is None:
+        limitations.append("no_mined_negatives: only removed proposals and boxes marked not a sign")
+    if any(record.get("tier") == "ai_before_rule" for record in records if record["label"] == NOT_A_SIGN):
+        limitations.append("negatives_of_ai_reviews_before_the_other_sign_rule_may_be_unboxed_signs")
+    if dataset_kind == "training-candidate":
+        limitations.append("model_review_candidates_are_not_human_gold")
+
+    return {
+        "schema_version": TRAINING_SCHEMA_VERSION,
+        "task": "reader",
+        "class_scheme": "v2",
+        "dataset_kind": dataset_kind,
+        "dataset_path": str(dataset_path),
+        "dataset_sha256": loaded["dataset_sha256"],
+        "split_path": str(loaded["split_path"]),
+        "requested_split_path": str(split_path),
+        "split_sha256": loaded["split_sha256"],
+        "classes": train_labels,
+        "records": records,
+        "counts_by_split": dict(sorted(counts_by_split.items())),
+        "positives_by_split": dict(sorted(positives.items())),
+        "train_counts_by_class": dict(sorted(counts_by_class.items())),
+        "negatives": dict(sorted(negatives.items())),
+        "negatives_by_label_basis": dict(sorted(by_basis.items())),
+        "negatives_by_tier": dict(sorted(by_tier.items())),
+        "negatives_file": negatives_file,
+        "negatives_sha256": None if negatives_file is None else negatives_file["sha256"],
+        "folded_labels": folded,
+        "min_kind_train_crops": MIN_KIND_TRAIN_CROPS,
+        "negative_max_iou": NEGATIVE_MAX_IOU,
+        "other_sign_rule_at": OTHER_SIGN_RULE_AT,
+        "skipped": dict(sorted(skipped.items())),
+        "unseen_validation_labels": unseen_validation,
+        "trainable": trainable,
+        "limitations": limitations,
+    }
+
+
 DETECTOR_FAMILIES = frozenset({
     "maximum_speed",
     "cancellation",
@@ -241,6 +653,22 @@ DETECTOR_FAMILIES = frozenset({
     "variable_display",
     "unreadable",
 })
+# What the cutter (the detector) learns to cut, its "families" (recorded in the plan, the configuration, the checkpoint
+# and result.json): "speed", the speed-sign families above (every detector before this setting), or "all", those and
+# the other traffic signs, so that the classifier sees them and says what they are. Never road markings, never the
+# boxes marked "not a sign". The detector keeps one class (its name stays "speed_sign" for the checkpoints).
+CUTTER_FAMILIES = {"speed": DETECTOR_FAMILIES, "all": DETECTOR_FAMILIES | {"other_sign"}}
+DEFAULT_CUTTER_FAMILIES = "all"
+# A detector checkpoint, plan or report that does not say was trained on the speed signs only.
+LEGACY_CUTTER_FAMILIES = "speed"
+
+
+def cutter_families(value: Any) -> str:
+    """The families setting of a checkpoint, plan, report or configuration; "speed" when it does not say."""
+    families = value.get("families", LEGACY_CUTTER_FAMILIES) if isinstance(value, dict) else LEGACY_CUTTER_FAMILIES
+    if families not in CUTTER_FAMILIES:
+        raise ValueError(f"unknown cutter families {families!r}: one of {', '.join(CUTTER_FAMILIES)}")
+    return families
 
 
 def prepare_detector_training(
@@ -249,14 +677,19 @@ def prepare_detector_training(
     data_root: Path,
     *,
     dataset_kind: str = "gold",
+    families: str = DEFAULT_CUTTER_FAMILIES,
 ) -> dict[str, Any]:
     """Build a full-frame detector plan from reviewed annotations.
 
-    Only vertical speed-sign families are positive detector boxes. A frame is a
+    The boxes of the families chosen (CUTTER_FAMILIES: the speed signs, or those and the other signs) are the
+    positive detector boxes; every frame keeps the family of each box (box_families). A frame is a
     detector negative only when it has an explicit whole-frame not_a_sign
     review. other_sign/road_marking rows alone are not silently promoted to
     whole-frame negatives.
     """
+    if families not in CUTTER_FAMILIES:
+        raise ValueError(f"unknown cutter families {families!r}: one of {', '.join(CUTTER_FAMILIES)}")
+    positive_families = CUTTER_FAMILIES[families]
     dataset_path = Path(dataset_path)
     split_path = Path(split_path)
     data_root = Path(data_root)
@@ -301,6 +734,7 @@ def prepare_detector_training(
             "segment_index": row["segment_index"],
             "decoded_frame_index": row["decoded_frame_index"],
             "boxes": [],
+            "box_families": [],
             "annotation_ids": [],
             "explicit_negative": False,
             "label_basis": _label_basis(row),
@@ -320,8 +754,9 @@ def prepare_detector_training(
         if row["bbox_xyxy"] is None and family == "not_a_sign":
             frame["explicit_negative"] = True
             frame["annotation_ids"].append(annotation_id)
-        elif row["bbox_xyxy"] is not None and family in DETECTOR_FAMILIES:
+        elif row["bbox_xyxy"] is not None and family in positive_families:
             frame["boxes"].append(list(row["bbox_xyxy"]))
+            frame["box_families"].append(family)
             frame["annotation_ids"].append(annotation_id)
         else:
             ignored["non_detector_label"] += 1
@@ -339,10 +774,13 @@ def prepare_detector_training(
     counts_by_split = Counter(r["split"] for r in frames)
     boxes_by_split = Counter()
     negatives_by_split = Counter()
+    boxes_by_family: dict[str, Counter] = {}
     for frame in frames:
         boxes_by_split[frame["split"]] += len(frame["boxes"])
         if frame["explicit_negative"] and not frame["boxes"]:
             negatives_by_split[frame["split"]] += 1
+        for family in frame["box_families"]:
+            boxes_by_family.setdefault(frame["split"], Counter())[family] += 1
 
     trainable = (
         counts_by_split[TRAIN_SPLIT] > 0
@@ -352,17 +790,23 @@ def prepare_detector_training(
     )
 
     limitations = [
-        "single_class_vertical_speed_sign_detector",
+        "single_class_vertical_speed_sign_detector" if families == "speed"
+        else "single_class_sign_detector_speed_and_other_signs",
         "road_markings_excluded",
         "other_sign_not_assumed_whole_frame_negative",
         "no_runtime_bundle",
     ]
+    if families == "all":
+        # Before the other-sign rule an AI reviewer left the other traffic signs without a box: there they are
+        # background for the cutter.
+        limitations.append("other_signs_unboxed_in_ai_reviews_before_the_other_sign_rule")
     if dataset_kind == "training-candidate":
         limitations.append("model_review_candidates_are_not_human_gold")
 
     return {
         "schema_version": TRAINING_SCHEMA_VERSION,
         "task": "detector",
+        "families": families,
         "dataset_kind": dataset_kind,
         "dataset_path": str(dataset_path),
         "dataset_sha256": validation["dataset_sha256"],
@@ -373,6 +817,7 @@ def prepare_detector_training(
         "frames": frames,
         "counts_by_split": dict(sorted(counts_by_split.items())),
         "boxes_by_split": dict(sorted(boxes_by_split.items())),
+        "boxes_by_family": {split: dict(sorted(counts.items())) for split, counts in sorted(boxes_by_family.items())},
         "negative_frames_by_split": dict(sorted(negatives_by_split.items())),
         "ignored": dict(sorted(ignored.items())),
         "trainable": trainable,
@@ -409,6 +854,74 @@ class TrainConfig:
     device: str = "cuda"
     pretrained: bool = False
     amp: bool = True
+    # The labels (CLASS_SCHEMES): v1 the reader, v2 the classifier with not_a_sign and the kinds of other signs.
+    class_scheme: str = "v1"
+    # v2 only: the darker, lower-contrast photometric augmentation (CLASSIFIER_AUGMENTATION) and the jitter of the
+    # box (CLASSIFIER_BOX_JITTER) of the training crops, in place of the light colour jitter of v1.
+    augment: bool = False
+
+
+# The settings a reader run saved before they existed was trained with: resuming such a run compares against these.
+READER_CONFIG_BEFORE_SETTINGS = {"class_scheme": "v1", "augment": False}
+
+# The photometric augmentation of the classifier's training crops: the detector's (DETECTOR_AUGMENTATION, defined
+# below; darker frames, as the test route is mostly at dusk), with lower contrast too.
+CLASSIFIER_CONTRAST = (0.5, 1.3)
+# The box of a training crop moved and resized before the crop, as the cutter's boxes are never exact: each side
+# scaled by a factor in "scale", the centre moved by up to "shift" of the box's size, with this probability.
+CLASSIFIER_BOX_JITTER = {"probability": 0.8, "scale": (0.85, 1.2), "shift": 0.1}
+# The smallest crop, in pixels of the frame, on each side: a box thinner than that is widened around its centre.
+MIN_CROP_SIDE = 2
+
+
+def crop_rectangle(box: list[float], width: int, height: int) -> tuple[int, int, int, int]:
+    """The pixels of a box (x1, y1, x2, y2 in frame pixels) to cut from a frame of width x height: rounded
+    outwards, inside the frame, at least MIN_CROP_SIDE pixels on each side. The classifier's crops (v2 training
+    and evaluation, the chain) all come from here; the v1 reader keeps its own crop."""
+    x1, y1, x2, y2 = (float(value) for value in box)
+    left, top, right, bottom = math.floor(min(x1, x2)), math.floor(min(y1, y2)), math.ceil(max(x1, x2)), math.ceil(max(y1, y2))
+
+    def widen(low: int, high: int, limit: int) -> tuple[int, int]:
+        side = min(MIN_CROP_SIDE, limit)
+        if high - low < side:
+            middle = (low + high) / 2
+            low = int(math.floor(middle - side / 2))
+            high = low + side
+        low = max(0, min(low, limit - side))
+        high = min(limit, max(high, low + side))
+        return low, high
+
+    left, right = widen(max(0, left), min(int(width), right), int(width))
+    top, bottom = widen(max(0, top), min(int(height), bottom), int(height))
+    return left, top, right, bottom
+
+
+def jitter_box(box: list[float], rng: random.Random, jitter: dict[str, Any] = CLASSIFIER_BOX_JITTER) -> list[float]:
+    """A training box moved and resized at random (CLASSIFIER_BOX_JITTER), from a seeded random.Random; every
+    value is drawn either way, so each crop uses the same amount of rng."""
+    apply = rng.random() < jitter["probability"]
+    low, high = jitter["scale"]
+    scale_x, scale_y = rng.uniform(low, high), rng.uniform(low, high)
+    shift_x, shift_y = rng.uniform(-jitter["shift"], jitter["shift"]), rng.uniform(-jitter["shift"], jitter["shift"])
+    if not apply:
+        return list(box)
+    x1, y1, x2, y2 = (float(value) for value in box)
+    width, height = max(x2 - x1, 1.0), max(y2 - y1, 1.0)
+    centre_x, centre_y = (x1 + x2) / 2 + shift_x * width, (y1 + y2) / 2 + shift_y * height
+    half_w, half_h = width * scale_x / 2, height * scale_y / 2
+    return [centre_x - half_w, centre_y - half_h, centre_x + half_w, centre_y + half_h]
+
+
+def _check_reader_config(config: "TrainConfig") -> None:
+    if config.class_scheme not in CLASS_SCHEMES:
+        raise ValueError(f"invalid reader class_scheme {config.class_scheme!r}: one of {', '.join(CLASS_SCHEMES)}")
+    if config.augment and config.class_scheme != "v2":
+        raise ValueError("the photometric augmentation and box jitter are settings of the v2 classifier")
+
+
+def _sample_seed(*parts: Any) -> int:
+    """A 63-bit seed from text parts (the same on every machine and in every loader worker)."""
+    return int.from_bytes(hashlib.sha256(" ".join(str(part) for part in parts).encode()).digest()[:8], "little") >> 1
 
 
 def _require_training_stack():
@@ -497,13 +1010,17 @@ class DetectorTrainConfig:
     # SELECT_SCORE_THRESHOLD, ties to fewer false boxes per frame: the detector is the cutter, what it misses
     # is lost) or "loss" (validation loss, as before).
     select_by: str = "recall"
+    # What the cutter learns to cut (CUTTER_FAMILIES): "all", the speed signs and the other traffic signs (the
+    # default), or "speed", the speed signs only (every detector before this setting).
+    families: str = DEFAULT_CUTTER_FAMILIES
 
 
 # The settings a detector run saved before they existed was trained with: resuming such a run compares
 # against these.
 DETECTOR_CONFIG_BEFORE_SETTINGS = {"input_size": DEFAULT_DETECTOR_INPUT_SIZE,
                                    "anchor_min_ratio": DEFAULT_DETECTOR_ANCHOR_MIN_RATIO, "augment": False,
-                                   "negative_frame_fraction": 1.0, "select_by": "loss"}
+                                   "negative_frame_fraction": 1.0, "select_by": "loss",
+                                   "families": LEGACY_CUTTER_FAMILIES}
 DETECTOR_SELECT_BY = ("recall", "loss")
 # The validation measure of select_by "recall": a reviewed box is found by a box of score >= this with IoU >= 0.5.
 SELECT_SCORE_THRESHOLD = 0.1
@@ -532,16 +1049,21 @@ DETECTOR_AUGMENTATION = {
     # A light colour cast: each of R, G and B multiplied by its own factor.
     "channel_gain": (0.92, 1.08),
 }
+# The classifier's training crops: the same, with lower contrast too (CLASSIFIER_CONTRAST).
+CLASSIFIER_AUGMENTATION = {**DETECTOR_AUGMENTATION, "contrast": CLASSIFIER_CONTRAST}
 
 
-def detector_photometric(torch, TF, image, generator):
+def detector_photometric(torch, TF, image, generator, ranges=None):
     """A training frame (3 x H x W, values 0..1, on any device) with random gamma, brightness, contrast,
-    saturation and colour cast (DETECTOR_AUGMENTATION); the factors come from the CPU generator."""
+    saturation and colour cast (DETECTOR_AUGMENTATION, or the ranges given: CLASSIFIER_AUGMENTATION for the
+    classifier's crops); the factors come from the CPU generator."""
+    ranges = DETECTOR_AUGMENTATION if ranges is None else ranges
+
     def draw(name, count=1):
-        low, high = DETECTOR_AUGMENTATION[name]
+        low, high = ranges[name]
         return (torch.rand(count, generator=generator, dtype=torch.float64) * (high - low) + low).tolist()
 
-    apply = float(torch.rand(1, generator=generator)) < DETECTOR_AUGMENTATION["probability"]
+    apply = float(torch.rand(1, generator=generator)) < ranges["probability"]
     # Every factor is drawn either way, so each frame uses the same amount of the generator.
     gamma, brightness, contrast, saturation = (draw(name)[0] for name in ("gamma", "brightness", "contrast",
                                                                            "saturation"))
@@ -572,6 +1094,8 @@ def _check_detector_config(config: "DetectorTrainConfig") -> None:
         raise ValueError(f"invalid detector negative_frame_fraction {fraction!r}: from 0 to 1")
     if config.select_by not in DETECTOR_SELECT_BY:
         raise ValueError(f"invalid detector select_by {config.select_by!r}: one of {', '.join(DETECTOR_SELECT_BY)}")
+    if config.families not in CUTTER_FAMILIES:
+        raise ValueError(f"invalid detector families {config.families!r}: one of {', '.join(CUTTER_FAMILIES)}")
 
 
 def _detector_config_differences(saved: Any, config: "DetectorTrainConfig") -> list[str]:
@@ -590,7 +1114,7 @@ _RESUME_FLAGS = (("epochs", "--epochs"), ("patience", "--patience"), ("batch_siz
                  ("learning_rate", "--learning-rate"), ("weight_decay", "--weight-decay"),
                  ("num_workers", "--num-workers"), ("seed", "--seed"), ("device", "--device"),
                  ("anchor_min_ratio", "--anchor-min-ratio"), ("negative_frame_fraction", "--negative-frame-fraction"),
-                 ("select_by", "--select-by"))
+                 ("select_by", "--select-by"), ("families", "--cutter-families"))
 
 
 def resume_arguments(state: dict[str, Any]) -> list[str]:
@@ -602,6 +1126,8 @@ def resume_arguments(state: dict[str, Any]) -> list[str]:
         raise ValueError("invalid training state: no task or configuration")
     if task == "detector":
         config = {**DETECTOR_CONFIG_BEFORE_SETTINGS, **config}
+    else:
+        config = {**READER_CONFIG_BEFORE_SETTINGS, **config}
     flags: list[str] = []
     for key, flag in _RESUME_FLAGS:
         if key in config:
@@ -617,6 +1143,11 @@ def resume_arguments(state: dict[str, Any]) -> list[str]:
         flags.append("--no-amp")
     if task == "detector" and config.get("augment") is False:
         flags.append("--no-augment")
+    if task == "reader" and config.get("class_scheme") == "v2":
+        # The classifier: its scheme, and its augmentation only when it trained without (on by default for v2).
+        flags += ["--classes", "v2"]
+        if config.get("augment") is False:
+            flags.append("--no-augment")
     return flags
 
 
@@ -660,8 +1191,11 @@ def train_detector(
     hf_revision: str = "main",
     init_from: Path | None = None,
 ) -> dict[str, Any]:
-    """Train the first single-class full-frame speed-sign detector baseline."""
+    """Train the first single-class full-frame speed-sign detector baseline (with the other signs too: families)."""
     _check_detector_config(config)
+    if cutter_families(plan) != config.families:
+        raise ValueError(f"the plan's boxes are the families {cutter_families(plan)}, the training configuration "
+                         f"{config.families} (--cutter-families)")
     if not plan.get("trainable"):
         raise ValueError(
             "training_plan_not_trainable: detector needs positive train and validation frames"
@@ -968,6 +1502,7 @@ def train_detector(
             "dataset_sha256": plan["dataset_sha256"],
             "split_sha256": plan["split_sha256"],
             "classes": ["background", "speed_sign"],
+            "families": config.families,
             "input_size": list(config.input_size),
             "anchor_min_ratio": config.anchor_min_ratio,
             "best_validation_loss": best_validation_loss,
@@ -991,6 +1526,9 @@ def train_detector(
     )
     print(f"detector input {config.input_size[0]}x{config.input_size[1]}, smallest default box "
           f"{config.anchor_min_ratio:g} of the image, photometric augmentation {'on' if config.augment else 'off'}",
+          flush=True)
+    print("detector boxes: " + ("the speed signs" if config.families == "speed" else
+                                "the speed signs and the other traffic signs") + f" (families {config.families})",
           flush=True)
     # The factors of the photometric augmentation, drawn here (not in the loader workers): the same for any
     # number of workers, and reproduced after a resume.
@@ -1075,6 +1613,8 @@ def train_detector(
                     "architecture": "ssdlite320_mobilenet_v3_large",
                     "task": "detector",
                     "classes": ["background", "speed_sign"],
+                    # What its one class means: the speed signs, or the other signs too (CUTTER_FAMILIES).
+                    "families": config.families,
                     # What load_detector rebuilds the detector with (nnslr_tools.checkpoints).
                     "input_size": list(config.input_size),
                     "anchor_min_ratio": config.anchor_min_ratio,
@@ -1139,6 +1679,8 @@ def train_detector(
             "task": "detector",
             "architecture": "ssdlite320_mobilenet_v3_large",
             "classes": ["background", "speed_sign"],
+            "families": config.families,
+            "boxes_by_family": plan.get("boxes_by_family"),
             "input_size": list(config.input_size),
             "anchor_min_ratio": config.anchor_min_ratio,
             "augmentation": ({key: list(value) if isinstance(value, tuple) else value
@@ -1198,15 +1740,28 @@ def train_reader(
     hf_revision: str = "main",
     init_from: Path | None = None,
 ) -> dict[str, Any]:
-    """Execute the first reader baseline after explicit compute opt-in."""
+    """Execute the first reader baseline after explicit compute opt-in.
+
+    The plan's class scheme decides what is trained. v1: the reader, its best epoch the highest validation
+    accuracy. v2: the classifier with not_a_sign (prepare_reader_training), its log lines "classifier epoch ...",
+    its training crops darker and lower in contrast and their boxes jittered (config.augment), the not_a_sign
+    crops weighing in the loss as much as all the sign crops together when they are more, and its best epoch
+    the highest validation balanced accuracy: the mean of the right answers on the sign crops and the share of
+    the not_a_sign crops it rejects, so that neither the signs nor the junk boxes of the cutter decide alone.
+    """
+    _check_reader_config(config)
+    scheme = checkpoint_class_scheme(plan)
+    if config.class_scheme != scheme:
+        raise ValueError(f"the plan has class scheme {scheme}, the training configuration {config.class_scheme}")
     if not plan.get("trainable"):
         raise ValueError(
             "training_plan_not_trainable: need >=2 train classes, non-empty train/validation, "
-            "and no validation-only classes"
+            "and no validation-only classes" + (" and not_a_sign crops in train" if scheme == "v2" else "")
         )
 
     torch, Image, DataLoader, Dataset, transforms, Weights, mobilenet_v3_small = _require_training_stack()
     import torchvision
+    from torchvision.transforms import functional as TF
 
     if config.device == "cuda" and not torch.cuda.is_available():
         raise ValueError("cuda_unavailable")
@@ -1217,24 +1772,33 @@ def train_reader(
     if device.type == "cuda":
         torch.cuda.manual_seed_all(config.seed)
 
+    classifier = scheme == "v2"
+    # The name of the network in the log lines, the progress of the panel and wandb.
+    name = "classifier" if classifier else "reader"
+    augment = classifier and config.augment
     classes = list(plan["classes"])
-    class_to_index = {name: idx for idx, name in enumerate(classes)}
+    class_to_index = {label: idx for idx, label in enumerate(classes)}
+    negative_index = class_to_index.get(NOT_A_SIGN) if classifier else None
     root = Path(data_root).resolve()
 
     class CropDataset(Dataset):
         def __init__(self, records, *, training: bool):
             self.records = records
+            self.training = training
+            # The epoch whose crops this is (the jitter and the photometric draws depend on it, not on the worker).
+            self.epoch = 0
             pipeline = [transforms.Resize((config.input_size, config.input_size))]
-            if training:
+            if training and not augment:
                 pipeline.extend([
                     transforms.ColorJitter(brightness=.15, contrast=.15, saturation=.1),
                     transforms.RandomAffine(degrees=4, translate=(.03, .03), scale=(.95, 1.05)),
                 ])
-            pipeline.extend([
-                transforms.ToTensor(),
-                transforms.Normalize(mean=READER_NORMALIZE_MEAN, std=READER_NORMALIZE_STD),
-            ])
-            self.transform = transforms.Compose(pipeline)
+            elif training:
+                # The colour comes from the photometric augmentation; the box jitter moves and resizes.
+                pipeline.append(transforms.RandomAffine(degrees=4))
+            self.geometry = transforms.Compose(pipeline)
+            self.to_tensor = transforms.ToTensor()
+            self.normalize = transforms.Normalize(mean=READER_NORMALIZE_MEAN, std=READER_NORMALIZE_STD)
 
         def __len__(self):
             return len(self.records)
@@ -1244,20 +1808,34 @@ def train_reader(
             image_path = _safe_image_path(root, row["image_path"])
             with Image.open(image_path) as source:
                 image = source.convert("RGB")
-                x1, y1, x2, y2 = [int(v) for v in row["bbox_xyxy"]]
-                crop = image.crop((x1, y1, x2, y2))
-            return self.transform(crop), class_to_index[row["label"]]
+                if classifier:
+                    box = row["bbox_xyxy"]
+                    if self.training and augment:
+                        box = jitter_box(box, random.Random(_sample_seed("box", config.seed, self.epoch, index)))
+                    crop = image.crop(crop_rectangle(box, image.width, image.height))
+                else:
+                    x1, y1, x2, y2 = [int(v) for v in row["bbox_xyxy"]]
+                    crop = image.crop((x1, y1, x2, y2))
+            tensor = self.to_tensor(self.geometry(crop))
+            if self.training and augment:
+                generator = torch.Generator().manual_seed(_sample_seed("photometric", config.seed, self.epoch, index))
+                tensor = detector_photometric(torch, TF, tensor, generator, CLASSIFIER_AUGMENTATION)
+            return self.normalize(tensor), class_to_index[row["label"]]
 
     train_records = [r for r in plan["records"] if r["split"] == TRAIN_SPLIT]
     val_records = [r for r in plan["records"] if r["split"] == VALIDATION_SPLIT]
     generator = torch.Generator().manual_seed(config.seed)
+    train_dataset = CropDataset(train_records, training=True)
     train_loader = DataLoader(
-        CropDataset(train_records, training=True),
+        train_dataset,
         batch_size=config.batch_size,
         shuffle=True,
         num_workers=config.num_workers,
         pin_memory=device.type == "cuda",
         generator=generator,
+        # A last batch of one crop fails in BatchNorm when the last feature map is 1 x 1 (small --input-size): that
+        # crop, the last of the shuffle, waits for another epoch.
+        drop_last=len(train_records) > 1 and len(train_records) % config.batch_size == 1,
     )
     val_loader = DataLoader(
         CropDataset(val_records, training=False),
@@ -1277,7 +1855,19 @@ def train_reader(
         lr=config.learning_rate,
         weight_decay=config.weight_decay,
     )
-    criterion = torch.nn.CrossEntropyLoss()
+    loss_weights = None
+    if classifier:
+        # The not_a_sign crops (removed proposals and the cutter's false boxes) outnumber the signs: together they
+        # weigh at most as much as all the sign crops, so the classifier is not pushed to call a sign junk.
+        train_negatives = sum(1 for record in train_records if record["label"] == NOT_A_SIGN)
+        train_signs = len(train_records) - train_negatives
+        negative_weight = min(1.0, train_signs / train_negatives) if train_negatives else 1.0
+        loss_weights = {NOT_A_SIGN: negative_weight}
+        class_weights = torch.ones(len(classes))
+        class_weights[negative_index] = negative_weight
+        criterion = torch.nn.CrossEntropyLoss(weight=class_weights.to(device))
+    else:
+        criterion = torch.nn.CrossEntropyLoss()
 
     use_amp = bool(config.amp and device.type == "cuda")
     scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
@@ -1308,9 +1898,13 @@ def train_reader(
         return samples
 
     history = []
+    # The best value of what chooses the epoch: validation accuracy (v1), validation balanced accuracy (v2).
     best_accuracy = -1.0
+    best_selection: dict[str, Any] | None = None
+    stale = 0
     best_path = output_dir / "reader-best.pt"
     global_step = 0
+    selected_by = "balanced_accuracy" if classifier else "accuracy"
 
     start_epoch = 0
     if mode == "continue":
@@ -1326,7 +1920,7 @@ def train_reader(
         if saved.get("classes") != classes or saved.get("input_size") != config.input_size:
             raise ValueError("stable reader classes/input size mismatch")
         model.load_state_dict(model_weights(saved), strict=True)
-        print(f"continue reader from weights: {origin}")
+        print(f"continue {name} from weights: {origin}")
     elif mode == "resume":
         saved = torch_load(checkpoint_path)
         if saved.get("format_version") != 1 or saved.get("task") != "reader":
@@ -1335,12 +1929,15 @@ def train_reader(
             raise ValueError("training already completed; use --mode continue for a new run")
         if saved.get("status") != "in_progress":
             raise ValueError("invalid checkpoint status")
-        if saved.get("config") != config.__dict__:
+        saved_config = {**READER_CONFIG_BEFORE_SETTINGS, **(saved.get("config") or {})}
+        if saved_config != config.__dict__:
             raise ValueError("resume requires exactly the original training configuration")
         if saved.get("dataset_sha256") != plan["dataset_sha256"] or saved.get("split_sha256") != plan["split_sha256"]:
             raise ValueError("resume dataset/split mismatch")
         if saved.get("classes") != classes:
             raise ValueError("resume reader classes mismatch")
+        if classifier and saved.get("negatives_sha256") != plan.get("negatives_sha256"):
+            raise ValueError("resume negatives mismatch: the run started with another negatives file")
         start_epoch = saved.get("epoch")
         if not isinstance(start_epoch, int) or not 0 <= start_epoch < config.epochs:
             raise ValueError("invalid or already completed resume epoch")
@@ -1350,7 +1947,9 @@ def train_reader(
         global_step = saved["global_step"]
         history = saved["history"]
         best_accuracy = saved["best_accuracy"]
-        print(f"resume reader at epoch {start_epoch}/{config.epochs}")
+        best_selection = saved.get("best_selection")
+        stale = int(saved.get("stale", 0))
+        print(f"resume {name} at epoch {start_epoch}/{config.epochs}")
 
     def save_training_state(epoch: int, status: str) -> None:
         atomic_torch_save({
@@ -1363,9 +1962,13 @@ def train_reader(
             "config": config.__dict__,
             "dataset_sha256": plan["dataset_sha256"],
             "split_sha256": plan["split_sha256"],
+            "class_scheme": scheme,
+            "negatives_sha256": plan.get("negatives_sha256"),
             "classes": classes,
             "input_size": config.input_size,
             "best_accuracy": best_accuracy,
+            "best_selection": best_selection,
+            "stale": stale,
             "history": history,
             "state_dict": model.state_dict(),
             "optimizer": optimizer.state_dict(),
@@ -1378,18 +1981,32 @@ def train_reader(
         save_training_state(0, "in_progress")
 
     tracker = tracking.start_training_run(
-        "reader",
+        name,
         output_dir,
         _tracking_config(plan, config, "mobilenet_v3_small"),
     )
+    augmentation = None
+    if augment:
+        augmentation = {"photometric": {key: list(value) if isinstance(value, tuple) else value
+                                        for key, value in CLASSIFIER_AUGMENTATION.items()},
+                        "box_jitter": {key: list(value) if isinstance(value, tuple) else value
+                                       for key, value in CLASSIFIER_BOX_JITTER.items()},
+                        "rotation_degrees": 4}
+    if classifier:
+        counts = Counter(record["label"] == NOT_A_SIGN for record in train_records)
+        print(f"classifier crops: {counts[False]} signs and {counts[True]} not_a_sign in train, "
+              f"{sum(1 for r in val_records if r['label'] != NOT_A_SIGN)} and "
+              f"{sum(1 for r in val_records if r['label'] == NOT_A_SIGN)} in validation; {len(classes)} classes; "
+              f"not_a_sign loss weight {loss_weights[NOT_A_SIGN]:.3f}; augmentation {'on' if augment else 'off'}; "
+              f"best epoch by validation balanced accuracy (signs read right, not_a_sign rejected)", flush=True)
     try:
-        stale = 0
         stopped_early = None
         for epoch in range(start_epoch, config.epochs):
             epoch_number = epoch + 1
             epoch_start = time.perf_counter()
-            # Reproduce each epoch's DataLoader shuffle after an epoch-boundary resume.
+            # Reproduce each epoch's DataLoader shuffle (and the crops' augmentation) after an epoch-boundary resume.
             generator.manual_seed(config.seed + epoch)
+            train_dataset.epoch = epoch
             model.train()
             train_loss = 0.0
             train_seen = 0
@@ -1401,7 +2018,7 @@ def train_reader(
             for inputs, targets in train_loader:
                 # Where the training is, batch by batch, for the panel of the review site.
                 batch_index += 1
-                report_progress("reader", epoch * batch_count + batch_index, config.epochs * batch_count,
+                report_progress(name, epoch * batch_count + batch_index, config.epochs * batch_count,
                                 f"epoch {epoch_number} of {config.epochs}, batch {batch_index} of {batch_count}")
                 inputs = inputs.to(device, non_blocking=True)
                 targets = targets.to(device, non_blocking=True)
@@ -1436,6 +2053,8 @@ def train_reader(
             val_loss = 0.0
             val_seen = 0
             val_correct = 0
+            # v2: the sign crops read right and the not_a_sign crops rejected.
+            sign_seen = sign_correct = negative_seen = negative_rejected = 0
             with torch.no_grad():
                 for inputs, targets in val_loader:
                     inputs = inputs.to(device, non_blocking=True)
@@ -1443,9 +2062,16 @@ def train_reader(
                     with torch.cuda.amp.autocast(enabled=use_amp):
                         logits = model(inputs)
                         loss = criterion(logits, targets)
+                    predicted = logits.argmax(1)
                     val_loss += float(loss.detach()) * targets.numel()
                     val_seen += targets.numel()
-                    val_correct += int((logits.argmax(1) == targets).sum())
+                    val_correct += int((predicted == targets).sum())
+                    if classifier:
+                        negative = targets == negative_index
+                        sign_seen += int((~negative).sum())
+                        sign_correct += int(((predicted == targets) & ~negative).sum())
+                        negative_seen += int(negative.sum())
+                        negative_rejected += int(((predicted == negative_index) & negative).sum())
                     if want_images and len(sample_crops) == 0:
                         sample_crops = reader_samples(inputs, targets, logits)
 
@@ -1456,22 +2082,36 @@ def train_reader(
                 "validation_loss": val_loss / max(val_seen, 1),
                 "validation_accuracy": val_correct / max(val_seen, 1),
             }
+            score = epoch_result["validation_accuracy"]
+            if classifier:
+                sign_accuracy = sign_correct / sign_seen if sign_seen else None
+                rejection = negative_rejected / negative_seen if negative_seen else None
+                parts = [value for value in (sign_accuracy, rejection) if value is not None]
+                balanced = sum(parts) / len(parts) if parts else epoch_result["validation_accuracy"]
+                epoch_result.update({"validation_sign_accuracy": sign_accuracy, "validation_rejection": rejection,
+                                     "validation_balanced_accuracy": balanced})
+                score = balanced
+            epoch_result["seconds"] = time.perf_counter() - epoch_start
             history.append(epoch_result)
 
-            improved = epoch_result["validation_accuracy"] > best_accuracy
+            improved = score > best_accuracy
             if improved:
-                best_accuracy = epoch_result["validation_accuracy"]
-                torch.save({
+                best_accuracy = score
+                best_selection = {key: epoch_result.get(key) for key in (
+                    "epoch", "validation_accuracy", "validation_sign_accuracy", "validation_rejection",
+                    "validation_balanced_accuracy") if key in epoch_result}
+                saved_best = {
                     "format_version": 1,
                     "architecture": "mobilenet_v3_small",
                     "task": "reader",
+                    "class_scheme": scheme,
                     "classes": classes,
                     "input_size": config.input_size,
                     "state_dict": model.state_dict(),
                     "dataset_sha256": plan["dataset_sha256"],
                     "split_sha256": plan["split_sha256"],
                     "epoch": epoch_number,
-                    "validation_accuracy": best_accuracy,
+                    "validation_accuracy": epoch_result["validation_accuracy"],
                     "initialization": "imagenet1k_v1" if config.pretrained else "random",
                     "initialization_source": (
                         "torchvision.models.MobileNet_V3_Small_Weights.IMAGENET1K_V1"
@@ -1479,7 +2119,17 @@ def train_reader(
                     ),
                     "torch_version": str(torch.__version__),
                     "torchvision_version": torchvision.__version__,
-                }, best_path)
+                }
+                if classifier:
+                    saved_best.update({
+                        "selected_by": selected_by,
+                        "validation_sign_accuracy": epoch_result["validation_sign_accuracy"],
+                        "validation_rejection": epoch_result["validation_rejection"],
+                        "validation_balanced_accuracy": epoch_result["validation_balanced_accuracy"],
+                        "folded_labels": dict(plan.get("folded_labels") or {}),
+                        "negatives_sha256": plan.get("negatives_sha256"),
+                    })
+                torch.save(saved_best, best_path)
 
             if tracker.enabled:
                 epoch_metrics = {
@@ -1491,20 +2141,30 @@ def train_reader(
                     "validation/best_accuracy": best_accuracy,
                     "epoch_time": time.perf_counter() - epoch_start,
                 }
+                if classifier:
+                    for key in ("sign_accuracy", "rejection", "balanced_accuracy"):
+                        if epoch_result["validation_" + key] is not None:
+                            epoch_metrics["validation/" + key] = epoch_result["validation_" + key]
                 if len(sample_crops) > 0:
                     epoch_metrics["validation/crops"] = sample_crops
                 tracker.log(epoch_metrics, step=global_step)
+            stale = 0 if improved else stale + 1
             save_training_state(epoch_number, "in_progress")
-            # One line per epoch: the panel of the review site reads the progress from the log.
-            print(f"reader epoch {epoch_number}/{config.epochs} train_loss {epoch_result['train_loss']:.4f} "
+            # One line per epoch: the panel of the review site reads the progress from the log (the seconds last).
+            extra = ""
+            if classifier:
+                extra = "".join(f" {label} {epoch_result[key]:.4f}" for label, key in (
+                    ("val_sign_accuracy", "validation_sign_accuracy"), ("val_rejection", "validation_rejection"))
+                    if epoch_result[key] is not None)
+            print(f"{name} epoch {epoch_number}/{config.epochs} train_loss {epoch_result['train_loss']:.4f} "
                   f"val_loss {epoch_result['validation_loss']:.4f} "
                   f"train_accuracy {epoch_result['train_accuracy']:.4f} "
-                  f"val_accuracy {epoch_result['validation_accuracy']:.4f} "
+                  f"val_accuracy {epoch_result['validation_accuracy']:.4f}{extra} "
                   f"{time.perf_counter() - epoch_start:.0f}s", flush=True)
-            stale = 0 if improved else stale + 1
             if config.patience and stale >= config.patience and epoch_number < config.epochs:
                 stopped_early = epoch_number
-                print(f"reader stops early after epoch {epoch_number}: validation accuracy not better for "
+                measure = "validation balanced accuracy" if classifier else "validation accuracy"
+                print(f"{name} stops early after epoch {epoch_number}: {measure} not better for "
                       f"{stale} epochs (best {best_accuracy:.4f})", flush=True)
                 break
 
@@ -1516,11 +2176,18 @@ def train_reader(
                 "total_memory_bytes": int(torch.cuda.get_device_properties(device).total_memory),
             }
 
+        best = best_selection or {}
         result = {
             "task": "reader",
             "architecture": "mobilenet_v3_small",
+            "class_scheme": scheme,
             "classes": classes,
-            "best_validation_accuracy": best_accuracy,
+            # v1: the best validation accuracy, which chose the epoch; v2: the accuracy on every validation crop at
+            # the epoch the balanced accuracy chose (best_validation_balanced_accuracy).
+            "best_validation_accuracy": best.get("validation_accuracy", best_accuracy),
+            "best_epoch": best.get("epoch") or next(
+                (item["epoch"] for item in history if item["validation_accuracy"] == best_accuracy), None),
+            "selection": {"by": selected_by},
             "stopped_early_after_epoch": stopped_early,
             "checkpoint": str(best_path),
             "training_plan": str(plan_path),
@@ -1537,12 +2204,26 @@ def train_reader(
             "history": history,
             "limitations": plan["limitations"],
         }
+        if classifier:
+            result.update({
+                "best_validation_sign_accuracy": best.get("validation_sign_accuracy"),
+                "best_validation_rejection": best.get("validation_rejection"),
+                "best_validation_balanced_accuracy": best.get("validation_balanced_accuracy"),
+                "loss_weights": loss_weights,
+                "augmentation": augmentation,
+                "folded_labels": dict(plan.get("folded_labels") or {}),
+                "negatives": {"file": (plan.get("negatives_file") or {}).get("file"),
+                              "sha256": plan.get("negatives_sha256"), "by_split": plan.get("negatives")},
+                "crops": {"train": len(train_records), "validation": len(val_records),
+                          "train_not_a_sign": sum(1 for r in train_records if r["label"] == NOT_A_SIGN),
+                          "validation_not_a_sign": sum(1 for r in val_records if r["label"] == NOT_A_SIGN)},
+            })
         (output_dir / "result.json").write_text(
             json.dumps(result, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
         tracker.set_summary({
-            "best_validation_accuracy": best_accuracy,
+            "best_validation_accuracy": result["best_validation_accuracy"],
             "checkpoint": str(best_path),
         })
         save_training_state(config.epochs, "completed")

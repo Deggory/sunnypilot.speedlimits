@@ -16,9 +16,16 @@ from typing import Any
 from nnslr_tools.checkpoints import (detector_anchor_min_ratio, detector_input_size, format_input_size,
                                      load_detector, safe_torch_load)
 from nnslr_tools.training import (
+    DETECTOR_FAMILIES,
+    NEGATIVE_SOURCES,
+    NOT_A_SIGN,
     _require_detector_stack,
     _require_training_stack,
     _safe_image_path,
+    checkpoint_class_scheme,
+    crop_rectangle,
+    cutter_families,
+    family_label,
 )
 
 
@@ -198,9 +205,36 @@ def detector_metrics(images: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def family_group(family: str) -> str:
+    """The family groups of a cutter's recall: "speed" (the speed signs, what every cutter finds) or the family."""
+    return "speed" if family in DETECTOR_FAMILIES else str(family)
+
+
+def recall_by_family(items: list[dict[str, Any]]) -> dict[str, dict[str, Any]] | None:
+    """Found reviewed boxes by family group (family_group), of frames scored by score_frame that carry the family of
+    each reviewed box (``truth_families``); None when they do not. A cutter of the speed and the other signs is
+    compared with the older speed-only ones on "speed"."""
+    if not items or not all(isinstance(item.get("truth_families"), list) for item in items):
+        return None
+    rows: dict[str, dict[str, int]] = {}
+    for item in items:
+        found = set(item["found_truth_indexes"])
+        for index, family in enumerate(item["truth_families"]):
+            row = rows.setdefault(family_group(family), {"truth": 0, "found": 0})
+            row["truth"] += 1
+            row["found"] += int(index in found)
+    return {key: {**row, "recall": row["found"] / row["truth"] if row["truth"] else None}
+            for key, row in sorted(rows.items())}
+
+
 def detector_size_metrics(items: list[dict[str, Any]]) -> dict[str, Any]:
-    """detector_metrics plus recall_by_width, of frames scored by score_frame."""
-    return {**detector_metrics(items), "recall_by_width": recall_by_width(items)}
+    """detector_metrics plus recall_by_width (and recall_by_family when the frames know it), of frames scored by
+    score_frame."""
+    measured = {**detector_metrics(items), "recall_by_width": recall_by_width(items)}
+    by_family = recall_by_family(items)
+    if by_family is not None:
+        measured["recall_by_family"] = by_family
+    return measured
 
 
 def threshold_metrics(items: list[dict[str, Any]]) -> dict[str, Any]:
@@ -217,6 +251,50 @@ def human_reviewed_metrics(items: list[dict[str, Any]], metrics) -> dict[str, An
     if not human:
         return None
     return {"label_basis": HUMAN_LABEL_BASIS, **metrics(human)}
+
+
+def _rate(part: int, whole: int) -> float | None:
+    return part / whole if whole else None
+
+
+def _rejections(samples: list[dict[str, Any]]) -> dict[str, Any]:
+    """How many not_a_sign crops the classifier rejected (answered not_a_sign)."""
+    rejected = sum(1 for sample in samples if sample["predicted"] == NOT_A_SIGN)
+    return {"crops": len(samples), "rejected": rejected, "rejection_rate": _rate(rejected, len(samples))}
+
+
+def classifier_metrics(samples: list[dict[str, Any]], classes: list[str]) -> dict[str, Any]:
+    """What the v2 classifier adds to reader_metrics, from its samples (truth, predicted, correct, source,
+    label_basis):
+
+    - ``signs``: reader_metrics of the sign crops alone (truth not not_a_sign), the same on the crops a person
+      confirmed, how many it rejected as not_a_sign (a sign lost), and ``family_accuracy``: right answers with
+      the kind of an other sign dropped on both sides, comparable with the v1 reader;
+    - ``not_a_sign``: the share of the not_a_sign crops it rejected, by where they come from (NEGATIVE_SOURCES),
+      on frames a person reviewed, and what it called those it kept (``survivors``).
+    """
+    signs = [sample for sample in samples if sample["truth"] != NOT_A_SIGN]
+    negatives = [sample for sample in samples if sample["truth"] == NOT_A_SIGN]
+    rejected_signs = sum(1 for sample in signs if sample["predicted"] == NOT_A_SIGN)
+    family_right = sum(1 for sample in signs if family_label(sample["predicted"]) == family_label(sample["truth"]))
+    human_negatives = [sample for sample in negatives if sample.get("label_basis") == HUMAN_LABEL_BASIS]
+    return {
+        "signs": {
+            **reader_metrics(signs, classes),
+            "human_reviewed": human_reviewed_metrics(signs, lambda items: reader_metrics(items, classes)),
+            "rejected": rejected_signs,
+            "rejected_rate": _rate(rejected_signs, len(signs)),
+            "family_accuracy": _rate(family_right, len(signs)),
+        },
+        "not_a_sign": {
+            **_rejections(negatives),
+            "by_source": {source: _rejections([sample for sample in negatives if sample.get("source") == source])
+                          for source in NEGATIVE_SOURCES},
+            "human_reviewed": _rejections(human_negatives) if human_negatives else None,
+            "survivors": dict(sorted(Counter(sample["predicted"] for sample in negatives
+                                             if sample["predicted"] != NOT_A_SIGN).items())),
+        },
+    }
 
 
 def _load_checkpoint(torch, checkpoint_path: Path, expected_task: str) -> dict[str, Any]:
@@ -251,6 +329,12 @@ def evaluate_reader(
         raise ValueError("checkpoint_dataset_mismatch")
     if checkpoint.get("split_sha256") != plan.get("split_sha256"):
         raise ValueError("checkpoint_split_mismatch")
+    # The labels of the plan and of the checkpoint must be the same scheme (v2: --classes v2 for the plan).
+    scheme = checkpoint_class_scheme(checkpoint)
+    if scheme != checkpoint_class_scheme(plan):
+        raise ValueError(f"checkpoint_class_scheme_mismatch: the checkpoint is {scheme}, the plan "
+                         f"{checkpoint_class_scheme(plan)} (--classes)")
+    classifier = scheme == "v2"
 
     records = [r for r in plan["records"] if r["split"] == partition]
     if not records:
@@ -267,8 +351,11 @@ def evaluate_reader(
             path = _safe_image_path(root, row["image_path"])
             with Image.open(path) as source:
                 image = source.convert("RGB")
-                x1, y1, x2, y2 = [int(v) for v in row["bbox_xyxy"]]
-                crop = image.crop((x1, y1, x2, y2))
+                if classifier:
+                    crop = image.crop(crop_rectangle(row["bbox_xyxy"], image.width, image.height))
+                else:
+                    x1, y1, x2, y2 = [int(v) for v in row["bbox_xyxy"]]
+                    crop = image.crop((x1, y1, x2, y2))
             transform = transforms.Compose([
                 transforms.Resize((input_size, input_size)),
                 transforms.ToTensor(),
@@ -303,7 +390,7 @@ def evaluate_reader(
             ):
                 predicted_label = classes[predicted_index]
                 row = records[record_index]
-                samples.append({
+                sample = {
                     "annotation_id": row["annotation_id"],
                     "image_path": row["image_path"],
                     "truth": truth_label,
@@ -311,9 +398,14 @@ def evaluate_reader(
                     "confidence": float(confidence),
                     "correct": predicted_label == truth_label,
                     "label_basis": row.get("label_basis"),
-                })
+                }
+                if classifier:
+                    # Where the crop comes from: a reviewed box, a removed proposal, a false box of the cutter.
+                    sample.update({"source": row.get("source"), "bbox_xyxy": row.get("bbox_xyxy"),
+                                   "negative_id": row.get("negative_id")})
+                samples.append(sample)
 
-    return {
+    report = {
         "schema_version": 1,
         "task": "reader",
         "partition": partition,
@@ -328,6 +420,12 @@ def evaluate_reader(
         "split_sha256": plan["split_sha256"],
         "device": str(device),
     }
+    if classifier:
+        # accuracy, per_class and confusion above count every crop, the not_a_sign ones too.
+        report.update({"class_scheme": scheme, **classifier_metrics(samples, classes),
+                       "negatives_sha256": plan.get("negatives_sha256"),
+                       "checkpoint_epoch": checkpoint.get("epoch")})
+    return report
 
 
 def evaluate_detector(
@@ -355,6 +453,11 @@ def evaluate_detector(
         raise ValueError("checkpoint_dataset_mismatch")
     if checkpoint.get("split_sha256") != plan.get("split_sha256"):
         raise ValueError("checkpoint_split_mismatch")
+    # The reviewed boxes it is measured on are the families it learnt to cut (--cutter-families of the plan).
+    families = cutter_families(checkpoint)
+    if families != cutter_families(plan):
+        raise ValueError(f"checkpoint_families_mismatch: the cutter finds the families {families}, the plan has "
+                         f"{cutter_families(plan)} (--cutter-families)")
 
     frames = [r for r in plan["frames"] if r["split"] == partition]
     if not frames:
@@ -400,7 +503,8 @@ def evaluate_detector(
             for value in thresholds:
                 scored[value].append({**score_frame(frame["boxes"], predictions, score_threshold=value,
                                                     iou_threshold=iou_threshold),
-                                      "label_basis": frame.get("label_basis")})
+                                      "label_basis": frame.get("label_basis"),
+                                      "truth_families": frame.get("box_families")})
             matched = scored[float(score_threshold)][-1]
             selected = matched["selected"]
             image_results.append({
@@ -410,6 +514,7 @@ def evaluate_detector(
                 "segment_index": frame["segment_index"],
                 "label_basis": frame.get("label_basis"),
                 "truth_boxes": frame["boxes"],
+                "truth_families": frame.get("box_families"),
                 "predictions": selected,
                 "truth_count": len(frame["boxes"]),
                 "prediction_count": len(selected),
@@ -429,6 +534,9 @@ def evaluate_detector(
         **detector_metrics(image_results),
         # Found and missed reviewed boxes by their width in the frame (WIDTH_BUCKETS), at score_threshold.
         "recall_by_width": recall_by_width(main),
+        # The same by family group: "speed" compares with the cutters of the speed signs only.
+        "recall_by_family": recall_by_family(main),
+        "families": families,
         # The same measure on the frames a person confirmed (None when the partition has none).
         "counts_by_label_basis": label_basis_counts(image_results),
         "human_reviewed": human_reviewed_metrics(main, detector_size_metrics),
@@ -565,8 +673,10 @@ def detector_sizes_table(sizes_root: Path, sizes: list[str] | tuple[str, ...] = 
         human_frames = (first.get("human_reviewed") or {}).get("image_count", 0)
         out.append(f"== {partition}: the cutter, recall first ({frames} frames, {human_frames} confirmed by a person; "
                    f"found = IoU >= {first.get('iou_threshold')} with a reviewed box; width of the reviewed box in "
-                   f"frame pixels; boxes/frame = boxes passed on to the classifier) ==")
-        header = ("score", "rows", "size", "recall", *WIDTH_LABELS.values(), "boxes/frame", "false/frame",
+                   f"frame pixels; speed = the speed signs alone; boxes/frame = boxes passed on to the classifier) ==")
+        # "speed": the recall of the speed signs alone, for a cutter of the other signs too (families all); the
+        # recall of a speed-only cutter is the same number.
+        header = ("score", "rows", "size", "recall", "speed", *WIDTH_LABELS.values(), "boxes/frame", "false/frame",
                   "precision", "F1")
         lines: list[tuple[str, ...]] = [header]
         thresholds = sorted({key for report in reports.values() if report is not None
@@ -587,8 +697,12 @@ def detector_sizes_table(sizes_root: Path, sizes: list[str] | tuple[str, ...] = 
                         lines.append((score, rows, size, *["-"] * (len(header) - 3)))
                         continue
                     widths = metrics.get("recall_by_width") or {}
+                    speed = (metrics.get("recall_by_family") or {}).get("speed")
+                    if speed is None and report.get("families", "speed") == "speed":
+                        speed = metrics
                     lines.append((
-                        score, rows, size, _found(metrics), *(_found(widths.get(key) or {}) for key in WIDTH_LABELS),
+                        score, rows, size, _found(metrics), _found(speed or {}),
+                        *(_found(widths.get(key) or {}) for key in WIDTH_LABELS),
                         _per_frame(metrics, "predictions_per_image"), _per_frame(metrics, "false_positives_per_image"),
                         _fraction(metrics.get("precision_iou")), _fraction(metrics.get("f1_iou")),
                     ))
@@ -604,7 +718,7 @@ def detector_sizes_table(sizes_root: Path, sizes: list[str] | tuple[str, ...] = 
 
     results = {size: _read_report(root / size / "result.json") for size in sizes}
     cost = [("size", "ms/frame", "s/epoch", "gpu_peak_GB", "best_epoch", "chosen_by", "val_recall",
-             "sign_free/epoch", "augmentation", "default_box_min")]
+             "sign_free/epoch", "augmentation", "default_box_min", "families")]
     for size in sizes:
         result = results[size]
         best, per_epoch, memory = _training_cells(result)
@@ -617,10 +731,12 @@ def detector_sizes_table(sizes_root: Path, sizes: list[str] | tuple[str, ...] = 
         cost.append((size, milliseconds.get(size, "-"), per_epoch, memory, best, chosen_by,
                      _fraction(result.get("best_validation_recall")),
                      _fraction(config.get("negative_frame_fraction", 1.0), 2),
-                     "on" if result.get("augmentation") else "off", _fraction(result.get("anchor_min_ratio"), 2)))
+                     "on" if result.get("augmentation") else "off", _fraction(result.get("anchor_min_ratio"), 2),
+                     str(result.get("families") or "speed")))
     out += ["", f"== cost and training: ms/frame of the model alone on {', '.join(sorted(devices)) or '-'} (batch 1, "
                 f"float32, on test); s/epoch and GPU memory of the training; best epoch / epochs run, chosen by "
                 f"validation recall at score 0.1 (val_recall) or loss; share of the frames without signs per epoch; "
-                f"smallest default box as a fraction of the image side =="]
+                f"smallest default box as a fraction of the image side; families: what it cuts (speed signs, or all: "
+                f"the other signs too) =="]
     out += _table(cost)
     return "\n".join(out) + "\n"

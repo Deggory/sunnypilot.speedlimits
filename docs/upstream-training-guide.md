@@ -588,6 +588,23 @@ validation loss). Every epoch line also prints `val_recall`, and `result.json`
 holds `best_epoch`, `best_validation_recall`, the validation loss of that epoch
 as `best_validation_loss`, and `selection`.
 
+What the cutter learns to cut is `--cutter-families`: `all` (the default for a
+new detector) is the speed-sign families and the other traffic signs
+(`other_sign`), so that the classifier gets them and says what they are;
+`speed` is the speed signs only, as every detector before the option (a
+checkpoint, training state or report without `families` is `speed`, and a run
+saved before it resumes so). Road markings and boxes marked "not a sign" are
+never boxes of the cutter. The detector keeps one class (still named
+`speed_sign` in its checkpoint); the plan, the checkpoint, the training state
+and `result.json` record `families`, the plan and `result.json` the boxes per
+partition and family (`boxes_by_family`). `nnslr evaluate --task detector`
+measures a checkpoint on the families it learnt and adds `recall_by_family`
+(`speed`, `other_sign`) overall and at every threshold, so the speed-sign recall
+of an `all` cutter compares with the older ones; the size comparison shows it
+as the `speed` column. Before the other-sign rule of 24 October 2026 an AI
+reviewer left the other signs without a box: in those frames they are
+background for the cutter.
+
 `--mode resume` needs exactly the settings the run started with;
 `scripts/run_v100_baseline.sh` and `scripts/run_detector_sizes.sh` read them
 from the run's `training-state.pt` (`nnslr_tools.training.resume_arguments_file`),
@@ -600,9 +617,86 @@ each on test and validation and prints the comparison, saved as
 `comparison.txt`. Its smallest default box is `0.02` of the image side
 (`NNSLR_DETECTOR_ANCHOR_MIN_RATIO`), its share of frames without signs `0.1`
 (`NNSLR_DETECTOR_NEGATIVE_FRACTION`), and the best epoch follows the validation
-recall. It refuses a busy GPU unless `NNSLR_ALLOW_BUSY_GPU=1`, like the
+recall; its boxes are the families `NNSLR_CUTTER_FAMILIES` (`all` by default, or
+`speed`). It refuses a busy GPU unless `NNSLR_ALLOW_BUSY_GPU=1`, like the
 baseline pipeline, and finishes an interrupted comparison when run again with
 the same name.
+
+### The classifier: "not a sign" and the chain end to end
+
+The reader has two class schemes (`--classes`, recorded in the plan, the
+training state, the checkpoint and `result.json`; a checkpoint without one is
+`v1`). `v1` is the reader as before. `v2` is the classifier of the pipeline
+(cutter -> classifier -> decider, [NEURAL_NETWORK.md](NEURAL_NETWORK.md)): the
+same labels, the kind of an other sign (`other_sign:give_way` when the review
+gives it; a kind with fewer than 3 training crops is folded into `other_sign`
+everywhere, `folded_labels`) and `not_a_sign`, learnt from:
+
+- the proposals a reviewer removed (`review_state` `rejected`) that overlap no
+  kept box of their frame (IoU < 0.1: a duplicate on a sign, or a box drawn
+  again, still frames a sign), in the partition of their frame;
+- the boxes a reviewer kept and marked "not a sign";
+- the cutter's false boxes, mined beforehand on the GPU:
+
+```sh
+.venv/bin/nnslr mine-negatives --dry-run          # CPU: frames, sign crops, caps, the dataset's own negatives
+.venv-gpu/bin/nnslr mine-negatives --cutter active --output data/runs/<run>/negatives.jsonl
+```
+
+`mine-negatives` runs the cutter (`active`: the cutter in use of the Models
+tab, `models/active.json`; or a `detector-best.pt`) on every reviewed frame of
+train, validation and test and keeps its boxes of score >= 0.1
+(`--score-threshold`) that overlap no box a reviewer saw there (IoU < 0.1 with
+every kept box and every removed proposal), at most 3 per frame, the highest
+scores (`--per-frame`), and at most 3 x the sign crops of each partition
+(`--total-factor`), drawn with `--seed` from the frames a person reviewed first,
+then those an AI reviewed after the other-sign rule of 24 October 2026
+(`OTHER_SIGN_RULE_AT`), then the older AI reviews, which may hold other signs
+without a box. Each partition takes its negatives from its own frames only, the
+buffer none. The file starts with a header (dataset and split, the cutter and
+its sha256, the settings, the counts per partition and per reviewer tier); the
+training refuses it on another dataset or split.
+
+```sh
+.venv/bin/nnslr train --task reader --classes v2 --dry-run
+.venv-gpu/bin/nnslr train --task reader --classes v2 --negatives data/runs/<run>/negatives.jsonl \
+  --pretrained --epochs 30 --output data/runs/<run>/classifier
+```
+
+The `v2` training crops are cut with a jittered box (each side scaled 0.85–1.2,
+the centre moved up to 10% of the box, `CLASSIFIER_BOX_JITTER`: the cutter's
+boxes are never exact) and photometrically augmented like the detector's
+frames, with lower contrast too (`CLASSIFIER_AUGMENTATION`); `--no-augment`
+trains without both. The `not_a_sign` crops together weigh at most as much as
+all the sign crops in the loss (`loss_weights`). The best epoch is the one with
+the highest validation balanced accuracy: the mean of the sign crops read right
+and the `not_a_sign` crops rejected. Its epoch lines read
+`classifier epoch N/M ... val_sign_accuracy X val_rejection Y Ns`.
+
+`nnslr evaluate --task reader --classes v2 --negatives <file>` measures it
+alone: besides the usual numbers on every crop, `signs` (the sign crops only,
+with the crops a person confirmed, the signs it called not a sign, and
+`family_accuracy`, comparable with the old reader) and `not_a_sign` (the share
+rejected, by source and on the frames a person reviewed).
+
+`nnslr evaluate-chain --cutter active --classifier <reader-best.pt> --partition
+test --output <run>/evaluation/chain-test.json` measures the two networks end
+to end: the cutter on every reviewed frame of the partition, each of its boxes
+cut from the frame at full resolution and classified; at cutter scores 0.05,
+0.1 and 0.25 the speed signs found AND read right (overall, by the width of the
+reviewed box, on the signs a person confirmed), the cutter's own share found,
+the boxes and false boxes per frame, the false boxes per frame that survive
+(answered anything but `not_a_sign`) and the confusion of every box passed on.
+An old reader (`v1`) rejects nothing: every false box survives.
+
+`scripts/run_classifier.sh NAME` (also the **Train the classifier** button of
+the Train tab) does all of it on the GPU into `data/runs/NAME/`: checks, mining
+with the cutter in use, training from ImageNet, the classifier alone on test and
+validation, the chain on test and validation, the chain on test with the old
+reader (`NNSLR_OLD_READER_RUN`, default `2026-10-24_1452`) and a comparison
+saved as `comparison.txt`. It refuses a busy GPU unless
+`NNSLR_ALLOW_BUSY_GPU=1` and finishes an interrupted run when run again with the
+same name.
 
 For the complete guarded pipeline on the training host:
 

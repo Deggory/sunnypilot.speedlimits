@@ -693,13 +693,18 @@ def _train_config(args: argparse.Namespace):
             negative_frame_fraction=(args.negative_frame_fraction if args.negative_frame_fraction is not None
                                      else defaults.negative_frame_fraction),
             select_by=args.select_by if args.select_by is not None else defaults.select_by,
+            families=args.cutter_families if args.cutter_families is not None else defaults.families,
         )
         _check_detector_config(config)
         return config
-    if (args.anchor_min_ratio is not None or args.no_augment or args.negative_frame_fraction is not None
-            or args.select_by is not None):
+    if args.cutter_families is not None:
+        raise ValueError("--cutter-families is a detector option")
+    classes = getattr(args, "classes", "v1")
+    # --no-augment is also the classifier's (v2): its darker crops and box jitter are on by default.
+    if (args.anchor_min_ratio is not None or (args.no_augment and classes != "v2")
+            or args.negative_frame_fraction is not None or args.select_by is not None):
         raise ValueError("--anchor-min-ratio, --no-augment, --negative-frame-fraction and --select-by are "
-                         "detector options")
+                         "detector options (--no-augment also of the reader with --classes v2)")
     if args.input_size is not None and not str(args.input_size).isdigit():
         raise ValueError(f"invalid reader --input-size {args.input_size!r}: the side of the square crop in pixels")
     return TrainConfig(
@@ -714,7 +719,34 @@ def _train_config(args: argparse.Namespace):
         device=args.device,
         pretrained=args.pretrained,
         amp=not args.no_amp,
+        class_scheme=classes,
+        augment=classes == "v2" and not args.no_augment,
     )
+
+
+def _evaluated_families(args: argparse.Namespace) -> str:
+    """The families a detector is measured on: those its checkpoint learnt (a checkpoint that does not say: the speed
+    signs); without a checkpoint (--dry-run) --cutter-families, else the default of a new cutter."""
+    from nnslr_tools.training import DEFAULT_CUTTER_FAMILIES, cutter_families
+
+    if args.dry_run or not args.checkpoint:
+        return args.cutter_families or DEFAULT_CUTTER_FAMILIES
+    from nnslr_tools.checkpoints import torch_load
+    families = cutter_families(torch_load(Path(args.checkpoint)))
+    if args.cutter_families is not None and args.cutter_families != families:
+        raise ValueError(f"--cutter-families {args.cutter_families}: the checkpoint cuts the families {families}")
+    return families
+
+
+def _reader_plan_options(args: argparse.Namespace) -> dict:
+    """The class scheme and negatives file of a reader plan (nnslr train and evaluate)."""
+    if args.task != "reader" and (args.classes != "v1" or args.negatives):
+        raise ValueError("--classes and --negatives are reader options")
+    if args.task != "detector" and getattr(args, "cutter_families", None) is not None:
+        raise ValueError("--cutter-families is a detector option")
+    if args.negatives and args.classes != "v2":
+        raise ValueError("--negatives are crops of the classifier: add --classes v2")
+    return {"class_scheme": args.classes, "negatives_path": Path(args.negatives) if args.negatives else None}
 
 
 def _cmd_train(args: argparse.Namespace) -> int:
@@ -738,10 +770,11 @@ def _cmd_train(args: argparse.Namespace) -> int:
 
     # The configuration is checked before the plan, so that a dry run refuses a wrong setting too.
     config = _train_config(args)
+    options = _reader_plan_options(args)
     if args.task == "detector":
-        plan = prepare_detector_training(dataset, splits, root, dataset_kind=kind)
+        plan = prepare_detector_training(dataset, splits, root, dataset_kind=kind, families=config.families)
     else:
-        plan = prepare_reader_training(dataset, splits, root, dataset_kind=kind)
+        plan = prepare_reader_training(dataset, splits, root, dataset_kind=kind, **options)
 
     if args.dry_run:
         summary = dict(plan)
@@ -785,14 +818,17 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
     dataset = Path(args.dataset) if args.dataset else default_dataset
     splits = Path(args.splits) if args.splits else root / "splits" / "latest.json"
 
+    options = _reader_plan_options(args)
     if args.task == "detector":
-        plan = prepare_detector_training(dataset, splits, root, dataset_kind=kind)
+        plan = prepare_detector_training(dataset, splits, root, dataset_kind=kind,
+                                         families=_evaluated_families(args))
         selected = [r for r in plan["frames"] if r["split"] == args.partition]
     else:
-        plan = prepare_reader_training(dataset, splits, root, dataset_kind=kind)
+        plan = prepare_reader_training(dataset, splits, root, dataset_kind=kind, **options)
         selected = [r for r in plan["records"] if r["split"] == args.partition]
 
     if args.dry_run:
+        from collections import Counter
         from nnslr_tools.evaluation import HUMAN_LABEL_BASIS, label_basis_counts
         report = {
             "task": args.task,
@@ -805,6 +841,11 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
             "human_reviewed_sample_count": sum(1 for r in selected if r.get("label_basis") == HUMAN_LABEL_BASIS),
             "checkpoint_required_for_execution": True,
         }
+        if plan.get("class_scheme") == "v2":
+            report.update({"class_scheme": "v2",
+                           "counts_by_label": dict(sorted(Counter(r["label"] for r in selected).items())),
+                           "not_a_sign_by_source": dict(sorted(Counter(r["source"] for r in selected
+                                                                       if r["label"] == "not_a_sign").items()))})
         print(json.dumps(report, indent=2, sort_keys=True))
         return 0 if selected else 1
 
@@ -837,6 +878,63 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
     print(json.dumps(report, indent=2, sort_keys=True, allow_nan=False))
     return 0
 # [evaluation-baseline] - END
+
+
+# [classifier-chain] - START
+def _dataset_and_split(args: argparse.Namespace) -> tuple[Path, Path, Path]:
+    """(data root, dataset, split) of a command with the usual dataset arguments."""
+    from nnslr_tools.preannotate import resolve_data_root
+
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    default_dataset = (root / "datasets" / "training_candidate_dataset" / "objects.jsonl"
+                       if args.dataset_kind == "training-candidate" else root / "annotations" / "objects.jsonl")
+    dataset = Path(args.dataset) if args.dataset else default_dataset
+    splits = Path(args.splits) if args.splits else root / "splits" / "latest.json"
+    return root, dataset, splits
+
+
+def _cmd_mine_negatives(args: argparse.Namespace) -> int:
+    from nnslr_tools.chain import mine_negatives, negatives_dry_run
+
+    root, dataset, splits = _dataset_and_split(args)
+    partitions = tuple(args.partition) if args.partition else ("train", "validation", "test")
+    if args.dry_run:
+        report = negatives_dry_run(dataset, splits, root, dataset_kind=args.dataset_kind, per_frame=args.per_frame,
+                                   total_factor=args.total_factor, partitions=partitions)
+    else:
+        if not args.output:
+            raise ValueError("--output is required unless --dry-run")
+        report = mine_negatives(dataset, splits, root, args.cutter, Path(args.output), dataset_kind=args.dataset_kind,
+                                score_threshold=args.score_threshold, per_frame=args.per_frame,
+                                total_factor=args.total_factor, seed=args.seed, partitions=partitions,
+                                device_name=args.device, batch_size=args.batch_size, num_workers=args.num_workers)
+    print(json.dumps(report, indent=2, sort_keys=True, allow_nan=False))
+    return 0
+
+
+def _cmd_evaluate_chain(args: argparse.Namespace) -> int:
+    from nnslr_tools.chain import chain_dry_run, evaluate_chain
+    from nnslr_tools.evaluation import write_evaluation
+
+    root, dataset, splits = _dataset_and_split(args)
+    if args.dry_run:
+        report = chain_dry_run(dataset, splits, root, dataset_kind=args.dataset_kind, partition=args.partition)
+        print(json.dumps(report, indent=2, sort_keys=True))
+        return 0 if report["image_count"] else 1
+    try:
+        thresholds = tuple(float(value) for value in args.score_thresholds.split(",") if value.strip())
+    except ValueError as exc:
+        raise ValueError(f"invalid --score-thresholds {args.score_thresholds!r}: numbers separated by commas") from exc
+    report = evaluate_chain(dataset, splits, root, args.cutter, args.classifier, dataset_kind=args.dataset_kind,
+                            partition=args.partition, score_thresholds=thresholds,
+                            main_score_threshold=args.main_score_threshold, iou_threshold=args.iou_threshold,
+                            device_name=args.device, batch_size=args.batch_size, num_workers=args.num_workers)
+    write_evaluation(report, Path(args.output) if args.output else None)
+    # The frames go to the file only: the terminal gets the measures.
+    print(json.dumps({key: value for key, value in report.items() if key != "images"}, indent=2, sort_keys=True,
+                     allow_nan=False))
+    return 0
+# [classifier-chain] - END
 
 
 # [experiment-b] - START
@@ -1352,6 +1450,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_train.add_argument("--pretrained", action="store_true",
                          help="allow torchvision ImageNet weights for the reader/backbone if not cached")
     p_train.add_argument("--no-amp", action="store_true", help="disable CUDA automatic mixed precision")
+    # [classifier-chain] - START
+    p_train.add_argument("--cutter-families", choices=("all", "speed"), default=None,
+                         help="detector: the boxes it learns to cut: all, the speed signs and the other traffic signs "
+                              "(default), or speed, the speed signs only (every detector before this option)")
+    p_train.add_argument("--classes", choices=("v1", "v2"), default="v1",
+                         help="reader: v1 the labels of the first reader (default); v2 the classifier: also "
+                              "not_a_sign (removed proposals, boxes marked not a sign, --negatives) and the kinds "
+                              "of other signs, with darker crops and box jitter (--no-augment: without)")
+    p_train.add_argument("--negatives", help="reader --classes v2: the cutter's false boxes of nnslr "
+                                             "mine-negatives (mined on this dataset and split)")
+    # [classifier-chain] - END
     p_train.set_defaults(func=_cmd_train)
     # [training-baseline] - END
 
@@ -1378,8 +1487,71 @@ def build_parser() -> argparse.ArgumentParser:
     p_eval.add_argument("--iou-threshold", type=float, default=.5, help="detector IoU match threshold")
     p_eval.add_argument("--dry-run", action="store_true", help="validate the evaluation population without importing torch")
     p_eval.add_argument("--output", help="optional JSON report path")
+    # [classifier-chain] - START
+    p_eval.add_argument("--cutter-families", choices=("all", "speed"), default=None,
+                        help="detector: the families its reviewed boxes are; default those of the checkpoint (one "
+                             "that does not say: speed), with --dry-run all")
+    p_eval.add_argument("--classes", choices=("v1", "v2"), default="v1",
+                        help="reader: the class scheme of the checkpoint (v2: the classifier with not_a_sign)")
+    p_eval.add_argument("--negatives", help="reader --classes v2: the negatives file the evaluated partition's "
+                                            "mined not_a_sign crops come from")
+    # [classifier-chain] - END
     p_eval.set_defaults(func=_cmd_evaluate)
     # [evaluation-baseline] - END
+
+    # [classifier-chain] - START
+    def _dataset_arguments(parser: argparse.ArgumentParser) -> None:
+        parser.add_argument("dataset", nargs="?", help="canonical dataset JSONL; defaults from --dataset-kind")
+        parser.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+        parser.add_argument("--splits", help="frozen split JSON; default: <data-root>/splits/latest.json")
+        parser.add_argument("--dataset-kind", choices=("gold", "training-candidate"), default="gold")
+        parser.add_argument("--device", choices=("cuda", "cpu"), default="cuda")
+        parser.add_argument("--batch-size", type=int, default=8, help="frames per batch of the cutter (default 8)")
+        parser.add_argument("--num-workers", type=int, default=4)
+
+    p_negatives = sub.add_parser(
+        "mine-negatives",
+        help="run the cutter on the reviewed frames of train, validation and test and keep its false boxes as "
+             "not_a_sign crops for the classifier (GPU); --dry-run for CPU-only counts",
+    )
+    _dataset_arguments(p_negatives)
+    p_negatives.add_argument("--cutter", default="active",
+                             help="detector-best.pt, or active: the cutter in use (models/active.json; default)")
+    p_negatives.add_argument("--output", help="new JSONL file, e.g. <data-root>/runs/<run>/negatives.jsonl; "
+                                              "required unless --dry-run")
+    p_negatives.add_argument("--score-threshold", type=float, default=0.1,
+                             help="keep the cutter's boxes of at least this score (default 0.1)")
+    p_negatives.add_argument("--per-frame", type=int, default=3,
+                             help="at most this many boxes per frame, the highest scores (default 3)")
+    p_negatives.add_argument("--total-factor", type=float, default=3.0,
+                             help="at most this many times the sign crops of each partition (default 3)")
+    p_negatives.add_argument("--seed", type=int, default=0)
+    p_negatives.add_argument("--partition", action="append", choices=("train", "validation", "test"),
+                             help="only these partitions (repeatable; default all three)")
+    p_negatives.add_argument("--dry-run", action="store_true",
+                             help="count the frames, sign crops, caps and the dataset's own negatives without torch")
+    p_negatives.set_defaults(func=_cmd_mine_negatives)
+
+    p_chain = sub.add_parser(
+        "evaluate-chain",
+        help="the cutter and the classifier end to end on a partition: signs found and read right, false boxes "
+             "per frame that survive, at several cutter thresholds (GPU); --dry-run for CPU-only counts",
+    )
+    _dataset_arguments(p_chain)
+    p_chain.add_argument("--cutter", default="active", help="detector-best.pt, or active (default)")
+    p_chain.add_argument("--classifier", default="active",
+                         help="reader-best.pt of a classifier (v2) or of an old reader (v1), or active (default)")
+    p_chain.add_argument("--partition", choices=("train", "validation", "test"), default="test")
+    p_chain.add_argument("--score-thresholds", default="0.05,0.1,0.25",
+                         help="cutter score thresholds, separated by commas (default 0.05,0.1,0.25)")
+    p_chain.add_argument("--main-score-threshold", type=float, default=0.1,
+                         help="the threshold whose frames the report lists (default 0.1)")
+    p_chain.add_argument("--iou-threshold", type=float, default=.5, help="IoU of a box that finds a sign")
+    p_chain.add_argument("--dry-run", action="store_true",
+                         help="count the frames and the reviewed boxes without torch")
+    p_chain.add_argument("--output", help="JSON report path, e.g. <run>/evaluation/chain-test.json")
+    p_chain.set_defaults(func=_cmd_evaluate_chain)
+    # [classifier-chain] - END
 
     # [experiment-b] - START
     p_expb = sub.add_parser(
