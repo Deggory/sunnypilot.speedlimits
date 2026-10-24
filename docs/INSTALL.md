@@ -74,6 +74,14 @@ bash scripts/setup_v100_training_env.sh
 
 Installs `torch==2.14.0` and `torchvision==0.29.0` from the CUDA 12.6 index (the last line that still supports the Tesla V100, sm_70), `onnx`, `onnxscript`, `onnxruntime` and the `training` extra (`wandb`). On a newer GPU you can install the default PyPI `torch` instead.
 
+### A model that sees images: Qwen3-VL-8B (optional)
+
+```sh
+scripts/setup_vlm.sh               # again: only what is missing; --no-test while the GPU is busy
+```
+
+Adds `transformers`, `accelerate` and `qwen-vl-utils` to `.venv-gpu` (no installed package changes version) and downloads [Qwen/Qwen3-VL-8B-Instruct](https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct) (Apache-2.0, about 17.5 GB) at a pinned revision into `data/models/vlm/Qwen3-VL-8B-Instruct`. It then loads it on the GPU in float16 (the V100 has no bfloat16, about 17 GB of memory) and asks it about one frame. It is there to be measured as a reader of the cutter's boxes and as a proposer; nothing uses it yet.
+
 ### Publishing a model on Hugging Face
 
 Nothing to install: `scripts/publish_model.sh` runs the Hugging Face CLI through `uvx`. Log in once with a token that can write the target repository:

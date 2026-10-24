@@ -157,6 +157,10 @@ All of these scripts use the GPU and write only under `data/runs/<name>/`. Each 
 
 The GPU environment comes from `bash scripts/setup_v100_training_env.sh`. It creates `.venv-gpu` with torch 2.14.0 and torchvision 0.29.0 for CUDA 12.6, the last line that supports the Tesla V100 (sm_70). It installs packages, but no driver, and runs no GPU job. Afterwards, `.venv-gpu/bin/nnslr env --gpu-smoke --gpu-device 0` checks the GPU.
 
+`scripts/setup_vlm.sh` (optional) adds Qwen3-VL-8B-Instruct, a model that sees images (Apache-2.0, about 17.5 GB), to this server: `transformers`, `accelerate` and `qwen-vl-utils` go into `.venv-gpu` without changing any package already there, the weights go into `data/models/vlm/Qwen3-VL-8B-Instruct` at a pinned revision, and it is tried on the GPU on one frame (`--no-test` skips that). Nothing uses it yet: it is there to be measured as a reader of the cutter's boxes and as a proposer.
+
+`nnslr preannotate --proposer ours` (or `NNSLR_PROPOSER=ours helpers/1_prepare.sh`, the **Signs proposed by** choice of the Prepare tab) proposes the signs with our cutter and classifier instead of the Vietnamese YOLO; it runs in `.venv-gpu`. `helpers/1_prepare.sh --again` (**Propose again**) proposes again the routes nobody has reviewed a frame of.
+
 **Training modes** (`--mode`, or the second argument of `run_v100_baseline.sh`):
 
 - **fresh** (the default) is a new run, started from torchvision's ImageNet-pretrained MobileNetV3 weights.
