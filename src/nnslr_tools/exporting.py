@@ -6,7 +6,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from nnslr_tools.checkpoints import build_detector, detector_is_wide, safe_torch_load
+from nnslr_tools.checkpoints import (DETECTOR_ANCHOR_MAX_RATIO, detector_anchor_min_ratio, detector_input_size,
+                                     load_detector, safe_torch_load)
 from nnslr_tools.training import _require_detector_stack, _require_training_stack
 
 
@@ -116,6 +117,8 @@ def detector_io_contract(
     classes = checkpoint.get("classes")
     if classes not in (["background", "speed_sign"], ["speed_sign"]):
         raise ValueError("checkpoint_invalid_classes")
+    # The size the model resizes the frame to, as it was trained (320 x 320 for checkpoints that do not say).
+    internal_width, internal_height = detector_input_size(checkpoint)
     return {
         "schema_version": 1,
         "task": "detector",
@@ -129,7 +132,8 @@ def detector_io_contract(
             "value_range": [0.0, 1.0],
             "source": "native_narrow_road_frame",
             "external_resize": None,
-            "model_internal_resize": [320, 320],
+            "model_internal_resize": [internal_width, internal_height],
+            "model_internal_resize_order": "width_height",
             "model_internal_resize_mode": "bilinear",
             "model_internal_normalization": {
                 "mean": [0.5, 0.5, 0.5],
@@ -142,6 +146,11 @@ def detector_io_contract(
             "labels": {"shape": ["detections"], "dtype": "int64", "mapping": {"1": "speed_sign"}},
         },
         "postprocessing": "model_includes_score_filtering_and_nms",
+        "default_boxes": {
+            "min_ratio": detector_anchor_min_ratio(checkpoint),
+            "max_ratio": DETECTOR_ANCHOR_MAX_RATIO,
+            "aspect_ratios": [2, 3],
+        },
         "dataset_sha256": checkpoint.get("dataset_sha256"),
         "split_sha256": checkpoint.get("split_sha256"),
         "training_initialization": checkpoint.get("initialization", "unknown"),
@@ -173,8 +182,8 @@ def export_detector_onnx(
         input_height=input_height,
     )
 
-    model = build_detector(wide=detector_is_wide(checkpoint["state_dict"]))
-    model.load_state_dict(checkpoint["state_dict"], strict=True)
+    # Rebuilt as it was trained: the tail of its weights, its input size and default boxes.
+    model = load_detector(checkpoint)
     model.eval()
 
     class ExportWrapper(torch.nn.Module):

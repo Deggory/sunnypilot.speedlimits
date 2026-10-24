@@ -21,8 +21,9 @@ import time
 from typing import Any
 
 from nnslr_tools import tracking
-from nnslr_tools.checkpoints import (atomic_torch_save, build_detector, detector_is_wide, model_weights,
-                                     stable_weights, torch_load)
+from nnslr_tools.checkpoints import (DEFAULT_DETECTOR_ANCHOR_MIN_RATIO, DEFAULT_DETECTOR_INPUT_SIZE,
+                                     DETECTOR_ANCHOR_MAX_RATIO, MAX_DETECTOR_INPUT_SIDE, atomic_torch_save,
+                                     build_detector, detector_is_wide, model_weights, stable_weights, torch_load)
 from nnslr_tools.progress import report as report_progress
 from nnslr_tools.annotations import load_jsonl, validate_dataset
 from nnslr_tools.splits import validate_splits
@@ -481,6 +482,78 @@ class DetectorTrainConfig:
     device: str = "cuda"
     pretrained_backbone: bool = False
     amp: bool = True
+    # The image the detector sees, (width, height): the frame is resized to it inside the model.
+    input_size: tuple[int, int] = DEFAULT_DETECTOR_INPUT_SIZE
+    # The smallest default box, as a fraction of the image side (nnslr_tools.checkpoints.build_detector).
+    anchor_min_ratio: float = DEFAULT_DETECTOR_ANCHOR_MIN_RATIO
+    # Photometric augmentation of the training frames (DETECTOR_AUGMENTATION).
+    augment: bool = True
+
+
+# The settings a detector run saved before they existed was trained with: resuming such a run compares
+# against these.
+DETECTOR_CONFIG_BEFORE_SETTINGS = {"input_size": DEFAULT_DETECTOR_INPUT_SIZE,
+                                   "anchor_min_ratio": DEFAULT_DETECTOR_ANCHOR_MIN_RATIO, "augment": False}
+
+# Photometric augmentation of the detector's training frames, never of validation, evaluation or export. The
+# test route is mostly at dusk (35% of its frames are dark, 7% in train), so the brightness range leans to
+# darkening. No flip and no geometric change: the side of the road a sign stands on matters, and the boxes stay
+# where they are. Each frame is changed with this probability, every factor drawn uniformly in its range.
+DETECTOR_AUGMENTATION = {
+    "probability": 0.8,
+    "brightness": (0.35, 1.25),
+    "contrast": (0.7, 1.3),
+    "gamma": (0.8, 1.6),
+    "saturation": (0.7, 1.3),
+    # A light colour cast: each of R, G and B multiplied by its own factor.
+    "channel_gain": (0.92, 1.08),
+}
+
+
+def detector_photometric(torch, TF, image, generator):
+    """A training frame (3 x H x W, values 0..1, on any device) with random gamma, brightness, contrast,
+    saturation and colour cast (DETECTOR_AUGMENTATION); the factors come from the CPU generator."""
+    def draw(name, count=1):
+        low, high = DETECTOR_AUGMENTATION[name]
+        return (torch.rand(count, generator=generator, dtype=torch.float64) * (high - low) + low).tolist()
+
+    apply = float(torch.rand(1, generator=generator)) < DETECTOR_AUGMENTATION["probability"]
+    # Every factor is drawn either way, so each frame uses the same amount of the generator.
+    gamma, brightness, contrast, saturation = (draw(name)[0] for name in ("gamma", "brightness", "contrast",
+                                                                           "saturation"))
+    gains = draw("channel_gain", 3)
+    if not apply:
+        return image
+    image = TF.adjust_gamma(image, gamma)
+    image = TF.adjust_brightness(image, brightness)
+    image = TF.adjust_contrast(image, contrast)
+    image = TF.adjust_saturation(image, saturation)
+    gains = torch.tensor(gains, dtype=image.dtype, device=image.device).view(3, 1, 1)
+    return (image * gains).clamp_(0.0, 1.0)
+
+
+def _check_detector_config(config: "DetectorTrainConfig") -> None:
+    size = config.input_size
+    if (
+        not isinstance(size, tuple)
+        or len(size) != 2
+        or not all(type(side) is int and 32 <= side <= MAX_DETECTOR_INPUT_SIDE for side in size)
+    ):
+        raise ValueError(f"invalid detector input_size {size!r}: (width, height), 32 to {MAX_DETECTOR_INPUT_SIDE}")
+    ratio = config.anchor_min_ratio
+    if isinstance(ratio, bool) or not isinstance(ratio, (int, float)) or not 0 < ratio < DETECTOR_ANCHOR_MAX_RATIO:
+        raise ValueError(f"invalid detector anchor_min_ratio {ratio!r}: between 0 and {DETECTOR_ANCHOR_MAX_RATIO}")
+
+
+def _detector_config_differences(saved: Any, config: "DetectorTrainConfig") -> list[str]:
+    """The settings of a saved detector run that differ from config (a run saved before a setting existed
+    was trained with DETECTOR_CONFIG_BEFORE_SETTINGS)."""
+    before = {**DETECTOR_CONFIG_BEFORE_SETTINGS, **(saved if isinstance(saved, dict) else {})}
+    if isinstance(before.get("input_size"), list):
+        before["input_size"] = tuple(before["input_size"])
+    current = config.__dict__
+    return [f"{key} {before.get(key)!r} -> {current.get(key)!r}" for key in sorted(set(before) | set(current))
+            if before.get(key) != current.get(key)]
 
 
 def _require_detector_stack():
@@ -519,6 +592,7 @@ def train_detector(
     init_from: Path | None = None,
 ) -> dict[str, Any]:
     """Train the first single-class full-frame speed-sign detector baseline."""
+    _check_detector_config(config)
     if not plan.get("trainable"):
         raise ValueError(
             "training_plan_not_trainable: detector needs positive train and validation frames"
@@ -596,12 +670,9 @@ def train_detector(
         collate_fn=collate,
     )
 
-    backbone_weights = BackboneWeights.IMAGENET1K_V1 if config.pretrained_backbone and mode == "fresh" else None
-    model = ssdlite320_mobilenet_v3_large(
-        weights=None,
-        weights_backbone=backbone_weights,
-        num_classes=2,
-    )
+    # ImageNet backbone weights for a fresh run; continue and resume load their own weights below.
+    geometry = {"input_size": config.input_size, "anchor_min_ratio": config.anchor_min_ratio}
+    model = build_detector(wide=config.pretrained_backbone and mode == "fresh", **geometry)
     model.to(device)
 
     optimizer = torch.optim.AdamW(
@@ -691,7 +762,7 @@ def train_detector(
         # Weights trained from ImageNet have the full tail: a run continued or resumed from them needs that shape.
         if detector_is_wide(weights) == detector_is_wide(model.state_dict()):
             return model, optimizer
-        model = build_detector(wide=detector_is_wide(weights)).to(device)
+        model = build_detector(wide=detector_is_wide(weights), **geometry).to(device)
         optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
         return model, optimizer
 
@@ -711,6 +782,11 @@ def train_detector(
         model, optimizer = match_detector_tail(model, optimizer, model_weights(saved))
         model.load_state_dict(model_weights(saved), strict=True)
         print(f"continue detector from weights: {origin}")
+        # No weight depends on the input size or on the default boxes: the new run uses its own.
+        saved_size = tuple(saved.get("input_size") or DEFAULT_DETECTOR_INPUT_SIZE)
+        if saved_size != config.input_size:
+            print(f"the weights were trained at {saved_size[0]}x{saved_size[1]}; this run trains at "
+                  f"{config.input_size[0]}x{config.input_size[1]}")
     elif mode == "resume":
         saved = torch_load(checkpoint_path)
         if saved.get("format_version") != 1 or saved.get("task") != "detector":
@@ -719,8 +795,9 @@ def train_detector(
             raise ValueError("training already completed; use --mode continue for a new run")
         if saved.get("status") != "in_progress":
             raise ValueError("invalid checkpoint status")
-        if saved.get("config") != config.__dict__:
-            raise ValueError("resume requires exactly the original training configuration")
+        differences = _detector_config_differences(saved.get("config"), config)
+        if differences:
+            raise ValueError("resume requires exactly the original training configuration: " + "; ".join(differences))
         if saved.get("dataset_sha256") != plan["dataset_sha256"] or saved.get("split_sha256") != plan["split_sha256"]:
             raise ValueError("resume dataset/split mismatch")
         start_epoch = saved.get("epoch")
@@ -747,6 +824,8 @@ def train_detector(
             "dataset_sha256": plan["dataset_sha256"],
             "split_sha256": plan["split_sha256"],
             "classes": ["background", "speed_sign"],
+            "input_size": list(config.input_size),
+            "anchor_min_ratio": config.anchor_min_ratio,
             "best_validation_loss": best_validation_loss,
             "history": history,
             "state_dict": model.state_dict(),
@@ -764,6 +843,12 @@ def train_detector(
         output_dir,
         _tracking_config(plan, config, "ssdlite320_mobilenet_v3_large"),
     )
+    print(f"detector input {config.input_size[0]}x{config.input_size[1]}, smallest default box "
+          f"{config.anchor_min_ratio:g} of the image, photometric augmentation {'on' if config.augment else 'off'}",
+          flush=True)
+    # The factors of the photometric augmentation, drawn here (not in the loader workers): the same for any
+    # number of workers, and reproduced after a resume.
+    augment_generator = torch.Generator().manual_seed(config.seed)
     try:
         stale = 0
         stopped_early = None
@@ -772,6 +857,7 @@ def train_detector(
             epoch_start = time.perf_counter()
             # Reproduce each epoch's DataLoader shuffle after an epoch-boundary resume.
             generator.manual_seed(config.seed + epoch)
+            augment_generator.manual_seed(config.seed + 1_000_003 * (epoch + 1))
             model.train()
             train_total = 0.0
             train_seen = 0
@@ -785,6 +871,8 @@ def train_detector(
                 report_progress("detector", epoch * batch_count + batch_index, config.epochs * batch_count,
                                 f"epoch {epoch_number} of {config.epochs}, batch {batch_index} of {batch_count}")
                 images = [img.to(device, non_blocking=True) for img in images]
+                if config.augment:
+                    images = [detector_photometric(torch, TF, image, augment_generator) for image in images]
                 targets = move_targets(targets)
                 optimizer.zero_grad(set_to_none=True)
                 with torch.cuda.amp.autocast(enabled=use_amp):
@@ -813,6 +901,8 @@ def train_detector(
                 "epoch": epoch_number,
                 "train_loss": train_total / max(train_seen, 1),
                 "validation_loss": val_loss,
+                # Training and validation of the epoch, for the cost of an input size.
+                "seconds": time.perf_counter() - epoch_start,
             }
             history.append(epoch_result)
 
@@ -824,6 +914,9 @@ def train_detector(
                     "architecture": "ssdlite320_mobilenet_v3_large",
                     "task": "detector",
                     "classes": ["background", "speed_sign"],
+                    # What load_detector rebuilds the detector with (nnslr_tools.checkpoints).
+                    "input_size": list(config.input_size),
+                    "anchor_min_ratio": config.anchor_min_ratio,
                     "state_dict": model.state_dict(),
                     "dataset_sha256": plan["dataset_sha256"],
                     "split_sha256": plan["split_sha256"],
@@ -867,13 +960,21 @@ def train_detector(
                 "name": torch.cuda.get_device_name(device),
                 "capability": list(torch.cuda.get_device_capability(device)),
                 "total_memory_bytes": int(torch.cuda.get_device_properties(device).total_memory),
+                # The most memory the tensors of this process held (since the start or the resume).
+                "peak_memory_allocated_bytes": int(torch.cuda.max_memory_allocated(device)),
             }
 
         result = {
             "task": "detector",
             "architecture": "ssdlite320_mobilenet_v3_large",
             "classes": ["background", "speed_sign"],
+            "input_size": list(config.input_size),
+            "anchor_min_ratio": config.anchor_min_ratio,
+            "augmentation": ({key: list(value) if isinstance(value, tuple) else value
+                              for key, value in DETECTOR_AUGMENTATION.items()} if config.augment else None),
             "best_validation_loss": best_validation_loss,
+            "best_epoch": next((item["epoch"] for item in history
+                                if item["validation_loss"] == best_validation_loss), None),
             "stopped_early_after_epoch": stopped_early,
             "checkpoint": str(best_path),
             "training_plan": str(plan_path),

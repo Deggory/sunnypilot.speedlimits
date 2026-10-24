@@ -54,21 +54,102 @@ def detector_is_wide(state_dict: dict[str, Any]) -> bool:
     return weight is not None and int(weight.shape[0]) == 960
 
 
-def build_detector(*, wide: bool):
-    """The two-class SSDlite320 MobileNetV3 detector, with the tail of the weights it will load.
+# The image the detector sees, (width, height): the frame is resized to it inside the model. torchvision's
+# SSDlite320 uses 320 x 320; checkpoints written before the input size was recorded were trained at it.
+DEFAULT_DETECTOR_INPUT_SIZE = (320, 320)
+MAX_DETECTOR_INPUT_SIDE = 4096
+# The smallest default box of the detector, as a fraction of the image side (torchvision's SSDlite320 value).
+# The default boxes are fractions of the image: a larger input does not make them smaller in frame pixels,
+# it only places them on a finer grid. 0.2 of a 1344 x 760 frame is a box of 155 x 88 pixels at the least.
+DEFAULT_DETECTOR_ANCHOR_MIN_RATIO = 0.2
+DETECTOR_ANCHOR_MAX_RATIO = 0.95
+
+
+def parse_input_size(text: str) -> tuple[int, int]:
+    """'640x360' -> (640, 360), '320' -> (320, 320): the (width, height) of the detector's input."""
+    value = str(text).strip().lower()
+    parts = value.split("x") if "x" in value else [value, value]
+    if len(parts) != 2 or not all(part.isdigit() for part in parts):
+        raise ValueError(f"invalid input size {text!r}: expected WIDTHxHEIGHT, e.g. 640x360")
+    width, height = int(parts[0]), int(parts[1])
+    if not (32 <= width <= MAX_DETECTOR_INPUT_SIDE and 32 <= height <= MAX_DETECTOR_INPUT_SIDE):
+        raise ValueError(f"invalid input size {text!r}: each side must be 32 to {MAX_DETECTOR_INPUT_SIDE} pixels")
+    return width, height
+
+
+def format_input_size(size: tuple[int, int] | list[int]) -> str:
+    return f"{int(size[0])}x{int(size[1])}"
+
+
+def detector_input_size(checkpoint: dict[str, Any]) -> tuple[int, int]:
+    """The (width, height) a detector checkpoint was trained at; 320 x 320 when it does not say."""
+    value = checkpoint.get("input_size")
+    if value is None:
+        return DEFAULT_DETECTOR_INPUT_SIZE
+    if (
+        not isinstance(value, (list, tuple))
+        or len(value) != 2
+        or not all(type(side) is int and 32 <= side <= MAX_DETECTOR_INPUT_SIDE for side in value)
+    ):
+        raise ValueError("checkpoint_invalid_input_size")
+    return int(value[0]), int(value[1])
+
+
+def detector_anchor_min_ratio(checkpoint: dict[str, Any]) -> float:
+    """The smallest default box of a detector checkpoint; torchvision's 0.2 when it does not say."""
+    value = checkpoint.get("anchor_min_ratio")
+    if value is None:
+        return DEFAULT_DETECTOR_ANCHOR_MIN_RATIO
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 < value < DETECTOR_ANCHOR_MAX_RATIO:
+        raise ValueError("checkpoint_invalid_anchor_min_ratio")
+    return float(value)
+
+
+def build_detector(*, wide: bool, input_size: tuple[int, int] = DEFAULT_DETECTOR_INPUT_SIZE,
+                   anchor_min_ratio: float = DEFAULT_DETECTOR_ANCHOR_MIN_RATIO):
+    """The two-class SSDlite MobileNetV3 detector, with the tail of the weights it will load, resizing the frame
+    to input_size (width, height) inside the model.
 
     torchvision builds the full tail only when it is given pretrained backbone weights: asking for them builds
     the same shape as a training started from ImageNet (they are overwritten by the weights loaded next; the
     file comes from the torch cache, downloaded once by the training).
+
+    The input size and the default boxes do not change any weight: the backbone and the head are convolutions,
+    and the default boxes follow the size of each feature map (DefaultBoxGenerator without steps). A detector
+    must still run at the size it was trained at, which is why the checkpoint records it.
     """
     from torchvision.models import MobileNet_V3_Large_Weights
     from torchvision.models.detection import ssdlite320_mobilenet_v3_large
+    from torchvision.models.detection.anchor_utils import DefaultBoxGenerator
+    from torchvision.models.detection.transform import GeneralizedRCNNTransform
 
-    return ssdlite320_mobilenet_v3_large(
+    model = ssdlite320_mobilenet_v3_large(
         weights=None,
         weights_backbone=MobileNet_V3_Large_Weights.IMAGENET1K_V1 if wide else None,
         num_classes=2,
     )
+    width, height = (int(side) for side in input_size)
+    if (width, height) != DEFAULT_DETECTOR_INPUT_SIZE:
+        # The same transform SSD builds for its fixed size: bilinear resize to (width, height), then the mean and
+        # std of SSDlite; the boxes come back in the pixels of the frame.
+        transform = model.transform
+        model.transform = GeneralizedRCNNTransform(
+            min(width, height), max(width, height), transform.image_mean, transform.image_std,
+            size_divisible=1, fixed_size=(width, height))
+    if anchor_min_ratio != DEFAULT_DETECTOR_ANCHOR_MIN_RATIO:
+        # Same aspect ratios, so the same number of boxes per cell and the same head.
+        model.anchor_generator = DefaultBoxGenerator([[2, 3] for _ in range(6)], min_ratio=float(anchor_min_ratio),
+                                                     max_ratio=DETECTOR_ANCHOR_MAX_RATIO)
+    return model
+
+
+def load_detector(checkpoint: dict[str, Any]):
+    """A detector rebuilt from a checkpoint as it was trained (tail, input size, default boxes), with its weights."""
+    weights = checkpoint["state_dict"]
+    model = build_detector(wide=detector_is_wide(weights), input_size=detector_input_size(checkpoint),
+                           anchor_min_ratio=detector_anchor_min_ratio(checkpoint))
+    model.load_state_dict(weights, strict=True)
+    return model
 
 
 def torch_load(path: Path) -> dict[str, Any]:

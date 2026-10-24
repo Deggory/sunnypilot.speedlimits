@@ -690,8 +690,16 @@ def _cmd_train(args: argparse.Namespace) -> int:
     splits = Path(args.splits) if args.splits else root / "splits" / "latest.json"
 
     if args.task == "detector":
+        from nnslr_tools.checkpoints import (DEFAULT_DETECTOR_ANCHOR_MIN_RATIO, DEFAULT_DETECTOR_INPUT_SIZE,
+                                             parse_input_size)
+        # Checked before the plan, so that a dry run refuses a wrong size too.
+        detector_input_size = parse_input_size(args.input_size) if args.input_size else DEFAULT_DETECTOR_INPUT_SIZE
         plan = prepare_detector_training(dataset, splits, root, dataset_kind=kind)
     else:
+        if args.anchor_min_ratio is not None or args.no_augment:
+            raise ValueError("--anchor-min-ratio and --no-augment are detector options")
+        if args.input_size is not None and not str(args.input_size).isdigit():
+            raise ValueError(f"invalid reader --input-size {args.input_size!r}: the side of the square crop in pixels")
         plan = prepare_reader_training(dataset, splits, root, dataset_kind=kind)
 
     if args.dry_run:
@@ -719,6 +727,10 @@ def _cmd_train(args: argparse.Namespace) -> int:
             device=args.device,
             pretrained_backbone=args.pretrained,
             amp=not args.no_amp,
+            input_size=detector_input_size,
+            anchor_min_ratio=(args.anchor_min_ratio if args.anchor_min_ratio is not None
+                              else DEFAULT_DETECTOR_ANCHOR_MIN_RATIO),
+            augment=not args.no_augment,
         )
         result = train_detector(plan, root, Path(args.output), config,
                                 mode=args.mode, hf_repo=args.hf_repo, hf_revision=args.hf_revision,
@@ -730,7 +742,7 @@ def _cmd_train(args: argparse.Namespace) -> int:
             batch_size=args.batch_size if args.batch_size is not None else 64,
             learning_rate=args.learning_rate if args.learning_rate is not None else 3e-4,
             weight_decay=args.weight_decay,
-            input_size=args.input_size,
+            input_size=int(args.input_size) if args.input_size is not None else 160,
             num_workers=args.num_workers,
             seed=args.seed,
             device=args.device,
@@ -1304,7 +1316,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_train.add_argument("--learning-rate", type=float, default=None,
                          help="default: reader 3e-4, detector 1e-4")
     p_train.add_argument("--weight-decay", type=float, default=1e-4)
-    p_train.add_argument("--input-size", type=int, default=160)
+    p_train.add_argument("--input-size", default=None,
+                         help="reader: side of the square crop in pixels (default 160); detector: WIDTHxHEIGHT "
+                              "the frame is resized to inside the model (default 320x320, e.g. 640x360)")
+    p_train.add_argument("--anchor-min-ratio", type=float, default=None,
+                         help="detector: smallest default box as a fraction of the image side (default 0.2, "
+                              "torchvision's; 0.2 of a 1344x760 frame is at least 155x88 pixels)")
+    p_train.add_argument("--no-augment", action="store_true",
+                         help="detector: no photometric augmentation (brightness incl. darkening, contrast, gamma, "
+                              "colour) of the training frames; it is on by default, never flips")
     p_train.add_argument("--num-workers", type=int, default=4)
     p_train.add_argument("--seed", type=int, default=0)
     p_train.add_argument("--init-from", type=Path, default=None,

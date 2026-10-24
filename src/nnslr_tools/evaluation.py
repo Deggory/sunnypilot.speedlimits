@@ -9,9 +9,12 @@ from collections import Counter, defaultdict
 import json
 import math
 from pathlib import Path
+import statistics
+import time
 from typing import Any
 
-from nnslr_tools.checkpoints import build_detector, detector_is_wide, safe_torch_load
+from nnslr_tools.checkpoints import (detector_anchor_min_ratio, detector_input_size, format_input_size,
+                                     load_detector, safe_torch_load)
 from nnslr_tools.training import (
     _require_detector_stack,
     _require_training_stack,
@@ -41,12 +44,13 @@ def match_detections(
     """Greedy score-ordered one-to-one matching for a single detector class."""
     if not 0 < iou_threshold <= 1:
         raise ValueError("invalid_iou_threshold")
-    ordered = sorted(predicted, key=lambda p: float(p["score"]), reverse=True)
+    ordered = sorted(enumerate(predicted), key=lambda item: float(item[1]["score"]), reverse=True)
     unmatched = set(range(len(truth)))
     matches = []
     false_positives = []
+    false_positive_indexes = []
 
-    for prediction in ordered:
+    for position, prediction in ordered:
         box = prediction["box"]
         candidates = [
             (box_iou(box, truth[index]), index)
@@ -65,6 +69,7 @@ def match_detections(
                 "score": float(prediction["score"]),
                 "best_iou": best_iou,
             })
+            false_positive_indexes.append(position)
 
     return {
         "true_positives": len(matches),
@@ -72,6 +77,61 @@ def match_detections(
         "false_negatives": len(unmatched),
         "matches": matches,
         "false_positive_details": false_positives,
+        # Where the false positives are in ``predicted`` (score order, like false_positive_details).
+        "false_positive_indexes": false_positive_indexes,
+    }
+
+
+# The sign sizes of the detector's recall: the width of the reviewed box in pixels of the frame. The same
+# buckets as the Evaluate tab of the site (nnslr_tools.runs.SIZE_BUCKETS).
+WIDTH_BUCKETS = (("lt12", 0.0, 12.0), ("12-20", 12.0, 20.0), ("20-40", 20.0, 40.0), ("ge40", 40.0, math.inf))
+# Score thresholds a detector report always measures, besides its own --score-threshold. The detector is the
+# cutter of the pipeline (cutter -> classifier -> decider): what it misses is lost, its false boxes the classifier
+# can still reject, so it is judged first on recall at the low thresholds, with the boxes per frame it passes on.
+CUTTER_SCORE_THRESHOLDS = (0.05, 0.1)
+REPORT_SCORE_THRESHOLDS = (*CUTTER_SCORE_THRESHOLDS, 0.3, 0.5)
+# Forward passes on the first frame before the time per frame is measured (CUDA kernels, cuDNN, allocator).
+INFERENCE_WARMUP_RUNS = 3
+
+
+def width_bucket(width: float) -> str:
+    for key, low, high in WIDTH_BUCKETS:
+        if low <= width < high:
+            return key
+    return WIDTH_BUCKETS[-1][0]
+
+
+def score_frame(truth: list[list[float]], predictions: list[dict[str, Any]], *, score_threshold: float,
+                iou_threshold: float) -> dict[str, Any]:
+    """The predictions of one frame at or above score_threshold, matched to its reviewed boxes: the matching of
+    match_detections plus the reviewed boxes found and the false boxes, for recall_by_width."""
+    selected = [prediction for prediction in predictions if prediction["score"] >= score_threshold]
+    matched = match_detections(selected, truth, iou_threshold=iou_threshold)
+    return {
+        **matched,
+        "selected": selected,
+        "truth_boxes": truth,
+        "found_truth_indexes": sorted(match["truth_index"] for match in matched["matches"]),
+        "false_boxes": [selected[index]["box"] for index in matched["false_positive_indexes"]],
+    }
+
+
+def recall_by_width(items: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Recall by the width of the reviewed box (WIDTH_BUCKETS), and the false boxes by their own width, of
+    frames scored by score_frame. recall is None in a bucket without reviewed boxes."""
+    rows = {key: {"truth": 0, "found": 0, "false_positives": 0} for key, _, _ in WIDTH_BUCKETS}
+    for item in items:
+        found = set(item["found_truth_indexes"])
+        for index, box in enumerate(item["truth_boxes"]):
+            row = rows[width_bucket(float(box[2]) - float(box[0]))]
+            row["truth"] += 1
+            row["found"] += int(index in found)
+        for box in item["false_boxes"]:
+            rows[width_bucket(float(box[2]) - float(box[0]))]["false_positives"] += 1
+    return {
+        key: {**row, "missed": row["truth"] - row["found"],
+              "recall": row["found"] / row["truth"] if row["truth"] else None}
+        for key, row in rows.items()
     }
 
 
@@ -133,7 +193,19 @@ def detector_metrics(images: list[dict[str, Any]]) -> dict[str, Any]:
         "recall_iou": recall,
         "f1_iou": f1,
         "false_positives_per_image": fp / len(images) if images else 0.0,
+        # Every box the detector passes on (found or false): the work of the classifier after it.
+        "predictions_per_image": (tp + fp) / len(images) if images else 0.0,
     }
+
+
+def detector_size_metrics(items: list[dict[str, Any]]) -> dict[str, Any]:
+    """detector_metrics plus recall_by_width, of frames scored by score_frame."""
+    return {**detector_metrics(items), "recall_by_width": recall_by_width(items)}
+
+
+def threshold_metrics(items: list[dict[str, Any]]) -> dict[str, Any]:
+    """detector_size_metrics of all the frames and of the frames a person confirmed (None without any)."""
+    return {**detector_size_metrics(items), "human_reviewed": human_reviewed_metrics(items, detector_size_metrics)}
 
 
 def human_reviewed_metrics(items: list[dict[str, Any]], metrics) -> dict[str, Any] | None:
@@ -267,13 +339,14 @@ def evaluate_detector(
     device_name: str = "cuda",
     score_threshold: float = 0.25,
     iou_threshold: float = 0.5,
+    score_thresholds: tuple[float, ...] = REPORT_SCORE_THRESHOLDS,
 ) -> dict[str, Any]:
-    if not 0 <= score_threshold <= 1:
+    if not 0 <= score_threshold <= 1 or not all(0 <= value <= 1 for value in score_thresholds):
         raise ValueError("invalid_score_threshold")
     if not 0 < iou_threshold <= 1:
         raise ValueError("invalid_iou_threshold")
 
-    torch, Image, _, _, TF, _, ssdlite320_mobilenet_v3_large = _require_detector_stack()
+    torch, Image, _, _, TF, _, _ = _require_detector_stack()
     if device_name == "cuda" and not torch.cuda.is_available():
         raise ValueError("cuda_unavailable")
     device = torch.device(device_name)
@@ -288,29 +361,48 @@ def evaluate_detector(
         raise ValueError(f"empty_evaluation_partition: {partition}")
     root = Path(data_root).resolve()
 
-    model = build_detector(wide=detector_is_wide(checkpoint["state_dict"]))
-    model.load_state_dict(checkpoint["state_dict"], strict=True)
+    # Rebuilt as it was trained: the tail of its weights, its input size and default boxes.
+    input_size = detector_input_size(checkpoint)
+    model = load_detector(checkpoint)
     model.to(device)
     model.eval()
 
+    def synchronize():
+        if device.type == "cuda":
+            torch.cuda.synchronize(device)
+
+    thresholds = sorted({float(score_threshold), *(float(value) for value in score_thresholds)})
+    scored: dict[float, list[dict[str, Any]]] = {value: [] for value in thresholds}
+    seconds = []
     image_results = []
     with torch.no_grad():
-        for frame in frames:
+        for position, frame in enumerate(frames):
             path = _safe_image_path(root, frame["image_path"])
             with Image.open(path) as source:
                 image = source.convert("RGB")
                 tensor = TF.pil_to_tensor(image).float().div_(255.0).to(device)
 
+            if position == 0:
+                for _ in range(INFERENCE_WARMUP_RUNS):
+                    model([tensor])
+            # The time of the model alone, one frame at a time as in the car: from the frame on the device to
+            # the boxes after non-maximum suppression (resize and normalization included).
+            synchronize()
+            start = time.perf_counter()
             prediction = model([tensor])[0]
+            synchronize()
+            seconds.append(time.perf_counter() - start)
             boxes = prediction["boxes"].detach().cpu().tolist()
             scores = prediction["scores"].detach().cpu().tolist()
             labels = prediction["labels"].detach().cpu().tolist()
-            selected = [
-                {"box": box, "score": score}
-                for box, score, label in zip(boxes, scores, labels)
-                if label == 1 and score >= score_threshold
-            ]
-            matched = match_detections(selected, frame["boxes"], iou_threshold=iou_threshold)
+            # Every speed-sign box the model keeps (its own floor is a score of 0.001), scored at each threshold.
+            predictions = [{"box": box, "score": score} for box, score, label in zip(boxes, scores, labels) if label == 1]
+            for value in thresholds:
+                scored[value].append({**score_frame(frame["boxes"], predictions, score_threshold=value,
+                                                    iou_threshold=iou_threshold),
+                                      "label_basis": frame.get("label_basis")})
+            matched = scored[float(score_threshold)][-1]
+            selected = matched["selected"]
             image_results.append({
                 "image_path": frame["image_path"],
                 "image_sha256": frame["image_sha256"],
@@ -328,16 +420,43 @@ def evaluate_detector(
                 "false_positive_details": matched["false_positive_details"],
             })
 
+    main = scored[float(score_threshold)]
+    milliseconds = [value * 1000.0 for value in seconds]
     return {
         "schema_version": 1,
         "task": "detector",
         "partition": partition,
         **detector_metrics(image_results),
+        # Found and missed reviewed boxes by their width in the frame (WIDTH_BUCKETS), at score_threshold.
+        "recall_by_width": recall_by_width(main),
         # The same measure on the frames a person confirmed (None when the partition has none).
         "counts_by_label_basis": label_basis_counts(image_results),
-        "human_reviewed": human_reviewed_metrics(image_results, detector_metrics),
+        "human_reviewed": human_reviewed_metrics(main, detector_size_metrics),
         "score_threshold": score_threshold,
         "iou_threshold": iou_threshold,
+        # Every measure again at each score threshold: this report's and REPORT_SCORE_THRESHOLDS.
+        "by_score_threshold": {f"{value:g}": threshold_metrics(scored[value]) for value in thresholds},
+        "input_size": list(input_size),
+        "input_size_label": format_input_size(input_size),
+        "anchor_min_ratio": detector_anchor_min_ratio(checkpoint),
+        # What the model itself keeps before any threshold here: the boxes per frame cannot exceed max_boxes.
+        "model_postprocessing": {"score_floor": float(model.score_thresh), "nms_iou": float(model.nms_thresh),
+                                 "max_boxes": int(model.detections_per_img)},
+        "checkpoint_epoch": checkpoint.get("epoch"),
+        "inference": {
+            "device": str(device),
+            "device_name": torch.cuda.get_device_name(device) if device.type == "cuda" else "cpu",
+            "cpu_threads": torch.get_num_threads() if device.type == "cpu" else None,
+            "frames": len(milliseconds),
+            "batch_size": 1,
+            "precision": "float32",
+            "warmup_runs": INFERENCE_WARMUP_RUNS,
+            "mean_ms_per_frame": statistics.fmean(milliseconds),
+            "median_ms_per_frame": statistics.median(milliseconds),
+            "max_ms_per_frame": max(milliseconds),
+            "measures": "model forward of one frame already on the device: internal resize and normalization, "
+                        "backbone, head, box decoding and NMS; not the image decoding nor the copy to the device",
+        },
         "checkpoint": str(checkpoint_path),
         "dataset_sha256": plan["dataset_sha256"],
         "split_sha256": plan["split_sha256"],
@@ -359,3 +478,140 @@ def write_evaluation(report: dict[str, Any], output: Path | None) -> None:
         json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n",
         encoding="utf-8",
     )
+
+
+# -- the detectors of scripts/run_detector_sizes.sh side by side -----------------------------------------
+DETECTOR_SIZES = ("320x320", "640x360", "960x544")
+SIZE_PARTITIONS = ("test", "validation")
+WIDTH_LABELS = {"lt12": "<12", "12-20": "12-20", "20-40": "20-40", "ge40": ">=40"}
+
+
+def _read_report(path: Path) -> dict[str, Any] | None:
+    try:
+        value = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _fraction(value: Any, digits: int = 3) -> str:
+    return "-" if not isinstance(value, (int, float)) or isinstance(value, bool) else f"{value:.{digits}f}"
+
+
+def _found(metrics: dict[str, Any]) -> str:
+    """'0.06 5/80': recall with the boxes found and reviewed; '-' without reviewed boxes."""
+    truth = metrics.get("truth_box_count", metrics.get("truth"))
+    found = metrics.get("true_positives", metrics.get("found"))
+    recall = metrics.get("recall_iou", metrics.get("recall"))
+    if not truth:
+        return "-"
+    return f"{_fraction(recall, 2)} {found}/{truth}"
+
+
+def _table(lines: list[tuple[str, ...]]) -> list[str]:
+    widths = [max(len(line[i]) for line in lines) for i in range(len(lines[0]))]
+    return ["  ".join(cell.ljust(widths[i]) for i, cell in enumerate(line)).rstrip() for line in lines]
+
+
+def _training_cells(result: dict[str, Any] | None) -> tuple[str, str, str]:
+    """(best epoch of the epochs run, mean seconds per epoch, peak GPU memory) of a result.json."""
+    if result is None:
+        return "-", "-", "-"
+    history = [item for item in result.get("history") or [] if isinstance(item, dict)]
+    best = result.get("best_epoch")
+    if best is None:
+        best = next((item.get("epoch") for item in history
+                     if item.get("validation_loss") == result.get("best_validation_loss")), None)
+    epochs = "-" if best is None else f"{best}/{len(history)}"
+    seconds = [item["seconds"] for item in history if isinstance(item.get("seconds"), (int, float))]
+    per_epoch = f"{statistics.fmean(seconds):.0f}" if seconds else "-"
+    peak = (result.get("gpu") or {}).get("peak_memory_allocated_bytes")
+    memory = f"{peak / 2**30:.1f}" if isinstance(peak, (int, float)) else "-"
+    return epochs, per_epoch, memory
+
+
+def _per_frame(metrics: dict[str, Any], key: str) -> str:
+    value = metrics.get(key)
+    if key == "predictions_per_image" and value is None and metrics.get("image_count"):
+        # Reports written before predictions_per_image: found + false boxes per frame.
+        value = ((metrics.get("true_positives") or 0) + (metrics.get("false_positives") or 0)) / metrics["image_count"]
+    return _fraction(value, 2)
+
+
+def detector_sizes_table(sizes_root: Path, sizes: list[str] | tuple[str, ...] = DETECTOR_SIZES) -> str:
+    """The detectors trained at each input size side by side: <sizes_root>/<size>/result.json and
+    <sizes_root>/<size>/evaluation/detector-<partition>.json (scripts/run_detector_sizes.sh).
+
+    The detector is the cutter of the pipeline, judged first on recall: per partition, at every score threshold
+    measured (lowest first) and for each size, recall overall and by the width of the reviewed box, the boxes
+    per frame it passes on to the classifier and the false ones among them, then precision and F1; on all the
+    frames and on the frames a person confirmed. Then what each size costs: milliseconds per frame, seconds per
+    training epoch, GPU memory, and the epoch the validation chose.
+    """
+    root = Path(sizes_root)
+    out: list[str] = []
+    milliseconds: dict[str, str] = {}
+    devices: set[str] = set()
+    for partition in SIZE_PARTITIONS:
+        reports = {size: _read_report(root / size / "evaluation" / f"detector-{partition}.json") for size in sizes}
+        first = next((report for report in reports.values() if report is not None), None)
+        if out:
+            out.append("")
+        if first is None:
+            out.append(f"== {partition}: not evaluated ==")
+            continue
+        frames = first.get("image_count")
+        human_frames = (first.get("human_reviewed") or {}).get("image_count", 0)
+        out.append(f"== {partition}: the cutter, recall first ({frames} frames, {human_frames} confirmed by a person; "
+                   f"found = IoU >= {first.get('iou_threshold')} with a reviewed box; width of the reviewed box in "
+                   f"frame pixels; boxes/frame = boxes passed on to the classifier) ==")
+        header = ("score", "rows", "size", "recall", *WIDTH_LABELS.values(), "boxes/frame", "false/frame",
+                  "precision", "F1")
+        lines: list[tuple[str, ...]] = [header]
+        thresholds = sorted({key for report in reports.values() if report is not None
+                             for key in (report.get("by_score_threshold") or {})}, key=float)
+        missing = [size for size in sizes if reports[size] is None]
+        for score in thresholds:
+            if len(lines) > 1:
+                lines.append(("",) * len(header))
+            for rows in ("all", "human"):
+                for size in sizes:
+                    report = reports[size]
+                    if report is None:
+                        continue
+                    metrics = (report.get("by_score_threshold") or {}).get(score)
+                    if isinstance(metrics, dict) and rows == "human":
+                        metrics = metrics.get("human_reviewed")
+                    if not isinstance(metrics, dict):
+                        lines.append((score, rows, size, *["-"] * (len(header) - 3)))
+                        continue
+                    widths = metrics.get("recall_by_width") or {}
+                    lines.append((
+                        score, rows, size, _found(metrics), *(_found(widths.get(key) or {}) for key in WIDTH_LABELS),
+                        _per_frame(metrics, "predictions_per_image"), _per_frame(metrics, "false_positives_per_image"),
+                        _fraction(metrics.get("precision_iou")), _fraction(metrics.get("f1_iou")),
+                    ))
+        out += _table(lines)
+        if missing:
+            out.append("not evaluated: " + ", ".join(missing))
+        for size, report in reports.items():
+            inference = (report or {}).get("inference") or {}
+            if partition == "test" or size not in milliseconds:
+                if isinstance(inference.get("mean_ms_per_frame"), (int, float)):
+                    milliseconds[size] = _fraction(inference["mean_ms_per_frame"], 1)
+                    devices.add(str(inference.get("device_name")))
+
+    results = {size: _read_report(root / size / "result.json") for size in sizes}
+    cost = [("size", "ms/frame", "s/epoch", "gpu_peak_GB", "best_epoch", "augmentation", "default_box_min")]
+    for size in sizes:
+        result = results[size]
+        best, per_epoch, memory = _training_cells(result)
+        if result is None:
+            cost.append((size, milliseconds.get(size, "-"), "no result.json", "", "", "", ""))
+            continue
+        cost.append((size, milliseconds.get(size, "-"), per_epoch, memory, best,
+                     "on" if result.get("augmentation") else "off", _fraction(result.get("anchor_min_ratio"), 2)))
+    out += ["", f"== cost: ms/frame of the model alone on {', '.join(sorted(devices)) or '-'} (batch 1, float32, "
+                f"on test); s/epoch and GPU memory of the training; best epoch by validation loss / epochs run =="]
+    out += _table(cost)
+    return "\n".join(out) + "\n"

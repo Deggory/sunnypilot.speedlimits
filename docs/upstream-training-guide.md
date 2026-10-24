@@ -560,6 +560,29 @@ nnslr train --task reader \
 Each run writes an immutable training plan, best checkpoint and JSON result,
 including dataset/split hashes and GPU identity.
 
+The detector resizes the full frame inside the model. `--input-size WIDTHxHEIGHT`
+(default `320x320`, torchvision's SSDLite320) sets that size, for example
+`--input-size 640x360`; `--anchor-min-ratio` sets the smallest default box as a
+fraction of the image side (default `0.2`, torchvision's: at least 155 x 88
+pixels of a 1344 x 760 frame at any input size, since the default boxes scale
+with the image and a larger input only puts them on a finer grid). Neither
+changes a weight. Both are recorded in `detector-best.pt`, `training-state.pt`
+and `result.json`, and evaluation, ONNX export (its contract's
+`model_internal_resize` and `default_boxes`) and replay rebuild the detector
+from the checkpoint; checkpoints without them are 320 x 320 with `0.2`.
+Training frames get a photometric augmentation (brightness leaning to darker,
+contrast, gamma, saturation and a light colour cast, never a flip: the side of
+the road matters); `--no-augment` turns it off, and `result.json` records the
+ranges under `augmentation`.
+
+To compare input sizes, `scripts/run_detector_sizes.sh NAME [SIZES...]`
+(default `320x320 640x360 960x544`) trains one detector per size with the same
+settings into `$NNSLR_DATA_ROOT/runs/NAME/detector-sizes/<size>/`, evaluates
+each on test and validation and prints the comparison, saved as
+`comparison.txt`. It refuses a busy GPU unless `NNSLR_ALLOW_BUSY_GPU=1`, like
+the baseline pipeline, and finishes an interrupted comparison when run again
+with the same name.
+
 For the complete guarded pipeline on the training host:
 
 ```sh
@@ -637,6 +660,16 @@ Most labels are AI reviews, so both also report `counts_by_label_basis` and a
 confirmed (`provenance.label_basis` `human_review`), or `null` when the
 partition has none; the top-level metrics stay those of the whole partition.
 `--dry-run` prints `counts_by_label_basis` and `human_reviewed_sample_count`.
+The detector is the cutter of the pipeline (cutter, then the reader as
+classifier, then whom the sign applies to), so its report also measures recall
+first: `recall_by_width` (the reviewed boxes found by their width in frame
+pixels: `lt12`, `12-20`, `20-40`, `ge40`, the buckets of the site's Evaluate
+tab), `predictions_per_image` (the boxes passed on to the classifier) and, in
+`by_score_threshold`, every measure again at 0.05, 0.1, 0.3, 0.5 and the
+report's own `--score-threshold`, each with its `human_reviewed` part.
+`inference` holds the milliseconds per frame of the model alone (batch 1,
+float32, on the device of the evaluation), `input_size` and `anchor_min_ratio`
+the geometry of the checkpoint.
 COCO-style mAP and time-based false positives/hour remain later evaluation work.
 
 Feed those errors directly into the next dataset iteration:
