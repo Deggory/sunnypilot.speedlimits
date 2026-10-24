@@ -23,7 +23,8 @@ A plan, started on 24 October 2026 from Codex's "teacher and student" proposal, 
    - It takes the box cut from the full-resolution frame, never from the scaled-down one.
    - Its answers are a speed value, end of limit, zone, variable display, "?" (a limit it cannot read), another sign with its kind (town entry, direction, give way…), or **not a sign**.
    - Today's reader plays this role. It still lacks "not a sign": the 2,431 model boxes that reviewers removed, plus the cutter's own mistakes, teach it.
-   - `scripts/run_classifier.sh` (the **Train the classifier** button) trains it with those classes (`nnslr train --classes v2`): the removed proposals that overlap no kept box (1,988 of the 2,431), the boxes marked "not a sign" and up to 3 × the signs of false boxes mined with the cutter in use (`nnslr mine-negatives`), darker crops and jittered boxes. It then measures it alone and the whole chain on the test (`nnslr evaluate-chain`: signs found **and** read right, false boxes per frame that survive), next to the old reader. Not run yet.
+   - `scripts/run_classifier.sh` (the **Train the classifier** button) trains it with those classes (`nnslr train --classes v2`): the removed proposals that overlap no kept box, the boxes marked "not a sign" and up to 3 × the signs of false boxes mined with the cutter in use (`nnslr mine-negatives`), darker crops and jittered boxes. It then measures it alone and the whole chain on the test (`nnslr evaluate-chain`: signs found **and** read right, false boxes per frame that survive), next to the old reader. First results below.
+   - Frames an AI reviewed before the other-sign rule have their other signs without a box. There, the other-sign proposals the AI removed and the cutter's boxes scoring 0.3 or more are not used as "not a sign" (see the results).
    - It is measured on right answers per sign.
 3. **Decide: the decider says whom each sign applies to.**
    - It takes the list of recognised signs with their position and size, the scene as a small image, and the car's speed and steering. The signs of a frame look at each other, as with two 80s on one gantry.
@@ -94,6 +95,22 @@ All three sizes use small default boxes (the smallest is 0.02 of the image side)
 | Other signs | 57% |
 
 Other signs were mostly taken for variable displays: the AI reviewer used to leave them out of the boxes, while people box them. The rule now asks for them too, with their kind.
+
+**Classifier (run `2026-10-24_1750-classifier`, cutter 960 × 544 at score 0.1, test)**
+
+| | New classifier | Old reader |
+|---|---|---|
+| Speed signs found **and** read right | 61% (49 of 80) | 66% (53 of 80) |
+| … of those a person confirmed | 70% (16 of 23) | 65% (15 of 23) |
+| False boxes per frame left after the classifier | **0.26** (from 41.5) | 41.5 (it has no "not a sign") |
+| Other signs read right | **0 of 54** | |
+
+- **It drops 99.4% of the cutter's false boxes,** which is its job. The ones left are mostly read as "speed, number unreadable" or "variable display".
+- **It called every other sign "not a sign".** The training had 34 other signs against 5,906 "not a sign" crops, and many of those crops were real signs:
+  - before the rule to box other signs, the AI reviewer removed the other-sign proposals: 1,339 of the 1,434 removed proposals of train were proposed as other signs, mostly pedestrian crossings, give way, no parking and direction signs;
+  - about 15 of the 40 highest-scoring cutter boxes mined in those frames were real signs: no entry, no overtaking, roadworks, end of motorway.
+- **Fixed:** in those frames, removed other-sign proposals and mined boxes scoring 0.3 or more are no longer "not a sign" (`BOXES_OTHER_SIGNS`, `mine-negatives --sign-score`). A second run with the 1344 × 760 cutter is measuring the fix.
+- Those 1,339 removed proposals are other signs waiting for their kind: reviewing them would give the classifier its first real set of other signs.
 
 **Experiment B (run `2026-10-24_expB`, on the reviewed boxes)**
 

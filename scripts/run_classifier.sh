@@ -8,7 +8,9 @@ set -euo pipefail
 #   2. a CUDA smoke test;
 #   3. mines the false boxes of that cutter (nnslr mine-negatives): on every reviewed frame of train, validation and
 #      test, its boxes of score >= 0.1 that overlap no reviewed box, at most 3 per frame and 3 x the sign crops of
-#      each partition, from the frames a person reviewed first; each partition from its own frames only;
+#      each partition, from the frames a person reviewed first; each partition from its own frames only; in the
+#      frames an AI reviewed before the other-sign rule (it left those signs without a box) only boxes under 0.3,
+#      and the other-sign proposals it removed there are not "not a sign" either;
 #   4. trains the classifier (nnslr train --task reader --classes v2): the reviewed sign crops with their labels and
 #      the kinds of other signs, and "not a sign" from the proposals reviewers removed, the boxes marked not a sign
 #      and the mined boxes; ImageNet start, darker and lower-contrast crops with jittered boxes, best epoch by the

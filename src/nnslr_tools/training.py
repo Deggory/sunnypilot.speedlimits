@@ -72,6 +72,10 @@ MIN_KIND_TRAIN_CROPS = 3
 OTHER_SIGN_RULE_AT = "2026-10-24T15:33:17Z"
 # Who reviewed a frame and when, for the negatives: a person; an AI after the rule above; an AI before it.
 REVIEW_TIERS = ("human", "ai_after_rule", "ai_before_rule", "other")
+# The frames whose reviewer boxed the other traffic signs too: a box left out there is not a sign. In the other
+# tiers an AI removed the other-sign proposals and left those signs without a box (1,339 of the 1,434 removed
+# proposals of train on 24 October 2026, mostly pedestrian crossings, give way, no parking and direction signs).
+BOXES_OTHER_SIGNS = ("human", "ai_after_rule")
 
 
 def _sha256(path: Path) -> str:
@@ -486,7 +490,9 @@ def classifier_positives(rows: list[dict[str, Any]], assignments: dict[str, Any]
 def _classifier_negatives(frames: list[dict[str, Any]], skipped: Counter) -> list[dict[str, Any]]:
     """The removed proposals of the frames of train, validation and test that are crops of not_a_sign: a box a
     reviewer took away and that overlaps no kept box (IoU < NEGATIVE_MAX_IOU; a duplicate on a sign, or a box
-    drawn again, still frames a sign). Noted with who reviewed the frame and when (tier)."""
+    drawn again, still frames a sign). Noted with who reviewed the frame and when (tier). An other-sign proposal
+    removed in a frame whose reviewer did not box the other signs (not BOXES_OTHER_SIGNS) is left out: it was
+    removed by the rule of the time, and is mostly a real sign."""
     found = []
     for frame in frames:
         if frame["split"] not in NEGATIVE_PARTITIONS:
@@ -496,6 +502,9 @@ def _classifier_negatives(frames: list[dict[str, Any]], skipped: Counter) -> lis
         for row in frame["rejected"]:
             if any(box_overlap(row["bbox_xyxy"], box) >= NEGATIVE_MAX_IOU for box in kept):
                 skipped["rejected_overlaps_a_kept_box"] += 1
+                continue
+            if row.get("sign_family") == "other_sign" and frame["tier"] not in BOXES_OTHER_SIGNS:
+                skipped["rejected_other_sign_before_rule"] += 1
                 continue
             found.append(_record(row, frame["split"], NOT_A_SIGN, "rejected", tier=frame["tier"],
                                  frame_label_basis=frame["label_basis"], proposal_family=row.get("sign_family"),

@@ -7,13 +7,15 @@ the comparison of a classifier with the old reader (scripts/run_classifier.sh).
   box and every removed proposal) is a candidate; each frame gives its per_frame best, and each partition at most
   total_factor x its sign crops, drawn with a seed from the frames a person reviewed first, then those an AI
   reviewed after the other-sign rule (training.OTHER_SIGN_RULE_AT), then the rest: before that rule an AI left the
-  other traffic signs without a box, so a "false" box there may be a sign. Every partition takes its negatives
+  other traffic signs without a box, so a "false" box there may be a sign. In those frames a box of at least
+  sign_score is left out too: the cutter's surest "false" boxes there are mostly signs nobody boxed. Every partition takes its negatives
   from its own frames only. The file starts with a header (dataset, split, cutter, settings, counts), so a
   training reads it only with the dataset and split it was mined on.
 - evaluate_chain runs the cutter on every reviewed frame of a partition, cuts each box at full resolution from
   the frame, classifies it, and counts at each cutter score threshold: the speed signs found AND read right (the
   end-to-end recall, overall, by width and on the signs a person confirmed), the false boxes per frame that
-  survive (answered anything but not_a_sign), and the confusion of every box passed on.
+  survive (answered anything but not_a_sign), and the confusion of every box passed on. Each frame keeps its boxes
+  with the classifier's answers (evaluation.per_frame_record), for the Watch panel of the Evaluate tab.
 - A cutter or classifier is a checkpoint path or "active": the model in use of its role, from
   <data root>/models/active.json (written by the Models tab of the site).
 
@@ -35,7 +37,7 @@ import time
 from typing import Any, Iterator
 
 from nnslr_tools.progress import report as report_progress
-from nnslr_tools.training import (DETECTOR_FAMILIES, NEGATIVE_MAX_IOU, NEGATIVE_PARTITIONS, NEGATIVES_KIND,
+from nnslr_tools.training import (BOXES_OTHER_SIGNS, DETECTOR_FAMILIES, NEGATIVE_MAX_IOU, NEGATIVE_PARTITIONS, NEGATIVES_KIND,
                                   NOT_A_SIGN, OTHER_SIGN_RULE_AT, READER_NORMALIZE_MEAN, READER_NORMALIZE_STD,
                                   REVIEW_TIERS, _label_basis, _safe_image_path, box_overlap, checkpoint_class_scheme,
                                   classifier_positives, crop_rectangle, cutter_families, family_label, frame_boxes,
@@ -52,6 +54,9 @@ CHAIN_IOU_THRESHOLD = 0.5
 MINE_SCORE_THRESHOLD = 0.1
 MINE_PER_FRAME = 3
 MINE_TOTAL_FACTOR = 3.0
+# In a frame whose reviewer did not box the other signs, a box of at least this score is not mined: on 24 October
+# 2026 about 15 of the 40 best-scored such boxes of train were real signs (no entry, no overtaking, roadworks).
+MINE_SIGN_SCORE = 0.3
 # The order in which the frames give their negatives when a partition has more than it takes.
 TIER_PREFERENCE = ("human", "ai_after_rule", "ai_before_rule", "other")
 # A model in use (models/active.json): "<role>:<run>/<part>"; the weights file of each role inside that part.
@@ -163,10 +168,15 @@ def cutter_boxes(model, device, frames: list[dict[str, Any]], data_root: Path, *
 
 
 # -- mining the negatives -----------------------------------------------------------------------------------
-def frame_candidates(frame: dict[str, Any], predictions: list[dict[str, Any]], *, per_frame: int) -> tuple[int, list]:
-    """(how many of the predictions overlap no box a reviewer saw, the best per_frame of them)."""
+def frame_candidates(frame: dict[str, Any], predictions: list[dict[str, Any]], *, per_frame: int,
+                     sign_score: float | None = None) -> tuple[int, list]:
+    """(how many of the predictions overlap no box a reviewer saw, the best per_frame of them). With sign_score,
+    a frame whose reviewer did not box the other signs (not BOXES_OTHER_SIGNS) loses its boxes of at least that
+    score first: likely signs, not junk."""
     seen = frame_boxes(frame)
     free = [item for item in predictions if all(box_overlap(item["box"], box) < NEGATIVE_MAX_IOU for box in seen)]
+    if sign_score is not None and frame.get("tier") not in BOXES_OTHER_SIGNS:
+        free = [item for item in free if item["score"] < sign_score]
     return len(free), free[:per_frame]
 
 
@@ -233,6 +243,7 @@ def negatives_dry_run(dataset_path: Path, split_path: Path, data_root: Path, *, 
 def mine_negatives(dataset_path: Path, split_path: Path, data_root: Path, cutter: str, output: Path, *,
                    dataset_kind: str = "gold", score_threshold: float = MINE_SCORE_THRESHOLD,
                    per_frame: int = MINE_PER_FRAME, total_factor: float = MINE_TOTAL_FACTOR, seed: int = 0,
+                   sign_score: float | None = MINE_SIGN_SCORE,
                    partitions: tuple[str, ...] = NEGATIVE_PARTITIONS, device_name: str = "cuda",
                    batch_size: int = CUTTER_BATCH, num_workers: int = 4) -> dict[str, Any]:
     """The cutter's false boxes of every partition (see the module), written to output (JSONL, header first).
@@ -241,6 +252,8 @@ def mine_negatives(dataset_path: Path, split_path: Path, data_root: Path, cutter
         raise ValueError("invalid_score_threshold")
     if per_frame < 1 or total_factor <= 0:
         raise ValueError("invalid_caps: per_frame >= 1 and total_factor > 0")
+    if sign_score is not None and not score_threshold < sign_score <= 1:
+        raise ValueError("invalid_sign_score: above score_threshold and at most 1")
     if any(partition not in NEGATIVE_PARTITIONS for partition in partitions):
         raise ValueError(f"negatives come from {', '.join(NEGATIVE_PARTITIONS)} only")
     output = Path(output)
@@ -256,12 +269,13 @@ def mine_negatives(dataset_path: Path, split_path: Path, data_root: Path, cutter
     model, checkpoint, input_size = _load_cutter(resolved, device)
     started = time.perf_counter()
     candidates: dict[str, list[dict[str, Any]]] = {partition: [] for partition in partitions}
-    counts = {partition: {"frames": 0, "frames_with_candidates": 0, "candidates": 0, "after_frame_cap": 0}
-              for partition in partitions}
+    counts = {partition: {"frames": 0, "frames_with_candidates": 0, "candidates": 0, "after_frame_cap": 0,
+                          "likely_unboxed_signs": 0} for partition in partitions}
     for frame, _, predictions in cutter_boxes(model, device, frames, data_root, min_score=score_threshold,
                                               batch_size=batch_size, num_workers=num_workers, task="mine"):
         count = counts[frame["split"]]
-        free, best = frame_candidates(frame, predictions, per_frame=per_frame)
+        free, best = frame_candidates(frame, predictions, per_frame=per_frame, sign_score=sign_score)
+        count["likely_unboxed_signs"] += frame_candidates(frame, predictions, per_frame=per_frame)[0] - free
         count["frames"] += 1
         count["candidates"] += free
         count["after_frame_cap"] += len(best)
@@ -291,6 +305,7 @@ def mine_negatives(dataset_path: Path, split_path: Path, data_root: Path, cutter
                    "families": cutter_families(checkpoint)},
         "settings": {"score_threshold": score_threshold, "max_iou": NEGATIVE_MAX_IOU, "per_frame": per_frame,
                      "total_factor": total_factor, "seed": seed, "rule_change_at": OTHER_SIGN_RULE_AT,
+                     "sign_score": sign_score, "boxes_other_signs": list(BOXES_OTHER_SIGNS),
                      "tier_preference": list(TIER_PREFERENCE), "partitions": list(partitions)},
         "counts": counts, "negative_count": len(rows), "device": str(device),
         "seconds": round(time.perf_counter() - started, 1),
@@ -467,6 +482,8 @@ def evaluate_chain(dataset_path: Path, split_path: Path, data_root: Path, cutter
                    main_score_threshold: float = CHAIN_MAIN_SCORE, iou_threshold: float = CHAIN_IOU_THRESHOLD,
                    device_name: str = "cuda", batch_size: int = CUTTER_BATCH, num_workers: int = 4) -> dict[str, Any]:
     """The cutter and the classifier on every reviewed frame of a partition (see the module)."""
+    from nnslr_tools.evaluation import per_frame_descriptor, per_frame_record
+
     thresholds = sorted({float(value) for value in (*score_thresholds, main_score_threshold)})
     if not all(0 <= value <= 1 for value in thresholds):
         raise ValueError("invalid_score_threshold")
@@ -505,6 +522,8 @@ def evaluate_chain(dataset_path: Path, split_path: Path, data_root: Path, cutter
                                                probabilities.max(1).values.tolist()):
                 item["predicted"], item["confidence"] = classes[index], float(confidence)
         truth = truth_objects(frame, scheme, classes, folded)
+        # Every box of the lowest threshold, matched there once, for the Watch panel of the Evaluate tab.
+        floor_pairs = match_boxes(predictions, truth, iou_threshold)
         for value in thresholds:
             selected = [item for item in predictions if item["score"] >= value]
             pairs = tallies[value].add(frame["label_basis"], truth, selected, iou_threshold)
@@ -513,9 +532,9 @@ def evaluate_chain(dataset_path: Path, split_path: Path, data_root: Path, cutter
                 images.append({
                     "image_path": frame["image_path"], "image_sha256": frame["image_sha256"],
                     "route_id": frame["route_id"], "segment_index": frame["segment_index"],
-                    "label_basis": frame["label_basis"], "boxes": len(selected),
+                    "label_basis": frame["label_basis"], "boxes": len(selected), "size": [width, height],
                     "truth": [{"box": item["box"], "label": item["label"], "speed_sign": item["speed_sign"],
-                               "label_basis": item["label_basis"], "found": index in by_truth,
+                               "family": item["family"], "label_basis": item["label_basis"], "found": index in by_truth,
                                "predicted": by_truth[index]["predicted"] if index in by_truth else None,
                                "confidence": by_truth[index]["confidence"] if index in by_truth else None,
                                "correct": index in by_truth and by_truth[index]["predicted"] == item["label"]}
@@ -524,6 +543,7 @@ def evaluate_chain(dataset_path: Path, split_path: Path, data_root: Path, cutter
                                          "predicted": item["predicted"], "confidence": round(item["confidence"], 4)}
                                         for position, item in enumerate(selected)
                                         if position not in pairs and item["predicted"] != NOT_A_SIGN],
+                    **per_frame_record(predictions, floor_pairs, chain=True),
                 })
 
     split_sha = loaded["split_sha256"]
@@ -551,7 +571,10 @@ def evaluate_chain(dataset_path: Path, split_path: Path, data_root: Path, cutter
         "reviewed_box_count": len(truth_all),
         "score_thresholds": thresholds, "main_score_threshold": float(main_score_threshold),
         "by_score_threshold": {f"{value:g}": tallies[value].metrics() for value in thresholds},
-        "images": images, "device": str(device), "seconds": round(time.perf_counter() - started, 1),
+        "images": images,
+        # How each image keeps every box of the cutter from the lowest threshold, with the classifier's answer.
+        "per_frame_boxes": per_frame_descriptor(chain=True, min_score=thresholds[0]),
+        "device": str(device), "seconds": round(time.perf_counter() - started, 1),
         "limitations": limitations,
     }
 

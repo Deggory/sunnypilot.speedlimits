@@ -906,7 +906,8 @@ def _cmd_mine_negatives(args: argparse.Namespace) -> int:
             raise ValueError("--output is required unless --dry-run")
         report = mine_negatives(dataset, splits, root, args.cutter, Path(args.output), dataset_kind=args.dataset_kind,
                                 score_threshold=args.score_threshold, per_frame=args.per_frame,
-                                total_factor=args.total_factor, seed=args.seed, partitions=partitions,
+                                total_factor=args.total_factor, seed=args.seed, sign_score=args.sign_score,
+                                partitions=partitions,
                                 device_name=args.device, batch_size=args.batch_size, num_workers=args.num_workers)
     print(json.dumps(report, indent=2, sort_keys=True, allow_nan=False))
     return 0
@@ -1525,6 +1526,10 @@ def build_parser() -> argparse.ArgumentParser:
                              help="at most this many boxes per frame, the highest scores (default 3)")
     p_negatives.add_argument("--total-factor", type=float, default=3.0,
                              help="at most this many times the sign crops of each partition (default 3)")
+    p_negatives.add_argument("--sign-score", type=float, default=0.3,
+                             help="in frames whose reviewer did not box the other signs (an AI before the rule), "
+                                  "leave out the boxes of at least this score: likely signs nobody boxed "
+                                  "(default 0.3)")
     p_negatives.add_argument("--seed", type=int, default=0)
     p_negatives.add_argument("--partition", action="append", choices=("train", "validation", "test"),
                              help="only these partitions (repeatable; default all three)")
