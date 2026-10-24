@@ -39,7 +39,7 @@ const quiet = computed(() => line.value.text === '' && notices.value.length === 
       <button type="button" class="btn primary confirm" :class="{already: labels.already}" id="confirm"
               data-action="confirm" :disabled="status === 'saving'" :data-save-state="status"
               @click="confirmFrame"><span class="btn-label" id="confirmLabel">{{ labels.label }}</span><kbd class="keycap" aria-hidden="true">↵</kbd></button>
-      <p class="keys" aria-label="Keyboard shortcuts"><span><kbd>←</kbd> <kbd>→</kbd> frame</span> <span><kbd>⇧</kbd> <kbd>←</kbd> <kbd>→</kbd> in the filter</span> <span><kbd>Enter</kbd> confirm</span> <span><kbd>N</kbd> new box</span> <span :hidden="!report.apiBase"><kbd>P</kbd> apply previous</span> <span><kbd>Del</kbd> delete</span> <span id="keyHints" :hidden="!report.routeHasHints"><kbd>H</kbd> second reading</span> <span><kbd>Esc</kbd> cancel</span></p>
+      <p class="keys" aria-label="Keyboard shortcuts"><span><kbd>←</kbd> <kbd>→</kbd> frame</span> <span><kbd>↑</kbd> <kbd>↓</kbd> box</span> <span><kbd>1</kbd>–<kbd>9</kbd> speed, <kbd>0</kbd> ?</span> <span><kbd>O</kbd> <kbd>A</kbd> <kbd>U</kbd> road</span> <span><kbd>⇧</kbd> <kbd>←</kbd> <kbd>→</kbd> in the filter</span> <span><kbd>Enter</kbd> confirm</span> <span><kbd>N</kbd> new box</span> <span :hidden="!report.apiBase"><kbd>P</kbd> apply previous</span> <span><kbd>Del</kbd> delete</span> <span id="keyHints" :hidden="!report.routeHasHints"><kbd>H</kbd> second reading</span> <span><kbd>Esc</kbd> cancel</span></p>
     </div>
   </section>
 </template>

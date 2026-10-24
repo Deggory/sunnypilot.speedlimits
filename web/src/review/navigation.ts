@@ -33,7 +33,8 @@ export function openFrame(key: string): void {
   state.filterNote = '';
   state.withdrawArmed = null;
   const row = rowOf(key);
-  if (row !== null) workOf(row);
+  // The first box is selected: the keys (speed, road) work at once.
+  if (row !== null && workOf(row).detections.length > 0) state.selected = 0;
   writeLocal(report.lastKeyStorage, key);
   // Once the page shows the frame: its tick in sight, and on a phone the photo.
   void nextTick(() => {

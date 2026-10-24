@@ -6,7 +6,7 @@
 // confirm, server, export) and the components below draw it.
 import {nextTick, onBeforeUnmount, onMounted, watchEffect} from 'vue';
 import {ensureCurrentFrame, row, status, work} from './current';
-import {unsavedKeys} from './frames';
+import {unsavedKeys, workOf} from './frames';
 import Inspector from './Inspector.vue';
 import MobileBar from './MobileBar.vue';
 import {pickStartFrame} from './navigation';
@@ -15,7 +15,7 @@ import {scrollTimelineToCurrent} from './scroll';
 import {loadServer, retryUnsaved} from './server';
 import Stage from './Stage.vue';
 import StageBar from './StageBar.vue';
-import {initStore, report, restore, state} from './store';
+import {initStore, report, restore, rowOf, state} from './store';
 import Timeline from './Timeline.vue';
 import type {Payload} from './types';
 import {useKeyboard} from './use-keyboard';
@@ -25,6 +25,9 @@ const props = defineProps<{payload: Partial<Payload>}>();
 initStore(props.payload);
 restore();
 state.currentKey = pickStartFrame();
+// As when a frame is opened: its first box selected, so the keys (speed, road) work at once.
+const startRow = state.currentKey === null ? null : rowOf(state.currentKey);
+if (startRow !== null && workOf(startRow).detections.length > 0) state.selected = 0;
 if (report.apiBase) state.server = 'loading';
 ensureCurrentFrame();
 useKeyboard();
@@ -56,7 +59,11 @@ let timer: number | undefined;
 onMounted(() => {
   void nextTick(scrollTimelineToCurrent);
   if (!report.apiBase) return;
-  void loadServer();
+  // A confirmed frame gets its boxes from the server: then its first box is selected too.
+  void loadServer().then(() => {
+    const shown = row.value;
+    if (shown !== null && state.selected < 0 && workOf(shown).detections.length > 0) state.selected = 0;
+  });
   timer = window.setInterval(retryLater, 30000);
   window.addEventListener('online', retryLater);
 });
