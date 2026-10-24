@@ -373,6 +373,88 @@
     "width": {
       "minimum": 1,
       "type": "integer"
+    },
+    "country": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Z]{2}$",
+      "description": "ISO 3166-1 alpha-2 country of the frame (GPS or reviewer); optional: rows imported before it may miss it"
+    },
+    "gps": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "where the car was at the frame (nnslr gps); optional",
+      "required": [
+        "latitude",
+        "longitude"
+      ],
+      "properties": {
+        "latitude": {
+          "type": "number",
+          "minimum": -90,
+          "maximum": 90
+        },
+        "longitude": {
+          "type": "number",
+          "minimum": -180,
+          "maximum": 180
+        },
+        "speed_mps": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "bearing_deg": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      }
+    },
+    "sign_type": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "pedestrian_crossing",
+        "children",
+        "traffic_queue",
+        "roadworks",
+        "danger_other",
+        "give_way",
+        "stop",
+        "main_road",
+        "main_road_end",
+        "no_overtaking",
+        "no_overtaking_end",
+        "no_entry",
+        "minimum_speed",
+        "weight_limit",
+        "height_limit",
+        "width_limit",
+        "town_entry",
+        "town_exit",
+        "motorway_start",
+        "motorway_end",
+        "expressway_start",
+        "expressway_end",
+        "roundabout",
+        "one_way",
+        "direction_left",
+        "direction_right",
+        "direction_straight",
+        "direction_several",
+        "other",
+        null
+      ],
+      "description": "kind of an other_sign box; optional"
     }
   },
   "required": [

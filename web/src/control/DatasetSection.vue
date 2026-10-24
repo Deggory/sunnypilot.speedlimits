@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // What the gold dataset holds (status.dataset): frames, objects and routes; the objects by sign family; who
-// confirmed them (people or an AI reviewer); the split into train, validation, test, held-out routes and hard
-// negatives, as one stacked bar; the last import; and route by route.
+// confirmed them (people or an AI reviewer); the split into train, validation, test and the buffer around the
+// test (by place), as one stacked bar; the last import; and route by route.
 import {computed} from 'vue';
 import {isoWhen, plural, thousands} from '../common/format';
 import type {DatasetSummary} from '../common/panel-types';
@@ -9,9 +9,11 @@ import type {DatasetSummary} from '../common/panel-types';
 const props = defineProps<{dataset: DatasetSummary | null; loading: boolean}>();
 
 // The split in the order the training uses it, each a slot of the reference categorical palette (control.html
-// --split-1..5, validated for both themes); train and validation are the blue and orange of the charts.
-const SPLITS: [key: string, label: string][] = [['train', 'Train'], ['validation', 'Validation'], ['test', 'Test'],
-  ['route-held-out', 'Held-out routes'], ['hard-negative', 'Hard negatives']];
+// --split-1..5, validated for both themes); train and validation are the blue and orange of the charts. The
+// test is made of places, and the buffer (the places next to it) is neither trained on nor measured. Partitions
+// of older split files (held-out routes, hard negatives) are added after these when a split has them.
+const SPLITS: [key: string, label: string][] = [['train', 'Train'], ['validation', 'Validation'],
+  ['test', 'Test (places kept apart)'], ['buffer', 'Buffer (next to the test)']];
 
 const percentOf = (part: number, whole: number): number => whole ? part * 100 / whole : 0;
 const percentText = (part: number, whole: number): string => {

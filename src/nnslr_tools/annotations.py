@@ -44,7 +44,13 @@ FIELDS = set(ENUMS) | {
     "capture_mono_ns", "image_path", "image_sha256", "width", "height", "bbox_xyxy", "value_kph",
     "temporary", "variable_display", "proposal_source", "proposal_score", "reviewer", "review_timestamp", "notes",
     "source_video_sha256", "source_log_sha256", "provenance", "site_group", "encounter_id",
+    "country", "gps", "sign_type",
 }
+# Added later, so rows imported before them may miss them: the country of the frame (ISO code, from its GPS
+# position or the reviewer), where the car was ({latitude, longitude, speed_mps, bearing_deg}, nnslr_tools.gps)
+# and the kind of an "Other sign" (nnslr_tools.sign_types). The split by place uses gps.
+OPTIONAL_FIELDS = {"country", "gps", "sign_type"}
+COUNTRY_CODE = re.compile(r"[A-Z]{2}")
 # Label fields of a reviewed box: a box whose labels all equal the proposal is
 # "accepted", otherwise "corrected". The review server copies the same fields.
 LABEL_KEYS = ('bbox_xyxy', 'family', 'value_kph', 'applicability', 'supplementary_panel', 'visibility', 'occlusion',
@@ -117,6 +123,10 @@ def _hash(value) -> bool:
     return isinstance(value, str) and re.fullmatch('[0-9a-f]{64}', value) is not None
 
 
+def _finite(value) -> bool:
+    return type(value) in (int, float) and math.isfinite(value)
+
+
 def _integer(value, minimum=0) -> bool:
     return type(value) is int and value >= minimum
 
@@ -132,7 +142,8 @@ def validate_annotation(row: dict, root: Path, *, dataset_kind: str = 'gold',
     # [model-review] - START
     require(dataset_kind in DATASET_KINDS, 'unknown_dataset_kind', str(dataset_kind))
     # [model-review] - END
-    require(set(row) == FIELDS, "invalid_schema", f"missing={sorted(FIELDS-set(row))}, unknown={sorted(set(row)-FIELDS)}")
+    require(FIELDS - OPTIONAL_FIELDS <= set(row) <= FIELDS, "invalid_schema",
+            f"missing={sorted(FIELDS - OPTIONAL_FIELDS - set(row))}, unknown={sorted(set(row) - FIELDS)}")
     # [model-review] - START
     model = isinstance(row.get('provenance'), dict) and row['provenance'].get('label_basis') == 'model_review'
     if model:
@@ -163,6 +174,17 @@ def validate_annotation(row: dict, root: Path, *, dataset_kind: str = 'gold',
     for field in ('site_group', 'encounter_id'):
         require(row[field] is None or (isinstance(row[field], str) and bool(row[field].strip()) and row[field] != 'unknown'), "invalid_group", field)
     require(isinstance(row['notes'], str), "invalid_schema", "notes")
+    country = row.get('country')
+    require(country is None or (isinstance(country, str) and COUNTRY_CODE.fullmatch(country) is not None),
+            "invalid_schema", "country")
+    gps = row.get('gps')
+    if gps is not None:
+        require(isinstance(gps, dict) and all(_finite(gps.get(name)) for name in ('latitude', 'longitude'))
+                and -90 <= gps['latitude'] <= 90 and -180 <= gps['longitude'] <= 180, "invalid_schema", "gps")
+    sign_type = row.get('sign_type')
+    if sign_type is not None:
+        from nnslr_tools.sign_types import SIGN_TYPES
+        require(sign_type in SIGN_TYPES and row['sign_family'] == 'other_sign', "invalid_schema", "sign_type")
     require(_hash(row['image_sha256']), "missing_provenance", "image_sha256")
     for field in ('source_video_sha256', 'source_log_sha256'):
         require(row[field] is None or _hash(row[field]), "missing_provenance", field)
@@ -359,6 +381,8 @@ def _canonical(frame: dict, detection: dict | None, original: dict | None, sourc
         'proposal_score': original.get('score') if original else None,
         'review_state': 'rejected' if rejected else 'accepted' if negative or unchanged else 'corrected',
         'notes': d.get('notes', frame.get('notes', '')),
+        'country': frame.get('country'), 'gps': frame.get('gps'),
+        'sign_type': d.get('sign_type') if family == 'other_sign' else None,
         'alignment_status': frame.get('alignment_status', 'unresolved'),
         'capture_time_provenance': frame.get('capture_time_provenance', 'unknown'),
         'provenance': provenance,

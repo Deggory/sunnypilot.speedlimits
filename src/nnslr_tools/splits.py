@@ -1,5 +1,11 @@
 # [reviewed-dataset] - START
-"""Deterministic route/site/encounter/image-connected partitions, never frame randomization."""
+"""Deterministic partitions of connected groups, never frame randomization.
+
+Groups are connected by place (areas of about 300 m from the GPS position of each frame) when the dataset
+has positions, else by route; site, encounter and identical images always join groups. The routes are driven
+on the same roads again and again, so a split by route would test the model on signs it learned: by place,
+the test areas and a buffer around them never reach the training.
+"""
 from __future__ import annotations
 
 import hashlib
@@ -10,7 +16,7 @@ from nnslr_tools.annotations import DatasetError, atomic_write, frame_identity, 
 
 # Every partition name a split file may use. route-held-out and hard-negative come from the
 # first policy (five partitions) and stay valid so its split files can still be read and checked.
-SPLITS = ('train', 'validation', 'test', 'route-held-out', 'hard-negative')
+SPLITS = ('train', 'validation', 'test', 'route-held-out', 'hard-negative', 'buffer')
 # The partitions build_splits assigns now: the training learns from train, picks its best epoch
 # on validation and is measured on test; nothing else reads a partition.
 POLICY = 'train-validation-test-v2'
@@ -19,9 +25,28 @@ POLICY_SPLITS = ('train', 'validation', 'test')
 # active rows (at least one group each); everything else is train.
 EVALUATION_SHARE = .15
 MIN_GROUPS = len(POLICY_SPLITS)
+# The split by place: areas of about 300 m (0.0027° of latitude, 0.004° of longitude at 47° N). Used when at least
+# PLACE_SHARE of the active rows have a GPS position; the areas next to a test area (also diagonally) are the
+# buffer: neither trained on nor measured, since a sign is seen from the next area too.
+PLACE_POLICY = 'place-v3'
+PLACE_CELL = (0.0027, 0.004)
+PLACE_SHARE = .75
 
 
-def connected_groups(rows: list[dict]) -> list[list[dict]]:
+def place_of(row: dict) -> tuple[int, int] | None:
+    """The area of about 300 m of a row, from its gps, or None without a position."""
+    gps = row.get('gps')
+    if not isinstance(gps, dict):
+        return None
+    latitude, longitude = gps.get('latitude'), gps.get('longitude')
+    if type(latitude) not in (int, float) or type(longitude) not in (int, float):
+        return None
+    return int(latitude // PLACE_CELL[0]), int(longitude // PLACE_CELL[1])
+
+
+def connected_groups(rows: list[dict], *, by_place: bool = False) -> list[list[dict]]:
+    """Groups that must stay in one partition. By place: rows of the same area; rows without a position are
+    grouped by their route. Else by route. Site, encounter and identical images join groups either way."""
     active = [r for r in rows if r['review_state'] in ('accepted', 'corrected')]
     parent = list(range(len(active)))
 
@@ -33,11 +58,10 @@ def connected_groups(rows: list[dict]) -> list[list[dict]]:
 
     tokens = {}
     for i, row in enumerate(active):
-        for field in ('route_id', 'site_group', 'encounter_id', 'image_sha256'):
-            value = row[field]
-            if value is None:
-                continue
-            key = field, value
+        keys = [(field, row[field]) for field in ('site_group', 'encounter_id', 'image_sha256') if row[field] is not None]
+        place = place_of(row) if by_place else None
+        keys.append(('place', place) if place is not None else ('route_id', row['route_id']))
+        for key in keys:
             if key in tokens:
                 parent[find(i)] = find(tokens[key])
             else:
@@ -68,7 +92,8 @@ def validate_splits(rows: list[dict], split: dict, dataset_sha256: str, *, datas
         return [{'reason': 'invalid_split_membership'}]
     if split.get('dataset_sha256') != dataset_sha256:
         errors.append({'reason': 'split_dataset_mismatch'})
-    for group in connected_groups(rows):
+    by_place = 'place' in (split.get('grouping') or ())
+    for group in connected_groups(rows, by_place=by_place):
         assigned = {assignments.get(r['annotation_id']) for r in group if r['annotation_id'] in assignments}
         if len(assigned) > 1:
             errors.append({'reason': 'split_leakage', 'routes': sorted({r['route_id'] for r in group})})
@@ -108,6 +133,54 @@ def _pick_groups(candidates: list[list[dict]], wanted: float, *, keep: int,
     return chosen
 
 
+def _route_partitions(groups: list[list[dict]], wanted: float, test_routes) -> tuple[list, list]:
+    """(test, validation) by whole route groups (policy train-validation-test-v2)."""
+    pinned = []
+    for route in dict.fromkeys(test_routes):
+        for group in groups:
+            if any(r['route_id'] == route for r in group) and not any(group is g for g in pinned):
+                pinned.append(group)
+    rest = [g for g in groups if not any(g is p for p in pinned)]
+    require(len(rest) >= 2, 'insufficient_independent_groups',
+            f'{len(groups)} groups; with the test routes pinned no group is left for validation and train')
+    # Test: the pinned groups, then whole groups up to about the wanted share, those with the most
+    # human-reviewed frames first (the seed order on a tie). Two groups stay for validation and train.
+    by_human = sorted(rest, key=lambda g: -_human_frame_count(g))
+    test = list(pinned)
+    tested = sum(len(g) for g in test)
+    if not test:
+        test = _pick_groups(by_human, wanted, keep=2)
+    elif tested < wanted:
+        test.extend(_pick_groups(by_human, wanted - tested, keep=2, at_least_one=False))
+    rest = [g for g in rest if not any(g is chosen for chosen in test)]
+    # Validation: whole groups up to about the wanted share, in the seed order; one group stays for train.
+    return test, _pick_groups(rest, wanted, keep=1)
+
+
+def _place_partitions(groups: list[list[dict]], wanted: float, test_routes) -> tuple[list, list, list]:
+    """(test, buffer, validation) by areas (policy place-v3).
+
+    The test takes areas up to about the wanted share: areas the test routes drove through when there are
+    test routes, the ones with the most frames confirmed by a person first (then the seed order). The areas
+    next to a test area are the buffer. Validation takes other areas up to about the wanted share in the seed
+    order, never next to the test either; everything else is train.
+    """
+    def places(group):
+        return {place for place in (place_of(r) for r in group) if place is not None}
+
+    routes = set(test_routes)
+    candidates = [g for g in groups if not routes or any(r['route_id'] in routes for r in g)]
+    candidates.sort(key=lambda g: -_human_frame_count(g))
+    test = _pick_groups(candidates, wanted, keep=0)
+    tested = set().union(*(places(g) for g in test)) if test else set()
+    near = {(a + da, b + db) for a, b in tested for da in (-1, 0, 1) for db in (-1, 0, 1)}
+    buffer = [g for g in groups if not any(g is t for t in test) and places(g) & near]
+    rest = [g for g in groups if not any(g is t for t in test) and not any(g is b for b in buffer)]
+    require(len(rest) >= 2, 'insufficient_independent_groups',
+            'no area is left for validation and train next to the test and its buffer')
+    return test, buffer, _pick_groups(rest, wanted, keep=1)
+
+
 def build_splits(rows: list[dict], root: Path, *, seed: int = 0, output: Path | None = None,
                  dataset_kind: str = 'gold', publish_latest: bool = True,
                  test_routes: list[str] | tuple[str, ...] = ()) -> dict:
@@ -124,7 +197,10 @@ def build_splits(rows: list[dict], root: Path, *, seed: int = 0, output: Path | 
     report = validate_dataset(rows, root, dataset_kind=dataset_kind)
     # [model-review] - END
     require(report['valid'], 'invalid_dataset', json.dumps(report['errors']))
-    groups = connected_groups(rows)
+    active_rows = [r for r in rows if r['review_state'] in ('accepted', 'corrected')]
+    located = sum(1 for r in active_rows if place_of(r) is not None)
+    by_place = bool(active_rows) and located >= PLACE_SHARE * len(active_rows)
+    groups = connected_groups(rows, by_place=by_place)
     require(len(groups) >= MIN_GROUPS, 'insufficient_independent_groups',
             f'{len(groups)} groups; train, validation and test need at least {MIN_GROUPS}. '
             f'Keep connected routes/sites together.')
@@ -136,38 +212,25 @@ def build_splits(rows: list[dict], root: Path, *, seed: int = 0, output: Path | 
 
     groups.sort(key=rank)
     wanted = EVALUATION_SHARE * sum(len(g) for g in groups)
-    pinned = []
     for route in dict.fromkeys(test_routes):
-        found = [g for g in groups if any(r['route_id'] == route for r in g)]
-        require(bool(found), 'unknown_test_route', f'{route} has no accepted or corrected rows in the dataset')
-        for group in found:
-            if not any(group is g for g in pinned):
-                pinned.append(group)
-    rest = [g for g in groups if not any(g is p for p in pinned)]
-    require(len(rest) >= 2, 'insufficient_independent_groups',
-            f'{len(groups)} groups; with the test routes pinned no group is left for validation and train')
-    # Test: the pinned groups, then whole groups up to about the wanted share, those with the most
-    # human-reviewed frames first (the seed order on a tie). Two groups stay for validation and train.
-    by_human = sorted(rest, key=lambda g: -_human_frame_count(g))
-    test = list(pinned)
-    tested = sum(len(g) for g in test)
-    if not test:
-        test = _pick_groups(by_human, wanted, keep=2)
-    elif tested < wanted:
-        test.extend(_pick_groups(by_human, wanted - tested, keep=2, at_least_one=False))
-    rest = [g for g in rest if not any(g is chosen for chosen in test)]
-    # Validation: whole groups up to about the wanted share, in the seed order; one group stays for train.
-    validation = _pick_groups(rest, wanted, keep=1)
+        require(any(r['route_id'] == route for g in groups for r in g), 'unknown_test_route',
+                f'{route} has no accepted or corrected rows in the dataset')
+    if by_place:
+        test, buffer, validation = _place_partitions(groups, wanted, test_routes)
+    else:
+        test, validation = _route_partitions(groups, wanted, test_routes)
+        buffer = []
     assignments = {}
-    for name, chosen in (('test', test), ('validation', validation)):
+    for name, chosen in (('test', test), ('buffer', buffer), ('validation', validation)):
         for group in chosen:
             assignments.update({r['annotation_id']: name for r in group})
     for group in groups:
         for row in group:
             assignments.setdefault(row['annotation_id'], 'train')
     active = [r for g in groups for r in g]
-    human = {name: 0 for name in POLICY_SPLITS}
-    routes = {name: set() for name in POLICY_SPLITS}
+    names = POLICY_SPLITS + (('buffer',) if by_place else ())
+    human = {name: 0 for name in names}
+    routes = {name: set() for name in names}
     for row in active:
         name = assignments[row['annotation_id']]
         human[name] += int(_human_reviewed(row))
@@ -176,11 +239,12 @@ def build_splits(rows: list[dict], root: Path, *, seed: int = 0, output: Path | 
     base = root / 'datasets' / 'training_candidate_dataset' if dataset_kind == 'training-candidate' else root
     payload = {'schema_version': 1, 'dataset_kind': dataset_kind, 'dataset_sha256': report['dataset_sha256'], 'seed': seed,
     # [model-review] - END
-               'policy': POLICY, 'test_routes': sorted(set(test_routes)),
-               'grouping': ['route_id', 'site_group', 'encounter_id', 'image_sha256'],
+               'policy': PLACE_POLICY if by_place else POLICY, 'test_routes': sorted(set(test_routes)),
+               'grouping': (['place', 'site_group', 'encounter_id', 'image_sha256'] if by_place
+                            else ['route_id', 'site_group', 'encounter_id', 'image_sha256']),
                'assignments': dict(sorted(assignments.items())),
                'excluded_rejected_ids': sorted(r['annotation_id'] for r in rows if r['review_state'] == 'rejected'),
-               'counts': {name: sum(s == name for s in assignments.values()) for name in POLICY_SPLITS},
+               'counts': {name: sum(s == name for s in assignments.values()) for name in names},
                'human_reviewed_counts': human,
                'routes': {name: sorted(values) for name, values in routes.items()},
                'warnings': report['warnings'], 'leakage_checked': True,

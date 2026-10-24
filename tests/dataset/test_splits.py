@@ -178,3 +178,49 @@ def test_invalid_split_values_are_reported_without_traceback(tmp_path,capsys):
     code,out=invoke(capsys,'validate-dataset','--data-root',str(tmp_path),'--splits',str(split))
     assert code!=0 and 'invalid_split_membership' in out.out
 # [reviewed-dataset] - END
+
+
+# [place-split] - START
+def located_frames(root,route,cells,human=True):
+    """One frame per area of about 300 m along the same road, each with its own image and GPS position."""
+    import hashlib
+    from test_annotations import png
+    rows=[]
+    for index,cell in enumerate(cells):
+        row=reviewed(root,route,index=index)
+        image=root/row['image_path']
+        png(image,(int(route[:8],16)*40+index*7+1)%256)
+        row['frame_sha256']=hashlib.sha256(image.read_bytes()).hexdigest()
+        row['gps']={'latitude':47.0+cell*0.0027+0.001,'longitude':8.0+0.002,'speed_mps':20.0,'bearing_deg':0.0}
+        row['country']='CH'
+        if not human:
+            row.update(reviewer='ai/Claude',label_basis='ai_review',reviewer_kind='ai',review_channel='mcp')
+        rows.append(row)
+    return rows
+
+
+def test_split_by_place_keeps_the_test_areas_and_a_buffer_out_of_training(tmp_path,capsys):
+    from nnslr_tools.annotations import load_jsonl
+    from nnslr_tools.splits import place_of
+    road=list(range(20))
+    rows=(located_frames(tmp_path,'00000001--abcdef1234',road)
+          +located_frames(tmp_path,'00000002--abcdef1234',road,human=False)
+          +located_frames(tmp_path,'00000003--abcdef1234',road,human=False))
+    dataset=import_rows(tmp_path,capsys,rows)
+    report,split=split_of(tmp_path,capsys,'--test-route','00000001--abcdef1234')
+    assert split['policy']=='place-v3' and split['grouping'][0]=='place'
+    canonical=load_jsonl(dataset)
+    where={}
+    for row in canonical:
+        where.setdefault(place_of(row),set()).add(split['assignments'][row['annotation_id']])
+    # One partition per area, whatever route drove through it.
+    assert all(len(names)==1 for names in where.values())
+    areas={name:{place for place,names in where.items() if name in names} for name in ('train','validation','test','buffer')}
+    assert areas['test'] and areas['buffer'] and areas['train'] and areas['validation']
+    # Nothing next to a test area is trained on.
+    for a,b in areas['test']:
+        for da in (-1,0,1):
+            for db in (-1,0,1):
+                assert (a+da,b+db) not in areas['train']
+    assert split['counts']['test']<=0.3*len(canonical)
+# [place-split] - END

@@ -180,9 +180,9 @@ def test_invalid_detection_types_are_reported_without_traceback(tmp_path,capsys,
 
 
 def test_canonical_schema_vocabulary_matches_validator():
-    from nnslr_tools.annotations import FIELDS,ENUMS
+    from nnslr_tools.annotations import FIELDS,ENUMS,OPTIONAL_FIELDS
     schema=json.loads((Path(__file__).parents[2]/'schemas/annotation.schema.json').read_text())
-    assert set(schema['required'])==FIELDS and set(schema['properties'])==FIELDS
+    assert set(schema['required'])==FIELDS-OPTIONAL_FIELDS and set(schema['properties'])==FIELDS
     assert all(set(schema['properties'][k]['enum'])==values for k,values in ENUMS.items())
 
 

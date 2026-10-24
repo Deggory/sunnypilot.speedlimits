@@ -170,7 +170,7 @@ export interface DatasetSummary {
   /** ISO time of the last change of the dataset file, or null. */
   changed_at: string | null;
   split: {
-    /** train, validation, test, route-held-out, hard-negative: objects in each. */
+    /** train, validation, test, buffer (older splits: route-held-out, hard-negative): objects in each. */
     counts: Record<string, number>;
     made_at: string | null;
     warnings: string[];

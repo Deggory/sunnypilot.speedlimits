@@ -145,7 +145,15 @@ else
     report_errors "$LOG_DIR/validate.json" >&2
     die "dataset non valido (report completo: $LOG_DIR/validate.json)"
   fi
-  if ! "$NN" build-splits < /dev/null > "$LOG_DIR/splits.json" 2> "$LOG_DIR/splits.err"; then
+  # The test routes (reviewed entirely by hand): annotations/test-routes.txt, one route per line. The split is
+  # by place: their areas are the test, the areas next to them are kept out of training.
+  test_routes=()
+  if [ -f "$DATA_ROOT/annotations/test-routes.txt" ]; then
+    while read -r line; do
+      if [[ "$line" =~ ^[0-9a-f]{8}--[0-9a-f]{10}$ ]]; then test_routes+=(--test-route "$line"); fi
+    done < "$DATA_ROOT/annotations/test-routes.txt"
+  fi
+  if ! "$NN" build-splits "${test_routes[@]}" < /dev/null > "$LOG_DIR/splits.json" 2> "$LOG_DIR/splits.err"; then
     # Three disjoint partitions (train, validation, test) of independent route/site groups:
     # with fewer groups the split cannot be made.
     groups="$(sed -n 's/.*: \([0-9][0-9]*\) groups.*/\1/p' "$LOG_DIR/splits.json" | head -1)"

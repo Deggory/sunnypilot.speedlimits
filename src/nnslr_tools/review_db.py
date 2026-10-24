@@ -809,6 +809,33 @@ def _dataset_line(review: dict) -> dict:
     return line
 
 
+def _with_position(line: dict, root: Path, cache: dict) -> dict:
+    """The line with gps and country: a review saved before they existed takes them from the positions of its
+    route (nnslr gps), when there are any; the reviewer's country, when given, stays."""
+    if 'gps' in line and 'country' in line:
+        return line
+    route = line.get('route_id')
+    if route not in cache:
+        from nnslr_tools.gps import load_positions
+        try:
+            cache[route] = load_positions(root, route)
+        except (ValueError, OSError):
+            cache[route] = {}
+    key = str(line.get('segment_index')) + '/' + str(line.get('output_index'))
+    position = cache[route].get(key)
+    if position is None:
+        # Nothing to add: the line stays exactly the one the page export writes.
+        return line
+    line = dict(line)
+    if 'gps' not in line:
+        line['gps'] = None
+        if position is not None and position.get('latitude') is not None:
+            line['gps'] = {name: position.get(name) for name in ('latitude', 'longitude', 'speed_mps', 'bearing_deg')}
+    if 'country' not in line:
+        line['country'] = position.get('country')
+    return line
+
+
 def _review_identity(review: dict) -> tuple | None:
     """Frame identity (annotations.frame_identity) of a stored review, from its payload."""
     payload = review['payload']
@@ -906,8 +933,9 @@ def import_from_db(root: Path, output: Path, *, route: str | None = None, datase
     new_ai_frames = 0
     already_imported = 0
     changed = []
+    positions = {}
     for review in selected:
-        line = _dataset_line(review)
+        line = _with_position(_dataset_line(review), root, positions)
         rows = reviewed_frame_annotations(line, PLACEHOLDER_SOURCE_HASH,
                                           dataset_kind=dataset_kind, name='review database')
         state = _import_state(rows, existing)
