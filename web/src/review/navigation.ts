@@ -35,6 +35,9 @@ export function openFrame(key: string): void {
   const row = rowOf(key);
   // The first box is selected: the keys (speed, road) work at once.
   if (row !== null && workOf(row).detections.length > 0) state.selected = 0;
+  // Opened on it, not chosen: Del does not delete it.
+  state.selectedByUser = false;
+  state.typing = '';
   writeLocal(report.lastKeyStorage, key);
   // Once the page shows the frame: its tick in sight, and on a phone the photo.
   void nextTick(() => {
@@ -55,6 +58,18 @@ function nextAfterConfirm(key: string): string | null {
     if (matchesFilter(row, state.filter)) return row.frame_key;
   }
   return null;
+}
+
+/** Once the server has said what is confirmed: with the "To review" filter, a frame already confirmed (the last one
+ * open here, or the first of the route) gives way to the next frame still to review. */
+export function startAtWork(): void {
+  const key = state.currentKey;
+  if (state.filter !== 'todo' || key === null || frameStatus(key) !== 'done') return;
+  const next = nextAfterConfirm(key)
+    ?? report.rows.find((row) => frameStatus(row.frame_key) !== 'done' && matchesFilter(row, 'todo'))?.frame_key ?? null;
+  if (next === null || next === key) return;
+  openFrame(next);
+  state.notice = {key: next, text: 'Opened at the next frame still to review.', error: false};
 }
 
 export function advanceAfterConfirm(key: string, savedText: string): void {

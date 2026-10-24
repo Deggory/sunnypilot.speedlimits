@@ -51,6 +51,11 @@ export interface ReviewState {
   currentKey: string | null;
   /** Index of the selected box in the working copy, -1 for none. */
   selected: number;
+  /** The reviewer chose that box (click, arrows, a new box), rather than the page opening on it: only then does
+   * Del delete it. */
+  selectedByUser: boolean;
+  /** The digits of a speed being typed on the keyboard ("8" before "80"), empty when none. */
+  typing: string;
   drawing: boolean;
   drag: Drag | null;
   /** The rectangle being drawn on the photo (image pixels), while drawing. */
@@ -89,6 +94,8 @@ export const state: ReviewState = reactive({
   suspicious: {},
   currentKey: null,
   selected: -1,
+  selectedByUser: false,
+  typing: '',
   drawing: false,
   drag: null,
   draft: null,

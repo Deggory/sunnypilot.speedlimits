@@ -132,6 +132,7 @@ function booleanChanged(key: BooleanField, event: Event): void {
       <input v-fill="detection?.value_kph === null || detection?.value_kph === undefined ? '' : String(detection.value_kph)"
              type="number" id="value" min="5" max="250" step="1" inputmode="numeric" placeholder="–" @change="valueChanged">
       <span>km/h</span>
+      <span v-if="state.typing" class="typing" role="status">typing {{ state.typing }}…</span>
     </div>
     <p class="field-error" id="valueError" :hidden="!state.valueError">Type a whole number from 5 to 250, or leave it empty if it cannot be read.</p>
     <p class="field-label">Type</p>
@@ -140,6 +141,7 @@ function booleanChanged(key: BooleanField, event: Event): void {
               :aria-pressed="detection?.family === family.id" :data-family="family.id"
               @click="setFamily(family.id); releaseFocus($event)">{{ family.label }}</button>
     </div>
+    <p class="effect-note">✕ in the list removes a box (a duplicate, a box on nothing); <strong>Not a sign</strong> keeps it, to teach the model what to ignore.</p>
     <div class="chips minor" id="familiesMore" role="group" aria-label="Other types">
       <button v-for="family in minor" :key="family.id" type="button" class="chip"
               :aria-pressed="detection?.family === family.id" :data-family="family.id"

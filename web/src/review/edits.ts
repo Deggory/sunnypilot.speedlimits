@@ -109,6 +109,7 @@ export function addManualBox(row: FrameRow, box: Box, family: string, value: num
     detection_id: manualId(work),
   });
   state.selected = work.detections.length - 1;
+  state.selectedByUser = true;
   state.drawing = false;
   changed(row);
 }
@@ -134,6 +135,7 @@ export function setFrameField(row: FrameRow, key: 'site_group' | 'encounter_id',
 /** A box chosen in the list (or on the photo, drawing: false there already): its editor opens. */
 export function selectBox(index: number): void {
   state.selected = index;
+  state.selectedByUser = true;
   state.drawing = false;
   void nextTick(revealEditor);
 }

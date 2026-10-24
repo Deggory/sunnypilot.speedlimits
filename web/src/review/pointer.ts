@@ -161,6 +161,7 @@ export function onSceneClick(event: MouseEvent): void {
   const index = data?.['index'];
   if (index !== undefined) {
     state.selected = Number(index);
+    state.selectedByUser = true;
     void nextTick(revealEditor);
     return;
   }

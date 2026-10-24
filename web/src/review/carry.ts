@@ -64,6 +64,7 @@ export async function applyPrevious(): Promise<void> {
     work.detections = answer.detections;
     const first = uncheckedIndices(work)[0];
     state.selected = first === undefined ? -1 : first;
+    state.selectedByUser = first !== undefined;
     state.drawing = false;
     changed(row);
     state.notice = {key, text: answer.message, error: false, warn: answer.to_check.length > 0};
@@ -94,6 +95,7 @@ export function blockUnchecked(row: FrameRow): boolean {
     + ', carried from the previous frame: move ' + (left.length === 1 ? 'it' : 'each')
     + ' onto the sign and press “Here”, or delete it if the sign is gone.';
   state.selected = first;
+  state.selectedByUser = true;
   state.notice = {key: row.frame_key, text, error: true};
   state.lastSave = {key: row.frame_key, result: 'need-check', revision: work.revision || 0};
   void nextTick(revealEditor);

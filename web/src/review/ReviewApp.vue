@@ -9,7 +9,7 @@ import {ensureCurrentFrame, row, status, work} from './current';
 import {unsavedKeys, workOf} from './frames';
 import Inspector from './Inspector.vue';
 import MobileBar from './MobileBar.vue';
-import {pickStartFrame} from './navigation';
+import {pickStartFrame, startAtWork} from './navigation';
 import ReviewToolbar from './ReviewToolbar.vue';
 import {scrollTimelineToCurrent} from './scroll';
 import {loadServer, retryUnsaved} from './server';
@@ -61,6 +61,7 @@ onMounted(() => {
   if (!report.apiBase) return;
   // A confirmed frame gets its boxes from the server: then its first box is selected too.
   void loadServer().then(() => {
+    startAtWork();
     const shown = row.value;
     if (shown !== null && state.selected < 0 && workOf(shown).detections.length > 0) state.selected = 0;
   });

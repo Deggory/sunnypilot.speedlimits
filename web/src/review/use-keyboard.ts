@@ -1,14 +1,17 @@
-// Keyboard shortcuts: ← → frame (with Shift: the frame before or after in the filter), ↑ ↓ box, 1-9 the speeds
-// of the sign buttons and 0 "not readable", O A U the road, Enter confirm, N new box, P apply previous,
-// H second reading, Del (or Backspace) remove, Esc cancel.
+// Keyboard shortcuts: ← → frame (with Shift: the frame before or after in the filter), ↑ ↓ box, the speed typed
+// as it reads ("5 0" = 50, "1 2 0" = 120, "0" alone = not readable), O A U the road, Enter confirm, N new box,
+// P apply previous, H second reading, Del removes a box the reviewer selected (never one the page opened on),
+// Esc cancel.
 import {onBeforeUnmount, onMounted} from 'vue';
 import {applyPrevious} from './carry';
 import {confirmFrame} from './confirm';
-import {QUICK_VALUES} from './catalog';
 import {cancelAll, removeSelected, selectBox, setField, setValue, toggleDrawing, toggleHints} from './edits';
 import {currentRow, workOf} from './frames';
 import {go, step} from './navigation';
 import {report, state} from './store';
+
+// A speed is typed as it reads: the digits wait this long for the next one, then the value is set.
+const TYPING_MS = 900;
 
 // O A U: the road of the selected box.
 const ROAD_KEYS: Record<string, string> = {o: 'own_road', a: 'other_road', u: 'unresolved'};
@@ -35,6 +38,25 @@ export function useKeyboard(): void {
   const onFocusIn = (event: FocusEvent): void => {
     if (event.target !== pointerButton) pointerButton = null;
   };
+  let typingTimer: number | undefined;
+  /** The digits typed so far become the value of the selected box: "0" alone = not readable; 10-250 a speed. */
+  const flushTyping = (): void => {
+    window.clearTimeout(typingTimer);
+    const typed = state.typing;
+    state.typing = '';
+    if (!typed || state.selected < 0) return;
+    if (typed === '0') {
+      setValue(null);
+      return;
+    }
+    const value = Number(typed);
+    if (value >= 10 && value <= 250) {
+      setValue(value);
+      return;
+    }
+    const key = state.currentKey ?? '';
+    state.notice = {key, text: 'Type the whole number: 5 0 for 50, 1 2 0 for 120 (0 alone: not readable).', error: true};
+  };
   const onKeyDown = (event: KeyboardEvent): void => {
     const target = event.target instanceof HTMLElement ? event.target : null;
     const tag = target ? target.tagName.toLowerCase() : '';
@@ -43,6 +65,8 @@ export function useKeyboard(): void {
       return;
     }
     if (event.metaKey || event.ctrlKey || event.altKey) return;
+    // Any key but a digit ends the number being typed first: Enter then confirms the value just typed.
+    if (state.typing && !/^[0-9]$/.test(event.key)) flushTyping();
     // The same buttons reached with Tab keep their own Enter.
     const byPointer = target !== null && target === pointerButton;
     if (event.key === 'Enter' && byPointer && CONFIRM_ON_ENTER.has(target.id)) {
@@ -52,14 +76,16 @@ export function useKeyboard(): void {
     }
     // Enter on any other focused button or summary belongs to that control.
     if (event.key === 'Enter' && (tag === 'button' || tag === 'summary' || tag === 'a')) return;
-    // With a box selected: its speed (1-9 the sign buttons, 0 not readable) and its road (O A U).
+    // With a box selected: its speed typed as it reads, and its road (O A U).
+    if (state.selected >= 0 && !event.shiftKey && /^[0-9]$/.test(event.key)) {
+      event.preventDefault();
+      state.typing += event.key;
+      window.clearTimeout(typingTimer);
+      if (state.typing.length >= 3) flushTyping();
+      else typingTimer = window.setTimeout(flushTyping, TYPING_MS);
+      return;
+    }
     if (state.selected >= 0 && !event.shiftKey) {
-      const digit = /^[0-9]$/.test(event.key) ? Number(event.key) : null;
-      if (digit !== null && (digit === 0 || QUICK_VALUES[digit - 1] !== undefined)) {
-        event.preventDefault();
-        setValue(digit === 0 ? null : QUICK_VALUES[digit - 1] ?? null);
-        return;
-      }
       const road = ROAD_KEYS[event.key.toLowerCase()];
       if (road) {
         event.preventDefault();
@@ -110,8 +136,8 @@ export function useKeyboard(): void {
         }
         break;
       case 'Delete':
-      case 'Backspace':
-        if (state.selected >= 0) {
+        // Only a box the reviewer selected: never the one the page opened on, never with Backspace.
+        if (state.selected >= 0 && state.selectedByUser) {
           event.preventDefault();
           removeSelected();
         }

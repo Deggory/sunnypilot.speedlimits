@@ -13,7 +13,8 @@ export interface Family {
 // The first five are the usual choices; the minor ones are shown smaller under them.
 export const FAMILIES: readonly Family[] = [
   {id: 'maximum_speed', label: 'Speed limit', hasValue: true, minor: false},
-  {id: 'cancellation', label: 'End of limit', hasValue: true, minor: false},
+  // The crossed number of an end of limit goes in the notes: the box has no value (review rules).
+  {id: 'cancellation', label: 'End of limit', hasValue: false, minor: false},
   {id: 'unreadable', label: 'Unreadable', hasValue: false, minor: false},
   {id: 'variable_display', label: 'Variable display', hasValue: true, minor: false},
   {id: 'zone', label: 'Zone', hasValue: true, minor: false},
