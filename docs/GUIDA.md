@@ -41,22 +41,16 @@ Gli helper si possono rilanciare quando si vuole: il lavoro già fatto viene sal
 
 ## 2. Il pannello web
 
-Il sito ha l'aspetto di `distill-web` e `perception-web` (scuro; in alto a destra l'interruttore scuro/chiaro e l'icona **Account**, dove c'è anche la scelta Automatico). Tre schede nella barra in alto:
+Il sito ha l'aspetto di `distill-web` e `perception-web` (scuro; tocca l'icona **Account** in alto a destra per l'aspetto Scuro / Chiaro / Automatico, la password e l'uscita). Quattro schede nella barra in alto:
 
+- **Panoramica** (`/panoramica`): il prossimo passo, i lavori in corso, la macchina (GPU, CPU per core, RAM, disco), i lavori recenti e **Aggiorna il codice**.
 - **Route** (`/`): le route con il loro report, divise in in corso, da iniziare e completate, da aprire e revisionare.
-- **Pannello** (`/pannello`): a che punto è il lavoro e i pulsanti per lanciare i passi 0, 1 e 3 senza terminale.
-- **Stato** (`/stato`): la macchina e i lavori, come la scheda Status di `distill-web`.
+- **Prepara** (`/prepara`): **Scarica dal comma** e **Prepara le route nuove**, il loro avanzamento, la tabella delle route con lo stato.
+- **Allena** (`/allena`): i numeri del dataset, **Importa le revisioni**, **Allena da zero** (parte da una rete pre-allenata su ImageNet), **Allena dai pesi stable** (riparte dall'ultimo modello pubblicato su Hugging Face), l'avanzamento e i **grafici dell'allenamento**: loss del detector, loss e accuratezza del reader, epoca per epoca, con la migliore segnata.
 
-Il pannello mostra:
+Le schede Panoramica, Prepara e Allena sono una pagina sola: si passa dall'una all'altra senza ricaricare. I vecchi indirizzi `/pannello` e `/stato` portano alla Panoramica.
 
-- il **prossimo passo**, con il pulsante giusto;
-- i tre passi con i numeri (route nuove, fotogrammi confermati, route revisionate su 5) e i pulsanti **Scarica dal comma**, **Prepara le route nuove**, **Importa le revisioni**, **Allena da zero**, **Allena dai pesi stable**. Un pulsante spento ha sotto il motivo (per esempio "servono 5 route revisionate, ora 1" o "la GPU è occupata");
-- un lavoro lanciato da un passo, come scheda dentro quel passo: stato (in corso, finito, fallito, interrotto), tempo, barra (la **percentuale** durante una preparazione) e l'ultima riga del log; il log grezzo solo dentro **Dettagli tecnici**, chiuso;
-- la tabella delle route con lo stato (da revisionare, pronta da importare, nel dataset), ogni route apribile.
-
-La pagina **Stato** mostra GPU (con l'andamento, temperatura, potenza, processi), CPU (andamento e un indicatore per core), RAM e disco; cosa sta girando, anche lanciato da terminale e anche il training di `openpilot.distill` (durante una preparazione con percentuale e route pronte sul totale del giro, che `helpers/1_prepare.sh` scrive in `data/logs/prepare/batch.json` quando parte); i lavori recenti con **Dettagli** (il log) e **Ferma**.
-
-Sempre in **Stato** c'è **Aggiorna il codice**: lancia `helpers/update.sh --no-link` (sezione 3), cioè `git pull` e riavvio del sito, senza bisogno della ssh. Parte solo se non ci sono preparazioni o training in corso, e finché gira non ne parte nessuno: il pull cambierebbe gli script sotto i piedi a quelli in corso. Durante il riavvio la pagina resta qualche secondo "non raggiungibile", poi riprende da sola.
+Ogni lavoro in corso ha una scheda dal vivo: percentuale (solo quando si sa davvero: dai passi fatti, dalle epoche, dalle route pronte; altrimenti una barra che scorre), i passi spuntati con quello attuale, il dettaglio ("detector · epoca 5 di 20"), il tempo trascorso e, con la percentuale, il tempo che manca (circa), l'ultima riga del log, **Ferma** e **Dettagli** (il log). Il progresso lo calcola il server dal log del lavoro (`nnslr_tools/job_progress.py`); il training scrive una riga per epoca apposta. **Ferma** funziona anche dopo un riavvio del sito: il numero del processo è in `data/logs/panel/<lavoro>.pid`. Un training lanciato da terminale si vede con passi e grafici (dal suo `data/logs/train-<run>.log`) ma si ferma dal terminale. Un pulsante spento ha sotto il motivo (per esempio "servono 5 route revisionate, ora 1" o "la GPU è occupata"). **Aggiorna il codice** lancia `helpers/update.sh --no-link` (sezione 3), cioè `git pull` e riavvio del sito; parte solo se non ci sono preparazioni o training in corso.
 
 **Scarica dal comma** lancia `helpers/fetch_comma_segments.sh` senza argomenti (passo 0): tutti i giri ancora sul comma, via ssh con la chiave di questa macchina (`Host comma` in `~/.ssh/config`), senza bisogno di `ssh -A`. Per leggere i log del comma (durata del giro, retromarcia) usa `COMMA_FETCH_PYTHON` se è impostata, altrimenti il Python di `../openpilot.distill/.venv`, che ha il `LogReader` di openpilot; senza nessuno dei due il pulsante resta spento con il motivo. Non parte insieme a una preparazione: tutti e due scrivono i collegamenti in `data/raw/routes`. Dopo il download il prossimo passo è **Prepara le route nuove**.
 
@@ -110,7 +104,7 @@ cd ~/sunnypilot.speedlimits
 helpers/update.sh
 ```
 
-`helpers/update.sh` fa `git pull --ff-only` (si ferma se ci sono modifiche locali), aggiorna `.venv` se è cambiato `pyproject.toml`, rilancia `scripts/install_review_service.sh` (riscrive il servizio solo se è cambiato) e riavvia il servizio; senza servizio riavvia il sito acceso da `helpers/2_review.sh`. Alla fine stampa il link (non con `--no-link`, che è come lo lancia il pulsante **Aggiorna il codice** della pagina Stato).
+`helpers/update.sh` fa `git pull --ff-only` (si ferma se ci sono modifiche locali), aggiorna `.venv` se è cambiato `pyproject.toml`, rilancia `scripts/install_review_service.sh` (riscrive il servizio solo se è cambiato) e riavvia il servizio; senza servizio riavvia il sito acceso da `helpers/2_review.sh`. Alla fine stampa il link (non con `--no-link`, che è come lo lancia il pulsante **Aggiorna il codice** della Panoramica).
 
 Il servizio ha `KillMode=process`: un riavvio ferma solo il sito, non una preparazione o un training partiti dal pannello. Dopo il riavvio il pannello li ritrova come "in corso".
 
@@ -182,12 +176,12 @@ Il database delle revisioni si aggiorna da solo alla versione 2 al primo avvio d
 
 | Cosa | Dove |
 | --- | --- |
-| Sorgenti TypeScript, uno per pagina più i moduli comuni | `web/src/pages/<pagina>.ts`, `web/src/common/`, `web/src/review/`, `web/src/panel/` |
+| Sorgenti delle pagine: componenti Vue 3 (`.vue`) e TypeScript; un ingresso per pagina, i componenti e le funzioni comuni | `web/src/pages/<pagina>.ts`; `web/src/review/` (revisione), `web/src/control/` (Panoramica, Prepara, Allena, grafici), `web/src/account/`, `web/src/login/`; comuni in `web/src/components/` (menu Account, avvisi, barre), `web/src/composables/`, `web/src/common/` |
 | Template HTML, stili (`shared.css`: colori e cornice comuni con distill-web) | `src/nnslr_tools/web/` |
 | Script compilati (committati: il server e `helpers/update.sh` non hanno bisogno di Node) | `src/nnslr_tools/web/js/<pagina>.js` |
-| Chi mette insieme pagina, stili e script, con il nonce | `src/nnslr_tools/pages.py` |
+| Chi mette insieme pagina, stili e script, con il nonce (la pagina Vue si disegna in `<div id="app">`) | `src/nnslr_tools/pages.py` |
 
-Per cambiare una pagina: modifica `web/src` (o il template), lancia `helpers/build_web.sh`, poi committa sorgenti e `js/` insieme; un test fallisce se `js/` non corrisponde ai sorgenti. HTML, CSS e `js/` sono riletti a ogni richiesta: basta ricaricare la pagina. `pages.py` e il resto del Python valgono dopo il riavvio del servizio.
+Per cambiare una pagina: modifica `web/src` (o il template), lancia `helpers/build_web.sh`, poi committa sorgenti e `js/` insieme. I componenti non hanno `<style>`: gli stili restano nei template e in `shared.css`. Vue è compilato prima (niente `eval`, che la CSP del sito vieta); un test fallisce se `js/` non corrisponde ai sorgenti. HTML, CSS e `js/` sono riletti a ogni richiesta: basta ricaricare la pagina. `pages.py` e il resto del Python valgono dopo il riavvio del servizio.
 
 ## 6. Script del repository
 
@@ -201,7 +195,7 @@ Per cambiare una pagina: modifica `web/src` (o il template), lancia `helpers/bui
 | `helpers/setup_mcp.sh` | installa l'SDK MCP; `--claude` prepara Claude Code in questa cartella; `--restart` copia il database se va migrato e riavvia il sito | pacchetti in `.venv`, `~/.claude.json`, `.claude/settings.local.json`, riavvio del servizio |
 | `helpers/mcp.sh` | server MCP (stdio) per Claude Code, Codex e altri client, anche via ssh ([API_MCP.md](API_MCP.md)) | legge le route; salva revisioni AI nel database (non con `--read-only`) |
 | `helpers/fetch_comma_segments.sh` | scarica i giri nuovi dal comma | rete, cartella condivisa dei video |
-| `helpers/build_web.sh` | controlla i tipi del TypeScript delle pagine (`web/src`) e lo compila in `src/nnslr_tools/web/js`; `--check` dice solo se i file compilati sono aggiornati | la prima volta installa TypeScript ed esbuild in `web/node_modules` (Node da PyPI con `uvx`, niente nel sistema) |
+| `helpers/build_web.sh` | controlla i tipi delle pagine (Vue 3 e TypeScript in `web/src`, con `vue-tsc`) e le compila con Vite in `src/nnslr_tools/web/js`; `--check` dice solo se i file compilati sono aggiornati | la prima volta installa Vue, Vite e TypeScript in `web/node_modules` (Node da PyPI con `uvx`, niente nel sistema) |
 | `scripts/install_review_service.sh` | installa/aggiorna/toglie il servizio `speedlimits-web` | systemd, `/etc/speedlimits-web.env`, `.env` |
 | `scripts/setup_v100_training_env.sh` | crea `.venv-gpu` (lo lancia anche `helpers/3_train.sh`) | installa pacchetti |
 | `scripts/run_v100_baseline.sh` | training completo (lo lancia `helpers/3_train.sh`) | GPU |

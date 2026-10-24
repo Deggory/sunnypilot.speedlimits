@@ -1,10 +1,9 @@
 // The review server: reading the saved reviews of the route, sending each confirmation, retrying the ones that
 // did not reach it. Not used offline (the static report, apiBase null).
 import {messageOf} from '../common/api';
-import {byId} from '../common/dom';
 import {clone} from './dom';
 import {fromServer, unsavedKeys} from './frames';
-import {apiBase, render, rows, runId, state, store} from './state';
+import {report, state, store} from './store';
 import type {Problem, ReviewsAnswer, SaveAnswer, Suspicious} from './types';
 
 /** A failed call; retry is true when trying again later can help (no network, server error). */
@@ -51,21 +50,21 @@ export function takeSuspicious(result: {suspicious?: unknown} | null): void {
 
 /** The reviewer name in the top bar. */
 export function reviewerName(): string {
-  return byId<HTMLInputElement>('reviewer').value.trim();
+  return state.reviewer.trim();
 }
 
 // POST one confirmed frame. True when the server stored it.
 export async function send(key: string): Promise<boolean> {
   const s = state.edits[key];
+  const apiBase = report.apiBase;
   if (!apiBase || !s || state.inFlight.has(key)) return false;
   const version = s.version || 0;
   state.inFlight.add(key);
   state.lastSave = {key, result: 'saving', revision: s.revision || 0};
-  render();
   let ok = false;
   try {
     const result = await call<SaveAnswer>('POST', apiBase + '/frame/' + key, {
-      run_id: runId,
+      run_id: report.runId,
       reviewer: s.reviewer || reviewerName(),
       confirmed: true,
       detections: s.detections,
@@ -92,14 +91,13 @@ export async function send(key: string): Promise<boolean> {
     const saved = ok ? state.edits[key] : s;
     state.lastSave = {key, result: ok ? 'ok' : 'error', revision: saved?.revision || 0};
     store();
-    render();
   }
   return ok;
 }
 
 /** Sends the frames confirmed and not saved; all: also those whose last error will not go away by itself. */
 export async function retryUnsaved(all: boolean): Promise<void> {
-  if (!apiBase || state.retrying) return;
+  if (!report.apiBase || state.retrying) return;
   state.retrying = true;
   try {
     for (const key of unsavedKeys()) {
@@ -112,13 +110,13 @@ export async function retryUnsaved(all: boolean): Promise<void> {
 
 /** The reviews saved on the server, merged with what this browser kept. */
 export async function loadServer(): Promise<void> {
+  const apiBase = report.apiBase;
   if (!apiBase) return;
   try {
     const body = await call<ReviewsAnswer>('GET', apiBase + '/reviews');
-    if (body.run_id !== runId) {
+    if (body.run_id !== report.runId) {
       state.serverWarning = 'Il report di questa route è stato rigenerato: ricarica la pagina.';
       state.server = 'stale';
-      render();
       return;
     }
     const onServer = new Set<string>();
@@ -133,7 +131,7 @@ export async function loadServer(): Promise<void> {
         state.edits[item.frame_key] = fromServer(item);
       }
     }
-    for (const row of rows) {
+    for (const row of report.rows) {
       const key = row.frame_key;
       const s = state.edits[key];
       if (!s || onServer.has(key)) continue;
@@ -151,12 +149,10 @@ export async function loadServer(): Promise<void> {
     state.serverWarning = '';
     state.server = 'ready';
     store();
-    render();
     void retryUnsaved(true);
   } catch (error) {
     state.serverWarning = 'Revisioni non lette dal server: ' + messageOf(error)
       + ' Le modifiche restano in questo browser.';
     state.server = 'error';
-    render();
   }
 }

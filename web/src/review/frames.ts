@@ -1,7 +1,7 @@
 // Frames and their review state: the working copy, the status of a frame, its doubts, the filters.
 import {hasValue, isSpeedFamily} from './catalog';
 import {clone} from './dom';
-import {apiBase, rowOf, rows, state} from './state';
+import {report, rowOf, state} from './store';
 import type {
   ConfirmedCopy, Detection, Filter, FrameEdit, FrameRow, FrameStatus, QualityFilter, SuspiciousReason,
 } from './types';
@@ -22,10 +22,11 @@ export function workOf(row: FrameRow): FrameEdit {
     const detections = clone(proposalsOf(row));
     // Numbered from left to right, as they appear on the photo.
     detections.sort((a, b) => a.bbox_xyxy[0] - b.bbox_xyxy[0]);
-    work = {review_state: 'pending', detections, saved: true, revision: 0};
-    state.edits[key] = work;
+    state.edits[key] = {review_state: 'pending', detections, saved: true, revision: 0};
+    // The reactive copy: changes made through it reach the page.
+    work = state.edits[key];
   }
-  return work;
+  return work as FrameEdit;
 }
 
 /** The box selected in the frame on screen. */
@@ -65,7 +66,7 @@ export function sameAsServer(s: FrameEdit | undefined): boolean {
 export function isConfirmed(key: string): boolean {
   const s = state.edits[key];
   if (!s) return false;
-  if (apiBase) return s.server_confirmed === true;
+  if (report.apiBase) return s.server_confirmed === true;
   return s.review_state === 'reviewed';
 }
 
@@ -76,11 +77,11 @@ export function reasonsOf(key: string): SuspiciousReason[] {
 }
 
 export function frameStatus(key: string): FrameStatus {
-  if (apiBase && state.inFlight.has(key)) return 'saving';
+  if (report.apiBase && state.inFlight.has(key)) return 'saving';
   const s = state.edits[key];
   if (!s) return 'todo';
   if (s.review_state === 'reviewed') {
-    if (!apiBase) return 'done';
+    if (!report.apiBase) return 'done';
     if (s.saved === true && s.server_confirmed === true) return 'done';
     return 'error';
   }
@@ -92,7 +93,7 @@ export function frameStatus(key: string): FrameStatus {
 // like a person's: this only shows where it comes from (filter, striped tick, save line).
 export function aiConfirmed(key: string): boolean {
   const s = state.edits[key];
-  return Boolean(apiBase && s && s.reviewer_kind === 'ai' && frameStatus(key) === 'done' && sameAsServer(s));
+  return Boolean(report.apiBase && s && s.reviewer_kind === 'ai' && frameStatus(key) === 'done' && sameAsServer(s));
 }
 
 export function statusLabel(key: string): string {
@@ -160,12 +161,12 @@ export function matchesFilter(row: FrameRow, filter: Filter): boolean {
 
 // Frames of the current filter, plus the frame on screen so that it never disappears under the reviewer.
 export function visibleRows(): FrameRow[] {
-  return rows.filter((row) => row.frame_key === state.currentKey || matchesFilter(row, state.filter));
+  return report.rows.filter((row) => row.frame_key === state.currentKey || matchesFilter(row, state.filter));
 }
 
 /** Frames confirmed here and not stored on the server yet. */
 export function unsavedKeys(): string[] {
-  return rows.filter((row) => {
+  return report.rows.filter((row) => {
     const s = state.edits[row.frame_key];
     return s && s.saved === false && s.review_state === 'reviewed';
   }).map((row) => row.frame_key);

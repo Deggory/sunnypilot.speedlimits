@@ -1,4 +1,4 @@
-// GET /api/panel/status (nnslr_tools.panel.Panel.status): the Pannello and the Stato page.
+// GET /api/panel/status (nnslr_tools.panel.Panel.status): the control pages (Panoramica, Prepara, Allena).
 
 export type ActionName = 'fetch' | 'prepare' | 'dataset' | 'train' | 'train_continue' | 'update';
 export type JobState = 'running' | 'ok' | 'failed' | 'interrupted';
@@ -10,23 +10,62 @@ export interface ActionState {
   reason: string;
 }
 
+/** How far a job is, read by the server from its log (nnslr_tools.job_progress). */
+export interface JobStep {
+  key: string;
+  label: string;
+  state: 'done' | 'current' | 'todo' | 'failed';
+}
+
+/** One epoch of a training, from its log line. */
+export interface EpochPoint {
+  epoch: number;
+  train_loss?: number;
+  val_loss?: number;
+  train_accuracy?: number;
+  val_accuracy?: number;
+  seconds?: number;
+}
+
+export interface TrainingCurve {
+  /** Epochs planned. */
+  epochs: number;
+  points: EpochPoint[];
+}
+
+export interface JobProgress {
+  steps: JobStep[];
+  /** 0-100 when known from steps, epochs or finished routes; null otherwise (never a guess). */
+  percent: number | null;
+  /** e.g. "detector · epoca 5 di 20", "2 di 5 route pronte", "12 segmenti scaricati". */
+  detail: string;
+  last_line: string;
+  /** Training only: the curves of the detector and of the reader, one point per epoch done. */
+  curves: Partial<Record<'detector' | 'reader', TrainingCurve>>;
+}
+
 export interface Job {
   id: string;
   action: ActionName;
   label: string;
-  /** "2026-10-23 18:55:09" */
+  /** "2026-10-23 18:55:09", the server's clock without a zone. */
   started: string;
+  /** The same instant with its offset ("2026-10-23T18:55:09+00:00"), when the server sends it. */
+  started_at?: string;
   state: JobState;
   code: number | null;
   stoppable: boolean;
   /** Bytes of the log so far. */
   size: number;
+  progress: JobProgress;
 }
 
 export interface Activity {
   group: string;
   label: string;
   pid: number;
+  /** A training started from a terminal: its progress, read from data/logs/train-<run>.log. */
+  progress?: JobProgress;
 }
 
 export interface GpuProcess {

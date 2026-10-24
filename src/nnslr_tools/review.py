@@ -32,8 +32,8 @@ from nnslr_tools.preannotate import PreannotationError, _inside, resolve_data_ro
 # [site-login] - START
 from nnslr_tools.review_auth import SESSION_MAX_SECONDS, AdminAuth, auth_dir
 # [site-login] - END
-from nnslr_tools.pages import (render_account, render_index, render_login, render_panel, render_problem,
-                               render_review, render_status)
+from nnslr_tools.pages import (CONTROL_TABS, render_account, render_control, render_index, render_login,
+                               render_problem, render_review)
 from nnslr_tools.review_service import ReviewService
 
 TOKEN_ENV = 'NNSLR_REVIEW_TOKEN'
@@ -48,7 +48,7 @@ LOGIN_MESSAGE = 'Accesso richiesto: ricarica la pagina e accedi con nome e passw
 PUBLIC_AUTH_ROUTES = ('/api/auth/login', '/api/auth/setup/check', '/api/auth/setup')
 AUTH_ROUTES = PUBLIC_AUTH_ROUTES + ('/api/auth/logout', '/api/auth/logout-all', '/api/auth/password')
 # The pages a browser opens: without a session they show the sign-in page instead.
-PAGE_RE = re.compile(r'/(index\.html|pannello|stato|account|route/[^/]+(/(index\.html)?)?)?')
+PAGE_RE = re.compile(r'/(index\.html|panoramica|prepara|allena|pannello|stato|account|route/[^/]+(/(index\.html)?)?)?')
 # [site-login] - END
 API_TOKEN_MESSAGE = ('Token mancante o errato: invialo nell’header "Authorization: Bearer <token>" '
                      '(oppure "X-Review-Token"), mai nell’indirizzo.')
@@ -494,17 +494,16 @@ def make_handler(app: ReviewApp):
                 self._json(200, {'routes': app.route_summaries()})
                 return
             # [control-panel] - START
-            if path == '/pannello':
+            # The control pages: one Vue app, a tab each (web/src/control); the old addresses lead there.
+            if path in CONTROL_TABS:
                 nonce = secrets.token_urlsafe(18)
                 csp = ("default-src 'none'; script-src 'nonce-" + nonce + "'; style-src 'unsafe-inline'; "
                        "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
-                self._send(200, 'text/html; charset=utf-8', render_panel(nonce).encode('utf-8'), csp)
+                self._send(200, 'text/html; charset=utf-8', render_control(nonce, CONTROL_TABS[path]).encode('utf-8'),
+                           csp)
                 return
-            if path == '/stato':
-                nonce = secrets.token_urlsafe(18)
-                csp = ("default-src 'none'; script-src 'nonce-" + nonce + "'; style-src 'unsafe-inline'; "
-                       "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
-                self._send(200, 'text/html; charset=utf-8', render_status(nonce).encode('utf-8'), csp)
+            if path in ('/pannello', '/stato'):
+                self._redirect('/panoramica', None)
                 return
             if path == '/api/panel/status':
                 self._json(200, app.panel.status())

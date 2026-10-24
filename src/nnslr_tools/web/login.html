@@ -14,41 +14,7 @@ __NNSLR_SITE_CSS__
 <body>
 <!-- [site-login] - START -->
 __NNSLR_TOPBAR__
-<main class="page">
-  <section class="auth-card" aria-labelledby="auth-title">
-    <span class="brand-mark auth-logo" aria-hidden="true">50</span>
-    <div class="auth-head idle" id="auth-head">
-      <button class="auth-back" type="button" id="auth-back" aria-label="Indietro" hidden>‹</button>
-      <div class="auth-steps" id="auth-steps" aria-hidden="true" hidden><span></span><span></span></div>
-    </div>
-    <h1 class="auth-title" id="auth-title">Revisione cartelli</h1>
-    <p class="auth-sub" id="auth-sub">Caricamento…</p>
-
-    <form class="auth-form" id="form-login" hidden novalidate>
-      <label class="field">Nome<input type="text" id="login-user" name="username" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="64" required></label>
-      <label class="field">Password<input type="password" id="login-password" name="password" autocomplete="current-password" maxlength="256" required></label>
-      <div class="auth-error" id="login-error" role="alert"></div>
-      <button class="btn primary" type="submit" id="login-submit">Accedi</button>
-    </form>
-
-    <form class="auth-form" id="form-code" hidden novalidate>
-      <label class="field">Codice di configurazione<input type="password" id="setup-code" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="256" required></label>
-      <p class="note">È il token di accesso di questo server (riga <code>NNSLR_REVIEW_TOKEN</code> del file <code>.env</code> del repository): l’installazione lo stampa. Serve una volta sola.</p>
-      <div class="auth-error" id="code-error" role="alert"></div>
-      <button class="btn primary" type="submit" id="code-submit">Avanti</button>
-    </form>
-
-    <form class="auth-form" id="form-setup" hidden novalidate>
-      <label class="field">Nome<input type="text" id="setup-user" name="username" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="64" required value="admin"></label>
-      <label class="field">Password<input type="password" id="setup-password" name="new-password" autocomplete="new-password" maxlength="256" minlength="12" required></label>
-      <label class="field">Ripeti la password<input type="password" id="setup-repeat" autocomplete="new-password" maxlength="256" required></label>
-      <p class="note">Almeno 12 caratteri. Un gestore di password può crearne una per te.</p>
-      <div class="auth-error" id="setup-error" role="alert"></div>
-      <button class="btn primary" type="submit" id="setup-submit">Crea e accedi</button>
-    </form>
-    <p class="note auth-foot" id="auth-transport" hidden>Connessione non cifrata (http): usa questa pagina solo nella rete di casa.</p>
-  </section>
-</main>
+<div id="app"></div>
 __NNSLR_SCRIPT__
 <!-- [site-login] - END -->
 </body>

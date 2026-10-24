@@ -185,7 +185,10 @@ class Panel:
                 state = 'interrupted'
             started = datetime.strptime(job_id[:15], '%Y%m%d-%H%M%S')
             result.append({'id': job_id, 'action': action, 'label': ACTIONS[action]['label'],
-                           'started': started.strftime('%Y-%m-%d %H:%M:%S'), 'state': state, 'code': code,
+                           'started': started.strftime('%Y-%m-%d %H:%M:%S'),
+                           # The same moment with the server's offset, for the elapsed time in the page.
+                           'started_at': started.astimezone().isoformat(timespec='seconds'),
+                           'state': state, 'code': code,
                            'stoppable': state == 'running' and self._group(job_id) is not None,
                            'size': path.stat().st_size})
         return result
@@ -247,7 +250,25 @@ class Panel:
         payload['actions'] = self._action_states(payload, activities)
         for job in payload['jobs']:
             job['progress'] = self.job_progress(job, payload['preparation'])
+        self._terminal_training(payload)
         return payload
+
+    def _terminal_training(self, payload: dict) -> None:
+        """A training started from a terminal (helpers/3_train.sh) is no job of the panel: its progress comes
+        from the log the helper writes itself, the newest data/logs/train-<run>.log."""
+        from_panel = any(job['state'] == 'running' and ACTIONS[job['action']]['group'] == 'train'
+                         for job in payload['jobs'])
+        trainings = [item for item in payload['activities'] if item['group'] == 'train']
+        logs = sorted((self.root / 'logs').glob('train-*.log'), key=lambda path: path.stat().st_mtime)
+        if from_panel or not trainings or not logs:
+            return
+        size = logs[-1].stat().st_size
+        with logs[-1].open('rb') as log:
+            log.seek(max(0, size - PROGRESS_BYTES))
+            text = log.read().decode('utf-8', 'replace')
+        result = progress('train', 'running', text)
+        for item in trainings:
+            item['progress'] = result
 
     def job_progress(self, job: dict, preparation: dict | None) -> dict:
         """Steps, percent and last line of a job, from its log (nnslr_tools.job_progress)."""

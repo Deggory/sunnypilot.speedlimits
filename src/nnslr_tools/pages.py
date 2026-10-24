@@ -2,7 +2,8 @@
 
 Templates, styles and scripts live in ``nnslr_tools/web``: ``shared.css`` (tokens and frame, the look of
 distill-web), ``site.css`` (route list, error pages, sign-in, account), the page templates and
-``js/<page>.js``, built from the TypeScript of ``web/src`` by ``helpers/build_web.sh``. Every page gets
+``js/<page>.js``, built from the Vue and TypeScript of ``web/src`` by ``helpers/build_web.sh``; a page with
+a script renders its content in ``<div id="app">``. Every page gets
 its script inline with the nonce of its Content-Security-Policy. Files are read on every request: a
 change to them is live at the next page load, a change to this module after a restart.
 
@@ -25,23 +26,26 @@ from pathlib import Path
 from nnslr_tools.review_hints import empty_stats
 
 # The tabs of the site: (key of the current page, address, label). Account is the icon at the right.
-SITE_TABS = (('route', '/', 'Route'), ('panel', '/pannello', 'Pannello'), ('status', '/stato', 'Stato'))
+SITE_TABS = (('overview', '/panoramica', 'Panoramica'), ('route', '/', 'Route'), ('prepare', '/prepara', 'Prepara'),
+             ('train', '/allena', 'Allena'))
+# The tabs that are one Vue app (web/src/control), by address: the app shows the tab of the address.
+CONTROL_TABS = {'/panoramica': 'overview', '/prepara': 'prepare', '/allena': 'train'}
 # Dark (the default) or the choice kept in this browser, applied before the first paint
 # (web/src/common/theme.ts changes it).
 THEME_HEAD = ('<script nonce="{nonce}">try{{var t=localStorage.getItem(\'nnslr-theme\');'
               'if(t===\'light\'||t===\'auto\')document.documentElement.dataset.theme=t}}catch(e){{}}</script>')
-# The Account icon at the right of every top bar: a menu with who is signed in, the appearance (dark, light,
-# automatic), the account settings and sign out; web/src/common/account-menu.ts fills it when it opens.
+# The Account menu at the right of every top bar (web/src/components/AccountMenu.vue, mounted here by the
+# page script): who is signed in, the appearance (dark, light, automatic), the settings and sign out. The
+# icon is already in the HTML, so nothing moves while the script starts.
 ACCOUNT_MENU = (
-    '<div class="account-menu">'
-    '<button class="icon-btn account-btn{current}" type="button" id="account-btn" aria-haspopup="dialog"'
-    ' aria-expanded="false" aria-controls="account-pop" aria-label="Account e impostazioni" title="Account">'
+    '<div class="account-menu" id="account-menu" data-current="{current}">'
+    '<button class="icon-btn account-btn" type="button" id="account-btn" aria-haspopup="dialog" aria-expanded="false"'
+    ' aria-controls="account-pop" aria-label="Account e impostazioni" title="Account">'
     '<svg viewBox="0 0 20 20" aria-hidden="true">'
     '<circle cx="10" cy="7" r="3.4" fill="none" stroke="currentColor" stroke-width="1.8"/>'
     '<path d="M3.6 17.2c.9-3.1 3.4-4.8 6.4-4.8s5.5 1.7 6.4 4.8" fill="none" stroke="currentColor"'
     ' stroke-width="1.8" stroke-linecap="round"/></svg></button>'
-    '<div class="account-pop" id="account-pop" role="dialog" aria-label="Account e impostazioni" hidden></div>'
-    '</div>')
+    '<div class="account-pop" id="account-pop" role="dialog" aria-label="Account e impostazioni" hidden></div></div>')
 LIVE = ('<span class="live" role="status"><span class="dot" id="live-dot"></span>'
         '<span id="live-text">connessione…</span></span>')
 # Groups of the route list, in this order: the work in progress first, finished routes last.
@@ -64,7 +68,7 @@ def page_script(page: str, nonce: str) -> str:
 
 def bar_end(current: str = '') -> str:
     """The Account menu, at the right of every top bar."""
-    return ACCOUNT_MENU.format(current=' current' if current == 'account' else '')
+    return ACCOUNT_MENU.format(current='true' if current == 'account' else 'false')
 
 
 def top_bar(current: str = '', *, live: bool = False, signed_in: bool = True) -> str:
@@ -117,14 +121,10 @@ def render_review(rows: list[dict], run_id: str, *, route_id: str = '', server: 
 
 
 # [control-panel] - START
-def render_panel(nonce: str) -> str:
-    """The control panel; it loads its data from /api/panel/status."""
-    return fill(asset('panel.html'), nonce, 'panel', 'panel', live=True)
-
-
-def render_status(nonce: str) -> str:
-    """The Stato page (the machine and the jobs, as distill-web's Status); data from /api/panel/status."""
-    return fill(asset('status.html'), nonce, 'status', 'status', live=True)
+def render_control(nonce: str, tab: str) -> str:
+    """Panoramica, Prepara, Allena: one page (control.html, web/src/control), the tab marked in the bar;
+    data from /api/panel/status."""
+    return fill(asset('control.html'), nonce, 'control', tab, live=True)
 # [control-panel] - END
 
 

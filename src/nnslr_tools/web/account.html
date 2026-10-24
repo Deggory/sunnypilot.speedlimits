@@ -14,31 +14,7 @@ __NNSLR_SITE_CSS__
 <body>
 <!-- [site-login] - START -->
 __NNSLR_TOPBAR__
-<main class="page settings">
-  <header class="page-head"><h1 class="page-title">Account</h1>
-    <p class="page-sub">Chi entra in questo sito dal browser. Gli agenti e i client API usano invece il token nell’header, mai il nome e la password.</p></header>
-  <section class="card state-box">
-    <h2>Amministratore</h2>
-    <p id="admin-sub">Caricamento…</p>
-    <div class="buttons">
-      <button class="btn" type="button" id="btn-signout">Esci</button>
-      <button class="btn danger" type="button" id="btn-signout-all">Esci da tutti i browser</button>
-    </div>
-  </section>
-  <section class="card state-box">
-    <h2>Cambia la password</h2>
-    <form class="auth-form" id="password-form" novalidate>
-      <input type="text" name="username" autocomplete="username" hidden>
-      <label class="field">Password attuale<input type="password" id="current" autocomplete="current-password" maxlength="256"></label>
-      <label class="field">Nuova password<input type="password" id="fresh" autocomplete="new-password" maxlength="256" minlength="12"></label>
-      <label class="field">Ripeti la nuova password<input type="password" id="repeat" autocomplete="new-password" maxlength="256"></label>
-      <div class="auth-error" id="password-error" role="alert"></div>
-      <div class="auth-ok" id="password-ok" role="status"></div>
-      <button class="btn primary" type="submit" id="btn-password">Cambia la password</button>
-    </form>
-    <p class="note">Dopo il cambio, tutti gli altri browser devono accedere di nuovo. Password dimenticata: chi ha accesso al server ferma il sito, sposta via <code>web/auth/admin.json</code> della cartella dati e lo riavvia; la visita successiva chiede di nuovo il codice di configurazione.</p>
-  </section>
-</main>
+<div id="app"></div>
 __NNSLR_SCRIPT__
 <!-- [site-login] - END -->
 </body>

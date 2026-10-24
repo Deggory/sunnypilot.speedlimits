@@ -191,7 +191,10 @@ export interface Notice {
 export type Point = [number, number];
 export type Corner = 'nw' | 'ne' | 'sw' | 'se';
 
+/** The two pictures a pointer can work on: the photo and the zoom of the selected box. */
+export type Surface = 'scene' | 'zoom';
+
 /** A pointer drag on the photo or on the zoom: drawing a new box, or moving a corner of the selected one. */
 export type Drag =
-  | {kind: 'draw'; svg: SVGSVGElement; start: Point}
-  | {kind: 'resize'; svg: SVGSVGElement; corner: Corner; moved: boolean};
+  | {kind: 'draw'; svg: Surface; start: Point}
+  | {kind: 'resize'; svg: Surface; corner: Corner; moved: boolean};

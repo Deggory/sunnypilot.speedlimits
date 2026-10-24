@@ -1,7 +1,6 @@
 // "Scarica revisioni JSONL": the confirmed frames as reviewed_frame lines, the same line the server stores
 // (review_db.build_reviewed_frame). Offline it is the only way to keep the review; with the server, a backup.
-import {byId} from '../common/dom';
-import {rows, runId, state} from './state';
+import {report, state} from './store';
 import type {Detection, FrameRow} from './types';
 
 /** One line of the export: the report row with the reviewer's decisions (review_db.build_reviewed_frame). */
@@ -20,13 +19,11 @@ interface ReviewedFrame extends FrameRow {
 }
 
 function say(text: string, ok: boolean): void {
-  const message = byId('exportMsg');
-  message.textContent = text;
-  message.className = 'save-msg ' + (ok ? 'ok' : 'error');
+  state.exportMessage = {text, ok};
 }
 
 export function exportJsonl(): void {
-  const confirmed = rows.flatMap((row) => {
+  const confirmed = report.rows.flatMap((row) => {
     const s = state.edits[row.frame_key];
     return s && s.review_state === 'reviewed' ? [{row, s}] : [];
   });
@@ -64,9 +61,10 @@ export function exportJsonl(): void {
     return;
   }
   const url = URL.createObjectURL(new Blob([lines.join('\n') + '\n'], {type: 'application/x-ndjson'}));
+  // A download needs a link of its own, never on the page.
   const link = document.createElement('a');
   link.href = url;
-  link.download = 'annotations-' + runId + '.jsonl';
+  link.download = 'annotations-' + report.runId + '.jsonl';
   link.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   say(lines.length + (lines.length === 1 ? ' fotogramma esportato.' : ' fotogrammi esportati.'), true);

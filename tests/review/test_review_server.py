@@ -1,8 +1,11 @@
 """Web review server: token/cookie, routes index, saving frames into the review database."""
 from __future__ import annotations
 
+import re
+
 import pytest
 
+from nnslr_tools.pages import asset
 from nnslr_tools.review_db import ReviewStore, db_path
 from review_helpers import (OTHER_ROUTE, ROUTE, RUN_ID, TOKEN, RunningServer, json_of, make_report,
                             page_body, sign_in)
@@ -60,9 +63,11 @@ def test_loopback_needs_no_token_and_index_lists_routes_with_counts(loopback, tm
 def test_without_a_session_pages_show_the_sign_in_and_calls_are_refused(tokened):
     server, root, rows = tokened
     # [site-login] - START
-    for path in ['/', f'/route/{ROUTE}/', '/pannello', '/account']:
+    # The sign-in page is a Vue app: its form is in the login script (web/src/login/LoginApp.vue).
+    login_script = asset("js/login.js").encode()
+    for path in ['/', f'/route/{ROUTE}/', '/panoramica', '/pannello', '/account']:
         status, response, data = server.request('GET', path)
-        assert status in (200, 401) and b'id="form-login"' in data and b'"server": true' not in data, path
+        assert status in (200, 401) and login_script in data and b'"server": true' not in data, path
     for path in ['/api/routes', f'/route/{ROUTE}/images/00000000.jpg', f'/api/route/{ROUTE}/reviews']:
         status, response, data = server.request('GET', path)
         assert status == 401, path
@@ -327,7 +332,7 @@ def test_paths_outside_the_report_are_refused(loopback):
                  f'/api/route/..%2F{ROUTE}/reviews', '/images/00000000.jpg']:
         status, response, data = server.request('GET', path)
         assert status == 404, path
-        assert b'secret' not in data and b'root:' not in data
+        assert b'secret' not in data and b'root:x:0:0' not in data
     status, response, data = server.post_frame('..%2F' + ROUTE, '0/0', page_body(rows[0]))
     assert status == 404
 
@@ -356,7 +361,9 @@ def test_route_page_is_rendered_without_touching_the_report(loopback):
 def test_static_report_page_still_works_offline(report):
     root, rows = report
     page = (root / 'derived/preannotations' / ROUTE / RUN_ID / 'index.html').read_text()
-    assert '"server": false' in page and '__NNSLR_' not in page and 'https://' not in page
+    assert '"server": false' in page and '__NNSLR_' not in page
+    # Nothing loaded from elsewhere (the Vue runtime only names its error page in a string).
+    assert re.search(r'(src|href)\s*=\s*["\']?https?://', page) is None
 
 
 def test_non_loopback_host_requires_a_token(tmp_path, monkeypatch):

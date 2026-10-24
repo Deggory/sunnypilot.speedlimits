@@ -1,5 +1,6 @@
 """The pages of the site: one shared look (shared.css, the tokens of distill-web), the tabs, the Account
-menu (appearance, settings, sign out), the Stato page, and the scripts built from the TypeScript of web/src."""
+menu (appearance, settings, sign out), the Stato page, and the scripts built from the Vue and TypeScript of
+web/src."""
 from __future__ import annotations
 
 import os
@@ -24,8 +25,8 @@ def served(tmp_path):
     server.close()
 
 
-PAGES = [('/', 'Route'), ('/stato', 'Stato'), ('/pannello', 'Pannello'), ('/account', None),
-         (f'/route/{ROUTE}/', None), ('/nonexistent', None)]
+PAGES = [('/', 'Route'), ('/panoramica', 'Panoramica'), ('/prepara', 'Prepara'), ('/allena', 'Allena'),
+         ('/account', None), (f'/route/{ROUTE}/', None), ('/nonexistent', None)]
 
 
 @pytest.mark.parametrize('path, tab', PAGES)
@@ -37,23 +38,27 @@ def test_every_page_has_the_shared_look_the_account_menu_and_its_script(served, 
     assert f'<script nonce="{nonce}">try{{var t=localStorage.getItem(\'nnslr-theme\')' in page
     assert page.count(f'<script nonce="{nonce}">') == 2
     assert asset('shared.css') in page
-    # The theme choice is in the Account menu, not a separate switch.
-    assert 'id="account-btn"' in page and 'id="account-pop"' in page and 'theme-toggle' not in page
+    # The theme choice is in the Account menu, not a separate switch; the review page draws its own bar
+    # (and the menu in it) with Vue.
+    if not path.startswith('/route/'):
+        assert 'id="account-menu"' in page and 'id="account-btn"' in page
+    assert 'theme-toggle' not in page
     assert '__NNSLR_' not in page.replace('"server": false', '')
     tabs = re.search(r'<nav class="tabs".*?</nav>', page, re.S)
     if tab is not None:
-        assert tabs and re.findall(r'>([^<]+)</a>', tabs.group(0)) == ['Route', 'Pannello', 'Stato']
+        assert tabs and re.findall(r'>([^<]+)</a>', tabs.group(0)) == ['Panoramica', 'Route', 'Prepara', 'Allena']
         assert f'aria-current="page">{tab}</a>' in tabs.group(0)
 
 
-def test_status_page_reads_the_panel_status(served):
-    page = served.request('GET', '/stato')[2].decode()
-    assert 'id="cpu-cores"' in page and 'id="gpu-procs"' in page and '"/api/panel/status"' in page
+def test_control_page_reads_the_panel_status(served):
+    page = served.request('GET', '/panoramica')[2].decode()
+    script = asset('js/control.js')
+    assert script in page and '/api/panel/status' in script and 'cores' in script and 'gpu-procs' in script
 
 
 def test_built_scripts_are_the_build_of_the_typescript():
-    """src/nnslr_tools/web/js is committed: it must be what helpers/build_web.sh makes of web/src."""
-    if not (REPO / 'web/node_modules/esbuild').is_dir() or shutil.which('uvx') is None:
+    """src/nnslr_tools/web/js is committed: it must be what helpers/build_web.sh makes of web/src (vue-tsc, Vite)."""
+    if not (REPO / 'web/node_modules/vite').is_dir() or shutil.which('uvx') is None:
         pytest.skip('web/node_modules missing: run helpers/build_web.sh once')
     result = subprocess.run([str(REPO / 'helpers/build_web.sh'), '--check'], capture_output=True, text=True,
                             env=dict(os.environ), timeout=300)

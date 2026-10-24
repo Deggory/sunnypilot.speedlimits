@@ -273,13 +273,19 @@ def served(root, checkout):
 
 
 def test_panel_page_status_and_run_over_http(served):
-    status, response, data = served.request('GET', '/pannello')
+    status, response, data = served.request('GET', '/panoramica')
     assert status == 200
     csp = response.getheader('Content-Security-Policy')
     assert "script-src 'nonce-" in csp and "connect-src 'self'" in csp
     nonce = csp.split("'nonce-")[1].split("'")[0]
     assert f'<script nonce="{nonce}">' in data.decode()
-    assert '/pannello' in served.request('GET', '/')[2].decode()
+    assert '/panoramica' in served.request('GET', '/')[2].decode()
+    # The three tabs are one page; the old addresses of the panel and of Stato lead to the first.
+    for path in ('/prepara', '/allena'):
+        assert served.request('GET', path)[0] == 200, path
+    for path in ('/pannello', '/stato'):
+        status, response, data = served.request('GET', path)
+        assert status == 303 and response.getheader('Location') == '/panoramica', path
     payload = json_of(served.request('GET', '/api/panel/status')[2])
     assert payload['routes'][0]['route'] == ROUTE and 'prepare' in payload['actions']
 
@@ -309,9 +315,22 @@ def test_panel_needs_the_sign_in_like_the_rest_of_the_site(root, checkout):
     server = RunningServer(root, token=TOKEN, require_token=True)
     server.app.panel = Panel(root, repo=checkout)
     try:
-        for path in ['/pannello', '/api/panel/status']:
+        for path in ['/panoramica', '/prepara', '/allena', '/api/panel/status']:
             assert server.request('GET', path)[0] == 401, path
         assert server.request('POST', '/api/panel/run/prepare', body={})[0] == 401
         assert server.request('GET', '/api/panel/status', headers=sign_in(server))[0] == 200
     finally:
         server.close()
+
+
+def test_a_training_started_from_a_terminal_has_the_progress_of_its_own_log(root, checkout):
+    panel = Panel(root, repo=checkout)
+    (root / 'logs').mkdir(exist_ok=True)
+    (root / 'logs' / 'train-r1.log').write_text('== a. importo le revisioni confermate\n== b. controllo\n'
+                                                '== c. ambiente GPU\n== d. training r1\n== 4/10 Train detector ==\n'
+                                                'detector epoch 2/20 train_loss 0.9000 val_loss 1.0000 30s\n')
+    payload = {'jobs': [], 'activities': [{'group': 'train', 'label': 'dataset e training', 'pid': 1}]}
+    panel._terminal_training(payload)
+    progress = payload['activities'][0]['progress']
+    assert progress['detail'] == 'detector · epoca 2 di 20'
+    assert progress['curves']['detector']['points'] == [{'epoch': 2, 'train_loss': 0.9, 'val_loss': 1.0, 'seconds': 30}]

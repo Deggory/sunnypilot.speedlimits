@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+from nnslr_tools.pages import asset
+
 from nnslr_tools.review_db import ReviewStore, db_path, save_frame_review
 from review_helpers import OTHER_ROUTE, ROUTE, RUN_ID, TOKEN, RunningServer, json_of, make_report, page_body
 
@@ -502,9 +504,11 @@ def test_review_page_shows_ai_reviews_as_final(api):
     status, response, page = server.request('GET', f'/route/{ROUTE}/')
     assert status == 200
     page = page.decode()
-    assert 'data-filter="ai"' in page and 'id="tlToggle"' in page and 'frameReviewerKind' in page
+    # The page is a Vue app: its markup and logic are in the built script, inline in the page.
+    script = asset('js/review.js')
+    assert script in page
+    assert 'data-filter' in script and 'tlToggle' in script and 'frameReviewerKind' in script and ' (AI' in script
     assert 'Approva' not in page and 'approv' not in page.lower()
-    assert '" (AI" + (via ? " · " + via : "") + ")"' in page
     reviews = json_of(server.request('GET', f'/api/route/{ROUTE}/reviews')[2])['reviews']
     assert reviews[0]['reviewer_kind'] == 'ai' and reviews[0]['channel'] == 'rest'
     # A person may still correct it from the page: the correction is a human review.

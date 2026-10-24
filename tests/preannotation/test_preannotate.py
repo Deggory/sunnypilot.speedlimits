@@ -1,5 +1,6 @@
 # [preannotation] - START
 import json
+import re
 import math
 from pathlib import Path
 
@@ -152,7 +153,8 @@ def test_report_escapes_embedded_json_and_is_self_contained(tmp_path):
     text=(tmp_path/'index.html').read_text()
     assert '</script><script>bad()' not in text
     assert '__NNSLR_DATA__' not in text
-    assert 'https://' not in text
+    # Self-contained: nothing loaded from elsewhere (the Vue runtime only names its error page in a string).
+    assert re.search(r'(src|href)\s*=\s*["\']?https?://', text) is None
 # [preannotation] - END
 
 # [road-text] - START
@@ -241,7 +243,9 @@ def test_review_refresh_uses_current_template_without_changing_proposals(tmp_pat
     (tmp_path/'run.json').write_text('{"run_id":"existing-run"}')
     (tmp_path/'index.html').write_text('old template')
     review.refresh_review(tmp_path)
-    assert 'id="reviewer"' in (tmp_path/'index.html').read_text()
+    from nnslr_tools.pages import asset
+    assert '<div id="app"></div>' in (tmp_path/'index.html').read_text()
+    assert asset('js/review.js') in (tmp_path/'index.html').read_text()
     assert 'existing-run' in (tmp_path/'index.html').read_text()
     assert (tmp_path/'preannotations.jsonl').read_text()==payload
 # [frame-provenance] - END

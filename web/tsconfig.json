@@ -1,5 +1,5 @@
 {
-  // Type check only (helpers/build_web.sh runs tsc --noEmit); esbuild builds the bundles.
+  // Type check only (helpers/build_web.sh runs vue-tsc --noEmit, also on the .vue files); Vite builds.
   "compilerOptions": {
     "target": "es2022",
     "lib": ["es2022", "dom", "dom.iterable"],
@@ -14,7 +14,11 @@
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
     "noEmit": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "jsx": "preserve"
   },
-  "include": ["src"]
+  "vueCompilerOptions": {
+    "strictTemplates": true
+  },
+  "include": ["src/**/*.ts", "src/**/*.vue"]
 }

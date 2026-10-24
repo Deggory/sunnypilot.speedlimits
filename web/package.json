@@ -1,14 +1,19 @@
 {
   "name": "speedlimits-web",
   "private": true,
-  "description": "TypeScript sources of the pages of speedlimits-web; helpers/build_web.sh builds them into src/nnslr_tools/web/js",
+  "description": "TypeScript and Vue sources of the pages of speedlimits-web; helpers/build_web.sh builds them into src/nnslr_tools/web/js",
   "type": "module",
   "scripts": {
-    "check": "tsc --noEmit -p .",
+    "check": "vue-tsc --noEmit -p .",
     "build": "node build.mjs"
   },
   "devDependencies": {
-    "esbuild": "0.28.2",
-    "typescript": "7.0.2"
+    "@vitejs/plugin-vue": "6.0.10",
+    "typescript": "5.9.3",
+    "vite": "8.3.5",
+    "vue-tsc": "3.3.13"
+  },
+  "dependencies": {
+    "vue": "3.5.44"
   }
 }

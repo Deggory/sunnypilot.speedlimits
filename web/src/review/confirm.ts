@@ -1,21 +1,18 @@
 // Conferma, Annulla conferma, Annulla modifiche: what the reviewer decides about the frame on screen. With the
 // server a confirmation is saved at once; offline it stays in this browser until the JSONL export.
-import {byId} from '../common/dom';
 import {messageOf} from '../common/api';
 import {clone, writeLocal} from './dom';
 import {currentRow, frameStatus, fromServer, sameAsServer, workOf} from './frames';
 import {advanceAfterConfirm, go} from './navigation';
 import {call, reviewerName, send, takeSuspicious} from './server';
-import {apiBase, render, runId, state, store} from './state';
+import {report, state, store} from './store';
 import type {SaveAnswer} from './types';
 
 function needReviewer(key: string): void {
-  const input = byId('reviewer');
-  input.classList.add('need');
-  input.focus();
+  state.reviewerNeeded = true;
+  state.reviewerFocus += 1;
   state.notice = {key, text: 'Scrivi nome o sigla del revisore, poi conferma.', error: true};
   state.lastSave = {key, result: 'need-reviewer', revision: 0};
-  render();
 }
 
 function timeNow(): string {
@@ -30,13 +27,12 @@ export async function confirmFrame(): Promise<void> {
   // Already on the server and not changed since: Conferma moves on, it does not sign the frame again
   // (a frame an AI confirmed too: that confirmation is final).
   const current = state.edits[key];
-  if (apiBase && frameStatus(key) === 'done' && current && sameAsServer(current)) {
+  if (report.apiBase && frameStatus(key) === 'done' && current && sameAsServer(current)) {
     state.lastSave = {key, result: 'unchanged', revision: current.revision || 0};
     go(1);
     if (state.currentKey === key) {
       state.notice = {key, text: 'Già confermato: non ci sono altri fotogrammi con questo filtro.', error: false};
     }
-    render();
     return;
   }
   const reviewer = reviewerName();
@@ -55,7 +51,7 @@ export async function confirmFrame(): Promise<void> {
   s.retry = true;
   s.version = (s.version || 0) + 1;
   state.drawing = false;
-  if (!apiBase) {
+  if (!report.apiBase) {
     s.saved = true;
     s.base = {
       detections: clone(s.detections),
@@ -70,13 +66,13 @@ export async function confirmFrame(): Promise<void> {
   }
   state.notice = null;
   store();
-  render();
   const ok = await send(key);
   if (ok && state.currentKey === key) advanceAfterConfirm(key, 'Salvato ' + key + ' alle ' + timeNow() + '.');
 }
 
 export async function withdrawFrame(): Promise<void> {
   const row = currentRow();
+  const apiBase = report.apiBase;
   if (!row || !apiBase) return;
   const key = row.frame_key;
   if (state.inFlight.has(key)) return;
@@ -90,16 +86,14 @@ export async function withdrawFrame(): Promise<void> {
     state.withdrawArmed = key;
     const text = 'Premi “Sì, annulla” per togliere la conferma: il fotogramma non verrà importato.';
     state.notice = {key, text, error: false, warn: true};
-    render();
     return;
   }
   state.withdrawArmed = null;
   const s = workOf(row);
   state.inFlight.add(key);
-  render();
   try {
     const result = await call<SaveAnswer>('POST', apiBase + '/frame/' + key,
-      {run_id: runId, reviewer, confirmed: false, base_revision: s.revision || 0});
+      {run_id: report.runId, reviewer, confirmed: false, base_revision: s.revision || 0});
     const saved = fromServer(result.review);
     state.edits[key] = saved;
     takeSuspicious(result);
@@ -112,7 +106,6 @@ export async function withdrawFrame(): Promise<void> {
     state.inFlight.delete(key);
     state.saveCount += 1;
     store();
-    render();
   }
 }
 
@@ -124,7 +117,7 @@ export function discardChanges(): void {
   const s = state.edits[key];
   if (!s || state.inFlight.has(key)) return;
   if (s.base) {
-    if (apiBase) {
+    if (report.apiBase) {
       state.edits[key] = fromServer(s.base);
     } else {
       state.edits[key] = {
@@ -146,7 +139,6 @@ export function discardChanges(): void {
   state.selected = -1;
   state.notice = null;
   state.withdrawArmed = null;
-  byId('valueError').hidden = true;
+  state.valueError = false;
   store();
-  render();
 }

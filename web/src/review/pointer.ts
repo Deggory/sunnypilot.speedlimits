@@ -1,11 +1,13 @@
 // Mouse and touch on the photo and on the zoom: draw a new box (drawing mode, N), select a box, move the
-// corners of the selected one.
-import {datasetOf, svgById} from './dom';
-import {addManualBox, changed, revealEditor} from './edits';
-import {currentRow, selectedDetection, workOf} from './frames';
-import {renderStage, renderZoom} from './overlay';
-import {render, state} from './state';
-import type {Box, Corner, FrameRow, Point} from './types';
+// corners of the selected one. The handlers of both pictures (Stage.vue, BoxEditor.vue); the point under the
+// pointer is the SVG's own math.
+import {nextTick} from 'vue';
+import {datasetOf} from './dom';
+import {addManualBox, changed} from './edits';
+import {currentRow, selectedDetection} from './frames';
+import {revealEditor} from './scroll';
+import {state} from './store';
+import type {Box, Corner, FrameRow, Point, Surface} from './types';
 
 function isCorner(value: string | undefined): value is Corner {
   return value === 'nw' || value === 'ne' || value === 'sw' || value === 'se';
@@ -15,6 +17,11 @@ function isCorner(value: string | undefined): value is Corner {
 function cornerOf(target: EventTarget | null): Corner | null {
   const corner = datasetOf(target)?.['corner'];
   return isCorner(corner) ? corner : null;
+}
+
+/** The picture the handler is on (the listeners are on the <svg> elements). */
+function svgOf(event: Event): SVGSVGElement | null {
+  return event.currentTarget instanceof SVGSVGElement ? event.currentTarget : null;
 }
 
 /** The point of the image under the pointer, inside the image. An SVGPoint (single precision), as the boxes
@@ -29,41 +36,38 @@ function toImagePoint(svg: SVGSVGElement, event: PointerEvent, row: FrameRow): P
 }
 
 function drawDraft(a: Point, b: Point): void {
-  const draft = svgById('draft');
-  draft.setAttribute('x', String(Math.min(a[0], b[0])));
-  draft.setAttribute('y', String(Math.min(a[1], b[1])));
-  draft.setAttribute('width', String(Math.abs(a[0] - b[0])));
-  draft.setAttribute('height', String(Math.abs(a[1] - b[1])));
+  state.draft = {
+    x: Math.min(a[0], b[0]), y: Math.min(a[1], b[1]), width: Math.abs(a[0] - b[0]), height: Math.abs(a[1] - b[1]),
+  };
 }
 
-function onPointerDown(event: PointerEvent): void {
+export function onPointerDown(event: PointerEvent, surface: Surface): void {
   const row = currentRow();
-  const svg = event.currentTarget;
-  if (!row || !(svg instanceof SVGSVGElement)) return;
-  if (svg.id === 'scene' && state.drawing) {
+  const svg = svgOf(event);
+  if (!row || svg === null) return;
+  if (surface === 'scene' && state.drawing) {
     event.preventDefault();
     const start = toImagePoint(svg, event, row);
-    state.drag = {kind: 'draw', svg, start};
+    state.drag = {kind: 'draw', svg: surface, start};
     svg.setPointerCapture(event.pointerId);
-    svgById('draft').setAttribute('visibility', 'visible');
     drawDraft(start, start);
     return;
   }
   const corner = cornerOf(event.target);
   if (corner !== null) {
     event.preventDefault();
-    state.drag = {kind: 'resize', svg, corner, moved: false};
+    state.drag = {kind: 'resize', svg: surface, corner, moved: false};
     svg.setPointerCapture(event.pointerId);
-    svg.classList.add('dragging');
   }
 }
 
-function onPointerMove(event: PointerEvent): void {
+export function onPointerMove(event: PointerEvent, surface: Surface): void {
   const drag = state.drag;
-  if (!drag || event.currentTarget !== drag.svg) return;
+  const svg = svgOf(event);
+  if (!drag || drag.svg !== surface || svg === null) return;
   const row = currentRow();
   if (!row) return;
-  const p = toImagePoint(drag.svg, event, row);
+  const p = toImagePoint(svg, event, row);
   if (drag.kind === 'draw') {
     drawDraft(drag.start, p);
     return;
@@ -82,23 +86,21 @@ function onPointerMove(event: PointerEvent): void {
   if (x2 - x1 >= 2 && y2 - y1 >= 2) {
     d.bbox_xyxy = [x1, y1, x2, y2];
     drag.moved = true;
-    renderStage(row, workOf(row));
-    renderZoom(row, d);
   }
 }
 
-function finishDrag(event: PointerEvent): void {
+export function finishDrag(event: PointerEvent, surface: Surface): void {
   const row = currentRow();
   const drag = state.drag;
-  if (!row || !drag || event.currentTarget !== drag.svg) return;
+  const svg = svgOf(event);
+  if (!row || !drag || drag.svg !== surface || svg === null) return;
   state.drag = null;
-  drag.svg.classList.remove('dragging');
   // The click that follows a drag must not select or deselect anything.
   state.ignoreClickUntil = Date.now() + 400;
   if (drag.kind === 'draw') {
-    svgById('draft').setAttribute('visibility', 'hidden');
+    state.draft = null;
     if (event.type === 'pointercancel') return;
-    const p = toImagePoint(drag.svg, event, row);
+    const p = toImagePoint(svg, event, row);
     const box: Box = [
       Math.min(drag.start[0], p[0]), Math.min(drag.start[1], p[1]),
       Math.max(drag.start[0], p[0]), Math.max(drag.start[1], p[1]),
@@ -108,13 +110,11 @@ function finishDrag(event: PointerEvent): void {
     return;
   }
   if (drag.moved) changed(row);
-  else render();
 }
 
 // A touch on a corner, or anywhere while drawing, must not scroll the page.
-function onTouchStart(event: TouchEvent): void {
-  const svg = event.currentTarget;
-  if (svg instanceof SVGSVGElement && svg.id === 'scene' && state.drawing) {
+export function onTouchStart(event: TouchEvent, surface: Surface): void {
+  if (surface === 'scene' && state.drawing) {
     event.preventDefault();
     return;
   }
@@ -122,30 +122,15 @@ function onTouchStart(event: TouchEvent): void {
 }
 
 /** A click on a box selects it; on the photo elsewhere it clears the selection. */
-function onSceneClick(event: MouseEvent): void {
+export function onSceneClick(event: MouseEvent): void {
   if (Date.now() < state.ignoreClickUntil || state.drawing) return;
   const data = datasetOf(event.target);
   const index = data?.['index'];
   if (index !== undefined) {
     state.selected = Number(index);
-    render();
-    revealEditor();
+    void nextTick(revealEditor);
     return;
   }
   if (data?.['corner']) return;
-  if (state.selected !== -1) {
-    state.selected = -1;
-    render();
-  }
-}
-
-export function initPointer(): void {
-  for (const svg of [svgById('scene'), svgById('zoom')]) {
-    svg.addEventListener('pointerdown', onPointerDown);
-    svg.addEventListener('pointermove', onPointerMove);
-    svg.addEventListener('pointerup', finishDrag);
-    svg.addEventListener('pointercancel', finishDrag);
-    svg.addEventListener('touchstart', onTouchStart, {passive: false});
-  }
-  svgById('scene').addEventListener('click', onSceneClick);
+  if (state.selected !== -1) state.selected = -1;
 }

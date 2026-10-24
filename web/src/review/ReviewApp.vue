@@ -1,0 +1,90 @@
+<script setup lang="ts">
+// Revisione cartelli: one route's frames, the boxes the model proposed, the reviewer's confirmation of each
+// frame. Served by the review server (every confirmation saved in its database) or written by write_review as
+// a static index.html that works offline (payload "server": false, confirmations kept in this browser, JSONL
+// export). The state lives in store.ts; the plain modules of web/src/review change it (navigation, edits,
+// confirm, server, export) and the components below draw it.
+import {nextTick, onBeforeUnmount, onMounted, watchEffect} from 'vue';
+import {ensureCurrentFrame, row, status, work} from './current';
+import {unsavedKeys} from './frames';
+import Inspector from './Inspector.vue';
+import MobileBar from './MobileBar.vue';
+import {pickStartFrame} from './navigation';
+import ReviewToolbar from './ReviewToolbar.vue';
+import {scrollTimelineToCurrent} from './scroll';
+import {loadServer, retryUnsaved} from './server';
+import Stage from './Stage.vue';
+import StageBar from './StageBar.vue';
+import {initStore, report, restore, state} from './store';
+import Timeline from './Timeline.vue';
+import type {Payload} from './types';
+import {useKeyboard} from './use-keyboard';
+
+const props = defineProps<{payload: Partial<Payload>}>();
+
+initStore(props.payload);
+restore();
+state.currentKey = pickStartFrame();
+if (report.apiBase) state.server = 'loading';
+ensureCurrentFrame();
+useKeyboard();
+const hasFrames = report.rows.length > 0;
+
+// State for whoever drives the page (an agent with Playwright): attributes only, the layout does not change.
+watchEffect(() => {
+  const shown = row.value;
+  if (shown === null) return;
+  const key = shown.frame_key;
+  const s = state.edits[key];
+  const data = document.body.dataset;
+  data['frameKey'] = key;
+  data['frameStatus'] = status.value;
+  data['frameReviewerKind'] = s && s.server_confirmed ? (s.reviewer_kind || 'human') : '';
+  data['server'] = state.server;
+  data['unsaved'] = String(unsavedKeys().length);
+  data['saving'] = state.inFlight.size > 0 ? 'true' : 'false';
+  data['saveCount'] = String(state.saveCount);
+  if (state.lastSave) {
+    data['lastSaveKey'] = state.lastSave.key;
+    data['lastSaveResult'] = state.lastSave.result;
+    data['lastSaveRevision'] = String(state.lastSave.revision);
+  }
+}, {flush: 'post'});
+
+const retryLater = (): void => void retryUnsaved(false);
+let timer: number | undefined;
+onMounted(() => {
+  void nextTick(scrollTimelineToCurrent);
+  if (!report.apiBase) return;
+  void loadServer();
+  timer = window.setInterval(retryLater, 30000);
+  window.addEventListener('online', retryLater);
+});
+onBeforeUnmount(() => {
+  window.clearInterval(timer);
+  window.removeEventListener('online', retryLater);
+});
+</script>
+
+<template>
+  <ReviewToolbar/>
+  <div class="page">
+    <div id="stateBox" class="state-box" :hidden="hasFrames">
+      <template v-if="!hasFrames">
+        <h2>Questo report non ha fotogrammi</h2>
+        <p>Scegli un’altra route in alto, oppure rigenera la pre-annotazione.</p>
+      </template>
+    </div>
+    <div id="workspace" class="workspace" :class="{'tl-open': state.timelineOpen}" :hidden="!hasFrames">
+      <template v-if="row && work">
+        <div class="stage-col">
+          <Stage :row="row" :work="work"/>
+          <StageBar :row="row"/>
+          <Timeline/>
+        </div>
+        <Inspector :row="row" :work="work"/>
+      </template>
+    </div>
+  </div>
+  <MobileBar :row="row" :work="work"/>
+</template>
