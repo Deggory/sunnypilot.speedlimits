@@ -807,6 +807,9 @@ def train_detector(
                 epoch_metrics["epoch_time"] = time.perf_counter() - epoch_start
                 tracker.log(epoch_metrics, step=global_step)
             save_training_state(epoch_number, "in_progress")
+            # One line per epoch: the panel of the review site reads the progress from the log.
+            print(f"detector epoch {epoch_number}/{config.epochs} train_loss {epoch_result['train_loss']:.4f} "
+                  f"val_loss {val_loss:.4f} {time.perf_counter() - epoch_start:.0f}s", flush=True)
 
         gpu = None
         if device.type == "cuda":
@@ -1146,6 +1149,12 @@ def train_reader(
                     epoch_metrics["validation/crops"] = sample_crops
                 tracker.log(epoch_metrics, step=global_step)
             save_training_state(epoch_number, "in_progress")
+            # One line per epoch: the panel of the review site reads the progress from the log.
+            print(f"reader epoch {epoch_number}/{config.epochs} train_loss {epoch_result['train_loss']:.4f} "
+                  f"val_loss {epoch_result['validation_loss']:.4f} "
+                  f"train_accuracy {epoch_result['train_accuracy']:.4f} "
+                  f"val_accuracy {epoch_result['validation_accuracy']:.4f} "
+                  f"{time.perf_counter() - epoch_start:.0f}s", flush=True)
 
         gpu = None
         if device.type == "cuda":

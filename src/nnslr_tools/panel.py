@@ -24,10 +24,14 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from nnslr_tools.job_progress import progress
+
 REPO = Path(__file__).resolve().parents[2]
 ACTIONS_ENV = 'NNSLR_PANEL_ACTIONS'
 PREPARE_JOBS_ENV = 'NNSLR_PANEL_PREPARE_JOBS'
 LOG_CHUNK_BYTES = 64 * 1024
+# The progress of a job is read from at most the last 4 MB of its log.
+PROGRESS_BYTES = 4 * 1024 * 1024
 # Written by helpers/1_prepare.sh when it starts: the routes of that run, for the progress.
 BATCH_FILE = 'logs/prepare/batch.json'
 HISTORY = 12
@@ -95,6 +99,8 @@ class Panel:
         self._lock = threading.RLock()
         self._processes = {}
         self._status_module = None
+        # Progress of each job, by job id: (log size, progress), so a log is read again only when it grew.
+        self._progress: dict[str, tuple[int, str, dict]] = {}
 
     # -- helpers of the checkout -------------------------------------------------------------
     def available(self) -> bool:
@@ -180,7 +186,7 @@ class Panel:
             started = datetime.strptime(job_id[:15], '%Y%m%d-%H%M%S')
             result.append({'id': job_id, 'action': action, 'label': ACTIONS[action]['label'],
                            'started': started.strftime('%Y-%m-%d %H:%M:%S'), 'state': state, 'code': code,
-                           'stoppable': process is not None and state == 'running',
+                           'stoppable': state == 'running' and self._group(job_id) is not None,
                            'size': path.stat().st_size})
         return result
 
@@ -239,7 +245,26 @@ class Panel:
             payload['reviewed_routes'] = sum(1 for row in rows if row['confirmed'])
             payload['next_action'] = _next_action(payload['next_step'])
         payload['actions'] = self._action_states(payload, activities)
+        for job in payload['jobs']:
+            job['progress'] = self.job_progress(job, payload['preparation'])
         return payload
+
+    def job_progress(self, job: dict, preparation: dict | None) -> dict:
+        """Steps, percent and last line of a job, from its log (nnslr_tools.job_progress)."""
+        key = (job['size'], job['state'])
+        cached = self._progress.get(job['id'])
+        # A preparation's percent changes without its log growing: never cached while it runs.
+        if cached is not None and cached[:2] == key and not (job['action'] == 'prepare' and job['state'] == 'running'):
+            return cached[2]
+        try:
+            with (self.logs / (job['id'] + '.log')).open('rb') as log:
+                log.seek(max(0, job['size'] - PROGRESS_BYTES))
+                text = log.read().decode('utf-8', 'replace')
+        except OSError:
+            text = ''
+        result = progress(job['action'], job['state'], text, preparation if job['action'] == 'prepare' else None)
+        self._progress[job['id']] = (key[0], key[1], result)
+        return result
 
     def _action_states(self, payload: dict, activities: list[dict]) -> dict:
         running = self._running_groups(activities)
@@ -421,19 +446,42 @@ class Panel:
                                            stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
                                            env=environment, start_new_session=True)
             self._processes[job_id] = process
+            # The process group of the action (a new session: its pid), so Ferma works also after a
+            # restart of this server, which forgets self._processes.
+            path.with_suffix('.pid').write_text(str(process.pid) + '\n')
         # Reaps the process as soon as it ends, so it never stays a zombie.
         threading.Thread(target=process.wait, daemon=True).start()
         return {'id': job_id, 'action': action, 'label': ACTIONS[action]['label']}
 
-    def stop(self, job_id: str) -> dict:
+    def _group(self, job_id: str) -> int | None:
+        """The process group of an action still running, also one started before a restart of this
+        server: the pid written at start, if that process is still the wrapper of this action."""
+        if not JOB_ID.fullmatch(job_id):
+            return None
         with self._lock:
             process = self._processes.get(job_id)
-        if process is None:
-            raise PanelError(404, 'unknown_job', 'Azione non avviata da questo server (fermala dal terminale).')
-        if process.poll() is not None:
-            raise PanelError(409, 'not_running', 'L\'azione è già finita.')
+        if process is not None:
+            return process.pid if process.poll() is None else None
         try:
-            os.killpg(process.pid, signal.SIGTERM)
+            pid = int((self.logs / (job_id + '.pid')).read_text().strip())
+            command = (Path('/proc') / str(pid) / 'cmdline').read_bytes().split(b'\0')
+        except (OSError, ValueError):
+            return None
+        # The pid may have been reused by another program: it must be the wrapper of this action.
+        action = job_id.split('-', 2)[2]
+        wanted = [part.encode() for part in ACTIONS.get(action, {}).get('command', [])]
+        if not wanted or command[:4] != [b'bash', b'-c', WRAPPER.encode(), b'panel'] or command[4:4 + len(wanted)] != wanted:
+            return None
+        return pid
+
+    def stop(self, job_id: str) -> dict:
+        group = self._group(job_id)
+        if group is None:
+            if JOB_ID.fullmatch(job_id) and (self.logs / (job_id + '.log')).is_file():
+                raise PanelError(409, 'not_running', 'L\'azione è già finita.')
+            raise PanelError(404, 'unknown_job', 'Azione non avviata dal pannello (fermala dal terminale).')
+        try:
+            os.killpg(group, signal.SIGTERM)
         except ProcessLookupError:
             pass
         return {'id': job_id, 'stopping': True}

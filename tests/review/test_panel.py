@@ -103,6 +103,19 @@ def test_one_action_per_kind_and_stop(root, checkout, monkeypatch):
     assert unknown.value.status == 404
 
 
+def test_stop_works_after_a_restart_of_the_server(root, checkout, monkeypatch):
+    monkeypatch.setenv('FAKE_SLEEP', '30')
+    job = Panel(root, repo=checkout).start('prepare')
+    # A new Panel is what the server has after a restart: it never saw the process start.
+    restarted = Panel(root, repo=checkout)
+    assert [j['stoppable'] for j in restarted.jobs() if j['id'] == job['id']] == [True]
+    assert restarted.stop(job['id']) == {'id': job['id'], 'stopping': True}
+    assert finished(restarted, job['id'])['state'] in ('interrupted', 'failed')
+    with pytest.raises(PanelError) as done:
+        restarted.stop(job['id'])
+    assert done.value.status == 409
+
+
 def test_update_runs_without_printing_the_token_link(root, checkout):
     panel = Panel(root, repo=checkout)
     assert panel.status()['actions']['update'] == {'label': 'Aggiorna il codice', 'allowed': True, 'reason': ''}
