@@ -704,8 +704,8 @@ def _cmd_train(args: argparse.Namespace) -> int:
 
     if not args.output:
         raise ValueError("--output is required for a real training run")
-    if args.mode == "continue" and not args.hf_repo:
-        raise ValueError("continue requires --hf-repo or NNSLR_HF_REPO")
+    if args.mode == "continue" and not args.hf_repo and not args.init_from:
+        raise ValueError("continue requires --hf-repo, NNSLR_HF_REPO or --init-from")
 
     if args.task == "detector":
         config = DetectorTrainConfig(
@@ -720,7 +720,8 @@ def _cmd_train(args: argparse.Namespace) -> int:
             amp=not args.no_amp,
         )
         result = train_detector(plan, root, Path(args.output), config,
-                                mode=args.mode, hf_repo=args.hf_repo, hf_revision=args.hf_revision)
+                                mode=args.mode, hf_repo=args.hf_repo, hf_revision=args.hf_revision,
+                                init_from=args.init_from)
     else:
         config = TrainConfig(
             epochs=args.epochs,
@@ -735,7 +736,8 @@ def _cmd_train(args: argparse.Namespace) -> int:
             amp=not args.no_amp,
         )
         result = train_reader(plan, root, Path(args.output), config,
-                              mode=args.mode, hf_repo=args.hf_repo, hf_revision=args.hf_revision)
+                              mode=args.mode, hf_repo=args.hf_repo, hf_revision=args.hf_revision,
+                                init_from=args.init_from)
 
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
@@ -1230,6 +1232,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_train.add_argument("--input-size", type=int, default=160)
     p_train.add_argument("--num-workers", type=int, default=4)
     p_train.add_argument("--seed", type=int, default=0)
+    p_train.add_argument("--init-from", type=Path, default=None,
+                         help="continue mode: start from these weights (a <task>-best.pt of an earlier run) "
+                              "instead of the stable ones on Hugging Face")
     p_train.add_argument("--pretrained", action="store_true",
                          help="allow torchvision ImageNet weights for the reader/backbone if not cached")
     p_train.add_argument("--no-amp", action="store_true", help="disable CUDA automatic mixed precision")

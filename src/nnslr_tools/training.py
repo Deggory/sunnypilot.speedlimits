@@ -497,6 +497,7 @@ def train_detector(
     mode: str = "fresh",
     hf_repo: str | None = None,
     hf_revision: str = "main",
+    init_from: Path | None = None,
 ) -> dict[str, Any]:
     """Train the first single-class full-frame speed-sign detector baseline."""
     if not plan.get("trainable"):
@@ -669,15 +670,19 @@ def train_detector(
 
     start_epoch = 0
     if mode == "continue":
-        if not hf_repo:
-            raise ValueError("continue requires --hf-repo")
-        saved, origin = stable_weights(hf_repo, "detector", revision=hf_revision)
+        if init_from is not None:
+            # The best weights of an earlier run of this server, checked as the stable ones are.
+            saved, origin = torch_load(Path(init_from)), str(init_from)
+        elif not hf_repo:
+            raise ValueError("continue requires --hf-repo or --init-from")
+        else:
+            saved, origin = stable_weights(hf_repo, "detector", revision=hf_revision)
         if saved.get("task") != "detector" or saved.get("architecture") != "ssdlite320_mobilenet_v3_large":
             raise ValueError("stable weight task/architecture mismatch")
         if saved.get("classes") != ["background", "speed_sign"]:
             raise ValueError("stable detector classes mismatch")
         model.load_state_dict(model_weights(saved), strict=True)
-        print(f"continue detector from verified stable weights: {origin}")
+        print(f"continue detector from weights: {origin}")
     elif mode == "resume":
         saved = torch_load(checkpoint_path)
         if saved.get("format_version") != 1 or saved.get("task") != "detector":
@@ -864,6 +869,7 @@ def train_reader(
     mode: str = "fresh",
     hf_repo: str | None = None,
     hf_revision: str = "main",
+    init_from: Path | None = None,
 ) -> dict[str, Any]:
     """Execute the first reader baseline after explicit compute opt-in."""
     if not plan.get("trainable"):
@@ -981,15 +987,19 @@ def train_reader(
 
     start_epoch = 0
     if mode == "continue":
-        if not hf_repo:
-            raise ValueError("continue requires --hf-repo")
-        saved, origin = stable_weights(hf_repo, "reader", revision=hf_revision)
+        if init_from is not None:
+            # The best weights of an earlier run of this server, checked as the stable ones are.
+            saved, origin = torch_load(Path(init_from)), str(init_from)
+        elif not hf_repo:
+            raise ValueError("continue requires --hf-repo or --init-from")
+        else:
+            saved, origin = stable_weights(hf_repo, "reader", revision=hf_revision)
         if saved.get("task") != "reader" or saved.get("architecture") != "mobilenet_v3_small":
             raise ValueError("stable weight task/architecture mismatch")
         if saved.get("classes") != classes or saved.get("input_size") != config.input_size:
             raise ValueError("stable reader classes/input size mismatch")
         model.load_state_dict(model_weights(saved), strict=True)
-        print(f"continue reader from verified stable weights: {origin}")
+        print(f"continue reader from weights: {origin}")
     elif mode == "resume":
         saved = torch_load(checkpoint_path)
         if saved.get("format_version") != 1 or saved.get("task") != "reader":

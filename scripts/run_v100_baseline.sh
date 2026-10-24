@@ -134,11 +134,18 @@ train_task() {
       return 3
     fi
   fi
-  # A fresh run starts from MobileNetV3 trained on ImageNet (torchvision, BSD), not from random weights:
-  # with a few thousand frames it learns much better. continue/resume start from their own weights.
+  # Where a fresh run starts (the panel's choice, through the environment of helpers/3_train.sh):
+  # NNSLR_TRAIN_FROM_RUN=<run> continues from the best weights of a finished run of this server;
+  # otherwise MobileNetV3 trained on ImageNet (torchvision, BSD), or random weights with
+  # NNSLR_TRAIN_INIT=random. continue/resume start from their own weights.
   local init=()
   if [[ "$selected_mode" == "fresh" ]]; then
-    init=(--pretrained)
+    if [[ -n "${NNSLR_TRAIN_FROM_RUN:-}" ]]; then
+      selected_mode="continue"
+      init=(--init-from "$DATA_ROOT/runs/$NNSLR_TRAIN_FROM_RUN/$task/$task-best.pt")
+    elif [[ "${NNSLR_TRAIN_INIT:-imagenet}" != "random" ]]; then
+      init=(--pretrained)
+    fi
   fi
   "$NN" train --task "$task" --dataset-kind "$DATASET_KIND" --device cuda \
     --mode "$selected_mode" --output "$output" "${init[@]}"
