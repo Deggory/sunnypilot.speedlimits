@@ -74,7 +74,7 @@ Run these commands **from the repository root**. [`docs/INSTALL.md`](docs/INSTAL
 | `scripts/run_v100_baseline.sh` | Validate dataset/splits, then train detector and reader, evaluate, mine errors, export ONNX and package a verified bundle. **Uses GPU and creates output files.** | Prepared, validated dataset and `.venv-gpu`; invoke `NNSLR_GPU_INDEX=0 bash scripts/run_v100_baseline.sh baseline-001` only when training is authorized. The run ID must be new. |
 | `scripts/publish_model.sh` | Verify/stage an existing bundle, create a catalog and optionally upload it to Hugging Face. **The normal invocation publishes externally.** | Have a bundle; first run `bash scripts/publish_model.sh --no-upload`. Upload requires `uvx`, Hugging Face authorization and explicit approval. |
 | `.venv/bin/nnslr mcp` / `helpers/mcp.sh` | MCP server (stdio) of the review: read frames and images, save reviews as an AI reviewer. No GPU, no training, no panel actions. | Optional `[mcp]` extra; `--read-only` for a trial without saving. See [docs/API_MCP.md](docs/API_MCP.md). |
-| `helpers/build_web.sh` | Type-check the TypeScript of the site pages (`web/src`) and build it into `src/nnslr_tools/web/js` (committed, so the server never needs Node). `--check` only verifies the built files are current. | First run installs TypeScript and esbuild into `web/node_modules`, with Node from PyPI through `uvx`; nothing system-wide. |
+| `helpers/build_web.sh` | Type-check the site pages (Vue 3 single-file components and TypeScript in `web/src`, with `vue-tsc`) and build them with Vite into `src/nnslr_tools/web/js` (committed, so the server never needs Node). `--check` only verifies the built files are current. | First run installs Vue, Vite and TypeScript into `web/node_modules`, with Node from PyPI through `uvx`; nothing system-wide. |
 | `scripts/install_review_service.sh` | Install/update or remove `speedlimits-web` as a systemd service for the web review UI. **Installation changes system configuration.** | Linux with systemd, `.venv` installed; inspect with `bash scripts/install_review_service.sh --dry-run` before an authorized `sudo bash scripts/install_review_service.sh`. |
 
 Common local workflows (use `--help` on each `nnslr` subcommand for exact arguments):
@@ -148,7 +148,7 @@ This project uses software from Haibin Wen and SUNNYPILOT LLC and is licensed un
 
 Both projects now expose `fresh`, `continue` and `resume`:
 
-- **Fresh** (default): a new run in a new output directory, with the existing random/default or optional ImageNet initialization.
+- **Fresh** (default): a new run in a new output directory. `scripts/run_v100_baseline.sh` starts it from torchvision's MobileNetV3 ImageNet weights (`nnslr train --pretrained`), not from random weights.
 - **Continue**: a new run initialized from the latest **explicitly reviewed** PyTorch weights listed in Hugging Face `training/stable.json`. The manifest pins each model to a SHA256, and the detector/reader are independently checked for matching architecture and class mapping. No previous optimizer is reused.
 - **Resume**: reuse the **original output directory** after interruption; restore model, optimizer, AMP scaler, validation history and epoch counters from `training-state.pt`. A completed run is rejected. Changes to the dataset, split or training config are rejected. Checkpoints are atomic and saved at every epoch boundary; an interrupted partial epoch is repeated rather than replayed exactly.
 

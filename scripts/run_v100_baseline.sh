@@ -134,8 +134,14 @@ train_task() {
       return 3
     fi
   fi
+  # A fresh run starts from MobileNetV3 trained on ImageNet (torchvision, BSD), not from random weights:
+  # with a few thousand frames it learns much better. continue/resume start from their own weights.
+  local init=()
+  if [[ "$selected_mode" == "fresh" ]]; then
+    init=(--pretrained)
+  fi
   "$NN" train --task "$task" --dataset-kind "$DATASET_KIND" --device cuda \
-    --mode "$selected_mode" --output "$output"
+    --mode "$selected_mode" --output "$output" "${init[@]}"
 }
 
 echo "== 4/10 Train detector =="

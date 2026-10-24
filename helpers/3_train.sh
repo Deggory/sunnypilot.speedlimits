@@ -8,7 +8,8 @@
 # Next: scripts/publish_model.sh data/runs/<run>/bundle --no-upload, then without --no-upload.
 #
 # Usage: helpers/3_train.sh [--background] [--name=<run>] [--continue | --resume=<run>] [--dataset-only]
-#   helpers/3_train.sh                       (dataset + training da zero, in primo piano)
+#   helpers/3_train.sh                       (dataset + training da zero, in primo piano: parte da
+#                                             MobileNetV3 pre-allenata su ImageNet, non da pesi casuali)
 #   helpers/3_train.sh --background          (continua anche se chiudi la ssh)
 #   helpers/3_train.sh --dataset-only        (solo a+b: importa e controlla, niente GPU)
 #   helpers/3_train.sh --continue            (parte dai pesi "stable" su Hugging Face)
