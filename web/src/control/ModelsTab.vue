@@ -27,10 +27,7 @@ async function choose(version: ModelVersion, roleLabel: string): Promise<void> {
 </script>
 
 <template>
-  <header class="page-head">
-    <h1 class="page-title">Models</h1>
-    <p class="page-sub">The three networks of the pipeline, every version trained here, and the one in use for each.</p>
-  </header>
+  <h1 class="sr-only">Models</h1>
 
   <p v-if="payload === null" class="card empty">{{ error ? 'The models cannot be read: ' + error : 'Loading…' }}</p>
   <template v-else>

@@ -29,7 +29,7 @@ from pathlib import Path
 
 from nnslr_tools.job_progress import last_line, progress, with_step_progress
 from nnslr_tools.model_roles import ModelChoiceError, ModelIndex
-from nnslr_tools.runs import RunsIndex
+from nnslr_tools.runs import RunsIndex, WatchError
 
 REPO = Path(__file__).resolve().parents[2]
 ACTIONS_ENV = 'NNSLR_PANEL_ACTIONS'
@@ -561,6 +561,14 @@ class Panel:
         if detail is None:
             raise PanelError(404, 'unknown_run', 'No such training run.')
         return detail
+
+    def frames(self, name: str, model, partition, route=None, previews=None) -> dict:
+        """The frames of one route of an evaluation of a run, with the boxes over each, for the Watch panel
+        (nnslr_tools.runs.RunsIndex.frames)."""
+        try:
+            return self.runs_index.frames(name, model, partition, route, previews)
+        except WatchError as exc:
+            raise PanelError(exc.status, exc.reason, exc.message) from exc
 
     # -- the networks by role, for the Models tab -----------------------------------------------------
     def models(self) -> dict:

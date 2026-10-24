@@ -234,9 +234,7 @@ def _route_row(summary: dict) -> str:
 def render_index(summaries: list[dict], database: Path, nonce: str = '') -> str:
     """The route list, grouped: in progress, to start, done."""
     main = ['<main class="page">',
-            '<header class="page-head"><h1 class="page-title">Routes</h1>'
-            '<p class="page-sub">Choose a route to review. Every confirmation is saved on the server '
-            'at once.</p></header>']
+            '<h1 class="sr-only">Review</h1>']
     if not summaries:
         main.append('<div class="card state-box"><h2>No routes to review</h2><p>Prepare a route with '
                     '<code>nnslr extract-frames</code> and <code>nnslr preannotate</code>, then reload this '

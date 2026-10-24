@@ -23,7 +23,7 @@ from nnslr_tools import cli
 from nnslr_tools.annotations import load_jsonl, validate_dataset
 from nnslr_tools.chain import (ChainTally, classifier_comparison, frame_candidates, resolve_model,
                                select_negatives, truth_objects)
-from nnslr_tools.evaluation import classifier_metrics
+from nnslr_tools.evaluation import PER_FRAME_MAX_BOXES, PER_FRAME_STEPS, classifier_metrics
 from nnslr_tools.training import (MIN_KIND_TRAIN_CROPS, TrainConfig, _classifier_label, _reader_label,
                                   crop_rectangle, family_label, jitter_box, prepare_reader_training,
                                   read_negatives, resume_arguments, review_tier, reviewed_frames)
@@ -605,6 +605,7 @@ def test_tiny_cpu_classifier_chain(tmp_path, capsys, torch_python):
                    "--classifier", str(checkpoint), "--partition", "test", "--output", str(chain_path))
     assert process.returncode == 0, process.stderr[-3000:]
     chain = json.loads(chain_path.read_text())
+    chain_classes = set(json.loads((output / "result.json").read_text())["classes"])
     assert chain["task"] == "chain" and chain["classifier"]["class_scheme"] == "v2" and chain["classifier"]["rejects"]
     assert (chain["image_count"], chain["speed_sign_count"], chain["reviewed_box_count"]) == (2, 2, 3)
     assert chain["score_thresholds"] == [0.05, 0.1, 0.25] and set(chain["by_score_threshold"]) == {"0.05", "0.1", "0.25"}
@@ -617,6 +618,20 @@ def test_tiny_cpu_classifier_chain(tmp_path, capsys, torch_python):
     low, high = chain["by_score_threshold"]["0.05"], chain["by_score_threshold"]["0.25"]
     assert low["boxes_per_frame"] >= high["boxes_per_frame"]
     assert len(chain["images"]) == 2 and all("surviving_false" in image for image in chain["images"])
+    # Every box of the cutter from the lowest score, with the classifier's answer, for the Watch panel of the Evaluate
+    # tab: at every score the report measured, the signs they find, the boxes and the false boxes let through are its own.
+    assert chain["per_frame_boxes"]["min_score"] == 0.05 and chain["per_frame_boxes"]["box"] == "x1 y1 x2 y2 score truth label confidence"
+    for image in chain["images"]:
+        parts = [line.split(" ") for line in image["cutter_boxes"]]
+        assert all(len(part) == 8 and part[6] in chain_classes for part in parts) and len(parts) <= PER_FRAME_MAX_BOXES
+        assert all("family" in item for item in image["truth"]) and len(image["size"]) == 2
+    for key, metrics in chain["by_score_threshold"].items():
+        step, threshold = PER_FRAME_STEPS.index(float(key)), float(key)
+        found = sum(len({int(part[5]) for part in (line.split(" ") for line in image["cutter_boxes"])
+                         if int(part[5]) >= 0 and float(part[4]) >= threshold}) for image in chain["images"])
+        assert found == metrics["all_boxes"]["found"], key
+        assert sum(image["cutter_box_counts"][step] for image in chain["images"]) == round(metrics["boxes_per_frame"] * 2), key
+        assert sum(image["surviving_counts"][step] for image in chain["images"]) == metrics["surviving_false_boxes"], key
 
     old_path = run / "evaluation" / "chain-test-old-reader.json"
     process = _run(torch_python, "-m", "nnslr_tools.cli", "evaluate-chain", str(dataset), *base, "--cutter", str(cutter),

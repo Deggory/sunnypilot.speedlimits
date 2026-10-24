@@ -498,6 +498,59 @@ border:1px solid var(--line-strong);border-radius:10px;padding:8px 10px;min-heig
 border:1px solid color-mix(in srgb,var(--warn) 35%,transparent)}
 td.change.better{color:var(--ok);font-weight:650}
 td.change.worse{color:var(--bad);font-weight:650}
+/* Watch (WatchSection.vue): the frames of a route played like a video, the boxes over them. The stage is dark in both
+   themes, like the photo of the review page, and its boxes keep one colour each whatever the theme: the reviewed sign in
+   the colour of its family (--ov-*, dashed when missed), the cutter's boxes green on a sign, grey on nothing, red when
+   the classifier lets a false box through, faded when it throws it away. */
+.watch{--wp-found:#4ade80;--wp-junk:#b4bcc8;--wp-survives:#ff4d4f;--wp-warn:#fbbf24}
+.wp-pick{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px 18px}
+.wp-field{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+.wp-field select{font:inherit;font-size:14px;letter-spacing:0;text-transform:none;color:var(--fg);background:var(--surface-2);
+border:1px solid var(--line-strong);border-radius:10px;padding:8px 10px;min-height:40px;min-width:min(320px,100%);max-width:100%}
+.wp-field output{font-family:var(--font-data);font-size:13px;letter-spacing:0;color:var(--fg)}
+.wp-score{min-width:min(240px,100%)}
+.wp-score input{width:100%;min-height:32px;accent-color:var(--accent)}
+.wp-stage{position:relative;width:100%;border-radius:12px;overflow:hidden;background:var(--stage);border:1px solid var(--line);
+cursor:pointer;user-select:none;-webkit-user-select:none}
+.wp-stage img{position:absolute;inset:0;width:100%;height:100%;display:block;object-fit:fill}
+.wp-overlay{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none}
+.wp-overlay rect{fill:none}
+.wp-truth{stroke-linejoin:round;filter:drop-shadow(0 0 1px rgba(0,0,0,.7))}
+.wp-box.found{stroke:var(--wp-found)}
+.wp-box.junk{stroke:var(--wp-junk);opacity:.75}
+.wp-box.rejected{stroke:var(--wp-junk);opacity:.32}
+.wp-box.survives{stroke:var(--wp-survives)}
+.wp-tag{font-family:var(--font-ui);font-weight:700;paint-order:stroke;stroke:var(--ov-halo);stroke-linejoin:round;fill:var(--ov-text)}
+.wp-tag.ok{fill:var(--wp-found)}.wp-tag.warn{fill:var(--wp-warn)}.wp-tag.bad{fill:var(--wp-survives)}
+.wp-noimage{position:absolute;inset:0;margin:0;display:grid;place-items:center;color:#9aa4b2;font-size:13.5px;text-align:center;padding:16px}
+.wp-where{position:absolute;left:8px;top:8px;display:flex;gap:6px;align-items:center;padding:3px 8px;border-radius:8px;
+background:rgba(5,7,11,.62);color:#e8ecf3;font-size:12px;font-family:var(--font-data);pointer-events:none}
+.wp-human{font-family:var(--font-ui);font-weight:650;color:var(--wp-found)}
+.wp-paused{position:absolute;right:10px;bottom:10px;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;
+background:rgba(5,7,11,.55);color:#fff;pointer-events:none}
+.wp-paused .icon{width:16px;height:16px}
+.wp-counts{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px 18px;font-size:13.5px;color:var(--muted)}
+.wp-counts strong{font-size:18px;font-weight:700;color:var(--fg);font-variant-numeric:tabular-nums;margin-right:3px}
+.wp-counts .found strong{color:var(--ok)}.wp-counts .missed strong{color:var(--bad)}.wp-counts .junk strong{color:var(--todo)}
+.wp-counts .survives strong{color:var(--bad)}
+.wp-counts small{font-size:12px}
+.wp-controls{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px}
+.wp-controls .btn .icon{margin:0}
+.wp-play{min-width:104px}
+.wp-position{margin-left:auto;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.wp-scrub{position:relative;padding-top:12px}
+/* The marks line up with the thumb's travel: half a thumb in from each end. */
+.wp-ticks{position:absolute;left:8px;right:8px;top:0;height:12px;width:calc(100% - 16px)}
+.wp-ticks path{fill:none;stroke-width:1.6;vector-effect:non-scaling-stroke}
+.wp-ticks .sign{stroke:var(--muted);opacity:.55}.wp-ticks .miss{stroke:var(--bad)}
+.wp-scrub input{width:100%;margin:0;min-height:28px;accent-color:var(--accent)}
+.wp-legend{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12.5px;color:var(--muted)}
+.wp-legend li{display:inline-flex;align-items:center;gap:6px}
+.wp-legend .sw{width:18px;height:12px;border-radius:2px;background:var(--stage);border:2px solid var(--wp-junk);flex:none}
+.wp-legend .sw.truth{border-color:var(--ov-speed)}.wp-legend .sw.truth.missed{border-style:dashed}
+.wp-legend .sw.found{border-color:var(--wp-found);border-width:1.5px}
+.wp-legend .sw.junk{border-width:1px}.wp-legend .sw.rejected{border-width:1px;opacity:.4}
+.wp-legend .sw.survives{border-color:var(--wp-survives);border-width:1.5px}
 /* Models: a column per role of the pipeline (cutter, classifier, decider), its versions newest first, the one in use
    outlined green. */
 .roles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;align-items:start}
@@ -639,6 +692,8 @@ border-top:1px solid var(--line)}
   .acc-bar{display:none}
   .compare-arrow{display:none}
   .compare-pick label{flex:1}
+  .wp-field,.wp-score{flex:1 1 100%}
+  .wp-position{margin-left:0;flex-basis:100%}
 }
 @media (prefers-reduced-motion:reduce){
   .page>*{animation:none}

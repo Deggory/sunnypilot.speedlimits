@@ -110,10 +110,7 @@ const numbers = computed(() => {
 </script>
 
 <template>
-  <header class="page-head">
-    <h1 class="page-title">Train</h1>
-    <p class="page-sub">From the reviews to the dataset, then to a model on the GPU.</p>
-  </header>
+  <h1 class="sr-only">Train</h1>
 
   <section class="numbers" aria-label="The numbers">
     <div class="card number">

@@ -55,8 +55,7 @@ onMounted(() => {
 
 <template>
   <main class="page settings">
-    <header class="page-head"><h1 class="page-title">Account</h1>
-      <p class="page-sub">Who signs in to this site from a browser. Agents and API clients use the token in the header instead, never the name and password.</p></header>
+    <h1 class="sr-only">Account</h1>
     <section class="card state-box">
       <h2>Administrator</h2>
       <p id="admin-sub">{{ who }}</p>

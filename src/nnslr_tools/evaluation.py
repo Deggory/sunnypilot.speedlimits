@@ -42,21 +42,21 @@ def box_iou(a: list[float], b: list[float]) -> float:
     return 0.0 if union <= 0 else intersection / union
 
 
-def match_detections(
+def greedy_matching(
     predicted: list[dict[str, Any]],
     truth: list[list[float]],
     *,
     iou_threshold: float = 0.5,
-) -> dict[str, Any]:
-    """Greedy score-ordered one-to-one matching for a single detector class."""
-    if not 0 < iou_threshold <= 1:
-        raise ValueError("invalid_iou_threshold")
+) -> list[tuple[int, int, float]]:
+    """The greedy score-ordered one-to-one matching of match_detections: (position in predicted, index of the
+    reviewed box it found or -1, best IoU) of every prediction, best score first.
+
+    A prediction is matched against the reviewed boxes left by those of a higher score only, so the matching of the
+    predictions at or above a score is this matching restricted to them: the Watch panel of the Evaluate tab draws
+    any score from the boxes matched once at the lowest (per_frame_record)."""
     ordered = sorted(enumerate(predicted), key=lambda item: float(item[1]["score"]), reverse=True)
     unmatched = set(range(len(truth)))
-    matches = []
-    false_positives = []
-    false_positive_indexes = []
-
+    result = []
     for position, prediction in ordered:
         box = prediction["box"]
         candidates = [
@@ -66,14 +66,35 @@ def match_detections(
         best_iou, best_index = max(candidates, default=(0.0, -1))
         if best_index >= 0 and best_iou >= iou_threshold:
             unmatched.remove(best_index)
+            result.append((position, best_index, best_iou))
+        else:
+            result.append((position, -1, best_iou))
+    return result
+
+
+def match_detections(
+    predicted: list[dict[str, Any]],
+    truth: list[list[float]],
+    *,
+    iou_threshold: float = 0.5,
+) -> dict[str, Any]:
+    """Greedy score-ordered one-to-one matching for a single detector class."""
+    if not 0 < iou_threshold <= 1:
+        raise ValueError("invalid_iou_threshold")
+    matches = []
+    false_positives = []
+    false_positive_indexes = []
+
+    for position, truth_index, best_iou in greedy_matching(predicted, truth, iou_threshold=iou_threshold):
+        if truth_index >= 0:
             matches.append({
-                "score": float(prediction["score"]),
+                "score": float(predicted[position]["score"]),
                 "iou": best_iou,
-                "truth_index": best_index,
+                "truth_index": truth_index,
             })
         else:
             false_positives.append({
-                "score": float(prediction["score"]),
+                "score": float(predicted[position]["score"]),
                 "best_iou": best_iou,
             })
             false_positive_indexes.append(position)
@@ -81,7 +102,7 @@ def match_detections(
     return {
         "true_positives": len(matches),
         "false_positives": len(false_positives),
-        "false_negatives": len(unmatched),
+        "false_negatives": len(truth) - len(matches),
         "matches": matches,
         "false_positive_details": false_positives,
         # Where the false positives are in ``predicted`` (score order, like false_positive_details).
@@ -99,6 +120,72 @@ CUTTER_SCORE_THRESHOLDS = (0.05, 0.1)
 REPORT_SCORE_THRESHOLDS = (*CUTTER_SCORE_THRESHOLDS, 0.3, 0.5)
 # Forward passes on the first frame before the time per frame is measured (CUDA kernels, cuDNN, allocator).
 INFERENCE_WARMUP_RUNS = 3
+
+# The cutter's boxes of every frame, kept in a detector or chain report for the Watch panel of the Evaluate tab
+# (nnslr_tools.runs.frames_digest), which draws them over the frame at any score of its slider: the boxes of score
+# PER_FRAME_MIN_SCORE and more, at most PER_FRAME_MAX_BOXES a frame (every box that found a reviewed box, then the
+# best others: a cutter passes on a couple of hundred boxes a frame at 0.05), and how many boxes the cutter passed on
+# at each step of the slider, kept or not.
+PER_FRAME_MIN_SCORE = 0.05
+PER_FRAME_MAX_BOXES = 50
+PER_FRAME_STEPS = tuple(step / 100 for step in range(5, 55, 5))
+
+
+def _score_down(score: float) -> float:
+    """A score to 3 decimals, rounded down: compared with a step of the slider it stays on the same side."""
+    return math.floor(round(float(score) * 1000, 6)) / 1000
+
+
+def per_frame_descriptor(*, chain: bool, min_score: float) -> dict[str, Any]:
+    """The ``per_frame_boxes`` of a report: how per_frame_record wrote the boxes of each frame."""
+    return {
+        "min_score": float(min_score),
+        "max_boxes": PER_FRAME_MAX_BOXES,
+        "steps": list(PER_FRAME_STEPS),
+        "box": "x1 y1 x2 y2 score truth" + (" label confidence" if chain else ""),
+        "fields": {
+            "x1 y1 x2 y2": "the box in pixels of the frame, rounded",
+            "score": "the cutter's score, 3 decimals rounded down",
+            "truth": ("the reviewed box it found (an index of " + ("truth" if chain else "truth_boxes")
+                      + "), matched at min_score as at every score, -1 for none"),
+            **({"label confidence": "what the classifier called it, and its probability"} if chain else {}),
+        },
+        "kept": ("cutter_boxes: every box of min_score or more that found a reviewed box, then the best others"
+                 + (" (first those the classifier let through)" if chain else "") + ", at most max_boxes a frame"),
+        "counts": ("cutter_box_counts: the boxes of the cutter at or above each step, kept or not"
+                   + ("; surviving_counts: of those on no reviewed box, the ones the classifier did not reject" if chain else "")
+                   + "; a step under min_score counts the boxes from min_score only"),
+    }
+
+
+def per_frame_record(predictions: list[dict[str, Any]], pairs: dict[int, int], *, chain: bool = False) -> dict[str, Any]:
+    """What a report keeps of one frame for the Watch panel (see per_frame_descriptor): predictions are the cutter's
+    boxes of the report's min_score or more ({"box", "score"}, in a chain also "predicted" and "confidence"), pairs
+    {position in predictions: index of the reviewed box it found} their matching at that score."""
+    def survives(position: int) -> bool:
+        return chain and position not in pairs and predictions[position]["predicted"] != NOT_A_SIGN
+
+    others = sorted((position for position in range(len(predictions)) if position not in pairs),
+                    key=lambda position: (not survives(position), -float(predictions[position]["score"])))
+    kept = [position for position in range(len(predictions)) if position in pairs]
+    kept += others[:max(0, PER_FRAME_MAX_BOXES - len(kept))]
+    kept.sort(key=lambda position: -float(predictions[position]["score"]))
+    lines = []
+    for position in kept:
+        item = predictions[position]
+        line = " ".join(str(int(round(float(value)))) for value in item["box"])
+        line += f" {_score_down(item['score']):.3f} {pairs.get(position, -1)}"
+        if chain:
+            line += f" {item['predicted']} {float(item['confidence']):.3f}"
+        lines.append(line)
+    record: dict[str, Any] = {
+        "cutter_boxes": lines,
+        "cutter_box_counts": [sum(1 for item in predictions if item["score"] >= step) for step in PER_FRAME_STEPS],
+    }
+    if chain:
+        record["surviving_counts"] = [sum(1 for position, item in enumerate(predictions)
+                                          if survives(position) and item["score"] >= step) for step in PER_FRAME_STEPS]
+    return record
 
 
 def width_bucket(width: float) -> str:
@@ -507,6 +594,10 @@ def evaluate_detector(
                                       "truth_families": frame.get("box_families")})
             matched = scored[float(score_threshold)][-1]
             selected = matched["selected"]
+            # Every box from PER_FRAME_MIN_SCORE, matched there once, for the Watch panel of the Evaluate tab.
+            low = [prediction for prediction in predictions if prediction["score"] >= PER_FRAME_MIN_SCORE]
+            pairs = {position: index for position, index, _ in
+                     greedy_matching(low, frame["boxes"], iou_threshold=iou_threshold) if index >= 0}
             image_results.append({
                 "image_path": frame["image_path"],
                 "image_sha256": frame["image_sha256"],
@@ -523,6 +614,8 @@ def evaluate_detector(
                 "false_negatives": matched["false_negatives"],
                 "matches": matched["matches"],
                 "false_positive_details": matched["false_positive_details"],
+                "size": [image.width, image.height],
+                **per_frame_record(low, pairs),
             })
 
     main = scored[float(score_threshold)]
@@ -570,6 +663,8 @@ def evaluate_detector(
         "split_sha256": plan["split_sha256"],
         "device": str(device),
         "images": image_results,
+        # How each image keeps the cutter's boxes from PER_FRAME_MIN_SCORE (cutter_boxes, cutter_box_counts).
+        "per_frame_boxes": per_frame_descriptor(chain=False, min_score=PER_FRAME_MIN_SCORE),
         "limitations": [
             "single_iou_threshold_not_coco_map",
             "false_positives_per_hour_requires_timed_replay",

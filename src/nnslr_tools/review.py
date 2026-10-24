@@ -262,6 +262,14 @@ class ReviewApp(ReviewService):
             name = name.rsplit(':', 1)[0]
         return is_loopback(name)
 
+    def frame_rows(self, route: str) -> dict:
+        """The rows of the current pre-annotation report of a route by frame key ({} without a report): the Watch
+        panel of the Evaluate tab shows a frame with its preview."""
+        try:
+            return self.report(route)[2]
+        except (PreannotationError, ValueError, OSError):
+            return {}
+
     def route_links(self) -> list[dict]:
         """Every route with a report, for the route menu of the review page."""
         links = []
@@ -505,8 +513,9 @@ def make_handler(app: ReviewApp):
             # The control pages: one Vue app, a tab each (web/src/control); the old addresses lead there.
             if path in CONTROL_TABS:
                 nonce = secrets.token_urlsafe(18)
+                # img-src: the frames of the Watch panel of the Evaluate tab (the previews of /route/<id>/images/).
                 csp = ("default-src 'none'; script-src 'nonce-" + nonce + "'; style-src 'unsafe-inline'; "
-                       "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+                       "img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
                 self._send(200, 'text/html; charset=utf-8', render_control(nonce, CONTROL_TABS[path]).encode('utf-8'),
                            csp)
                 return
@@ -526,6 +535,14 @@ def make_handler(app: ReviewApp):
             match = re.fullmatch(r'/api/panel/runs/([A-Za-z0-9][A-Za-z0-9._-]{0,99})', path)
             if match:
                 self._json(200, app.panel.run(match.group(1)))
+                return
+            # The Watch panel: the frames of one route of an evaluation, with the boxes to draw over each.
+            match = re.fullmatch(r'/api/panel/runs/([A-Za-z0-9][A-Za-z0-9._-]{0,99})/frames', path)
+            if match:
+                query = parse_qs(urlsplit(self.path).query)
+                value = lambda name: query.get(name, [None])[0]  # noqa: E731
+                self._json(200, app.panel.frames(match.group(1), value('model'), value('partition') or 'test',
+                                                 value('route') or None, app.frame_rows))
                 return
             # The networks by role (cutter, classifier, decider) and the one in use, for the Models tab.
             if path == '/api/panel/models':

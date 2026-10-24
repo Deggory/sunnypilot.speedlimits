@@ -30,6 +30,12 @@ A run of scripts/run_detector_sizes.sh alone (the panel's "Train the cutter": on
 ``detector-sizes/<size>.log`` (the epochs) and ``detector-sizes/comparison.txt``; the same folders in a run of the
 pipeline are shown with it.
 
+The Watch panel of the Evaluate tab plays the frames of one route of an evaluation (the detector of the pipeline, a
+cutter of the sizes, the chain and the chain with the old reader) with the reviewed boxes and the cutter's boxes over
+each frame (RunsIndex.frames, frames_digest): from the boxes the report keeps frame by frame (``per_frame_boxes`` of
+nnslr_tools.evaluation and nnslr_tools.chain), else from what an older report has (the detector's boxes at its own
+threshold, the chain's verdicts at its main score), and the previews of the review pages.
+
 Every file is reduced once to a small digest, kept while its size and mtime stay the same: the evaluation
 reports and the training plans (megabytes, a row per sample) are never parsed again at every request.
 Run and variant names follow a strict pattern, and a file is read only when its real path (after the
@@ -116,6 +122,16 @@ SKIPPED_KEYS = {'samples', 'images', 'predictions', 'records', 'history', 'confi
 HUMAN_KEYS = {'human_reviewed', 'human'}
 MAX_METRICS = 60
 MAX_MATRIX = 8
+
+
+class WatchError(Exception):
+    """A request of the Watch panel that is refused: HTTP status, reason, message (as panel.PanelError)."""
+
+    def __init__(self, status: int, reason: str, message: str):
+        super().__init__(message)
+        self.status = status
+        self.reason = reason
+        self.message = message
 
 
 class _Unreadable:
@@ -626,6 +642,246 @@ def detector_digest(report: Any) -> dict:
         'dataset_sha256': report.get('dataset_sha256') if isinstance(report.get('dataset_sha256'), str) else None,
         'split_sha256': report.get('split_sha256') if isinstance(report.get('split_sha256'), str) else None,
     }
+
+
+# -- the frames of an evaluation, for the Watch panel ------------------------------------------------------
+# The reports the Watch panel of the Evaluate tab plays, frame after frame, with the boxes over the frame
+# (GET /api/panel/runs/<run>/frames?model=&partition=&route=): the detector of the pipeline, a cutter of
+# scripts/run_detector_sizes.sh, the chain (cutter -> classifier) and the same chain with the old reader.
+WATCH_MODEL = re.compile(r'detector|detector-sizes/[1-9][0-9]{0,4}x[1-9][0-9]{0,4}|chain|chain-old-reader')
+WATCH_PARTITIONS = ('test', 'validation')
+WATCH_ROUTE = re.compile(r'[A-Za-z0-9][A-Za-z0-9_-]{0,63}')
+# A frame of the dataset: derived/frames/<route>/<segment>/frame_<image>.png.
+FRAME_FILE = re.compile(r'(?:^|/)([0-9]{1,9})/frame_([0-9]{1,9})\.(?:png|jpe?g)$')
+# The preview of a frame in the current pre-annotation report of its route (served by /route/<route>/images/...).
+PREVIEW_PATH = re.compile(r'images/[0-9]{8}\.jpg')
+# What a report keeps of the cutter's boxes, frame by frame (nnslr_tools.evaluation.per_frame_boxes):
+# 'all' every box from its floor (0.05), at most a few dozen per frame, with the counts at each step of the slider;
+# 'above' (a detector report written before) its boxes at its own threshold only; 'verdicts' (a chain report written
+# before) the reviewed boxes found and what the classifier called them, and the false boxes it let through, at its
+# main score only; 'none' the reviewed boxes alone.
+WATCH_LEVELS = ('all', 'above', 'verdicts', 'none')
+
+
+def watch_file(model: str, partition: str) -> str | None:
+    """The report of a model of the Watch panel on a partition, relative to its run; None when there is none."""
+    if not isinstance(model, str) or not WATCH_MODEL.fullmatch(model) or partition not in WATCH_PARTITIONS:
+        return None
+    if model == 'detector':
+        return f'evaluation/detector-{partition}.json'
+    if model.startswith(SIZES_DIR + '/'):
+        return f'{model}/evaluation/detector-{partition}.json'
+    if model == 'chain':
+        return f'evaluation/chain-{partition}.json'
+    # The old reader in the same chain is measured on the test only.
+    return 'evaluation/chain-test-old-reader.json' if partition == 'test' else None
+
+
+def watch_label(model: str) -> str:
+    if model == 'detector':
+        return 'Detector of the pipeline'
+    if model.startswith(SIZES_DIR + '/'):
+        return 'Cutter ' + model[len(SIZES_DIR) + 1:].replace('x', ' × ')
+    return 'Chain' if model == 'chain' else 'Chain, old reader'
+
+
+def _pairs(boxes: list[list[float]], scores: list[float], truth: list[list[float]], threshold: float) -> dict[int, int]:
+    """{box index: truth index}: the greedy score-ordered matching of nnslr_tools.evaluation.match_detections."""
+    unmatched = set(range(len(truth)))
+    pairs: dict[int, int] = {}
+    for index in sorted(range(len(boxes)), key=lambda item: scores[item], reverse=True):
+        best_iou, best = max(((_iou(boxes[index], truth[t]), t) for t in unmatched), default=(0.0, -1))
+        if best >= 0 and best_iou >= threshold:
+            unmatched.discard(best)
+            pairs[index] = best
+    return pairs
+
+
+def _px(box: list[float]) -> list[int]:
+    return [int(round(value)) for value in box]
+
+
+def _score(value: float) -> float:
+    """A score down to 3 decimals, never up: compared with a step of the slider it stays on the same side (as
+    nnslr_tools.evaluation.per_frame_record writes it)."""
+    return math.floor(round(value * 1000, 6)) / 1000
+
+
+def _counts_list(value: Any, length: int) -> list[int] | None:
+    if not isinstance(value, list) or len(value) != length:
+        return None
+    numbers = [_int(item) for item in value]
+    return None if any(item is None or item < 0 for item in numbers) else numbers  # type: ignore[misc]
+
+
+def _confidence(item: dict) -> float | None:
+    value = _num(item.get('confidence'))
+    return None if value is None else round(value, 3)
+
+
+def _stored_box(text: Any, chain: bool) -> dict | None:
+    """One box of per_frame_boxes: "x1 y1 x2 y2 score truth" (chain: "... label confidence"); truth -1 when the box
+    found no reviewed box."""
+    if not isinstance(text, str):
+        return None
+    parts = text.split(' ')
+    if len(parts) != (8 if chain else 6):
+        return None
+    try:
+        box = [float(value) for value in parts[:4]]
+        score, match = float(parts[4]), int(parts[5])
+        confidence = float(parts[7]) if chain else None
+    except ValueError:
+        return None
+    if not all(math.isfinite(value) for value in [*box, score, *([] if confidence is None else [confidence])]):
+        return None
+    # Written with 3 decimals already (rounded down there).
+    item = {'box': _px(box), 'score': round(score, 3), 'match': match}
+    if chain:
+        item.update(label=parts[6], confidence=round(confidence, 3))
+    return item
+
+
+def _watch_frame(image: dict, level: str, chain: bool, iou: float) -> dict | None:
+    """A frame of a report as the Watch panel draws it: its key and image, the reviewed boxes (family, label, and
+    for an old chain report whether the cutter found it and what the classifier called it), the boxes of the cutter
+    (score, the reviewed box each found or -1, and the classifier's answer in a chain), and how many boxes the cutter
+    passed on at each step of the slider when the report counted them."""
+    route = image.get('route_id')
+    path = image.get('image_path')
+    if not isinstance(route, str) or not WATCH_ROUTE.fullmatch(route) or not isinstance(path, str):
+        return None
+    named = FRAME_FILE.search(path)
+    segment = _int(image.get('segment_index'))
+    if segment is None and named:
+        segment = int(named.group(1))
+    index = int(named.group(2)) if named and (segment is None or int(named.group(1)) == segment) else None
+    size = image.get('size')
+    width = height = None
+    if isinstance(size, list) and len(size) == 2 and all(_int(side) for side in size):
+        width, height = int(size[0]), int(size[1])
+    truth = []
+    if chain:
+        for item in image.get('truth') or []:
+            box = _box(item.get('box')) if isinstance(item, dict) else None
+            if box is None:
+                continue
+            label = item.get('label') if isinstance(item.get('label'), str) else None
+            family = item.get('family') if isinstance(item.get('family'), str) else (label or '').partition(':')[0] or None
+            row = {'box': _px(box), 'family': family, 'label': label}
+            if level == 'verdicts':
+                row.update(found=bool(item.get('found')),
+                           verdict=item.get('predicted') if isinstance(item.get('predicted'), str) else None,
+                           confidence=_confidence(item))
+            truth.append(row)
+    else:
+        families = image.get('truth_families') if isinstance(image.get('truth_families'), list) else []
+        for position, item in enumerate(image.get('truth_boxes') or []):
+            box = _box(item)
+            if box is None:
+                continue
+            family = families[position] if position < len(families) and isinstance(families[position], str) else None
+            truth.append({'box': _px(box), 'family': family, 'label': None})
+    boxes: list[dict] = []
+    counts = surviving = None
+    if level == 'all':
+        boxes = [item for item in (_stored_box(text, chain) for text in image.get('cutter_boxes') or []) if item is not None]
+        counts = _counts_list(image.get('cutter_box_counts'), len(PER_FRAME_STEPS))
+        surviving = _counts_list(image.get('surviving_counts'), len(PER_FRAME_STEPS)) if chain else None
+    elif level == 'above':
+        found = []
+        for item in image.get('predictions') or []:
+            box = _box(item.get('box')) if isinstance(item, dict) else None
+            score = _num(item.get('score')) if isinstance(item, dict) else None
+            if box is not None and score is not None:
+                found.append((box, score))
+        truth_boxes = [_box(item) for item in image.get('truth_boxes') or []]
+        pairs = _pairs([box for box, _ in found], [score for _, score in found],
+                       [box for box in truth_boxes if box is not None], iou)
+        boxes = [{'box': _px(box), 'score': _score(score), 'match': pairs.get(position, -1)}
+                 for position, (box, score) in enumerate(found)]
+    elif level == 'verdicts':
+        for item in image.get('surviving_false') or []:
+            box = _box(item.get('box')) if isinstance(item, dict) else None
+            score = _num(item.get('score')) if isinstance(item, dict) else None
+            if box is None or score is None:
+                continue
+            boxes.append({'box': _px(box), 'score': _score(score), 'match': -1,
+                          'label': item.get('predicted') if isinstance(item.get('predicted'), str) else None,
+                          'confidence': _confidence(item)})
+    # Matches of a box to a reviewed box that is not there (a report edited by hand) are dropped.
+    for item in boxes:
+        if not 0 <= item['match'] < len(truth):
+            item['match'] = -1
+    boxes.sort(key=lambda item: -item['score'])
+    basis = image.get('label_basis')
+    return {'route': route, 'key': None if segment is None or index is None else f'{segment}/{index}',
+            'segment': segment, 'index': index, 'image_path': path,
+            'image_sha256': image.get('image_sha256') if isinstance(image.get('image_sha256'), str) else None,
+            'width': width, 'height': height, 'basis': basis if isinstance(basis, str) else None,
+            'truth': truth, 'boxes': boxes, 'counts': counts, 'surviving': surviving}
+
+
+# The steps of the score slider of the Watch panel, at which a report counts the boxes of each frame
+# (nnslr_tools.evaluation.PER_FRAME_STEPS: the same numbers).
+PER_FRAME_STEPS = tuple(step / 100 for step in range(5, 55, 5))
+
+
+def frames_digest(report: Any) -> dict:
+    """A detector or chain report as the Watch panel plays it: what it kept of the cutter's boxes (WATCH_LEVELS),
+    from which score, its main score and IoU, and its frames by route in the order of the drive (segment, image)."""
+    if not isinstance(report, dict) or report.get('task') not in ('detector', 'chain'):
+        raise ValueError('not a detector or chain report')
+    chain = report['task'] == 'chain'
+    images = [item for item in report.get('images') or [] if isinstance(item, dict)] if isinstance(report.get('images'), list) else []
+    stored = report.get('per_frame_boxes') if isinstance(report.get('per_frame_boxes'), dict) else None
+    main = _num(report.get('main_score_threshold' if chain else 'score_threshold'))
+    steps = stored.get('steps') if stored else None
+    if stored and isinstance(steps, list) and [_num(step) for step in steps] == list(PER_FRAME_STEPS):
+        level, floor = 'all', _num(stored.get('min_score'))
+    elif not chain and images and all(isinstance(item.get('predictions'), list) for item in images):
+        level, floor = 'above', main
+    elif chain and images and all(isinstance(item.get('truth'), list) and isinstance(item.get('surviving_false'), list)
+                                  for item in images):
+        level, floor = 'verdicts', main
+    else:
+        level, floor = 'none', None
+    iou = _num(report.get('iou_threshold')) or 0.5
+    routes: dict[str, list[dict]] = {}
+    for image in images:
+        frame = _watch_frame(image, level, chain, iou)
+        if frame is not None:
+            routes.setdefault(frame.pop('route'), []).append(frame)
+    for frames in routes.values():
+        frames.sort(key=lambda item: (item['segment'] if item['segment'] is not None else -1,
+                                      item['index'] if item['index'] is not None else -1, item['image_path']))
+    classifier = report.get('classifier') if isinstance(report.get('classifier'), dict) else {}
+    return {'kind': 'chain' if chain else 'cutter', 'level': level, 'min_score': floor, 'main_score': main,
+            'max_boxes': _int((stored or {}).get('max_boxes')), 'iou_threshold': iou,
+            'rejects': classifier.get('rejects') if chain and isinstance(classifier.get('rejects'), bool) else None,
+            'partition': str(report.get('partition') or 'test'), 'image_count': len(images), 'routes': routes}
+
+
+def default_score(digest: dict) -> float | None:
+    """The score the Watch panel starts at: the chain's main score; for a cutter, its own score (0.1, as the Cutter
+    section and the Models tab judge it) when the report kept boxes that low, else the report's own threshold."""
+    if digest['level'] == 'none':
+        return None
+    if digest['kind'] == 'chain' or digest['level'] != 'all':
+        return digest['main_score'] if digest['main_score'] is not None else digest['min_score']
+    floor = digest['min_score'] or 0.0
+    return CHAIN_SCORE if floor <= CHAIN_SCORE + 1e-9 else floor
+
+
+def _frame_outcome(frame: dict, score: float | None, level: str) -> tuple[int, int | None]:
+    """(reviewed boxes, those missed) of a frame at a score of the cutter; missed None when the report does not say."""
+    truth = len(frame['truth'])
+    if level == 'verdicts':
+        return truth, sum(1 for item in frame['truth'] if not item.get('found'))
+    if level == 'none' or score is None:
+        return truth, None
+    found = {item['match'] for item in frame['boxes'] if item['match'] >= 0 and item['score'] >= score}
+    return truth, truth - len(found)
 
 
 # -- training results, plans, the split, the log ----------------------------------------------------------
@@ -1770,7 +2026,94 @@ class RunsIndex:
             'experiment': self._experiment(run),
             'classifier_run': self._classifier_detail(gathered),
             'cutter_run': self._cutter_detail(gathered),
+            'watch': self._watch_models(run, gathered),
         }
+
+    def _watch_models(self, run: Path, gathered: dict) -> list[dict]:
+        """The reports of this run the Watch panel can play, by model, with the partitions that have one (only
+        which files exist: a report is read when its frames are asked for)."""
+        models = ['detector'] + [f"{SIZES_DIR}/{item['size']}" for item in gathered['cutters']['sizes']] + ['chain', 'chain-old-reader']
+        found = []
+        for model in models:
+            partitions = [partition for partition in WATCH_PARTITIONS
+                          if (relative := watch_file(model, partition)) is not None and self._file(run, relative) is not None]
+            if partitions:
+                found.append({'model': model, 'label': watch_label(model),
+                              'kind': 'chain' if model.startswith('chain') else 'cutter', 'partitions': partitions})
+        return found
+
+    def frames(self, name: str, model: str, partition: str, route: str | None = None,
+               previews: Callable[[str], dict] | None = None) -> dict:
+        """GET /api/panel/runs/<run>/frames: the frames of one route of a report of the Watch panel, in the order of the
+        drive, with the boxes to draw over each (the route asked for, else the one with the most signs); and every
+        route of the report with its frames, signs and misses at the score the panel starts at. previews(route) gives
+        the rows of the current pre-annotation report of a route by frame key ({} without one): a frame shows its
+        preview (/route/<route>/images/NNNNNNNN.jpg) only when the row is the same image."""
+        run = self._run_dir(name)
+        if run is None:
+            raise WatchError(404, 'unknown_run', 'No such training run.')
+        if not isinstance(model, str) or not WATCH_MODEL.fullmatch(model):
+            raise WatchError(400, 'invalid_model', 'model must be detector, detector-sizes/<W>x<H>, chain or chain-old-reader.')
+        if partition not in WATCH_PARTITIONS:
+            raise WatchError(400, 'invalid_partition', 'partition must be test or validation.')
+        if route is not None and (not isinstance(route, str) or not WATCH_ROUTE.fullmatch(route)):
+            raise WatchError(400, 'invalid_route', 'Invalid route id.')
+        relative = watch_file(model, partition)
+        path = self._file(run, relative) if relative is not None else None
+        if path is None:
+            raise WatchError(404, 'no_report', f'{watch_label(model)} has no evaluation on {partition} in this run.')
+        digest = self._load(path, frames_digest)
+        if digest is None or digest is UNREADABLE:
+            raise WatchError(409, 'unreadable_report', f'{relative} cannot be read.')
+        level, start = digest['level'], default_score(digest)
+        listed = []
+        for key, frames in sorted(digest['routes'].items()):
+            outcomes = [_frame_outcome(frame, start, level) for frame in frames]
+            missed = [count for _, count in outcomes]
+            listed.append({'route': key, 'frames': len(frames), 'signs': sum(signs for signs, _ in outcomes),
+                           'frames_with_signs': sum(1 for signs, _ in outcomes if signs),
+                           'missed': None if any(count is None for count in missed) else sum(missed),  # type: ignore[arg-type]
+                           'frames_with_misses': None if any(count is None for count in missed)
+                           else sum(1 for count in missed if count)})
+        asked = route
+        if route not in digest['routes']:
+            # None, or a route this report has no frame of (the panel keeps its route when another report is chosen):
+            # the route with the most reviewed signs, the first by name on a tie.
+            route = max(listed, key=lambda item: (item['signs'], item['frames']))['route'] if listed else None
+        rows = {}
+        if route is not None and previews is not None:
+            try:
+                rows = previews(route) or {}
+            except (OSError, ValueError):
+                rows = {}
+        frames = []
+        for frame in digest['routes'].get(route, []) if route is not None else []:
+            row = rows.get(frame['key']) if frame['key'] is not None else None
+            image = None
+            width, height = frame['width'], frame['height']
+            if isinstance(row, dict) and row.get('image_path') == frame['image_path'] and (
+                    not isinstance(row.get('frame_sha256'), str) or frame['image_sha256'] is None
+                    or row['frame_sha256'] == frame['image_sha256']):
+                preview = row.get('preview_path')
+                if isinstance(preview, str) and PREVIEW_PATH.fullmatch(preview):
+                    image = f'/route/{route}/{preview}'
+                if width is None or height is None:
+                    width, height = _int(row.get('width')), _int(row.get('height'))
+            frames.append({'key': frame['key'], 'segment': frame['segment'], 'index': frame['index'], 'image': image,
+                           'width': width, 'height': height, 'basis': frame['basis'], 'truth': frame['truth'],
+                           # [x1, y1, x2, y2, score, truth] (a chain: + label, confidence): a route has thousands.
+                           'boxes': [[*item['box'], item['score'], item['match'],
+                                      *((item['label'], item['confidence']) if 'label' in item else ())]
+                                     for item in frame['boxes']],
+                           'counts': frame['counts'], 'surviving': frame['surviving']})
+        return {'run': name, 'model': model, 'label': watch_label(model), 'partition': partition, 'kind': digest['kind'],
+                'level': level, 'min_score': digest['min_score'], 'main_score': digest['main_score'],
+                'default_score': start, 'max_boxes': digest['max_boxes'],
+                'steps': list(PER_FRAME_STEPS) if level == 'all' else None, 'iou_threshold': digest['iou_threshold'],
+                'rejects': digest['rejects'], 'image_count': digest['image_count'], 'routes': listed, 'route': route,
+                # The route asked for when this report has no frame of it.
+                'route_not_here': asked if asked is not None and asked != route else None,
+                'with_image': sum(1 for frame in frames if frame['image'] is not None), 'frames': frames}
 
     def _prune(self) -> None:
         """Forget the digests of files that are gone (a run deleted)."""

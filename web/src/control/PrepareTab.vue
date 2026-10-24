@@ -28,10 +28,7 @@ const total = computed(() => counts.value.reduce((sum, item) => sum + item.count
 </script>
 
 <template>
-  <header class="page-head">
-    <h1 class="page-title">Prepare</h1>
-    <p class="page-sub">From the drives of the comma to frames with the proposed signs, all automatic.</p>
-  </header>
+  <h1 class="sr-only">Prepare</h1>
 
   <section class="card tab-card" aria-labelledby="prepare-title">
     <div class="tab-card-head">

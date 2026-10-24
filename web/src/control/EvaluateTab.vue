@@ -22,10 +22,7 @@ const evaluated = computed(() => runs.value.filter((run) => run.evaluated).lengt
 </script>
 
 <template>
-  <header class="page-head">
-    <h1 class="page-title">Evaluate</h1>
-    <p class="page-sub">How every training did on the test: places kept apart, never seen while learning.</p>
-  </header>
+  <h1 class="sr-only">Evaluate</h1>
 
   <section class="card runs-card" aria-labelledby="runs-title">
     <div class="ds-head">

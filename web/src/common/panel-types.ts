@@ -690,6 +690,126 @@ export interface RunDetail extends RunSummary {
   classifier_run: ClassifierRun | null;
   /** What scripts/run_detector_sizes.sh wrote here: each size as the Models tab judges a cutter, the comparison. */
   cutter_run: {sizes: CutterSize[]; comparison: string | null} | null;
+  /** The reports of this run the Watch panel can play (only which files exist). */
+  watch: WatchModel[];
+}
+
+// GET /api/panel/runs/<run>/frames?model=&partition=&route= (nnslr_tools.runs.RunsIndex.frames): the Watch panel.
+
+export type WatchPartition = 'test' | 'validation';
+
+/** A report of a run the Watch panel plays. */
+export interface WatchModel {
+  /** detector (of the pipeline), detector-sizes/<W>x<H> (a cutter of the sizes), chain, chain-old-reader. */
+  model: string;
+  /** "Cutter 960 × 544", "Chain", ... */
+  label: string;
+  kind: 'cutter' | 'chain';
+  partitions: WatchPartition[];
+}
+
+/** What a report kept of the cutter's boxes frame by frame: every box from its floor (at most max_boxes a frame, with
+ * the counts at each step), its boxes at its own threshold only (an older detector report), the signs found and what
+ * the classifier said at its main score (an older chain report), nothing (the reviewed boxes alone). */
+export type WatchLevel = 'all' | 'above' | 'verdicts' | 'none';
+
+/** x1, y1, x2, y2 in pixels of the frame. */
+export type PixelBox = [number, number, number, number];
+
+/** A reviewed box: the truth. */
+export interface WatchTruth {
+  box: PixelBox;
+  family: string | null;
+  /** The classifier's label of the review (a chain report); null in a cutter report. */
+  label: string | null;
+  /** An older chain report: found by the cutter at its main score, and what the classifier called it. */
+  found?: boolean;
+  verdict?: string | null;
+  confidence?: number | null;
+}
+
+/** A box of the cutter. */
+export interface WatchBox {
+  box: PixelBox;
+  score: number;
+  /** The reviewed box it found (an index of truth), -1 for none: a false box. */
+  match: number;
+  /** A chain report: what the classifier called it, and how sure it was. */
+  label?: string | null;
+  confidence?: number | null;
+}
+
+/** A box of the cutter as the server sends it: x1, y1, x2, y2, score, truth (a chain: then label, confidence). */
+export type WatchBoxRow = [number, number, number, number, number, number]
+  | [number, number, number, number, number, number, string | null, number | null];
+
+/** A frame as the server sends it: its boxes as rows (watch.ts makes them WatchBox). */
+export interface WatchFrameRows extends Omit<WatchFrame, 'boxes'> {
+  boxes: WatchBoxRow[];
+}
+
+export interface WatchFrame {
+  /** "<segment>/<image>", as the review page names a frame. */
+  key: string | null;
+  segment: number | null;
+  index: number | null;
+  /** The preview of the review page, /route/<route>/images/NNNNNNNN.jpg; null without one. */
+  image: string | null;
+  width: number | null;
+  height: number | null;
+  /** human_review, ai_review, ... */
+  basis: string | null;
+  truth: WatchTruth[];
+  /** Best score first. */
+  boxes: WatchBox[];
+  /** Every box of the cutter at or above each step (level all), drawn or not. */
+  counts: number[] | null;
+  /** A chain: the false boxes the classifier let through at each step. */
+  surviving: number[] | null;
+}
+
+export interface WatchRoute {
+  route: string;
+  frames: number;
+  signs: number;
+  frames_with_signs: number;
+  /** At the score the panel starts at; null when the report does not say. */
+  missed: number | null;
+  frames_with_misses: number | null;
+}
+
+export interface WatchPayload {
+  run: string;
+  model: string;
+  label: string;
+  partition: WatchPartition;
+  kind: 'cutter' | 'chain';
+  level: WatchLevel;
+  /** The lowest score of the boxes kept. */
+  min_score: number | null;
+  /** The report's own threshold (a cutter) or main score (a chain). */
+  main_score: number | null;
+  default_score: number | null;
+  max_boxes: number | null;
+  /** The scores at which counts and surviving are given (level all). */
+  steps: number[] | null;
+  iou_threshold: number;
+  /** A chain: the classifier has “not a sign”. */
+  rejects: boolean | null;
+  image_count: number;
+  routes: WatchRoute[];
+  /** The route shown: the one asked for, else the one with the most signs. */
+  route: string | null;
+  /** The route asked for when this report has no frame of it. */
+  route_not_here: string | null;
+  /** Frames of the route with a preview to show. */
+  with_image: number;
+  frames: WatchFrame[];
+}
+
+/** WatchPayload as the server sends it. */
+export interface WatchPayloadRows extends Omit<WatchPayload, 'frames'> {
+  frames: WatchFrameRows[];
 }
 
 export interface CutterSize {

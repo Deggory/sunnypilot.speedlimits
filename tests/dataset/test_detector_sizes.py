@@ -21,7 +21,8 @@ from nnslr_tools import cli
 from nnslr_tools.annotations import load_jsonl, validate_dataset
 from nnslr_tools.checkpoints import (detector_anchor_min_ratio, detector_input_size, format_input_size,
                                      parse_input_size)
-from nnslr_tools.evaluation import (WIDTH_BUCKETS, detector_sizes_table, match_detections, recall_by_width,
+from nnslr_tools.evaluation import (PER_FRAME_MAX_BOXES, PER_FRAME_MIN_SCORE, PER_FRAME_STEPS, WIDTH_BUCKETS,
+                                    detector_sizes_table, match_detections, recall_by_width,
                                     score_frame, threshold_metrics, width_bucket)
 from nnslr_tools.exporting import detector_io_contract
 from nnslr_tools.job_progress import progress
@@ -364,6 +365,30 @@ print("rebuild ok")
 """
 
 
+def _kept_found(image: dict, threshold: float) -> set[int]:
+    """The reviewed boxes found at a score by the boxes a frame keeps for the Watch panel ("x1 y1 x2 y2 score truth")."""
+    parts = [line.split(" ") for line in image["cutter_boxes"]]
+    return {int(part[5]) for part in parts if int(part[5]) >= 0 and float(part[4]) >= threshold}
+
+
+def _check_per_frame_boxes(report: dict) -> None:
+    """Every frame keeps the cutter's boxes from 0.05 for the Watch panel of the Evaluate tab: at every score the report
+    measured, the signs they find and the boxes counted are the report's own."""
+    assert report["per_frame_boxes"]["min_score"] == PER_FRAME_MIN_SCORE
+    assert report["per_frame_boxes"]["steps"] == list(PER_FRAME_STEPS) and report["per_frame_boxes"]["box"] == "x1 y1 x2 y2 score truth"
+    for image in report["images"]:
+        assert len(image["size"]) == 2 and all(side > 0 for side in image["size"])
+        assert image["cutter_box_counts"] == sorted(image["cutter_box_counts"], reverse=True)
+        assert len(image["cutter_boxes"]) <= min(PER_FRAME_MAX_BOXES, image["cutter_box_counts"][0])
+        assert all(len(line.split(" ")) == 6 and float(line.split(" ")[4]) >= PER_FRAME_MIN_SCORE for line in image["cutter_boxes"])
+        assert len(_kept_found(image, report["score_threshold"])) == image["true_positives"]
+    for key, metrics in report["by_score_threshold"].items():
+        step = PER_FRAME_STEPS.index(float(key))
+        assert sum(len(_kept_found(image, float(key))) for image in report["images"]) == metrics["true_positives"], key
+        assert sum(image["cutter_box_counts"][step] for image in report["images"]) == round(
+            metrics["predictions_per_image"] * metrics["image_count"]), key
+
+
 def _fixture_with_sign_free_frames(root, capsys) -> Path:
     """12 frames on 12 routes, every other one without signs: train 0-5, validation 6-9, test 10-11."""
     rows, partition = [], {}
@@ -484,6 +509,7 @@ def test_tiny_cpu_detector_at_a_non_square_size(tmp_path, capsys, torch_python):
     assert report["families"] == "all" and report["recall_by_family"]["speed"]["truth"] == report["truth_box_count"]
     assert report["by_score_threshold"]["0.1"]["recall_by_family"]["speed"]["truth"] == report["truth_box_count"]
     assert report["images"][0]["truth_families"] == ["maximum_speed"] * report["images"][0]["truth_count"]
+    _check_per_frame_boxes(report)
 
     if subprocess.run([torch_python, "-c", "import onnx, onnxruntime, onnxscript"], capture_output=True).returncode:
         pytest.skip("onnx/onnxruntime/onnxscript missing: export not checked")
