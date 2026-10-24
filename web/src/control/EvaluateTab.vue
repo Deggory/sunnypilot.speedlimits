@@ -13,7 +13,7 @@ import WatchSection from './WatchSection.vue';
 
 type View = 'chain' | 'cutter' | 'classifier' | 'decider';
 const VIEWS: {key: View; label: string}[] = [
-  {key: 'chain', label: 'Whole chain'}, {key: 'cutter', label: 'Cutter'},
+  {key: 'chain', label: 'Chain'}, {key: 'cutter', label: 'Cutter'},
   {key: 'classifier', label: 'Classifier'}, {key: 'decider', label: 'Decider'},
 ];
 /** What each network must do, and the number that judges it. */
@@ -145,19 +145,16 @@ const watchModels = computed((): WatchModel[] => {
     <p class="eval-goal">{{ GOAL[view] }}</p>
     <p v-if="models === null" class="empty">Loading…</p>
     <p v-else-if="rows.length === 0" class="empty">Nothing measured yet: train one on the Train tab.</p>
-    <table v-else class="eval-table">
-      <thead><tr><th>Version</th><th>Result on the test</th><th>Also</th><th></th></tr></thead>
-      <tbody>
-        <tr v-for="row in rows" :key="row.id" :class="{picked: shown?.id === row.id}" tabindex="0"
-            @click="picked = row.id" @keydown.enter="picked = row.id">
-          <td><strong>{{ row.name }}</strong><span v-if="row.inUse" class="in-use">in use</span>
-            <div class="eval-when">{{ row.when }}</div></td>
-          <td><strong :class="{top: row.main !== null && row.main === best && rows.length > 1}">{{ row.mainText }}</strong></td>
-          <td class="eval-second">{{ row.second }}</td>
-          <td><span v-if="versus(row).text" :class="['eval-vs', versus(row).kind]">{{ versus(row).text }}</span></td>
-        </tr>
-      </tbody>
-    </table>
+    <ul v-else class="eval-list" role="listbox" aria-label="Versions">
+      <li v-for="row in rows" :key="row.id" role="option" :aria-selected="shown?.id === row.id"
+          :class="['eval-row', {picked: shown?.id === row.id}]" tabindex="0"
+          @click="picked = row.id" @keydown.enter="picked = row.id">
+        <div class="eval-name"><strong>{{ row.name }}</strong><span v-if="row.inUse" class="in-use">in use</span>
+          <span class="eval-when">{{ row.when }}</span></div>
+        <div class="eval-main" :class="{top: row.main !== null && row.main === best && rows.length > 1}">{{ row.mainText }}</div>
+        <div class="eval-second">{{ row.second }}<span v-if="versus(row).text" :class="['eval-vs', versus(row).kind]">{{ versus(row).text }}</span></div>
+      </li>
+    </ul>
   </section>
 
   <template v-if="shown">
