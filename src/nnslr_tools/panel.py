@@ -27,6 +27,7 @@ from datetime import datetime
 from pathlib import Path
 
 from nnslr_tools.job_progress import last_line, progress, with_step_progress
+from nnslr_tools.runs import RunsIndex
 
 REPO = Path(__file__).resolve().parents[2]
 ACTIONS_ENV = 'NNSLR_PANEL_ACTIONS'
@@ -113,6 +114,8 @@ class Panel:
         # (time of the last check, published?): None until the first answer.
         self._stable: tuple[float, bool | None] = (-float('inf'), None)
         self._stable_checking = False
+        # The training runs of <root>/runs, for the Evaluate tab (nnslr_tools.runs).
+        self.runs_index = RunsIndex(root)
 
     # -- helpers of the checkout -------------------------------------------------------------
     def available(self) -> bool:
@@ -472,6 +475,18 @@ class Panel:
         with self._lock:
             self._stable = (time.monotonic(), published)
             self._stable_checking = False
+
+    # -- the training runs, for the Evaluate tab ------------------------------------------------------
+    def runs(self) -> dict:
+        """Every run under <root>/runs with its state and headline numbers, newest first."""
+        return self.runs_index.summaries()
+
+    def run(self, name: str) -> dict:
+        """One run: its evaluation per label and per sign size, the dataset and split it used, its curves."""
+        detail = self.runs_index.detail(name)
+        if detail is None:
+            raise PanelError(404, 'unknown_run', 'No such training run.')
+        return detail
 
     # -- progress of the preparation -----------------------------------------------------------
     def preparation(self, rows: list[dict], activities: list[dict]) -> dict | None:

@@ -234,3 +234,218 @@ export interface LogChunk {
   offset: number;
   size: number;
 }
+
+// GET /api/panel/runs and /api/panel/runs/<run> (nnslr_tools.runs.RunsIndex): the Evaluate tab.
+
+/** running: its pipeline is running now; finished: bundle packaged; incomplete: stopped before the end. */
+export type RunState = 'running' | 'finished' | 'incomplete';
+/** The step a run reached (scripts/run_v100_baseline.sh), 'done' when packaged; 'experiment' for a folder of
+ * scripts/run_experiment_b.sh alone, 'done' when its three variants have a result. */
+export type RunStage = 'checks' | 'detector' | 'reader' | 'evaluate' | 'export' | 'bundle' | 'experiment' | 'done';
+
+export interface RunStart {
+  /** Where the weights came from; null when not recorded (a fresh run before its detector finished). */
+  kind: 'imagenet' | 'random' | 'stable' | 'run' | 'weights' | null;
+  label: string;
+  /** kind 'run': the earlier run it continued from. */
+  run: string | null;
+  /** The weights file or Hugging Face path, from the log. */
+  source: string | null;
+}
+
+export interface RunSummary {
+  name: string;
+  /** training: the pipeline of helpers/3_train.sh; experiment: a folder with experiment B only. */
+  kind: 'training' | 'experiment';
+  state: RunState;
+  stage: RunStage;
+  /** "training the detector", ... */
+  stage_label: string;
+  /** A running run: "detector · epoch 5 of 20". */
+  progress: string | null;
+  /** An incomplete run: the last error line of its log. */
+  error: string | null;
+  /** Experiment B is running in this folder now, and how far ("experiment B · crop_geom · epoch 3 of 20"). */
+  experiment_running: boolean;
+  experiment_progress: string | null;
+  started_at: string | null;
+  /** The last change of any of its files. */
+  updated_at: string | null;
+  /** When the bundle was packaged. */
+  finished_at: string | null;
+  /** The pipeline's mode (fresh, continue, resume), from the log; null without a log. */
+  mode: string | null;
+  /** Resumed after an interruption at least once. */
+  resumed: boolean;
+  start: RunStart;
+  dataset_sha256: string | null;
+  split_sha256: string | null;
+  evaluated: boolean;
+  /** Reader on the test partition. */
+  reader: {samples: number; accuracy: number | null; human_samples: number | null; human_accuracy: number | null} | null;
+  /** Detector on the test partition (IoU matching). */
+  detector: {truth_boxes: number; found: number; missed: number; false_boxes: number; recall: number | null;
+    precision: number | null; f1: number | null; human_recall: number | null; human_precision: number | null} | null;
+  /** Best validation values of the training (result.json). */
+  best: {detector_val_loss: number | null; reader_val_accuracy: number | null};
+  /** Experiment B variants with a result.json. */
+  experiment_b: string[];
+  /** Files that exist but cannot be read. */
+  problems: string[];
+  /** Changes when anything of the run changes: the page asks the detail again. */
+  version: string;
+}
+
+export interface RunsPayload {
+  runs: RunSummary[];
+  runs_dir_exists: boolean;
+}
+
+export interface LabelRow {
+  /** maximum_speed:60, cancellation, ... */
+  label: string;
+  /** "Speed limit 60". */
+  name: string;
+  count: number;
+  correct: number;
+  accuracy: number | null;
+  /** The wrong answer given most often, or null when never wrong. */
+  wrong: {label: string; name: string; count: number} | null;
+}
+
+export interface ReaderEvaluation {
+  partition: string;
+  samples: number;
+  correct: number;
+  accuracy: number | null;
+  human: {samples: number; accuracy: number | null; correct: number | null} | null;
+  counts_by_label_basis: Record<string, number>;
+  labels: LabelRow[];
+  labels_human: LabelRow[] | null;
+  /** Labels of the test the network never learnt. */
+  unseen_labels: string[];
+  classes: number | null;
+}
+
+export interface BoxCounts {
+  images: number | null;
+  truth_boxes: number;
+  found: number;
+  missed: number;
+  false_boxes: number;
+  recall: number | null;
+  precision: number | null;
+  f1: number | null;
+}
+
+export interface SizeRow {
+  key: string;
+  /** "< 12 px", "12–20 px", ... (width of the box in the frame). */
+  label: string;
+  truth: number;
+  found: number;
+  missed: number;
+  recall: number | null;
+  /** False boxes of this width. */
+  false_boxes: number;
+}
+
+export interface DetectorEvaluation extends BoxCounts {
+  partition: string;
+  false_per_image: number | null;
+  score_threshold: number | null;
+  iou_threshold: number | null;
+  human: BoxCounts | null;
+  counts_by_label_basis: Record<string, number>;
+  /** null when the report has no boxes. */
+  sizes: SizeRow[] | null;
+  sizes_human: SizeRow[] | null;
+  routes: (BoxCounts & {route: string})[];
+}
+
+export interface TrainingResult {
+  architecture: string;
+  initialization: string | null;
+  epochs: number | null;
+  best_validation_loss: number | null;
+  best_validation_accuracy: number | null;
+  best_epoch: number | null;
+  classes: number | null;
+  device: string | null;
+  gpu: string | null;
+}
+
+export interface SplitUsed {
+  policy: string | null;
+  seed: number | null;
+  grouping: string[];
+  /** The routes reviewed entirely by hand whose places are the test. */
+  test_routes: string[];
+  /** Routes with rows in each partition. */
+  routes: Record<string, string[]>;
+  counts: Record<string, number>;
+  human_reviewed_counts: Record<string, number>;
+  warnings: string[];
+}
+
+export interface DatasetUsed {
+  dataset_sha256: string | null;
+  split_sha256: string | null;
+  dataset_kind: string | null;
+  /** splits/<sha>.json, relative to the data root. */
+  split_file: string | null;
+  split: SplitUsed | null;
+  /** The split is the one data/splits/latest.json points to now. */
+  current_split: boolean;
+  detector: {frames: Record<string, number>; boxes: Record<string, number>; negative_frames: Record<string, number>} | null;
+  reader: {crops: Record<string, number>; classes: number | null} | null;
+}
+
+export interface Matrix {
+  labels: string[];
+  /** "Ours", "Another", "Unclear". */
+  names: string[];
+  /** Rows: the truth; columns: the answer. */
+  matrix: number[][];
+}
+
+export interface ExperimentCell {
+  all: number | null;
+  human: number | null;
+}
+
+export interface ExperimentVariant {
+  key: string;
+  label: string;
+  found: boolean;
+  unreadable: boolean;
+  at: string | null;
+  inputs: string[] | null;
+  best_epoch: number | null;
+  epochs: number | null;
+  selection_score: number | null;
+  initialization: string | null;
+  split_sha256: string | null;
+  /** Frames per partition kept (a smoke run, not a measure), or null. */
+  limit: number | null;
+}
+
+export interface ExperimentB {
+  variants: ExperimentVariant[];
+  selection_metric: string | null;
+  /** test, validation (or 'result' for a report of another shape). */
+  partitions: string[];
+  metrics: {key: string; label: string; unit: 'percent' | 'count' | 'number'; better: 'higher' | 'lower' | null;
+    values: Record<string, Record<string, ExperimentCell>>}[];
+  confusions: {key: string; label: string; variants: Record<string, Record<string, {all: Matrix | null; human: Matrix | null}>>}[];
+}
+
+export interface RunDetail extends RunSummary {
+  files: Record<string, boolean>;
+  training: {detector: TrainingResult | null; reader: TrainingResult | null};
+  reader_eval: ReaderEvaluation | null;
+  detector_eval: DetectorEvaluation | null;
+  dataset: DatasetUsed | null;
+  curves: Partial<Record<'detector' | 'reader', TrainingCurve>>;
+  experiment: ExperimentB | null;
+}

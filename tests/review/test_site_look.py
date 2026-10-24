@@ -25,7 +25,7 @@ def served(tmp_path):
     server.close()
 
 
-PAGES = [('/', 'Overview'), ('/prepare', 'Prepare'), ('/train', 'Train'), ('/routes', 'Review'),
+PAGES = [('/', 'Overview'), ('/prepare', 'Prepare'), ('/train', 'Train'), ('/evaluate', 'Evaluate'), ('/routes', 'Review'),
          ('/account', None), (f'/route/{ROUTE}/', None), ('/nonexistent', None)]
 
 
@@ -46,7 +46,7 @@ def test_every_page_has_the_shared_look_the_account_menu_and_its_script(served, 
     assert '__NNSLR_' not in page.replace('"server": false', '')
     tabs = re.search(r'<nav class="tabs".*?</nav>', page, re.S)
     if tab is not None:
-        assert tabs and re.findall(r'>([^<]+)</a>', tabs.group(0)) == ['Overview', 'Prepare', 'Review', 'Train']
+        assert tabs and re.findall(r'>([^<]+)</a>', tabs.group(0)) == ['Overview', 'Prepare', 'Review', 'Train', 'Evaluate']
         assert f'aria-current="page">{tab}</a>' in tabs.group(0)
 
 

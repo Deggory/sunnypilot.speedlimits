@@ -1,0 +1,100 @@
+<script setup lang="ts">
+// One run in detail: what it is (when, where its weights started from, how far it got, the error that stopped it),
+// its headline numbers on the test, then the reader label by label, the detector by sign size and route, the dataset
+// and split it used, its training curves (TrainingCharts, as on the Train tab) and experiment B when it has one.
+import {computed} from 'vue';
+import {thousands} from '../common/format';
+import type {JobProgress, RunDetail, RunSummary} from '../common/panel-types';
+import DetectorSection from './DetectorSection.vue';
+import {RUN_STATE, modeText, notEvaluatedText, pct, plain, runWhen, shortSha} from './evaluate';
+import ExperimentSection from './ExperimentSection.vue';
+import ReaderSection from './ReaderSection.vue';
+import SplitSection from './SplitSection.vue';
+import TrainingCharts from './TrainingCharts.vue';
+
+const props = defineProps<{summary: RunSummary; detail: RunDetail | null; loading: boolean; error: string}>();
+/** The summary is refreshed with the list every 10 s; the detail is asked again only when the run changed. */
+const run = computed((): RunSummary => props.summary);
+const detail = computed(() => props.detail?.name === props.summary.name ? props.detail : null);
+
+/** The curves as the Train tab's charts take them (a job's progress without steps). */
+const curves = computed((): JobProgress | null => {
+  const value = detail.value;
+  if (value === null || value.kind !== 'training') return null;
+  const points = (value.curves.detector?.points.length ?? 0) + (value.curves.reader?.points.length ?? 0);
+  if (!points && run.value.state !== 'running') return null;
+  return {steps: [], percent: null, detail: '', last_line: '', curves: value.curves};
+});
+const training = computed(() => detail.value?.training ?? null);
+const where = computed(() => {
+  const value = run.value;
+  if (value.state === 'running') return 'Running: ' + (value.progress || value.stage_label) + '.';
+  if (value.state === 'finished') {
+    return value.kind === 'experiment' ? 'Finished: the three variants of experiment B are measured.'
+      : 'Finished: trained, evaluated, exported and packaged.';
+  }
+  return 'Stopped while ' + value.stage_label + '.';
+});
+</script>
+
+<template>
+  <section class="card run-detail" id="run-detail" :data-run="run.name" aria-labelledby="run-title">
+    <div class="rd-head">
+      <div class="rd-title">
+        <span class="jp-kicker">Run</span>
+        <h2 id="run-title">{{ run.name }}</h2>
+      </div>
+      <span class="pill" :class="RUN_STATE[run.state][1]">{{ RUN_STATE[run.state][0] }}</span>
+    </div>
+    <dl class="facts">
+      <div><dt>Started</dt><dd>{{ runWhen(run) || '–' }}</dd></div>
+      <div><dt>Started from</dt><dd>{{ run.start.label }}<span v-if="modeText(run)" class="muted"> · {{ modeText(run) }}</span></dd></div>
+      <div v-if="training?.detector || training?.reader"><dt>Best validation</dt><dd>
+        <template v-if="training?.detector">detector loss {{ plain(training.detector.best_validation_loss) }}{{
+          training.detector.best_epoch ? ' (epoch ' + training.detector.best_epoch + ')' : '' }}</template><template
+          v-if="training?.detector && training?.reader"> · </template><template v-if="training?.reader">reader {{
+          pct(training.reader.best_validation_accuracy) }}{{ training.reader.best_epoch ? ' (epoch ' + training.reader.best_epoch + ')' : '' }}</template></dd></div>
+      <div v-if="training?.detector?.gpu || training?.reader?.gpu"><dt>GPU</dt><dd>{{ training?.detector?.gpu ?? training?.reader?.gpu }}</dd></div>
+      <div v-if="run.split_sha256"><dt>Split</dt><dd><code :title="run.split_sha256">{{ shortSha(run.split_sha256) }}</code></dd></div>
+    </dl>
+    <p class="rd-where" :class="run.state">{{ where }}</p>
+    <p v-if="run.state === 'incomplete' && run.error" class="rd-error"><code>{{ run.error }}</code></p>
+    <p v-if="run.kind === 'training' && run.experiment_running" class="rd-where running">Also running here: {{ run.experiment_progress }}.</p>
+    <p v-if="run.start.source" class="note">Weights: <code>{{ run.start.source }}</code></p>
+    <p v-for="problem in run.problems" :key="problem" class="note ds-note">{{ problem }}.</p>
+
+    <div v-if="run.evaluated" class="tiles" id="run-tiles">
+      <div class="tile">
+        <span class="tile-label">Reader accuracy</span>
+        <span class="tile-value">{{ pct(run.reader?.accuracy) }}</span>
+        <span class="tile-note">{{ run.reader ? thousands(run.reader.samples) + ' test crops' : 'no reader evaluation' }}</span>
+      </div>
+      <div class="tile">
+        <span class="tile-label">Reader, human-reviewed</span>
+        <span class="tile-value">{{ pct(run.reader?.human_accuracy) }}</span>
+        <span class="tile-note">{{ run.reader?.human_samples ? thousands(run.reader.human_samples) + ' crops a person confirmed' : 'none confirmed by a person' }}</span>
+      </div>
+      <div class="tile">
+        <span class="tile-label">Detector recall</span>
+        <span class="tile-value">{{ pct(run.detector?.recall) }}</span>
+        <span class="tile-note">{{ run.detector ? thousands(run.detector.found) + ' of ' + thousands(run.detector.truth_boxes) + ' signs found' : 'no detector evaluation' }}</span>
+      </div>
+      <div class="tile">
+        <span class="tile-label">Detector precision</span>
+        <span class="tile-value">{{ pct(run.detector?.precision) }}</span>
+        <span class="tile-note">{{ run.detector ? thousands(run.detector.false_boxes) + ' false boxes' : '' }}</span>
+      </div>
+    </div>
+    <p v-else-if="run.kind === 'training'" class="net-wait" id="run-not-evaluated">{{ notEvaluatedText(run) }}</p>
+  </section>
+
+  <p v-if="error" class="banner">The details of {{ run.name }} cannot be read: {{ error }}</p>
+  <p v-else-if="loading && detail === null" class="card empty">Loading {{ run.name }}…</p>
+  <template v-if="detail">
+    <ReaderSection v-if="detail.reader_eval" :reader="detail.reader_eval"/>
+    <DetectorSection v-if="detail.detector_eval" :detector="detail.detector_eval"/>
+    <TrainingCharts v-if="curves" :progress="curves" :running="run.state === 'running'" title="Training curves"/>
+    <SplitSection v-if="detail.dataset" :dataset="detail.dataset"/>
+    <ExperimentSection v-if="detail.experiment" :experiment="detail.experiment" :split="detail.split_sha256"/>
+  </template>
+</template>

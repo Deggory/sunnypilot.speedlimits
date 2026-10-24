@@ -1,12 +1,12 @@
-// Overview, Prepare, Train: one page, the tab shown follows the address ("/", "/prepare", "/train"). The tab
-// links of the top bar (rendered by pages.py) and the brand switch tab here without a reload; the route list
-// (/routes) and the review pages stay normal links.
+// Overview, Prepare, Train, Evaluate: one page, the tab shown follows the address ("/", "/prepare", "/train",
+// "/evaluate"). The tab links of the top bar (rendered by pages.py) and the brand switch tab here without a reload;
+// the route list (/routes) and the review pages stay normal links.
 import {onBeforeUnmount, onMounted, ref} from 'vue';
 
-export type ControlTab = 'overview' | 'prepare' | 'train';
+export type ControlTab = 'overview' | 'prepare' | 'train' | 'evaluate';
 
-export const TAB_PATH: Record<ControlTab, string> = {overview: '/', prepare: '/prepare', train: '/train'};
-const TAB_TITLE: Record<ControlTab, string> = {overview: 'Overview', prepare: 'Prepare', train: 'Train'};
+export const TAB_PATH: Record<ControlTab, string> = {overview: '/', prepare: '/prepare', train: '/train', evaluate: '/evaluate'};
+const TAB_TITLE: Record<ControlTab, string> = {overview: 'Overview', prepare: 'Prepare', train: 'Train', evaluate: 'Evaluate'};
 
 export function tabOf(path: string): ControlTab | null {
   const clean = path.replace(/\/+$/, '') || '/';

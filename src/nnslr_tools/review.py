@@ -48,7 +48,7 @@ LOGIN_MESSAGE = 'Sign-in required: reload the page and sign in with your name an
 PUBLIC_AUTH_ROUTES = ('/api/auth/login', '/api/auth/setup/check', '/api/auth/setup')
 AUTH_ROUTES = PUBLIC_AUTH_ROUTES + ('/api/auth/logout', '/api/auth/logout-all', '/api/auth/password')
 # The pages a browser opens: without a session they show the sign-in page instead.
-PAGE_RE = re.compile(r'/(index\.html|routes|prepare|train|panoramica|prepara|allena|pannello|stato|account|route/[^/]+(/(index\.html)?)?)?')
+PAGE_RE = re.compile(r'/(index\.html|routes|prepare|train|evaluate|panoramica|prepara|allena|pannello|stato|account|route/[^/]+(/(index\.html)?)?)?')
 # [site-login] - END
 API_TOKEN_MESSAGE = ('Missing or wrong token: send it in the header "Authorization: Bearer <token>" '
                      '(or "X-Review-Token"), never in the address.')
@@ -507,6 +507,13 @@ def make_handler(app: ReviewApp):
                 return
             if path == '/api/panel/status':
                 self._json(200, app.panel.status())
+                return
+            if path == '/api/panel/runs':
+                self._json(200, app.panel.runs())
+                return
+            match = re.fullmatch(r'/api/panel/runs/([A-Za-z0-9][A-Za-z0-9._-]{0,99})', path)
+            if match:
+                self._json(200, app.panel.run(match.group(1)))
                 return
             match = re.fullmatch(r'/api/panel/job/([0-9a-z_-]+)/log', path)
             if match:

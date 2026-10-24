@@ -8,7 +8,7 @@ __NNSLR_THEME__
 <title>Speed limits · Overview</title>
 <style>
 __NNSLR_SHARED_CSS__
-/* Overview, Prepare, Train: one page, a tab each (web/src/pages/control.ts, web/src/control/ControlApp.vue). */
+/* Overview, Prepare, Train, Evaluate: one page, a tab each (web/src/pages/control.ts, web/src/control/ControlApp.vue). */
 .live.off{color:var(--bad)}
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 .banner{margin:0;padding:12px 16px;border-radius:14px;background:var(--warn-soft);color:var(--fg);border:1px solid var(--warn)}
@@ -409,6 +409,105 @@ td.none{color:var(--muted)}
 td .note{display:block;margin-top:4px;font-size:12px}
 .table-card .empty{padding:0 20px 14px}
 
+/* Evaluate (EvaluateTab.vue and its sections): the runs as a table (a row opens the run), the run in detail, the
+   reader per label, the detector per sign size, the split, experiment B, two runs compared. Only the tokens of
+   shared.css and the series colours above, so both themes follow. */
+.muted{color:var(--muted)}
+.runs-card,.eval-card,.run-detail{display:flex;flex-direction:column;gap:16px;min-width:0}
+.runs-card{gap:12px}
+.runs-card .count-badge{margin-left:8px;vertical-align:1px}
+.eval-card>.ds-block{padding-top:16px;border-top:1px solid var(--line)}
+.eval-what{margin-left:10px;font-size:13px;font-weight:400;letter-spacing:0;text-transform:none;color:var(--muted)}
+.run-empty{display:flex;align-items:center;gap:14px}
+.run-empty .idle-icon{background:var(--accent-soft);color:var(--accent)}
+.run-empty .flow-link{margin-top:6px;width:max-content}
+.runs{font-size:13.5px}
+.runs th,.runs td{padding:10px}
+.runs td{vertical-align:top}
+.runs tbody tr{cursor:pointer}
+.runs tbody tr:hover td{background:var(--surface-2)}
+.runs tbody tr.on td{background:var(--accent-soft)}
+.runs tbody tr.on td:first-child{box-shadow:inset 3px 0 0 var(--accent)}
+.run-name{appearance:none;border:0;background:none;padding:0;font:inherit;font-weight:650;color:var(--fg);cursor:pointer;
+font-variant-numeric:tabular-nums;text-align:left;border-radius:4px}
+.run-name:hover{color:var(--rev)}
+.run-sub{display:block;margin-top:2px;font-size:12px;font-weight:400;color:var(--muted);white-space:normal}
+.runs td.num .run-sub{white-space:nowrap}
+.runs .pill{margin-bottom:1px}
+.run-none{color:var(--muted);font-size:13px}
+.run-detail{scroll-margin-top:140px}
+.rd-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.rd-title{display:flex;flex-direction:column;gap:1px;min-width:0}
+.run-detail .rd-title h2{margin:0;font-size:22px;font-weight:700;letter-spacing:-.01em;text-transform:none;color:var(--fg);
+font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.rd-where{margin:0;font-size:14.5px;font-weight:600}
+.rd-where.running{color:var(--rev)}.rd-where.finished{color:var(--ok)}.rd-where.incomplete{color:var(--warn)}
+.rd-error{margin:0}
+.rd-error code{display:block;padding:8px 10px;white-space:pre-wrap;word-break:break-word;border-color:var(--error-line)}
+.run-detail>.note{margin:0}
+.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px 24px;margin:0}
+.facts>div{min-width:0}
+.facts dt{font-size:12px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+.facts dd{margin:3px 0 0;font-size:14px;overflow-wrap:anywhere}
+.route-code{display:inline-block;margin:0 6px 4px 0}
+/* A choice of two or three (Segmented.vue), marked as the tabs of the top bar. */
+.seg{display:inline-flex;flex-wrap:wrap;gap:4px;padding:4px;width:max-content;max-width:100%;background:var(--surface-2);
+border:1px solid var(--line);border-radius:12px}
+.seg button{appearance:none;border:0;background:none;color:var(--muted);font:inherit;font-weight:600;font-size:13px;padding:5px 12px;
+border-radius:9px;cursor:pointer;min-height:32px}
+.seg button:hover{color:var(--fg)}
+.seg button[aria-checked="true"]{color:var(--tab-on-fg);background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--tab-on-ring)}
+.seg-row{display:flex;flex-wrap:wrap;gap:8px 12px}
+.eval-table{font-size:13.5px}
+.eval-table th,.eval-table td{padding:8px 10px}
+.eval-table tbody th,.eval-table tfoot th{font-size:13.5px;font-weight:600;letter-spacing:0;text-transform:none;color:var(--fg);
+border-bottom:1px solid var(--line);white-space:normal}
+.eval-table tfoot th,.eval-table tfoot td{border-top:1px solid var(--line-strong);border-bottom:0;font-weight:650}
+.eval-table tbody tr:last-child th{border-bottom:none}
+.eval-table tr.test th,.eval-table tr.test td{background:color-mix(in srgb,var(--split-3) 10%,transparent)}
+/* The reader per label: the accuracy as a short bar with its percent. */
+.acc-col{width:210px}
+.acc{display:flex;align-items:center;justify-content:flex-end;gap:10px}
+.acc-bar{flex:1;min-width:48px;max-width:130px;height:8px;border-radius:0 4px 4px 0;background:color-mix(in srgb,var(--surface-3) 70%,transparent)}
+.acc-bar span{display:block;height:100%;border-radius:0 4px 4px 0;background:var(--series)}
+.acc .num{width:6ch}
+/* The detector: found green, missed red, false boxes amber; recall by sign size as a bar list. */
+.box-counts{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.box-counts li{display:flex;flex-direction:column;gap:1px;min-width:0;padding:12px 14px;border-radius:14px;background:var(--surface-2);
+border:1px solid var(--line);font-size:13.5px;font-weight:600;color:var(--muted)}
+.box-counts strong{font-size:24px;font-weight:700;letter-spacing:-.02em;line-height:1.2;font-variant-numeric:tabular-nums}
+.box-counts .found strong{color:var(--ok)}.box-counts .missed strong{color:var(--bad)}.box-counts .false strong{color:var(--todo)}
+.box-counts span{font-size:12.5px;font-weight:400}
+.eval-card>.note{margin:0}
+.barlist.sizes li{grid-template-columns:minmax(80px,18%) minmax(0,1fr) 128px 72px}
+.bl-extra{font-size:12px;color:var(--muted);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.ds-block>.seg{margin-bottom:2px}
+/* Experiment B: the variants side by side, the best of a row green; the confusion matrices shaded by row share. */
+.variant-head{vertical-align:bottom;white-space:normal;min-width:120px}
+.variant-name{display:block;font-size:13px;color:var(--fg);letter-spacing:0;text-transform:none}
+.variant-inputs{display:block;font-size:11.5px;font-weight:400;letter-spacing:0;text-transform:none}
+.better{display:block;font-size:11.5px;font-weight:400;color:var(--muted)}
+.experiment td.best{color:var(--ok);font-weight:700}
+.matrices{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr));gap:12px}
+.matrix{margin:0;min-width:0;padding:12px;border-radius:14px;background:var(--surface-2);border:1px solid var(--line)}
+.matrix figcaption{margin-bottom:6px;font-size:13px;font-weight:600}
+.matrix table{font-size:12.5px;border-collapse:separate;border-spacing:2px}
+.matrix th,.matrix td{padding:5px 6px;border:0}
+.matrix th{font-size:11px;letter-spacing:0;text-transform:none}
+.matrix td{border-radius:5px;background:color-mix(in srgb,var(--series) calc(var(--share,0) * 55%),transparent)}
+.matrix td.diag{font-weight:700}
+.matrix p{margin:0}
+/* Two runs compared: the change green when better, red when worse (with its sign, and a word for screen readers). */
+.compare-pick{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px 14px}
+.compare-pick label{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+.compare-pick select{font:inherit;font-size:14px;letter-spacing:0;text-transform:none;color:var(--fg);background:var(--surface-2);
+border:1px solid var(--line-strong);border-radius:10px;padding:8px 10px;min-height:40px;min-width:min(240px,100%);max-width:100%}
+.compare-arrow{padding-bottom:10px;color:var(--muted)}
+.compare-warn{margin:0;padding:10px 12px;border-radius:12px;font-size:13.5px;background:var(--warn-soft);
+border:1px solid color-mix(in srgb,var(--warn) 35%,transparent)}
+td.change.better{color:var(--ok);font-weight:650}
+td.change.worse{color:var(--bad);font-weight:650}
+
 @media (max-width:1100px){
   col.c-route{width:180px}
   col.c-seg{width:92px}
@@ -487,6 +586,19 @@ td .note{display:block;margin-top:4px;font-size:12px}
   .ds-routes td.route a{font-size:11.5px}
   .ds-routes .rid-pad{display:none}
   .jp-machine{grid-template-columns:1fr 1fr}
+  /* Evaluate: the runs keep name, state and the reader's and detector's main number; the counts stack. */
+  .runs th:nth-child(2),.runs td:nth-child(2),.runs th:nth-child(5),.runs td:nth-child(5),.runs th:nth-child(7),.runs td:nth-child(7){display:none}
+  .runs th,.runs td{padding:8px 6px}
+  .runs thead th{font-size:10.5px;letter-spacing:0;white-space:normal;vertical-align:bottom}
+  .box-counts{grid-template-columns:minmax(0,1fr)}
+  .box-counts li{flex-direction:row;flex-wrap:wrap;align-items:baseline;gap:4px 8px}
+  .box-counts span{flex-basis:100%}
+  .barlist.sizes li{grid-template-columns:72px minmax(0,1fr) 104px}
+  .barlist.sizes .bl-extra{display:none}
+  .acc-col{width:auto}
+  .acc-bar{display:none}
+  .compare-arrow{display:none}
+  .compare-pick label{flex:1}
 }
 @media (prefers-reduced-motion:reduce){
   .page>*{animation:none}

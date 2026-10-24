@@ -34,12 +34,12 @@ BRAND_MARK = ('<span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 
               '<circle cx="16" cy="16" r="6.6" fill="#fff" stroke="#ef4444" stroke-width="2.8"/></svg></span>')
 
 # The tabs of the site: (key of the current page, address, label). Account is the icon at the right.
-# In the order of the work: prepare the routes, review them, train on the reviews.
+# In the order of the work: prepare the routes, review them, train on the reviews, evaluate the runs.
 SITE_TABS = (('overview', '/', 'Overview'), ('prepare', '/prepare', 'Prepare'), ('review', '/routes', 'Review'),
-             ('train', '/train', 'Train'))
+             ('train', '/train', 'Train'), ('evaluate', '/evaluate', 'Evaluate'))
 # The tabs that are one Vue app (web/src/control), by address: the app shows the tab of the address. The
 # route list (/routes) is reached from the Overview.
-CONTROL_TABS = {'/': 'overview', '/prepare': 'prepare', '/train': 'train'}
+CONTROL_TABS = {'/': 'overview', '/prepare': 'prepare', '/train': 'train', '/evaluate': 'evaluate'}
 # Earlier addresses of these pages, kept working.
 OLD_ADDRESSES = {'/panoramica': '/', '/pannello': '/', '/stato': '/', '/prepara': '/prepare', '/allena': '/train'}
 # Dark (the default) or the choice kept in this browser, applied before the first paint
@@ -135,8 +135,8 @@ def render_review(rows: list[dict], run_id: str, *, route_id: str = '', server: 
 
 # [control-panel] - START
 def render_control(nonce: str, tab: str) -> str:
-    """Panoramica, Prepara, Allena: one page (control.html, web/src/control), the tab marked in the bar;
-    data from /api/panel/status."""
+    """Overview, Prepare, Train, Evaluate: one page (control.html, web/src/control), the tab marked in the bar;
+    data from /api/panel/status (and /api/panel/runs for Evaluate)."""
     return fill(asset('control.html'), nonce, 'control', tab, live=True)
 # [control-panel] - END
 

@@ -7,7 +7,8 @@ import type {EpochPoint, JobProgress, TrainingCurve} from '../common/panel-types
 import LineChart, {type ChartSeries} from './charts/LineChart.vue';
 import {elapsedText, roughText} from './jobs';
 
-const props = defineProps<{progress: JobProgress; running: boolean}>();
+// title: the heading of the card (the Evaluate tab shows the curves of a past run).
+const props = defineProps<{progress: JobProgress; running: boolean; title?: string}>();
 type Net = 'detector' | 'reader';
 const NET_NAME: Record<Net, string> = {detector: 'Detector', reader: 'Reader'};
 const TRAIN = 'var(--c-train)';
@@ -89,7 +90,7 @@ const tables = computed(() => (['detector', 'reader'] as Net[]).flatMap((net) =>
 
 <template>
   <section class="card training" aria-labelledby="training-title">
-    <h2 id="training-title">How the training is going</h2>
+    <h2 id="training-title">{{ title ?? 'How the training is going' }}</h2>
     <div v-if="!hasAny" class="training-wait">
       <svg viewBox="0 0 48 32" aria-hidden="true"><path d="M3 27h42M3 27V4" fill="none" stroke="currentColor" stroke-width="1.5"
         stroke-linecap="round"/><path d="M7 9c6 2 9 9 15 12s12 2 21 3" fill="none" stroke="currentColor" stroke-width="2"
