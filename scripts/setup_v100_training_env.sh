@@ -21,8 +21,12 @@ if [ -d "$VENV" ] && [ ! -x "$VENV/bin/pip" ]; then
 fi
 if [ ! -d "$VENV" ]; then
   # uv when present: it needs no ensurepip, which Debian ships apart (python3.X-venv, not installed here).
-  if command -v uv >/dev/null 2>&1; then
-    uv venv --seed --python "$(command -v "$PYTHON")" "$VENV"
+  # Also from ~/.local/bin, which is not on the PATH of a job started by the speedlimits-web service.
+  UV="$(command -v uv || true)"
+  home="${HOME:-$(getent passwd "$(id -u)" | cut -d: -f6)}"
+  if [ -z "$UV" ] && [ -x "$home/.local/bin/uv" ]; then UV="$home/.local/bin/uv"; fi
+  if [ -n "$UV" ]; then
+    "$UV" venv --seed --python "$(command -v "$PYTHON")" "$VENV"
   else
     "$PYTHON" -m venv "$VENV"
   fi
