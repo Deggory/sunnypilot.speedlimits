@@ -289,7 +289,7 @@ def test_panel_page_status_and_run_over_http(served):
     nonce = csp.split("'nonce-")[1].split("'")[0]
     assert f'<script nonce="{nonce}">' in data.decode()
     # The tabs are one page (Overview is the home page); the old addresses lead to them.
-    for path in ('/prepare', '/train', '/evaluate'):
+    for path in ('/prepare', '/train', '/evaluate', '/models'):
         assert served.request('GET', path)[0] == 200, path
     for path, target in (('/pannello', '/'), ('/stato', '/'), ('/panoramica', '/'), ('/prepara', '/prepare'),
                          ('/allena', '/train')):
@@ -328,12 +328,14 @@ def test_panel_needs_the_sign_in_like_the_rest_of_the_site(root, checkout):
     server.app.panel = Panel(root, repo=checkout)
     try:
         # Signed out, the pages show the sign-in page and the API answers 401.
-        for path in ['/', '/prepare', '/train', '/evaluate']:
+        for path in ['/', '/prepare', '/train', '/evaluate', '/models']:
             status, response, data = server.request('GET', path)
             assert status in (200, 401) and asset('js/login.js').encode() in data, path
         assert server.request('GET', '/api/panel/status')[0] == 401
         assert server.request('GET', '/api/panel/system')[0] == 401
         assert server.request('POST', '/api/panel/run/prepare', body={})[0] == 401
+        assert server.request('GET', '/api/panel/models')[0] == 401
+        assert server.request('POST', '/api/panel/models/active', body={})[0] == 401
         assert server.request('GET', '/api/panel/status', headers=sign_in(server))[0] == 200
     finally:
         server.close()

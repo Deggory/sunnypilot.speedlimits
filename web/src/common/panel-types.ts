@@ -451,3 +451,156 @@ export interface RunDetail extends RunSummary {
   curves: Partial<Record<'detector' | 'reader', TrainingCurve>>;
   experiment: ExperimentB | null;
 }
+
+// GET /api/panel/models and POST /api/panel/models/active (nnslr_tools.model_roles.ModelIndex): the Models tab.
+
+/** The three networks of the pipeline (docs/NEURAL_NETWORK.md). */
+export type ModelRole = 'cutter' | 'classifier' | 'decider';
+
+/** Signs of one width found by the cutter. */
+export interface WidthRecall {
+  /** lt12, 12-20, 20-40, ge40. */
+  key: string;
+  /** "< 12 px", ... (width of the reviewed box in the frame). */
+  label: string;
+  truth: number;
+  found: number;
+  recall: number | null;
+}
+
+/** A detector evaluation as the cutter is judged. */
+export interface CutterNumbers {
+  partition: string;
+  /** The score the numbers are at: 0.1 when the report measured it, else the report's own threshold. */
+  score_threshold: number | null;
+  at_cutter_score: boolean;
+  images: number | null;
+  truth_boxes: number | null;
+  found: number | null;
+  false_boxes: number | null;
+  recall: number | null;
+  precision: number | null;
+  /** Boxes passed on to the classifier per frame, and the false ones among them. */
+  boxes_per_frame: number | null;
+  false_per_frame: number | null;
+  widths: WidthRecall[] | null;
+  human: {images: number | null; truth_boxes: number | null; found: number | null; recall: number | null} | null;
+  /** The model alone, one frame at a time (newer reports only). */
+  ms_per_frame: number | null;
+  device: string | null;
+  input_size: string | null;
+  anchor_min_ratio: number | null;
+  checkpoint_epoch: number | null;
+}
+
+export interface ClassifierNumbers {
+  samples: number;
+  accuracy: number | null;
+  human_samples: number | null;
+  human_accuracy: number | null;
+}
+
+/** An experiment B variant on one partition: whom the sign applies to, and the reading. */
+export interface DeciderNumbers {
+  boxes: number | null;
+  reading_accuracy: number | null;
+  ownership_samples: number | null;
+  macro_f1: number | null;
+  abstain_rate: number | null;
+  /** The "Another" road: found (recall) and right when answered (precision); support 0 = no such case. */
+  other_road_recall: number | null;
+  other_road_precision: number | null;
+  other_road_support: number | null;
+  other_road_found: number | null;
+}
+
+interface ModelBase {
+  /** "cutter:2026-10-24_1452/detector", "decider:<run>/experiment-b/crop_geom": stable. */
+  id: string;
+  run: string;
+  part: string;
+  /** "Detector 640 × 360", "Reader", "Crop + geometry". */
+  label: string;
+  /** "training pipeline", "input-size comparison", "experiment B prototype". */
+  detail: string;
+  /** The time of its weights (*-best.pt). */
+  trained_at: string | null;
+  /** Its training wrote result.json: the weights no longer change. */
+  finished: boolean;
+  in_use: boolean;
+  /** Files that exist but cannot be read. */
+  problems: string[];
+  architecture: string | null;
+  initialization: string | null;
+  best_epoch: number | null;
+  epochs: number | null;
+  epochs_run: number | null;
+}
+
+export interface CutterModel extends ModelBase {
+  role: 'cutter';
+  /** "320x320"; recorded false: the default, from before the size was recorded. */
+  input_size: string;
+  input_size_recorded: boolean;
+  anchor_min_ratio: number;
+  anchor_recorded: boolean;
+  augmentation: boolean | null;
+  test: CutterNumbers | null;
+  validation: CutterNumbers | null;
+}
+
+export interface ClassifierModel extends ModelBase {
+  role: 'classifier';
+  classes: number | null;
+  best_validation_accuracy: number | null;
+  test: ClassifierNumbers | null;
+}
+
+export interface DeciderModel extends ModelBase {
+  role: 'decider';
+  variant: string;
+  /** "crop", "box position", "car speed", "scene". */
+  inputs: string[] | null;
+  /** A smoke run on this many frames per partition, not a measure; null for a real one. */
+  smoke_limit: number | null;
+  validation: DeciderNumbers | null;
+  test: DeciderNumbers | null;
+}
+
+export type ModelVersion = CutterModel | ClassifierModel | DeciderModel;
+
+/** The model in use for a role (models/active.json of the data root). */
+export interface ActiveModel {
+  id: string;
+  /** The name signed in; null for an agent with the token or 127.0.0.1 without sign-in. */
+  who: string | null;
+  via: 'sign-in' | 'token' | 'local' | null;
+  at: string | null;
+  /** Its files are still on this server. */
+  found: boolean;
+}
+
+export interface RoleModels {
+  role: ModelRole;
+  label: string;
+  /** Newest first. */
+  versions: ModelVersion[];
+  /** null: nobody picked one yet (there is no default). */
+  active: ActiveModel | null;
+}
+
+export interface ModelsPayload {
+  roles: RoleModels[];
+  /** Why models/active.json cannot be used, if it cannot. */
+  active_problem: string | null;
+  active_file: string;
+  runs_dir_exists: boolean;
+  cutter_score_threshold: number;
+}
+
+/** POST /api/panel/models/active */
+export interface ActiveChosen {
+  ok: true;
+  role: ModelRole;
+  active: Omit<ActiveModel, 'found'>;
+}

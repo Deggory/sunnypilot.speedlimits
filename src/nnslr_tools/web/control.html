@@ -506,6 +506,55 @@ border:1px solid var(--line-strong);border-radius:10px;padding:8px 10px;min-heig
 border:1px solid color-mix(in srgb,var(--warn) 35%,transparent)}
 td.change.better{color:var(--ok);font-weight:650}
 td.change.worse{color:var(--bad);font-weight:650}
+/* Models: a column per role of the pipeline (cutter, classifier, decider), its versions newest first, the one in use
+   outlined green. */
+.roles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;align-items:start}
+.role-card{display:flex;flex-direction:column;gap:12px}
+.role-card .count-badge{margin-left:8px;vertical-align:1px}
+.role-what{margin:0;font-size:13.5px;line-height:1.45}
+.role-what .muted{display:block;margin-top:2px;font-size:12.5px}
+.role-use{display:flex;flex-direction:column;gap:1px;padding:10px 12px;border-radius:12px;background:var(--surface-2);
+border:1px dashed var(--line-strong);min-width:0}
+.role-use.set{border-style:solid;border-color:color-mix(in srgb,var(--ok) 45%,var(--line));background:var(--ok-soft)}
+.role-use.missing{border-style:solid;border-color:color-mix(in srgb,var(--warn) 45%,var(--line));background:var(--warn-soft)}
+.role-use-label{font-size:11.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.role-use strong{font-size:14.5px;overflow-wrap:anywhere}
+.role-use-sub{font-size:12.5px;color:var(--muted)}
+.role-empty{display:flex;flex-direction:column;gap:4px;padding:16px;border-radius:14px;border:1px dashed var(--line-strong);
+font-size:13.5px;color:var(--muted)}
+.role-empty strong{color:var(--fg);font-size:14px}
+.role-empty .flow-link{margin-top:4px;width:max-content}
+.model-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+.model{display:flex;flex-direction:column;gap:9px;min-width:0;padding:12px 14px;border-radius:14px;background:var(--surface-2);
+border:1px solid var(--line)}
+.model.in-use{border-color:color-mix(in srgb,var(--ok) 50%,var(--line));box-shadow:0 0 0 1px color-mix(in srgb,var(--ok) 30%,transparent)}
+.model-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+.model-title{display:flex;flex-direction:column;min-width:0}
+.model-name{font-size:14.5px;font-weight:650;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.model-sub{font-size:12.5px;color:var(--muted)}
+.model-head .pill{flex:none}
+.model-big{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 8px}
+.model-big strong{font-size:24px;font-weight:700;letter-spacing:-.02em;line-height:1.2;font-variant-numeric:tabular-nums}
+.model-big span{font-size:12.5px;color:var(--muted)}
+.model-widths{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px}
+.model-widths li{display:flex;flex-direction:column;min-width:0;padding:5px 7px;border-radius:9px;background:var(--surface);
+border:1px solid var(--line);font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.model-widths b{font-size:14px;color:var(--fg)}
+.model-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 12px;margin:0}
+.model-facts>div{min-width:0}
+.model-facts dt{font-size:11.5px;color:var(--muted)}
+.model-facts dd{margin:0;font-size:13.5px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.model-table{font-size:13px}
+.model-table th,.model-table td{padding:5px 6px}
+.model-table thead th{font-size:11px;letter-spacing:.03em}
+.model-table tbody th{font-size:13px;font-weight:500;letter-spacing:0;text-transform:none;color:var(--fg);white-space:normal}
+.model-table tbody tr:last-child th,.model-table tbody tr:last-child td{border-bottom:none}
+.model>.note{margin:0}
+.model-wait{margin:0;padding:10px;border-radius:10px;border:1px dashed var(--line-strong);color:var(--muted);font-size:13px;text-align:center}
+.model-actions{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;padding-top:8px;
+border-top:1px solid var(--line)}
+.model-actions .flow-link{font-size:13px}
+.models-foot{margin:0;text-align:center}
 
 @media (max-width:1100px){
   col.c-route{width:180px}
@@ -513,6 +562,7 @@ td.change.worse{color:var(--bad);font-weight:650}
   col.c-objects{width:112px}
   col.c-state{width:200px}
 }
+@media (max-width:1000px){.roles{grid-template-columns:minmax(0,1fr)}}
 @media (max-width:900px){
   .net-charts{grid-template-columns:minmax(0,1fr)}
   .jp.has-steps .jp-body{grid-template-columns:minmax(0,1fr)}

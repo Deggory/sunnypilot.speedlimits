@@ -649,7 +649,8 @@ class RunsIndex:
     def __init__(self, root: Path):
         self.root = Path(root)
         self._lock = threading.Lock()
-        self._cache: dict[str, tuple[tuple[int, int], Any]] = {}
+        # By (file, digest): one file can be reduced by two digests (the Evaluate and the Models tab).
+        self._cache: dict[tuple[str, Callable[[Any], Any]], tuple[tuple[int, int], Any]] = {}
 
     # -- files -----------------------------------------------------------------------------------------
     @property
@@ -691,8 +692,9 @@ class RunsIndex:
         except OSError:
             return None
         key = (info.st_mtime_ns, info.st_size)
+        slot = (str(path), digest)
         with self._lock:
-            hit = self._cache.get(str(path))
+            hit = self._cache.get(slot)
             if hit is not None and hit[0] == key:
                 return hit[1]
             try:
@@ -704,7 +706,7 @@ class RunsIndex:
                     value = digest(_read_json(path))
             except (OSError, ValueError, TypeError, KeyError, AttributeError, RecursionError):
                 value = UNREADABLE
-            self._cache[str(path)] = (key, value)
+            self._cache[slot] = (key, value)
             return value
 
     def _file(self, run: Path, relative: str) -> Path | None:
@@ -1089,8 +1091,8 @@ class RunsIndex:
     def _prune(self) -> None:
         """Forget the digests of files that are gone (a run deleted)."""
         with self._lock:
-            for key in [key for key in self._cache if not Path(key).exists()]:
-                del self._cache[key]
+            for slot in [slot for slot in self._cache if not Path(slot[0]).exists()]:
+                del self._cache[slot]
 
 
 PROBLEM_FILES = {'detector_plan': 'detector/training-plan.json', 'reader_plan': 'reader/training-plan.json',

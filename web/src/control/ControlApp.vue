@@ -1,7 +1,8 @@
 <script setup lang="ts">
-// Overview, Prepare, Train, Evaluate: one app, the tab shown follows the address (tabs.ts). One status for all tabs
-// (/api/panel/status every 4 s, which also feeds the machine's history), the actions, and the sheet with the
-// details of a job. Evaluate reads the training runs itself (/api/panel/runs).
+// Overview, Prepare, Train, Evaluate, Models: one app, the tab shown follows the address (tabs.ts). One status for all
+// tabs (/api/panel/status every 4 s, which also feeds the machine's history), the actions, and the sheet with the
+// details of a job. Evaluate reads the training runs itself (/api/panel/runs), Models the networks by role
+// (/api/panel/models).
 import {computed, provide, ref, watch} from 'vue';
 import type {Job} from '../common/panel-types';
 import ToastHost from '../components/ToastHost.vue';
@@ -10,6 +11,7 @@ import {ACTION_GROUP, PREPARE_ACTIONS, TRAIN_ACTIONS} from './jobs';
 import LogSheet from './LogSheet.vue';
 import {recordMachine} from './machine-history';
 import EvaluateTab from './EvaluateTab.vue';
+import ModelsTab from './ModelsTab.vue';
 import OverviewTab from './OverviewTab.vue';
 import PrepareTab from './PrepareTab.vue';
 import {currentTab, markBusy, useTabRouting, type ControlTab} from './tabs';
@@ -49,7 +51,8 @@ watch(busy, markBusy);
     <OverviewTab v-if="currentTab === 'overview'" :status="status" :busy="busy" @run="run" @stop="stop" @details="details"/>
     <PrepareTab v-else-if="currentTab === 'prepare'" :status="status" @run="run" @stop="stop" @details="details"/>
     <TrainTab v-else-if="currentTab === 'train'" :status="status" @run="run" @stop="stop" @details="details"/>
-    <EvaluateTab v-else/>
+    <EvaluateTab v-else-if="currentTab === 'evaluate'"/>
+    <ModelsTab v-else :status="status"/>
   </main>
   <LogSheet :job="shownJob" @close="shownId = null"/>
   <ToastHost/>

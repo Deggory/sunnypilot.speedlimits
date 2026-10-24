@@ -43,12 +43,13 @@ BRAND_MARK = ('<span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 
 TABS_MACHINE = '<div class="tabs-machine" id="tabs-machine" data-feed="{feed}"></div>'
 
 # The tabs of the site: (key of the current page, address, label). Account is the icon at the right.
-# In the order of the work: prepare the routes, review them, train on the reviews, evaluate the runs.
+# In the order of the work: prepare the routes, review them, train on the reviews, evaluate the runs, then choose
+# the model in use for each network of the pipeline (cutter, classifier, decider).
 SITE_TABS = (('overview', '/', 'Overview'), ('prepare', '/prepare', 'Prepare'), ('review', '/routes', 'Review'),
-             ('train', '/train', 'Train'), ('evaluate', '/evaluate', 'Evaluate'))
+             ('train', '/train', 'Train'), ('evaluate', '/evaluate', 'Evaluate'), ('models', '/models', 'Models'))
 # The tabs that are one Vue app (web/src/control), by address: the app shows the tab of the address. The
 # route list (/routes) is reached from the Overview.
-CONTROL_TABS = {'/': 'overview', '/prepare': 'prepare', '/train': 'train', '/evaluate': 'evaluate'}
+CONTROL_TABS = {'/': 'overview', '/prepare': 'prepare', '/train': 'train', '/evaluate': 'evaluate', '/models': 'models'}
 # Earlier addresses of these pages, kept working.
 OLD_ADDRESSES = {'/panoramica': '/', '/pannello': '/', '/stato': '/', '/prepara': '/prepare', '/allena': '/train'}
 # Dark (the default) or the choice kept in this browser, applied before the first paint
@@ -145,8 +146,8 @@ def render_review(rows: list[dict], run_id: str, *, route_id: str = '', server: 
 
 # [control-panel] - START
 def render_control(nonce: str, tab: str) -> str:
-    """Overview, Prepare, Train, Evaluate: one page (control.html, web/src/control), the tab marked in the bar;
-    data from /api/panel/status (and /api/panel/runs for Evaluate)."""
+    """Overview, Prepare, Train, Evaluate, Models: one page (control.html, web/src/control), the tab marked in the
+    bar; data from /api/panel/status (and /api/panel/runs for Evaluate, /api/panel/models for Models)."""
     return fill(asset('control.html'), nonce, 'control', tab, live=True)
 # [control-panel] - END
 

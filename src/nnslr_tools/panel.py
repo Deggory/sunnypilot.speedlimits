@@ -27,6 +27,7 @@ from datetime import datetime
 from pathlib import Path
 
 from nnslr_tools.job_progress import last_line, progress, with_step_progress
+from nnslr_tools.model_roles import ModelChoiceError, ModelIndex
 from nnslr_tools.runs import RunsIndex
 
 REPO = Path(__file__).resolve().parents[2]
@@ -132,6 +133,8 @@ class Panel:
         self._stable_checking = False
         # The training runs of <root>/runs, for the Evaluate tab (nnslr_tools.runs).
         self.runs_index = RunsIndex(root)
+        # The same runs by role (cutter, classifier, decider) and the model in use, for the Models tab.
+        self.models_index = ModelIndex(self.runs_index)
 
     # -- helpers of the checkout -------------------------------------------------------------
     def available(self) -> bool:
@@ -504,6 +507,23 @@ class Panel:
         if detail is None:
             raise PanelError(404, 'unknown_run', 'No such training run.')
         return detail
+
+    # -- the networks by role, for the Models tab -----------------------------------------------------
+    def models(self) -> dict:
+        """Every trained cutter, classifier and decider with its numbers, newest first, and the one in use."""
+        return self.models_index.index()
+
+    def set_active_model(self, body, *, who: str | None, via: str) -> dict:
+        """The model in use for a role ({"role", "id"}), written to <root>/models/active.json. A read-only panel
+        refuses it, as it refuses the actions."""
+        if not self.actions_enabled:
+            raise PanelError(403, 'actions_disabled', 'The panel is read-only on this server.')
+        if not isinstance(body, dict):
+            raise PanelError(400, 'invalid_json', 'A JSON object is required.')
+        try:
+            return self.models_index.set_active(body.get('role'), body.get('id'), who=who, via=via)
+        except ModelChoiceError as exc:
+            raise PanelError(exc.status, exc.reason, exc.message) from exc
 
     # -- progress of the preparation -----------------------------------------------------------
     def preparation(self, rows: list[dict], activities: list[dict]) -> dict | None:

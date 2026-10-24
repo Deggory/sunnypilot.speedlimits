@@ -48,7 +48,7 @@ LOGIN_MESSAGE = 'Sign-in required: reload the page and sign in with your name an
 PUBLIC_AUTH_ROUTES = ('/api/auth/login', '/api/auth/setup/check', '/api/auth/setup')
 AUTH_ROUTES = PUBLIC_AUTH_ROUTES + ('/api/auth/logout', '/api/auth/logout-all', '/api/auth/password')
 # The pages a browser opens: without a session they show the sign-in page instead.
-PAGE_RE = re.compile(r'/(index\.html|routes|prepare|train|evaluate|panoramica|prepara|allena|pannello|stato|account|route/[^/]+(/(index\.html)?)?)?')
+PAGE_RE = re.compile(r'/(index\.html|routes|prepare|train|evaluate|models|panoramica|prepara|allena|pannello|stato|account|route/[^/]+(/(index\.html)?)?)?')
 # [site-login] - END
 API_TOKEN_MESSAGE = ('Missing or wrong token: send it in the header "Authorization: Bearer <token>" '
                      '(or "X-Review-Token"), never in the address.')
@@ -408,6 +408,14 @@ def make_handler(app: ReviewApp):
         def _expired_cookie(self):
             return app.cookie_name + '=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0'
 
+        def _who(self):
+            """Who makes this request, for the record of a choice: (name, how it was recognised)."""
+            if app.auth is None:
+                return None, 'local'
+            if self._session() is not None:
+                return app.auth.username(), 'sign-in'
+            return None, 'token'
+
         def _auth_state(self):
             if app.auth is None:
                 return {'configured': False, 'signed_in': True, 'local': True}
@@ -518,6 +526,13 @@ def make_handler(app: ReviewApp):
             match = re.fullmatch(r'/api/panel/runs/([A-Za-z0-9][A-Za-z0-9._-]{0,99})', path)
             if match:
                 self._json(200, app.panel.run(match.group(1)))
+                return
+            # The networks by role (cutter, classifier, decider) and the one in use, for the Models tab.
+            if path == '/api/panel/models':
+                self._json(200, app.panel.models())
+                return
+            if path == '/api/panel/models/active':
+                self._problem(405, 'method_not_allowed', 'Use POST, with {"role", "id"}.', True)
                 return
             match = re.fullmatch(r'/api/panel/job/([0-9a-z_-]+)/log', path)
             if match:
@@ -774,7 +789,8 @@ def make_handler(app: ReviewApp):
             # [control-panel] - START
             run = re.fullmatch(r'/api/panel/run/([a-z_]+)', path)
             stop = re.fullmatch(r'/api/panel/job/([0-9a-z_-]+)/stop', path)
-            if run or stop:
+            active = path == '/api/panel/models/active'
+            if run or stop or active:
                 # Same protections as saving a frame: same origin, JSON only (no form can send it).
                 if not self._same_origin():
                     self._problem(403, 'cross_origin', 'Request from another origin refused.', True)
@@ -792,6 +808,13 @@ def make_handler(app: ReviewApp):
                     job = app.panel.start(run.group(1), options)
                     print(f'Pannello: avviata {job["label"]} ({job["id"]})', flush=True)
                     self._json(200, {'ok': True, **job})
+                elif active:
+                    # The model in use for a role: only an id of the index is written, never a path.
+                    who, via = self._who()
+                    entry = app.panel.set_active_model(body, who=who, via=via)
+                    role = body['role']
+                    print(f'Panel: {role} in use {entry["id"]} ({terminal_text(who or via)})', flush=True)
+                    self._json(200, {'ok': True, 'role': role, 'active': entry})
                 else:
                     self._json(200, {'ok': True, **app.panel.stop(stop.group(1))})
                 return
