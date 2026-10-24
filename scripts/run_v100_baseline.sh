@@ -146,6 +146,13 @@ train_task() {
     elif [[ "${NNSLR_TRAIN_INIT:-imagenet}" != "random" ]]; then
       init=(--pretrained)
     fi
+  elif [[ "$selected_mode" == "resume" ]]; then
+    # A resumed run trains with exactly the settings it started with (nnslr train refuses others), --pretrained
+    # of a start from ImageNet included: they come from its own training state.
+    local flags
+    flags="$("$VENV/bin/python" -c 'import sys; from nnslr_tools.training import resume_arguments_file; print("\n".join(resume_arguments_file(sys.argv[1])))' "$output/training-state.pt")"
+    readarray -t init <<< "$flags"
+    echo "resume $task with the settings of its training state: ${init[*]}"
   fi
   "$NN" train --task "$task" --dataset-kind "$DATASET_KIND" --device cuda \
     --mode "$selected_mode" --output "$output" "${init[@]}"

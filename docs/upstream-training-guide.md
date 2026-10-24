@@ -575,13 +575,34 @@ contrast, gamma, saturation and a light colour cast, never a flip: the side of
 the road matters); `--no-augment` turns it off, and `result.json` records the
 ranges under `augmentation`.
 
+torchvision's SSD takes its negative boxes only inside frames with signs, so a
+frame without signs gives no loss. Each detector epoch therefore uses every frame
+with signs and a share of the frames without (`--negative-frame-fraction`,
+default `0.1`, drawn again each epoch; `1.0` uses every frame as before); the
+validation uses the same share as one fixed draw, so its epochs compare.
+`result.json` records the counts under `frames`. The detector is the cutter of
+the pipeline, so its best epoch (`detector-best.pt`) and early stopping follow
+the validation recall at score 0.1, ties to fewer false boxes per frame
+(`--select-by recall`, the default; `--select-by loss` keeps the lowest
+validation loss). Every epoch line also prints `val_recall`, and `result.json`
+holds `best_epoch`, `best_validation_recall`, the validation loss of that epoch
+as `best_validation_loss`, and `selection`.
+
+`--mode resume` needs exactly the settings the run started with;
+`scripts/run_v100_baseline.sh` and `scripts/run_detector_sizes.sh` read them
+from the run's `training-state.pt` (`nnslr_tools.training.resume_arguments_file`),
+`--pretrained` of a start from ImageNet included.
+
 To compare input sizes, `scripts/run_detector_sizes.sh NAME [SIZES...]`
 (default `320x320 640x360 960x544`) trains one detector per size with the same
 settings into `$NNSLR_DATA_ROOT/runs/NAME/detector-sizes/<size>/`, evaluates
 each on test and validation and prints the comparison, saved as
-`comparison.txt`. It refuses a busy GPU unless `NNSLR_ALLOW_BUSY_GPU=1`, like
-the baseline pipeline, and finishes an interrupted comparison when run again
-with the same name.
+`comparison.txt`. Its smallest default box is `0.02` of the image side
+(`NNSLR_DETECTOR_ANCHOR_MIN_RATIO`), its share of frames without signs `0.1`
+(`NNSLR_DETECTOR_NEGATIVE_FRACTION`), and the best epoch follows the validation
+recall. It refuses a busy GPU unless `NNSLR_ALLOW_BUSY_GPU=1`, like the
+baseline pipeline, and finishes an interrupted comparison when run again with
+the same name.
 
 For the complete guarded pipeline on the training host:
 

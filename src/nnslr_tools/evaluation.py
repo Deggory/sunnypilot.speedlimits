@@ -545,8 +545,9 @@ def detector_sizes_table(sizes_root: Path, sizes: list[str] | tuple[str, ...] = 
     The detector is the cutter of the pipeline, judged first on recall: per partition, at every score threshold
     measured (lowest first) and for each size, recall overall and by the width of the reviewed box, the boxes
     per frame it passes on to the classifier and the false ones among them, then precision and F1; on all the
-    frames and on the frames a person confirmed. Then what each size costs: milliseconds per frame, seconds per
-    training epoch, GPU memory, and the epoch the validation chose.
+    frames and on the frames a person confirmed. Then what each size costs and how it was trained: milliseconds
+    per frame, seconds per training epoch, GPU memory, the epoch the validation chose and by what, the share of
+    frames without signs per epoch, augmentation and the smallest default box.
     """
     root = Path(sizes_root)
     out: list[str] = []
@@ -602,16 +603,24 @@ def detector_sizes_table(sizes_root: Path, sizes: list[str] | tuple[str, ...] = 
                     devices.add(str(inference.get("device_name")))
 
     results = {size: _read_report(root / size / "result.json") for size in sizes}
-    cost = [("size", "ms/frame", "s/epoch", "gpu_peak_GB", "best_epoch", "augmentation", "default_box_min")]
+    cost = [("size", "ms/frame", "s/epoch", "gpu_peak_GB", "best_epoch", "chosen_by", "val_recall",
+             "sign_free/epoch", "augmentation", "default_box_min")]
     for size in sizes:
         result = results[size]
         best, per_epoch, memory = _training_cells(result)
         if result is None:
-            cost.append((size, milliseconds.get(size, "-"), "no result.json", "", "", "", ""))
+            cost.append((size, milliseconds.get(size, "-"), "no result.json", *[""] * (len(cost[0]) - 3)))
             continue
-        cost.append((size, milliseconds.get(size, "-"), per_epoch, memory, best,
+        config = result.get("config") if isinstance(result.get("config"), dict) else {}
+        # Results written before these settings: best epoch by validation loss, every frame without signs.
+        chosen_by = (result.get("selection") or {}).get("by") or "loss"
+        cost.append((size, milliseconds.get(size, "-"), per_epoch, memory, best, chosen_by,
+                     _fraction(result.get("best_validation_recall")),
+                     _fraction(config.get("negative_frame_fraction", 1.0), 2),
                      "on" if result.get("augmentation") else "off", _fraction(result.get("anchor_min_ratio"), 2)))
-    out += ["", f"== cost: ms/frame of the model alone on {', '.join(sorted(devices)) or '-'} (batch 1, float32, "
-                f"on test); s/epoch and GPU memory of the training; best epoch by validation loss / epochs run =="]
+    out += ["", f"== cost and training: ms/frame of the model alone on {', '.join(sorted(devices)) or '-'} (batch 1, "
+                f"float32, on test); s/epoch and GPU memory of the training; best epoch / epochs run, chosen by "
+                f"validation recall at score 0.1 (val_recall) or loss; share of the frames without signs per epoch; "
+                f"smallest default box as a fraction of the image side =="]
     out += _table(cost)
     return "\n".join(out) + "\n"

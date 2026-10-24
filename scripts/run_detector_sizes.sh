@@ -22,14 +22,17 @@ set -euo pipefail
 # interrupted during training resumes from its training-state.pt, a missing or older evaluation is redone.
 #
 # Every size gets the same settings: ImageNet backbone (NNSLR_TRAIN_INIT=random for random weights), batch 8,
-# learning rate 1e-4, 20 epochs with early stop after 5 without a better validation loss, the photometric
-# augmentation of the detector. The default boxes stay torchvision's unless NNSLR_DETECTOR_ANCHOR_MIN_RATIO says
-# otherwise: they are fractions of the image (the smallest is 0.2 of it, 155 x 88 pixels of a 1344 x 760 frame at
-# any input size), so a larger input places them on a finer grid but does not make them smaller.
+# learning rate 1e-4, up to 20 epochs, the photometric augmentation of the detector, every frame with signs and
+# 10% of those without per epoch, the best epoch chosen (and early stopping after 5 epochs measured) by the
+# validation recall at score 0.1. The default boxes are small: the smallest is 0.02 of the image side
+# (NNSLR_DETECTOR_ANCHOR_MIN_RATIO; torchvision's 0.2 is at least 155 x 88 pixels of a 1344 x 760 frame at any
+# input size, since the default boxes are fractions of the image and a larger input only puts them on a finer
+# grid). A size that resumes keeps the settings it started with (they come from its training state).
 #
 # Environment: NNSLR_GPU_INDEX (default 0), NNSLR_DATASET_KIND (gold), NNSLR_GPU_VENV (.venv-gpu),
 # NNSLR_DETECTOR_EPOCHS (20), NNSLR_DETECTOR_PATIENCE (5), NNSLR_DETECTOR_BATCH_SIZE (8), NNSLR_NUM_WORKERS (4),
-# NNSLR_DETECTOR_ANCHOR_MIN_RATIO (0.2), NNSLR_DETECTOR_AUGMENT=0 to train without the photometric augmentation,
+# NNSLR_DETECTOR_ANCHOR_MIN_RATIO (0.02), NNSLR_DETECTOR_NEGATIVE_FRACTION (0.1, the share of the frames without
+# signs per epoch), NNSLR_DETECTOR_AUGMENT=0 to train without the photometric augmentation,
 # NNSLR_TRAIN_INIT=random, NNSLR_ALLOW_BUSY_GPU=1 to share a GPU that already has compute processes.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -42,7 +45,8 @@ EPOCHS="${NNSLR_DETECTOR_EPOCHS:-20}"
 PATIENCE="${NNSLR_DETECTOR_PATIENCE:-5}"
 BATCH_SIZE="${NNSLR_DETECTOR_BATCH_SIZE:-8}"
 NUM_WORKERS="${NNSLR_NUM_WORKERS:-4}"
-ANCHOR_MIN_RATIO="${NNSLR_DETECTOR_ANCHOR_MIN_RATIO:-}"
+ANCHOR_MIN_RATIO="${NNSLR_DETECTOR_ANCHOR_MIN_RATIO:-0.02}"
+NEGATIVE_FRACTION="${NNSLR_DETECTOR_NEGATIVE_FRACTION:-0.1}"
 PARTITIONS=(test validation)
 
 if [[ -z "$RUN_ID" ]]; then
@@ -80,21 +84,32 @@ for setting in EPOCHS PATIENCE BATCH_SIZE NUM_WORKERS; do
   fi
 done
 
+for setting in ANCHOR_MIN_RATIO NEGATIVE_FRACTION; do
+  if [[ ! "${!setting}" =~ ^[0-9]*\.?[0-9]+$ ]]; then
+    echo "error: $setting must be a number: ${!setting}" >&2
+    exit 2
+  fi
+done
+
 if [[ ! -x "$VENV/bin/nnslr" || ! -x "$VENV/bin/python" ]]; then
   echo "error: GPU environment missing: $VENV/bin/nnslr" >&2
   echo "run: bash scripts/setup_v100_training_env.sh" >&2
   exit 2
 fi
 
-# The sizes the detector accepts: sides from 32 to 4096 pixels (nnslr_tools.checkpoints.parse_input_size).
-"$VENV/bin/python" - "${SIZES[@]}" <<'EOF' || exit 2
+# The settings the detector accepts: sides from 32 to 4096 pixels, the smallest default box above 0 and below
+# 0.95 of the image, a share of frames without signs from 0 to 1 (nnslr_tools.training._check_detector_config).
+"$VENV/bin/python" - "$ANCHOR_MIN_RATIO" "$NEGATIVE_FRACTION" "${SIZES[@]}" <<'EOF' || exit 2
 import sys
 
 from nnslr_tools.checkpoints import parse_input_size
+from nnslr_tools.training import DetectorTrainConfig, _check_detector_config
 
 try:
-    for size in sys.argv[1:]:
-        parse_input_size(size)
+    for size in sys.argv[3:]:
+        _check_detector_config(DetectorTrainConfig(input_size=parse_input_size(size),
+                                                   anchor_min_ratio=float(sys.argv[1]),
+                                                   negative_frame_fraction=float(sys.argv[2])))
 except ValueError as exc:
     sys.exit(f"error: {exc}")
 EOF
@@ -142,17 +157,16 @@ if [ -z "${WANDB_MODE:-}" ] && [ -z "${WANDB_API_KEY:-}" ]; then
   fi
 fi
 
-# The same settings for every size, also when a size resumes (a resumed run refuses other settings).
-SETTINGS=(--epochs "$EPOCHS" --patience "$PATIENCE" --batch-size "$BATCH_SIZE" --num-workers "$NUM_WORKERS")
+# The same settings for every size that starts; a size that resumes takes its own from its training state.
+SETTINGS=(--epochs "$EPOCHS" --patience "$PATIENCE" --batch-size "$BATCH_SIZE" --num-workers "$NUM_WORKERS"
+          --anchor-min-ratio "$ANCHOR_MIN_RATIO" --negative-frame-fraction "$NEGATIVE_FRACTION" --select-by recall)
 if [[ "${NNSLR_TRAIN_INIT:-imagenet}" != "random" ]]; then
   SETTINGS+=(--pretrained)
-fi
-if [[ -n "$ANCHOR_MIN_RATIO" ]]; then
-  SETTINGS+=(--anchor-min-ratio "$ANCHOR_MIN_RATIO")
 fi
 if [[ "${NNSLR_DETECTOR_AUGMENT:-1}" == "0" ]]; then
   SETTINGS+=(--no-augment)
 fi
+SETTINGS_TEXT="input sizes ${SIZES[*]}; smallest default box $ANCHOR_MIN_RATIO of the image side; frames without signs $NEGATIVE_FRACTION per epoch; best epoch by validation recall at score 0.1; ${SETTINGS[*]}"
 
 NN="$VENV/bin/nnslr"
 total=$((2 + 2 * ${#SIZES[@]}))
@@ -164,6 +178,9 @@ echo "output:       $SIZES_ROOT"
 echo "data root:    $DATA_ROOT"
 echo "dataset kind: $DATASET_KIND"
 echo "physical GPU: $GPU_INDEX"
+echo "default boxes: smallest $ANCHOR_MIN_RATIO of the image side (torchvision's: 0.2)"
+echo "sign-free:    $NEGATIVE_FRACTION of the frames without signs per epoch (validation: one fixed draw)"
+echo "best epoch:   validation recall at score 0.1, ties to fewer false boxes per frame"
 echo "settings:     ${SETTINGS[*]}"
 echo "wandb:        project ${WANDB_PROJECT:-sunnypilot.speedlimits}, group $RUN_ID-<size>, mode ${WANDB_MODE:-online}"
 echo
@@ -188,12 +205,17 @@ for size in "${SIZES[@]}"; do
     echo "skip completed $size: $output/result.json"
   else
     mode=fresh
+    flags=("${SETTINGS[@]}")
     if [[ -f "$output/training-state.pt" ]]; then
       mode=resume
+      # A resumed run trains with exactly the settings it started with: they come from its training state.
+      resume_flags="$("$VENV/bin/python" -c 'import sys; from nnslr_tools.training import resume_arguments_file; print("\n".join(resume_arguments_file(sys.argv[1])))' "$output/training-state.pt")"
+      readarray -t flags <<< "$resume_flags"
+      echo "resume $size with the settings of its training state: ${flags[*]}"
     fi
     # The epoch lines ("detector epoch N/M ...") and the final JSON go to the terminal and to <size>.log.
     NNSLR_RUN_ID="$RUN_ID-$size" "$NN" train --task detector --dataset-kind "$DATASET_KIND" --device cuda \
-      --mode "$mode" --output "$output" --input-size "$size" "${SETTINGS[@]}" 2>&1 | tee -a "$SIZES_ROOT/$size.log"
+      --mode "$mode" --output "$output" --input-size "$size" "${flags[@]}" 2>&1 | tee -a "$SIZES_ROOT/$size.log"
   fi
 
   echo "== $step/$total Evaluate the detector at $size on ${PARTITIONS[*]} =="
@@ -213,9 +235,14 @@ for size in "${SIZES[@]}"; do
 done
 
 echo
-echo "== Comparison (the cutter's recall first; validation loss chose the best epoch of each size) =="
-"$VENV/bin/python" -c 'import sys; from nnslr_tools.evaluation import detector_sizes_table; print(detector_sizes_table(sys.argv[1], sys.argv[2:]), end="")' \
-  "$SIZES_ROOT" "${SIZES[@]}" | tee "$SIZES_ROOT/comparison.txt"
+echo "== Comparison (the cutter's recall first; validation recall at score 0.1 chose the best epoch of each size) =="
+{
+  echo "run $RUN_ID: $SETTINGS_TEXT"
+  echo "(each size's own settings, from its result.json, are in the cost table: a resumed size keeps those it started with)"
+  echo
+  "$VENV/bin/python" -c 'import sys; from nnslr_tools.evaluation import detector_sizes_table; print(detector_sizes_table(sys.argv[1], sys.argv[2:]), end="")' \
+    "$SIZES_ROOT" "${SIZES[@]}"
+} | tee "$SIZES_ROOT/comparison.txt"
 echo
 echo "Detector sizes complete: $SIZES_ROOT"
 echo "Nothing was imported, exported, deployed or published."

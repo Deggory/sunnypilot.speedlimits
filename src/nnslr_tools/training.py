@@ -15,6 +15,7 @@ from collections import Counter
 from dataclasses import dataclass
 import hashlib
 import json
+import math
 from pathlib import Path
 import random
 import time
@@ -488,12 +489,35 @@ class DetectorTrainConfig:
     anchor_min_ratio: float = DEFAULT_DETECTOR_ANCHOR_MIN_RATIO
     # Photometric augmentation of the training frames (DETECTOR_AUGMENTATION).
     augment: bool = True
+    # The share of the frames without signs that an epoch uses: torchvision's SSD takes its negative boxes only
+    # inside frames with signs, so a frame without any gives no loss and only costs time. Each epoch draws its
+    # own share; validation keeps one fixed draw, so its epochs compare. 1.0: every frame, as before.
+    negative_frame_fraction: float = 0.1
+    # What chooses the best epoch, and what early stopping waits for: "recall" (validation recall at score
+    # SELECT_SCORE_THRESHOLD, ties to fewer false boxes per frame: the detector is the cutter, what it misses
+    # is lost) or "loss" (validation loss, as before).
+    select_by: str = "recall"
 
 
 # The settings a detector run saved before they existed was trained with: resuming such a run compares
 # against these.
 DETECTOR_CONFIG_BEFORE_SETTINGS = {"input_size": DEFAULT_DETECTOR_INPUT_SIZE,
-                                   "anchor_min_ratio": DEFAULT_DETECTOR_ANCHOR_MIN_RATIO, "augment": False}
+                                   "anchor_min_ratio": DEFAULT_DETECTOR_ANCHOR_MIN_RATIO, "augment": False,
+                                   "negative_frame_fraction": 1.0, "select_by": "loss"}
+DETECTOR_SELECT_BY = ("recall", "loss")
+# The validation measure of select_by "recall": a reviewed box is found by a box of score >= this with IoU >= 0.5.
+SELECT_SCORE_THRESHOLD = 0.1
+SELECT_IOU_THRESHOLD = 0.5
+
+
+def epoch_frame_indices(frames: list[dict[str, Any]], fraction: float, seed: Any) -> list[int]:
+    """The frames an epoch (or the validation) uses, in their order: every frame with signs, and
+    round(fraction x the frames without) of those without, drawn with seed."""
+    with_signs = [index for index, frame in enumerate(frames) if frame["boxes"]]
+    sign_free = [index for index, frame in enumerate(frames) if not frame["boxes"]]
+    count = min(len(sign_free), int(fraction * len(sign_free) + 0.5))
+    chosen = sign_free if count == len(sign_free) else random.Random(seed).sample(sign_free, count)
+    return sorted(with_signs + chosen)
 
 # Photometric augmentation of the detector's training frames, never of validation, evaluation or export. The
 # test route is mostly at dusk (35% of its frames are dark, 7% in train), so the brightness range leans to
@@ -543,6 +567,11 @@ def _check_detector_config(config: "DetectorTrainConfig") -> None:
     ratio = config.anchor_min_ratio
     if isinstance(ratio, bool) or not isinstance(ratio, (int, float)) or not 0 < ratio < DETECTOR_ANCHOR_MAX_RATIO:
         raise ValueError(f"invalid detector anchor_min_ratio {ratio!r}: between 0 and {DETECTOR_ANCHOR_MAX_RATIO}")
+    fraction = config.negative_frame_fraction
+    if isinstance(fraction, bool) or not isinstance(fraction, (int, float)) or not 0 <= fraction <= 1:
+        raise ValueError(f"invalid detector negative_frame_fraction {fraction!r}: from 0 to 1")
+    if config.select_by not in DETECTOR_SELECT_BY:
+        raise ValueError(f"invalid detector select_by {config.select_by!r}: one of {', '.join(DETECTOR_SELECT_BY)}")
 
 
 def _detector_config_differences(saved: Any, config: "DetectorTrainConfig") -> list[str]:
@@ -554,6 +583,46 @@ def _detector_config_differences(saved: Any, config: "DetectorTrainConfig") -> l
     current = config.__dict__
     return [f"{key} {before.get(key)!r} -> {current.get(key)!r}" for key in sorted(set(before) | set(current))
             if before.get(key) != current.get(key)]
+
+
+# The flags of nnslr train for each setting of a saved configuration (bool settings are switches).
+_RESUME_FLAGS = (("epochs", "--epochs"), ("patience", "--patience"), ("batch_size", "--batch-size"),
+                 ("learning_rate", "--learning-rate"), ("weight_decay", "--weight-decay"),
+                 ("num_workers", "--num-workers"), ("seed", "--seed"), ("device", "--device"),
+                 ("anchor_min_ratio", "--anchor-min-ratio"), ("negative_frame_fraction", "--negative-frame-fraction"),
+                 ("select_by", "--select-by"))
+
+
+def resume_arguments(state: dict[str, Any]) -> list[str]:
+    """The nnslr train flags that give a saved run (its training-state.pt) back its configuration: a resumed
+    run must train with exactly the settings it started with, ImageNet start (--pretrained) included."""
+    task = state.get("task") if isinstance(state, dict) else None
+    config = state.get("config") if isinstance(state, dict) else None
+    if task not in ("detector", "reader") or not isinstance(config, dict):
+        raise ValueError("invalid training state: no task or configuration")
+    if task == "detector":
+        config = {**DETECTOR_CONFIG_BEFORE_SETTINGS, **config}
+    flags: list[str] = []
+    for key, flag in _RESUME_FLAGS:
+        if key in config:
+            flags += [flag, str(config[key])]
+    size = config.get("input_size")
+    if task == "detector" and size is not None:
+        flags += ["--input-size", f"{int(size[0])}x{int(size[1])}"]
+    elif size is not None:
+        flags += ["--input-size", str(int(size))]
+    if config.get("pretrained_backbone" if task == "detector" else "pretrained"):
+        flags.append("--pretrained")
+    if config.get("amp") is False:
+        flags.append("--no-amp")
+    if task == "detector" and config.get("augment") is False:
+        flags.append("--no-augment")
+    return flags
+
+
+def resume_arguments_file(path: Path) -> list[str]:
+    """resume_arguments of a training-state.pt (scripts/run_v100_baseline.sh, scripts/run_detector_sizes.sh)."""
+    return resume_arguments(torch_load(Path(path)))
 
 
 def _require_detector_stack():
@@ -597,6 +666,8 @@ def train_detector(
         raise ValueError(
             "training_plan_not_trainable: detector needs positive train and validation frames"
         )
+    # The measure of the validation (evaluation imports this module: imported here, not at the top).
+    from nnslr_tools.evaluation import detector_metrics, score_frame
 
     (
         torch,
@@ -649,18 +720,55 @@ def train_detector(
         return tuple(zip(*batch))
 
     train_frames = [r for r in plan["frames"] if r["split"] == TRAIN_SPLIT]
-    val_frames = [r for r in plan["frames"] if r["split"] == VALIDATION_SPLIT]
+    all_val_frames = [r for r in plan["frames"] if r["split"] == VALIDATION_SPLIT]
+    # Validation: every frame with signs and one fixed draw of those without, the same frames every epoch.
+    val_frames = [all_val_frames[index] for index in
+                  epoch_frame_indices(all_val_frames, config.negative_frame_fraction, f"validation {config.seed}")]
     val_dataset = DetectionDataset(val_frames)
     generator = torch.Generator().manual_seed(config.seed)
+
+    class EpochSampler(torch.utils.data.Sampler):
+        """The frames of the current epoch (set_epoch) in random order. With every frame (fraction 1.0) the
+        order is the one of shuffle=True with the same generator."""
+
+        def __init__(self):
+            self.indices = list(range(len(train_frames)))
+
+        def set_epoch(self, epoch: int) -> None:
+            self.indices = epoch_frame_indices(train_frames, config.negative_frame_fraction,
+                                               f"train {config.seed} {epoch}")
+
+        def __len__(self):
+            # A last batch of one frame fails in BatchNorm (the last feature map is 1 x 1 at 320 x 320): that
+            # frame, the last of the shuffle, waits for another epoch.
+            count = len(self.indices)
+            return count - 1 if count > 1 and count % config.batch_size == 1 else count
+
+        def __iter__(self):
+            order = torch.randperm(len(self.indices), generator=generator).tolist()
+            return iter([self.indices[position] for position in order][:len(self)])
+
+    train_sampler = EpochSampler()
+    train_sampler.set_epoch(0)
     train_loader = DataLoader(
         DetectionDataset(train_frames),
         batch_size=config.batch_size,
-        shuffle=True,
+        sampler=train_sampler,
         num_workers=config.num_workers,
         pin_memory=device.type == "cuda",
         collate_fn=collate,
         generator=generator,
     )
+    sign_free_train = sum(1 for frame in train_frames if not frame["boxes"])
+    frame_counts = {
+        "train_with_signs": len(train_frames) - sign_free_train,
+        "train_sign_free": sign_free_train,
+        "train_sign_free_per_epoch": len(train_sampler.indices) - (len(train_frames) - sign_free_train),
+        "train_frames_per_epoch": len(train_sampler),
+        "validation_with_signs": sum(1 for frame in all_val_frames if frame["boxes"]),
+        "validation_sign_free": sum(1 for frame in all_val_frames if not frame["boxes"]),
+        "validation_sign_free_used": sum(1 for frame in val_frames if not frame["boxes"]),
+    }
     val_loader = DataLoader(
         val_dataset,
         batch_size=config.batch_size,
@@ -694,25 +802,53 @@ def train_detector(
     def move_targets(targets):
         return [{k: v.to(device, non_blocking=True) for k, v in target.items()} for target in targets]
 
-    def validation_loss() -> float:
-        # torchvision detection models expose training losses only in train mode.
-        # Keep BatchNorm frozen so validation does not mutate running statistics.
-        model.train()
-        for module in model.modules():
-            if isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
-                module.eval()
+    def validate() -> dict[str, Any]:
+        """The validation loss, and the boxes the cutter passes on scored as nnslr evaluate scores them:
+        recall at SELECT_SCORE_THRESHOLD, false boxes and boxes per frame. One pass over the frames."""
         total = 0.0
         seen = 0
+        scored = []
         with torch.no_grad():
             for images, targets in val_loader:
                 images = [img.to(device, non_blocking=True) for img in images]
-                targets = move_targets(targets)
+                # torchvision detection models expose training losses only in train mode.
+                # Keep BatchNorm frozen so validation does not mutate running statistics.
+                model.train()
+                for module in model.modules():
+                    if isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
+                        module.eval()
                 with torch.cuda.amp.autocast(enabled=use_amp):
-                    losses = model(images, targets)
+                    losses = model(images, move_targets(targets))
                     loss = sum(losses.values())
                 total += float(loss.detach()) * len(images)
                 seen += len(images)
-        return total / max(seen, 1)
+                # The boxes, in float32 like the evaluation.
+                model.eval()
+                for detection, target in zip(model(images), targets):
+                    keep = detection["labels"] == 1
+                    predictions = [{"box": box, "score": score} for box, score in
+                                   zip(detection["boxes"][keep].float().cpu().tolist(),
+                                       detection["scores"][keep].float().cpu().tolist())]
+                    scored.append(score_frame(target["boxes"].tolist(), predictions,
+                                              score_threshold=SELECT_SCORE_THRESHOLD,
+                                              iou_threshold=SELECT_IOU_THRESHOLD))
+        model.train()
+        measured = detector_metrics(scored)
+        return {
+            "loss": total / max(seen, 1),
+            "recall": measured["recall_iou"],
+            "true_positives": measured["true_positives"],
+            "false_positives": measured["false_positives"],
+            "false_positives_per_image": measured["false_positives_per_image"],
+            "predictions_per_image": measured["predictions_per_image"],
+        }
+
+    def selection_key(measured: dict[str, Any]) -> tuple | None:
+        """Higher is better; None never counts as better (a validation loss that is not a number)."""
+        if config.select_by == "recall":
+            # The same validation frames every epoch: counts compare as recall and false boxes per frame do.
+            return (measured["true_positives"], -measured["false_positives"])
+        return (-measured["loss"],) if math.isfinite(measured["loss"]) else None
 
     def detector_samples() -> list[Any]:
         # The first validation frames with reviewed boxes (fixed order, so the
@@ -755,6 +891,9 @@ def train_detector(
 
     history = []
     best_validation_loss = float("inf")
+    # The epoch whose weights are detector-best.pt: its selection key and its validation measures.
+    best_selection: dict[str, Any] | None = None
+    stale = 0
     best_path = output_dir / "detector-best.pt"
     global_step = 0
 
@@ -810,6 +949,11 @@ def train_detector(
         global_step = saved["global_step"]
         history = saved["history"]
         best_validation_loss = saved["best_validation_loss"]
+        best_selection = saved.get("best_selection")
+        if best_selection is None and math.isfinite(best_validation_loss):
+            # A run saved before best_selection existed chose its best epoch by validation loss.
+            best_selection = {"key": [-best_validation_loss], "validation_loss": best_validation_loss}
+        stale = int(saved.get("stale", 0))
         print(f"resume detector at epoch {start_epoch}/{config.epochs}")
 
     def save_training_state(epoch: int, status: str) -> None:
@@ -827,6 +971,8 @@ def train_detector(
             "input_size": list(config.input_size),
             "anchor_min_ratio": config.anchor_min_ratio,
             "best_validation_loss": best_validation_loss,
+            "best_selection": best_selection,
+            "stale": stale,
             "history": history,
             "state_dict": model.state_dict(),
             "optimizer": optimizer.state_dict(),
@@ -849,13 +995,19 @@ def train_detector(
     # The factors of the photometric augmentation, drawn here (not in the loader workers): the same for any
     # number of workers, and reproduced after a resume.
     augment_generator = torch.Generator().manual_seed(config.seed)
+    print(f"detector frames per epoch: {frame_counts['train_with_signs']} with signs and "
+          f"{frame_counts['train_sign_free_per_epoch']} of {frame_counts['train_sign_free']} without; validation "
+          f"{frame_counts['validation_with_signs']} with signs and {frame_counts['validation_sign_free_used']} of "
+          f"{frame_counts['validation_sign_free']} without; best epoch by "
+          + (f"validation recall at score {SELECT_SCORE_THRESHOLD:g}" if config.select_by == "recall"
+             else "validation loss"), flush=True)
     try:
-        stale = 0
         stopped_early = None
         for epoch in range(start_epoch, config.epochs):
             epoch_number = epoch + 1
             epoch_start = time.perf_counter()
-            # Reproduce each epoch's DataLoader shuffle after an epoch-boundary resume.
+            # Reproduce each epoch's frames and DataLoader shuffle after an epoch-boundary resume.
+            train_sampler.set_epoch(epoch)
             generator.manual_seed(config.seed + epoch)
             augment_generator.manual_seed(config.seed + 1_000_003 * (epoch + 1))
             model.train()
@@ -896,19 +1048,28 @@ def train_detector(
                     tracker.log(step_metrics, step=global_step)
                 step_start = step_end
 
-            val_loss = validation_loss()
+            measured = validate()
+            val_loss = measured["loss"]
             epoch_result = {
                 "epoch": epoch_number,
                 "train_loss": train_total / max(train_seen, 1),
                 "validation_loss": val_loss,
+                # The cutter on the validation frames, at score SELECT_SCORE_THRESHOLD.
+                "validation_recall": measured["recall"],
+                "validation_false_positives_per_image": measured["false_positives_per_image"],
+                "validation_predictions_per_image": measured["predictions_per_image"],
                 # Training and validation of the epoch, for the cost of an input size.
                 "seconds": time.perf_counter() - epoch_start,
             }
             history.append(epoch_result)
 
-            improved = val_loss < best_validation_loss
+            key = selection_key(measured)
+            improved = key is not None and (best_selection is None or list(key) > best_selection["key"])
             if improved:
                 best_validation_loss = val_loss
+                best_selection = {"key": list(key), "epoch": epoch_number, "validation_loss": val_loss,
+                                  "validation_recall": measured["recall"],
+                                  "validation_false_positives_per_image": measured["false_positives_per_image"]}
                 torch.save({
                     "format_version": 1,
                     "architecture": "ssdlite320_mobilenet_v3_large",
@@ -922,6 +1083,9 @@ def train_detector(
                     "split_sha256": plan["split_sha256"],
                     "epoch": epoch_number,
                     "validation_loss": best_validation_loss,
+                    "validation_recall": measured["recall"],
+                    "validation_false_positives_per_image": measured["false_positives_per_image"],
+                    "selected_by": config.select_by,
                     "initialization": "imagenet1k_v1" if config.pretrained_backbone else "random",
                     "initialization_source": (
                         "torchvision.models.MobileNet_V3_Large_Weights.IMAGENET1K_V1"
@@ -937,21 +1101,28 @@ def train_detector(
                     "train/epoch_loss": epoch_result["train_loss"],
                     "validation/loss": val_loss,
                     "validation/best_loss": best_validation_loss,
+                    "validation/recall": measured["recall"],
+                    "validation/false_per_image": measured["false_positives_per_image"],
                 }
                 if tracker.should_log_images(epoch_number, config.epochs):
                     epoch_metrics["validation/detections"] = detector_samples()
                 epoch_metrics["epoch_time"] = time.perf_counter() - epoch_start
                 tracker.log(epoch_metrics, step=global_step)
-            save_training_state(epoch_number, "in_progress")
-            # One line per epoch: the panel of the review site reads the progress from the log.
-            print(f"detector epoch {epoch_number}/{config.epochs} train_loss {epoch_result['train_loss']:.4f} "
-                  f"val_loss {val_loss:.4f} {time.perf_counter() - epoch_start:.0f}s", flush=True)
             # Early stop: the best weights are already saved; more epochs would only memorise the training images.
             stale = 0 if improved else stale + 1
+            save_training_state(epoch_number, "in_progress")
+            # One line per epoch: the panel of the review site reads the progress from the log (the seconds last).
+            print(f"detector epoch {epoch_number}/{config.epochs} train_loss {epoch_result['train_loss']:.4f} "
+                  f"val_loss {val_loss:.4f} val_recall {measured['recall']:.4f} "
+                  f"{time.perf_counter() - epoch_start:.0f}s", flush=True)
             if config.patience and stale >= config.patience and epoch_number < config.epochs:
                 stopped_early = epoch_number
-                print(f"detector stops early after epoch {epoch_number}: validation loss not better for "
-                      f"{stale} epochs (best {best_validation_loss:.4f})", flush=True)
+                measure = (f"validation recall at score {SELECT_SCORE_THRESHOLD:g}" if config.select_by == "recall"
+                           else "validation loss")
+                print(f"detector stops early after epoch {epoch_number}: {measure} not better for {stale} epochs "
+                      f"(best epoch {(best_selection or {}).get('epoch', '-')}, "
+                      f"val_loss {best_validation_loss:.4f}, "
+                      f"val_recall {(best_selection or {}).get('validation_recall', float('nan')):.4f})", flush=True)
                 break
 
         gpu = None
@@ -972,9 +1143,17 @@ def train_detector(
             "anchor_min_ratio": config.anchor_min_ratio,
             "augmentation": ({key: list(value) if isinstance(value, tuple) else value
                               for key, value in DETECTOR_AUGMENTATION.items()} if config.augment else None),
+            # The validation measures of the epoch whose weights are detector-best.pt (chosen by selection.by).
             "best_validation_loss": best_validation_loss,
-            "best_epoch": next((item["epoch"] for item in history
-                                if item["validation_loss"] == best_validation_loss), None),
+            "best_epoch": (best_selection or {}).get("epoch") or next(
+                (item["epoch"] for item in history if item["validation_loss"] == best_validation_loss), None),
+            "best_validation_recall": (best_selection or {}).get("validation_recall"),
+            "best_validation_false_positives_per_image": (best_selection or {}).get(
+                "validation_false_positives_per_image"),
+            "selection": {"by": config.select_by, "score_threshold": SELECT_SCORE_THRESHOLD,
+                          "iou_threshold": SELECT_IOU_THRESHOLD,
+                          "ties": "fewer false boxes per frame" if config.select_by == "recall" else None},
+            "frames": frame_counts,
             "stopped_early_after_epoch": stopped_early,
             "checkpoint": str(best_path),
             "training_plan": str(plan_path),
@@ -997,6 +1176,7 @@ def train_detector(
         )
         tracker.set_summary({
             "best_validation_loss": best_validation_loss,
+            "best_validation_recall": (best_selection or {}).get("validation_recall"),
             "checkpoint": str(best_path),
         })
         save_training_state(config.epochs, "completed")

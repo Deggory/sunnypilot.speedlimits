@@ -42,8 +42,9 @@ MARKERS = (
 )
 SUBSTEP = re.compile(r'^== (\d+)/10 ')
 EPOCH = re.compile(r'^(detector|reader) epoch (\d+)/(\d+)\b')
-# The values of an epoch line: "train_loss 0.5000 val_loss 0.6000 ... 40s".
-METRIC = re.compile(r'\b(train_loss|val_loss|train_accuracy|val_accuracy) (-?[0-9.]+(?:e-?[0-9]+)?)\b')
+# The values of an epoch line: "train_loss 0.5000 val_loss 0.6000 ... 40s" (the detector also writes
+# val_recall, its validation recall at score 0.1, which chooses its best epoch).
+METRIC = re.compile(r'\b(train_loss|val_loss|train_accuracy|val_accuracy|val_recall) (-?[0-9.]+(?:e-?[0-9]+)?)\b')
 SECONDS = re.compile(r'\b([0-9]+)s$')
 FETCHED = re.compile(r'^== (\S+)--(\d+) -> ')
 ON_COMMA = re.compile(r'^(\S+) sul comma: ')
@@ -67,7 +68,7 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
     """{'steps': [{'key', 'label', 'state': done|current|todo|failed}], 'percent': 0-100 or None,
     'detail': str, 'last_line': str, 'step_progress': how far the current step is from the log alone (see
     _inside_step) or None, 'curves': {'detector'|'reader': {'epochs': total, 'points':
-    [{'epoch', 'train_loss', 'val_loss', ('train_accuracy', 'val_accuracy',) 'seconds'}]}}} for an action
+    [{'epoch', 'train_loss', 'val_loss', ('train_accuracy', 'val_accuracy',) ('val_recall',) 'seconds'}]}}} for an action
     in state running, ok, failed or interrupted."""
     steps = STEPS.get(action, ())
     keys = [key for key, _, _ in steps]

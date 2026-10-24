@@ -668,11 +668,58 @@ def _cmd_link_videos(args: argparse.Namespace) -> int:
 
 
 # [training-baseline] - START
+def _train_config(args: argparse.Namespace):
+    """The DetectorTrainConfig or TrainConfig of nnslr train's arguments (torch is not imported)."""
+    from nnslr_tools.checkpoints import DEFAULT_DETECTOR_ANCHOR_MIN_RATIO, DEFAULT_DETECTOR_INPUT_SIZE, parse_input_size
+    from nnslr_tools.training import DetectorTrainConfig, TrainConfig, _check_detector_config
+
+    if args.task == "detector":
+        defaults = DetectorTrainConfig()
+        config = DetectorTrainConfig(
+            epochs=args.epochs,
+            patience=args.patience,
+            batch_size=args.batch_size if args.batch_size is not None else 8,
+            learning_rate=args.learning_rate if args.learning_rate is not None else 1e-4,
+            weight_decay=args.weight_decay,
+            num_workers=args.num_workers,
+            seed=args.seed,
+            device=args.device,
+            pretrained_backbone=args.pretrained,
+            amp=not args.no_amp,
+            input_size=parse_input_size(args.input_size) if args.input_size else DEFAULT_DETECTOR_INPUT_SIZE,
+            anchor_min_ratio=(args.anchor_min_ratio if args.anchor_min_ratio is not None
+                              else DEFAULT_DETECTOR_ANCHOR_MIN_RATIO),
+            augment=not args.no_augment,
+            negative_frame_fraction=(args.negative_frame_fraction if args.negative_frame_fraction is not None
+                                     else defaults.negative_frame_fraction),
+            select_by=args.select_by if args.select_by is not None else defaults.select_by,
+        )
+        _check_detector_config(config)
+        return config
+    if (args.anchor_min_ratio is not None or args.no_augment or args.negative_frame_fraction is not None
+            or args.select_by is not None):
+        raise ValueError("--anchor-min-ratio, --no-augment, --negative-frame-fraction and --select-by are "
+                         "detector options")
+    if args.input_size is not None and not str(args.input_size).isdigit():
+        raise ValueError(f"invalid reader --input-size {args.input_size!r}: the side of the square crop in pixels")
+    return TrainConfig(
+        epochs=args.epochs,
+        patience=args.patience,
+        batch_size=args.batch_size if args.batch_size is not None else 64,
+        learning_rate=args.learning_rate if args.learning_rate is not None else 3e-4,
+        weight_decay=args.weight_decay,
+        input_size=int(args.input_size) if args.input_size is not None else 160,
+        num_workers=args.num_workers,
+        seed=args.seed,
+        device=args.device,
+        pretrained=args.pretrained,
+        amp=not args.no_amp,
+    )
+
+
 def _cmd_train(args: argparse.Namespace) -> int:
     from nnslr_tools.preannotate import resolve_data_root
     from nnslr_tools.training import (
-        DetectorTrainConfig,
-        TrainConfig,
         prepare_detector_training,
         prepare_reader_training,
         train_detector,
@@ -689,17 +736,11 @@ def _cmd_train(args: argparse.Namespace) -> int:
     dataset = Path(args.dataset) if args.dataset else default_dataset
     splits = Path(args.splits) if args.splits else root / "splits" / "latest.json"
 
+    # The configuration is checked before the plan, so that a dry run refuses a wrong setting too.
+    config = _train_config(args)
     if args.task == "detector":
-        from nnslr_tools.checkpoints import (DEFAULT_DETECTOR_ANCHOR_MIN_RATIO, DEFAULT_DETECTOR_INPUT_SIZE,
-                                             parse_input_size)
-        # Checked before the plan, so that a dry run refuses a wrong size too.
-        detector_input_size = parse_input_size(args.input_size) if args.input_size else DEFAULT_DETECTOR_INPUT_SIZE
         plan = prepare_detector_training(dataset, splits, root, dataset_kind=kind)
     else:
-        if args.anchor_min_ratio is not None or args.no_augment:
-            raise ValueError("--anchor-min-ratio and --no-augment are detector options")
-        if args.input_size is not None and not str(args.input_size).isdigit():
-            raise ValueError(f"invalid reader --input-size {args.input_size!r}: the side of the square crop in pixels")
         plan = prepare_reader_training(dataset, splits, root, dataset_kind=kind)
 
     if args.dry_run:
@@ -716,39 +757,10 @@ def _cmd_train(args: argparse.Namespace) -> int:
         raise ValueError("continue requires --hf-repo, NNSLR_HF_REPO or --init-from")
 
     if args.task == "detector":
-        config = DetectorTrainConfig(
-            epochs=args.epochs,
-            patience=args.patience,
-            batch_size=args.batch_size if args.batch_size is not None else 8,
-            learning_rate=args.learning_rate if args.learning_rate is not None else 1e-4,
-            weight_decay=args.weight_decay,
-            num_workers=args.num_workers,
-            seed=args.seed,
-            device=args.device,
-            pretrained_backbone=args.pretrained,
-            amp=not args.no_amp,
-            input_size=detector_input_size,
-            anchor_min_ratio=(args.anchor_min_ratio if args.anchor_min_ratio is not None
-                              else DEFAULT_DETECTOR_ANCHOR_MIN_RATIO),
-            augment=not args.no_augment,
-        )
         result = train_detector(plan, root, Path(args.output), config,
                                 mode=args.mode, hf_repo=args.hf_repo, hf_revision=args.hf_revision,
                                 init_from=args.init_from)
     else:
-        config = TrainConfig(
-            epochs=args.epochs,
-            patience=args.patience,
-            batch_size=args.batch_size if args.batch_size is not None else 64,
-            learning_rate=args.learning_rate if args.learning_rate is not None else 3e-4,
-            weight_decay=args.weight_decay,
-            input_size=int(args.input_size) if args.input_size is not None else 160,
-            num_workers=args.num_workers,
-            seed=args.seed,
-            device=args.device,
-            pretrained=args.pretrained,
-            amp=not args.no_amp,
-        )
         result = train_reader(plan, root, Path(args.output), config,
                               mode=args.mode, hf_repo=args.hf_repo, hf_revision=args.hf_revision,
                                 init_from=args.init_from)
@@ -1325,6 +1337,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_train.add_argument("--no-augment", action="store_true",
                          help="detector: no photometric augmentation (brightness incl. darkening, contrast, gamma, "
                               "colour) of the training frames; it is on by default, never flips")
+    p_train.add_argument("--negative-frame-fraction", type=float, default=None,
+                         help="detector: share of the frames without signs used per epoch, drawn again each epoch "
+                              "(validation: one fixed draw); every frame with signs is used (default 0.1; 1.0: all, "
+                              "as before; such frames give torchvision's SSD no loss)")
+    p_train.add_argument("--select-by", choices=("recall", "loss"), default=None,
+                         help="detector: what chooses the best epoch and stops early: validation recall at score "
+                              "0.1, ties to fewer false boxes per frame (default), or validation loss")
     p_train.add_argument("--num-workers", type=int, default=4)
     p_train.add_argument("--seed", type=int, default=0)
     p_train.add_argument("--init-from", type=Path, default=None,
