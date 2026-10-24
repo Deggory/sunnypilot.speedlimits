@@ -11,12 +11,16 @@ from what the training and the evaluation wrote:
   ``<size>/evaluation/detector-{test,validation}.json``): recall overall and by sign width at the cutter's score
   (CUTTER_SCORE, else the report's own threshold), boxes and false boxes per frame, time per frame;
 - classifier: ``<run>/reader/reader-best.pt`` (``<run>/evaluation/reader-test.json``): right answers on the test,
-  overall and on the crops a person confirmed;
+  overall and on the crops a person confirmed; ``<run>/classifier/reader-best.pt`` of scripts/run_classifier.sh, the
+  classifier with "not a sign" (``<run>/evaluation/classifier-test.json``, ``<run>/evaluation/chain-test.json``):
+  right answers on the sign crops, the "not a sign" crops it rejects, and the chain end to end at the cutter's score
+  (the speed signs found and read right, the false boxes per frame that survive it);
 - decider: ``<run>/experiment-b/<variant>/<variant>-best.pt`` with its ``result.json`` (nnslr_tools.context_experiment):
   whom the sign applies to on validation and test, and the reading.
 
 Each artifact has a stable id ``<role>:<run>/<part>``: ``cutter:2026-10-24_1452/detector``,
-``cutter:<run>/detector-sizes/640x360``, ``classifier:<run>/reader``, ``decider:<run>/experiment-b/crop_geom``.
+``cutter:<run>/detector-sizes/640x360``, ``classifier:<run>/reader``, ``classifier:<run>/classifier``,
+``decider:<run>/experiment-b/crop_geom``.
 
 The model in use for each role is <data root>/models/active.json, ``{"cutter": {"id", "who", "via", "at"} or null,
 "classifier": ..., "decider": ...}``: null until someone picks one, never a default. Nothing reads it yet besides
@@ -41,17 +45,21 @@ from typing import Any
 from nnslr_tools.checkpoints import DEFAULT_DETECTOR_ANCHOR_MIN_RATIO, DEFAULT_DETECTOR_INPUT_SIZE
 from nnslr_tools.runs import (EXPERIMENT_DIR, INPUT_NAMES, RUN_NAME, SIZE_BUCKETS, UNREADABLE, VARIANT_LABELS,
                               VARIANTS, RunsIndex, _dig, _int, _iso, _mtime, _num, _ratio, _size_table, _words,
+                              chain_digest, chain_headline, classifier_headline, classifier_result_digest,
                               reader_digest, result_digest)
 
 ROLES = ('cutter', 'classifier', 'decider')
 ROLE_LABELS = {'cutter': 'Cutter', 'classifier': 'Classifier', 'decider': 'Decider'}
 # The cutter must miss nothing: it is judged on recall at a low score (nnslr_tools.evaluation.CUTTER_SCORE_THRESHOLDS).
 CUTTER_SCORE = 0.1
+# What a cutter learnt to find (result.json and its reports, "families"): every sign (the speed signs and the other
+# signs) or the speed signs only (every cutter trained before it was recorded).
+FAMILIES = ('all', 'speed')
 # A detector folder of scripts/run_detector_sizes.sh: WIDTHxHEIGHT.
 SIZE_NAME = re.compile(r'[1-9][0-9]{0,4}x[1-9][0-9]{0,4}')
 _RUN = RUN_NAME.pattern
 MODEL_ID = re.compile(rf'(cutter|classifier|decider):({_RUN})/(detector|detector-sizes/{SIZE_NAME.pattern}|reader|'
-                      rf'{EXPERIMENT_DIR}/{_RUN})')
+                      rf'classifier|{EXPERIMENT_DIR}/{_RUN})')
 MAX_ID = 320
 ACTIVE_FILE = 'models/active.json'
 # How the person who chose was recognised: signed in on the site, the access token of an agent, 127.0.0.1 without
@@ -127,10 +135,29 @@ def _box_counts(metrics: dict) -> dict:
             'precision': precision, 'boxes_per_frame': boxes, 'false_per_frame': false_per_frame}
 
 
+def _families(value: Any) -> str | None:
+    return value if value in FAMILIES else None
+
+
+def _by_family(table: Any) -> dict | None:
+    """recall_by_family of a report ({"speed": {truth, found, recall}, "other_sign": ...}): the speed signs keep the
+    headline of a cutter that also finds the other signs comparable with one that finds the speed signs only."""
+    if not isinstance(table, dict):
+        return None
+    rows = {}
+    for key, row in table.items():
+        if isinstance(row, dict):
+            truth, found = _int(row.get('truth')) or 0, _int(row.get('found')) or 0
+            recall = _num(row.get('recall'))
+            rows[str(key)] = {'truth': truth, 'found': found, 'recall': recall if recall is not None else _ratio(found, truth)}
+    return rows or None
+
+
 def cutter_digest(report: Any) -> dict:
     """A detector evaluation (nnslr_tools.evaluation.evaluate_detector) as the cutter is judged: at CUTTER_SCORE when
     the report measured it (by_score_threshold), else at the report's own threshold; recall by the width of the
-    reviewed box; the boxes per frame passed on; the time per frame; the input size and default boxes it ran with."""
+    reviewed box, and by family (the speed signs apart) for a cutter that also finds the other signs; the boxes per
+    frame passed on; the time per frame; the input size and default boxes it ran with, and what it finds."""
     if not isinstance(report, dict):
         raise ValueError('not a report')
     chosen = None
@@ -165,6 +192,8 @@ def cutter_digest(report: Any) -> dict:
         'input_size': _size_label(report.get('input_size_label')) or _size_label(report.get('input_size')),
         'anchor_min_ratio': _num(report.get('anchor_min_ratio')),
         'checkpoint_epoch': _int(report.get('checkpoint_epoch')),
+        'families': _families(report.get('families')),
+        'by_family': _by_family(metrics.get('recall_by_family')),
     }
 
 
@@ -186,6 +215,7 @@ def model_result_digest(result: Any) -> dict:
         'anchor_min_ratio': _num(result.get('anchor_min_ratio')),
         'augmentation': None if 'augmentation' not in result else bool(augmentation),
         'gpu': base['gpu'],
+        'families': _families(result.get('families')),
     }
 
 
@@ -306,6 +336,7 @@ class ModelIndex:
         if anchor is None:
             anchor = trained.get('anchor_min_ratio')
         default_size = '{}x{}'.format(*DEFAULT_DETECTOR_INPUT_SIZE)
+        families = trained.get('families') or measured.get('families')
         entry = self._base('cutter', name, part, checkpoint, result, problems)
         entry.update({
             'label': 'Detector ' + _pretty_size(input_size or default_size),
@@ -317,6 +348,8 @@ class ModelIndex:
             'anchor_min_ratio': anchor if anchor is not None else DEFAULT_DETECTOR_ANCHOR_MIN_RATIO,
             'anchor_recorded': anchor is not None,
             'augmentation': trained.get('augmentation'),
+            # What it finds: every sign or the speed signs only (before it was recorded, the speed signs only).
+            'families': families or 'speed', 'families_recorded': families is not None,
             'test': test, 'validation': validation,
         })
         return entry
@@ -340,6 +373,37 @@ class ModelIndex:
                 'samples': report['samples'], 'accuracy': report['accuracy'],
                 'human_samples': (report['human'] or {}).get('samples'),
                 'human_accuracy': (report['human'] or {}).get('accuracy')},
+        })
+        return entry
+
+    def _classifier_v2(self, name: str, run: Path) -> dict | None:
+        """The classifier with "not a sign" of scripts/run_classifier.sh (its weights still say task "reader")."""
+        checkpoint = self.runs._file(run, 'classifier/reader-best.pt')
+        if checkpoint is None:
+            return None
+        problems: list[str] = []
+        result = self._read(run, 'classifier/result.json', classifier_result_digest, problems)
+        report = self._read(run, 'evaluation/classifier-test.json', reader_digest, problems)
+        chain = self._read(run, 'evaluation/chain-test.json', chain_digest, problems)
+        old_reader = self._read(run, 'evaluation/chain-test-old-reader.json', chain_digest, problems)
+        trained = result or {}
+        entry = self._base('classifier', name, 'classifier', checkpoint, result, problems)
+        entry.update({
+            'label': 'Classifier', 'detail': 'with “not a sign”',
+            'class_scheme': trained.get('class_scheme') or (report or {}).get('class_scheme') or 'v2',
+            'architecture': trained.get('architecture') or None, 'initialization': trained.get('initialization'),
+            'best_epoch': trained.get('best_epoch'), 'epochs': trained.get('epochs'), 'epochs_run': trained.get('epochs_run'),
+            'classes': trained.get('classes') or (report or {}).get('classes'),
+            'best_validation_accuracy': trained.get('best_validation_accuracy'),
+            # The mean of the two below chose its best epoch.
+            'best_validation_balanced_accuracy': trained.get('best_validation_balanced_accuracy'),
+            'best_validation_sign_accuracy': trained.get('best_validation_sign_accuracy'),
+            'best_validation_rejection': trained.get('best_validation_rejection'),
+            'augmentation': trained.get('augmentation'),
+            'test': None if report is None else classifier_headline(report),
+            # The chain end to end at the cutter's score, and the old reader in the same chain.
+            'chain': None if chain is None else chain_headline(chain),
+            'chain_old_reader': None if old_reader is None else chain_headline(old_reader),
         })
         return entry
 
@@ -376,12 +440,19 @@ class ModelIndex:
             found.append(entry)
         return found
 
-    def artifacts(self) -> dict[str, list[dict]]:
-        """Every trained artifact by role, newest first (by the time of its weights)."""
+    def artifacts(self, roles: tuple[str, ...] = ROLES) -> dict[str, list[dict]]:
+        """Every trained artifact by role (of the roles asked), newest first (by the time of its weights)."""
         found: dict[str, list[dict]] = {role: [] for role in ROLES}
         for name in self.runs.names():
             run = self.runs._run_dir(name)
             if run is None:
+                continue
+            if 'classifier' in roles:
+                found['classifier'] += [entry for entry in (self._classifier(name, run), self._classifier_v2(name, run))
+                                        if entry is not None]
+            if 'decider' in roles:
+                found['decider'] += self._deciders(name, run)
+            if 'cutter' not in roles:
                 continue
             cutters = [self._cutter(name, run, 'detector', 'evaluation', 'detector', None)]
             sizes = run / 'detector-sizes'
@@ -395,10 +466,6 @@ class ModelIndex:
                 folder = 'detector-sizes/' + size
                 cutters.append(self._cutter(name, run, folder, folder + '/evaluation', folder, size))
             found['cutter'] += [entry for entry in cutters if entry is not None]
-            classifier = self._classifier(name, run)
-            if classifier is not None:
-                found['classifier'].append(classifier)
-            found['decider'] += self._deciders(name, run)
         for versions in found.values():
             versions.sort(key=lambda entry: (entry['_mtime'], entry['id']), reverse=True)
             for entry in versions:
@@ -434,6 +501,20 @@ class ModelIndex:
         if not isinstance(data, dict):
             return empty, ACTIVE_FILE + ' is not a JSON object'
         return {role: _active_entry(role, data.get(role)) for role in ROLES}, None
+
+    def in_use(self, role: str) -> tuple[dict | None, str]:
+        """The version in use for a role, its files still on this server; else None and why (for the panel: the
+        classifier's training mines the false boxes of the cutter in use)."""
+        active, problem = self.read_active()
+        if problem is not None:
+            return None, problem
+        chosen = active.get(role)
+        if chosen is None:
+            return None, 'no ' + role + ' in use: choose one on the Models tab'
+        version = next((entry for entry in self.artifacts((role,))[role] if entry['id'] == chosen['id']), None)
+        if version is None:
+            return None, 'the ' + role + ' in use is no longer on this server: choose another one on the Models tab'
+        return version, ''
 
     def index(self) -> dict:
         """GET /api/panel/models: the three roles, each with its versions newest first and the one in use."""

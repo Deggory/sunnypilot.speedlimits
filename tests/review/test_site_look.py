@@ -56,6 +56,11 @@ def test_control_page_reads_the_panel_status(served):
     page = served.request('GET', '/')[2].decode()
     script = asset('js/control.js')
     assert script in page and '/api/panel/status' in script and 'cores' in script and 'gpu-procs' in script
+    # The classifier with "not a sign": its action on Train, its sections on Evaluate.
+    assert 'train_classifier' in script and 'chain-eval' in script and 'classifier-eval' in script
+    # The Train tab by role: the cutter (its sizes and signs), the classifier, the decider, the whole pipeline.
+    for marker in ('train_cutter', 'train-roles', 'train-cutter', 'train-decider', 'train-pipeline', 'cutter-eval'):
+        assert marker in script, marker
 
 
 def test_built_scripts_are_the_build_of_the_typescript():

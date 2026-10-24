@@ -8,7 +8,7 @@ import type {Job, SystemInfo} from '../common/panel-types';
 import Icon from '../components/Icon.vue';
 import {useNow} from '../composables/now';
 import JobSteps from './JobSteps.vue';
-import {elapsedText, failedStep, JOB_STATE, roughText, startedAt, startedWhen} from './jobs';
+import {elapsedText, failedStep, JOB_STATE, PIPELINE_ACTIONS, roughText, startedAt, startedWhen} from './jobs';
 import MiniMachine from './MiniMachine.vue';
 import {RESUME_JOB} from './use-actions';
 
@@ -18,9 +18,10 @@ const now = useNow();
 
 const running = computed(() => props.job.state === 'running');
 const resumeJob = inject(RESUME_JOB, null);
-// A training that stopped after writing its run: the missing steps can run again on that run.
+// A training of the pipeline that stopped after writing its run: the missing steps can run again on that run
+// (helpers/3_train.sh --resume; not the cutter's or the classifier's training, which are other scripts).
 const resumable = computed(() => resumeJob !== null && Boolean(props.job.run)
-  && (props.job.state === 'failed' || props.job.state === 'interrupted') && props.job.action.startsWith('train'));
+  && (props.job.state === 'failed' || props.job.state === 'interrupted') && PIPELINE_ACTIONS.includes(props.job.action));
 const state = computed(() => JOB_STATE[props.job.state]);
 const percent = computed(() => {
   const value = props.job.state === 'ok' ? 100 : props.job.progress.percent;

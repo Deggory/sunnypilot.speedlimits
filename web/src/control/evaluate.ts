@@ -120,7 +120,10 @@ export function modeText(run: RunSummary): string {
 /** Where a run is: "detector · epoch 5 of 20", "stopped while training the reader", "bundle packaged". */
 export function stageText(run: RunSummary): string {
   if (run.state === 'running') return run.progress || run.stage_label;
-  if (run.state === 'finished') return run.kind === 'experiment' ? 'every variant measured' : 'bundle packaged';
+  if (run.state === 'finished') {
+    return run.kind === 'experiment' ? 'every variant measured' : run.kind === 'classifier' ? 'classifier and chain measured'
+      : run.kind === 'cutter' ? 'cutter measured' : 'bundle packaged';
+  }
   return 'while ' + run.stage_label;
 }
 
@@ -129,7 +132,11 @@ export function notEvaluatedText(run: RunSummary): string {
   if (run.kind === 'experiment') {
     return 'Experiment B only: ' + run.experiment_b.length + ' of 3 variants measured' + (run.experiment_b.length ? ', open it for the table.' : '.');
   }
-  if (run.state === 'running') return 'Not evaluated yet: the test comes after the training.';
+  if (run.state === 'running') {
+    return run.kind === 'classifier' ? 'Not evaluated yet: the classifier and the chain are measured after the training.'
+      : run.kind === 'cutter' ? 'Not evaluated yet: test and validation come after the training.'
+        : 'Not evaluated yet: the test comes after the training.';
+  }
   return 'No evaluation: the run stopped before it.';
 }
 

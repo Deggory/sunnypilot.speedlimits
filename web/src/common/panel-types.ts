@@ -1,6 +1,14 @@
 // GET /api/panel/status (nnslr_tools.panel.Panel.status): the control pages (Overview, Prepare, Train).
 
-export type ActionName = 'fetch' | 'prepare' | 'dataset' | 'train' | 'train_continue' | 'train_resume' | 'update';
+export type ActionName = 'fetch' | 'prepare' | 'dataset' | 'train' | 'train_continue' | 'train_resume' | 'train_classifier'
+  | 'train_cutter' | 'update';
+/** What a cutter learns to find: every sign (the speed signs and the other signs) or the speed signs only. */
+export type CutterFamilies = 'all' | 'speed';
+/** The options of “Train the cutter” (POST /api/panel/run/train_cutter {"size", "families"}). */
+export interface CutterOptions {
+  size: string;
+  families: CutterFamilies;
+}
 export type JobState = 'running' | 'ok' | 'failed' | 'interrupted';
 export type RouteState = 'collegare' | 'estrarre' | 'preannotare' | 'revisionare' | 'importare' | 'pronta';
 
@@ -24,14 +32,26 @@ export interface EpochPoint {
   val_loss?: number;
   train_accuracy?: number;
   val_accuracy?: number;
+  /** The detector: its validation recall at score 0.1. */
+  val_recall?: number;
+  /** The classifier with “not a sign”: the sign crops read right and the “not a sign” crops rejected on validation, and
+   * their mean, which chooses its best epoch. */
+  val_sign_accuracy?: number;
+  val_rejection?: number;
+  val_balanced_accuracy?: number;
   seconds?: number;
 }
 
 export interface TrainingCurve {
   /** Epochs planned. */
   epochs: number;
+  /** It stopped after this epoch, before the planned ones (validation not better for a while). */
+  stopped_early?: number;
   points: EpochPoint[];
 }
+
+/** The networks with curves: the pipeline's detector and reader, the classifier with “not a sign”. */
+export type CurveNet = 'detector' | 'reader' | 'classifier';
 
 export interface StepProgress {
   done: number;
@@ -50,8 +70,8 @@ export interface JobProgress {
   last_line: string;
   /** A running job: how far its current step is (images checked, batches, the file being downloaded). */
   step_progress?: StepProgress | null;
-  /** Training only: the curves of the detector and of the reader, one point per epoch done. */
-  curves: Partial<Record<'detector' | 'reader', TrainingCurve>>;
+  /** Training only: the curves of the detector and of the reader (or of the classifier), one point per epoch done. */
+  curves: Partial<Record<CurveNet, TrainingCurve>>;
 }
 
 export interface Job {
@@ -220,6 +240,8 @@ export interface PanelStatus {
   preparation: Preparation | null;
   dataset: DatasetSummary | null;
   training_starts: TrainingStart[];
+  /** The choices of “Train the cutter”: its input sizes and the default one, what it finds and the default. */
+  cutter_options?: {sizes: string[]; size: string; families: CutterFamilies[]; family: CutterFamilies};
 }
 
 /** POST /api/panel/run/<action> */
@@ -242,8 +264,10 @@ export interface LogChunk {
 /** running: its pipeline is running now; finished: bundle packaged; incomplete: stopped before the end. */
 export type RunState = 'running' | 'finished' | 'incomplete';
 /** The step a run reached (scripts/run_v100_baseline.sh), 'done' when packaged; 'experiment' for a folder of
- * scripts/run_experiment_b.sh alone, 'done' when its three variants have a result. */
-export type RunStage = 'checks' | 'detector' | 'reader' | 'evaluate' | 'export' | 'bundle' | 'experiment' | 'done';
+ * scripts/run_experiment_b.sh alone, 'done' when its three variants have a result; mine, classifier, chain for a run of
+ * scripts/run_classifier.sh, 'done' when its chain is measured. */
+export type RunStage = 'checks' | 'detector' | 'reader' | 'evaluate' | 'export' | 'bundle' | 'experiment' | 'mine' | 'classifier'
+  | 'chain' | 'done';
 
 export interface RunStart {
   /** Where the weights came from; null when not recorded (a fresh run before its detector finished). */
@@ -255,10 +279,71 @@ export interface RunStart {
   source: string | null;
 }
 
+/** The classifier judged on the test crops: the sign crops (every crop for an old reader) read right, also with the kinds
+ * of other signs folded (comparable with the old reader), the “not a sign” crops it rejects, the sign crops it throws away. */
+export interface ClassifierNumbers {
+  samples: number | null;
+  accuracy: number | null;
+  human_samples: number | null;
+  human_accuracy: number | null;
+  /** Null for an old reader (no “not a sign”). */
+  family_accuracy?: number | null;
+  not_a_sign_crops?: number | null;
+  not_a_sign_rejected?: number | null;
+  rejection_rate?: number | null;
+  signs_rejected?: number | null;
+  signs_rejected_rate?: number | null;
+  /** 'v2': with “not a sign” and the kinds of other signs. */
+  class_scheme?: string | null;
+}
+
+/** The chain end to end (cutter -> classifier) at the cutter's score 0.1: the speed signs found and read right. */
+export interface ChainNumbers {
+  score_threshold: number;
+  /** Measured at 0.1 (else at the report's main score). */
+  at_chain_score: boolean;
+  truth: number | null;
+  found: number | null;
+  correct: number | null;
+  /** End to end: found by the cutter and read right by the classifier. */
+  recall: number | null;
+  /** The cutter alone. */
+  recall_found: number | null;
+  read_right_when_found: number | null;
+  human_truth: number | null;
+  human_recall: number | null;
+  boxes_per_frame: number | null;
+  false_per_frame: number | null;
+  /** False boxes the classifier lets through, per frame. */
+  surviving_false_per_frame: number | null;
+  /** The classifier can say “not a sign” (the old reader cannot). */
+  rejects: boolean | null;
+  images: number | null;
+}
+
+/** One size of the cutter (scripts/run_detector_sizes.sh) in a line: at score 0.1 on test (else validation). */
+export interface CutterLine {
+  size: string;
+  families: CutterFamilies;
+  finished: boolean;
+  evaluated: boolean;
+  partition: string | null;
+  score_threshold: number | null;
+  recall: number | null;
+  found: number | null;
+  truth_boxes: number | null;
+  /** A cutter of every sign: its recall on the speed signs alone (comparable with a speed-only cutter). */
+  speed_recall: number | null;
+  boxes_per_frame: number | null;
+  false_per_frame: number | null;
+  ms_per_frame: number | null;
+}
+
 export interface RunSummary {
   name: string;
-  /** training: the pipeline of helpers/3_train.sh; experiment: a folder with experiment B only. */
-  kind: 'training' | 'experiment';
+  /** training: the pipeline of helpers/3_train.sh; experiment: a folder with experiment B only; classifier: a run of
+   * scripts/run_classifier.sh (the classifier with “not a sign”); cutter: a run of scripts/run_detector_sizes.sh alone. */
+  kind: 'training' | 'experiment' | 'classifier' | 'cutter';
   state: RunState;
   stage: RunStage;
   /** "training the detector", ... */
@@ -290,6 +375,14 @@ export interface RunSummary {
     precision: number | null; f1: number | null; human_recall: number | null; human_precision: number | null} | null;
   /** Best validation values of the training (result.json). */
   best: {detector_val_loss: number | null; reader_val_accuracy: number | null};
+  /** The classifier with “not a sign” on the test crops, and its best validation epoch. */
+  classifier: (ClassifierNumbers & {best_validation_balanced_accuracy: number | null; best_validation_accuracy: number | null;
+    best_epoch: number | null}) | null;
+  /** The chain at the cutter's score 0.1 with this classifier, and with the old reader. */
+  chain: ChainNumbers | null;
+  chain_old_reader: ChainNumbers | null;
+  /** The detectors of scripts/run_detector_sizes.sh in this run, smallest first. */
+  cutters: CutterLine[] | null;
   /** Experiment B variants with a result.json. */
   experiment_b: string[];
   /** Files that exist but cannot be read. */
@@ -315,18 +408,157 @@ export interface LabelRow {
   wrong: {label: string; name: string; count: number} | null;
 }
 
+export interface HumanShare {
+  samples: number;
+  accuracy: number | null;
+  correct: number | null;
+}
+
+/** “Not a sign” crops: how many, and how many the classifier rejects (answers “not a sign”). */
+export interface Rejection {
+  crops: number;
+  rejected: number;
+  rejection_rate: number | null;
+}
+
 export interface ReaderEvaluation {
   partition: string;
   samples: number;
   correct: number;
   accuracy: number | null;
-  human: {samples: number; accuracy: number | null; correct: number | null} | null;
+  human: HumanShare | null;
   counts_by_label_basis: Record<string, number>;
   labels: LabelRow[];
   labels_human: LabelRow[] | null;
   /** Labels of the test the network never learnt. */
   unseen_labels: string[];
   classes: number | null;
+  /** 'v2' for the classifier with “not a sign” (every crop counted above, “not a sign” included); null for a reader. */
+  class_scheme?: string | null;
+  /** The sign crops alone (null for a reader). */
+  signs?: {
+    samples: number;
+    correct: number;
+    accuracy: number | null;
+    /** With other_sign:<kind> folded into other_sign on both sides: comparable with the old reader. */
+    family_accuracy: number | null;
+    /** Sign crops it answered “not a sign”. */
+    rejected: number | null;
+    rejected_rate: number | null;
+    human: HumanShare | null;
+    labels: LabelRow[];
+    labels_human: LabelRow[] | null;
+    unseen_labels: string[];
+  } | null;
+  /** The “not a sign” crops (null for a reader): rejected overall, by where they come from, on human-reviewed frames,
+   * and what it calls the ones it lets through. */
+  not_a_sign?: (Rejection & {
+    by_source: (Rejection & {source: string; label: string})[];
+    human: Rejection | null;
+    survivors: LabelCount[];
+  }) | null;
+}
+
+export interface LabelCount {
+  label: string;
+  /** “Speed limit 60”, “Other sign: give way”, “Not a sign”. */
+  name: string;
+  count: number;
+}
+
+/** Reviewed boxes at one score of the cutter: found by the cutter, read right by the classifier, rejected. */
+export interface ChainCounts {
+  truth: number;
+  found: number;
+  correct: number;
+  rejected: number | null;
+  /** End to end: found and read right, of the reviewed boxes. */
+  recall: number | null;
+  /** The cutter alone. */
+  recall_found: number | null;
+  read_right_when_found: number | null;
+  human: {truth: number | null; found: number | null; correct: number | null; recall: number | null; recall_found: number | null} | null;
+  /** Speed signs only: by the width of the reviewed box (lt12, 12-20, 20-40, ge40). */
+  widths?: {key: string; label: string; truth: number | null; found: number | null; correct: number | null; recall: number | null;
+    recall_found: number | null}[] | null;
+}
+
+export interface ChainThreshold {
+  score: number;
+  speed_signs: ChainCounts | null;
+  /** Every reviewed box, other signs included. */
+  all_boxes: ChainCounts | null;
+  boxes_per_frame: number | null;
+  false_boxes: number | null;
+  false_per_frame: number | null;
+  surviving_false_boxes: number | null;
+  surviving_false_per_frame: number | null;
+  /** Share of the cutter's false boxes the classifier rejects. */
+  false_rejected_rate: number | null;
+  human: {images: number | null; false_per_frame: number | null; surviving_false_per_frame: number | null} | null;
+  surviving_false_by_label: LabelCount[];
+  /** The main score only: the classifier's answers by the review of the box (“not a sign” for a false box). */
+  labels: LabelRow[] | null;
+}
+
+/** The chain (cutter -> classifier) on a partition (evaluation/chain-<partition>.json). */
+export interface ChainEvaluation {
+  partition: string;
+  cutter: {checkpoint: string | null; id: string | null; same_split: boolean | null; input_size: string | null};
+  classifier: {checkpoint: string | null; class_scheme: string | null; classes: number | null; rejects: boolean | null;
+    same_split: boolean | null};
+  iou_threshold: number | null;
+  image_count: number | null;
+  human_image_count: number | null;
+  speed_sign_count: number | null;
+  reviewed_box_count: number | null;
+  main_score_threshold: number | null;
+  thresholds: ChainThreshold[];
+  device: string | null;
+  seconds: number | null;
+  limitations: string[];
+}
+
+/** The training of the classifier with “not a sign” (classifier/result.json). */
+export interface ClassifierTraining extends TrainingResult {
+  epochs_run: number | null;
+  stopped_early: number | null;
+  class_scheme: string | null;
+  best_validation_sign_accuracy: number | null;
+  best_validation_rejection: number | null;
+  best_validation_balanced_accuracy: number | null;
+  /** What chose the best epoch ('balanced_accuracy'). */
+  selection: string | null;
+  /** The weight of “not a sign” in the loss. */
+  not_a_sign_weight: number | null;
+  augmentation: boolean | null;
+  negatives: {file: string | null; sha256: string | null; by_split: Record<string, Record<string, number> | number>} | null;
+}
+
+/** The header of negatives.jsonl: the cutter's false boxes mined for the classifier. */
+export interface NegativesMined {
+  created_at: string | null;
+  dataset_kind: string | null;
+  dataset_sha256: string | null;
+  split_sha256: string | null;
+  cutter: {checkpoint: string | null; id: string | null; input_size: string | null; same_split: boolean | null};
+  settings: {score_threshold: number | null; max_iou: number | null; per_frame: number | null; total_factor: number | null;
+    seed: number | null; rule_change_at: string | null};
+  splits: {split: string; frames: number | null; frames_with_candidates: number | null; candidates: number | null;
+    after_frame_cap: number | null; positives: number | null; cap: number | null; selected: number | null;
+    /** human, ai_after_rule, ai_before_rule, other. */
+    by_tier: Record<string, number>}[];
+}
+
+/** What scripts/run_classifier.sh wrote in a run. */
+export interface ClassifierRun {
+  files: Record<string, boolean>;
+  training: ClassifierTraining | null;
+  negatives: NegativesMined | null;
+  evaluations: {test: ReaderEvaluation | null; validation: ReaderEvaluation | null};
+  chains: {test: ChainEvaluation | null; validation: ChainEvaluation | null; old_reader: ChainEvaluation | null};
+  /** comparison.txt, the new classifier against the old reader. */
+  comparison: string | null;
 }
 
 export interface BoxCounts {
@@ -401,6 +633,10 @@ export interface DatasetUsed {
   current_split: boolean;
   detector: {frames: Record<string, number>; boxes: Record<string, number>; negative_frames: Record<string, number>} | null;
   reader: {crops: Record<string, number>; classes: number | null} | null;
+  /** The classifier with “not a sign”: its crops, and its “not a sign” crops per split by where they come from. */
+  classifier?: {crops: Record<string, number>; classes: number | null; class_scheme: string | null;
+    negatives: Record<string, Record<string, number> | number>;
+    folded_labels: {label: string; name: string; into: string | null; into_name: string | null; count?: number}[] | null} | null;
 }
 
 export interface Matrix {
@@ -448,8 +684,26 @@ export interface RunDetail extends RunSummary {
   reader_eval: ReaderEvaluation | null;
   detector_eval: DetectorEvaluation | null;
   dataset: DatasetUsed | null;
-  curves: Partial<Record<'detector' | 'reader', TrainingCurve>>;
+  curves: Partial<Record<CurveNet, TrainingCurve>>;
   experiment: ExperimentB | null;
+  /** What scripts/run_classifier.sh wrote here (a run of its own, or into a run of the pipeline). */
+  classifier_run: ClassifierRun | null;
+  /** What scripts/run_detector_sizes.sh wrote here: each size as the Models tab judges a cutter, the comparison. */
+  cutter_run: {sizes: CutterSize[]; comparison: string | null} | null;
+}
+
+export interface CutterSize {
+  size: string;
+  /** "960 × 544". */
+  label: string;
+  families: CutterFamilies;
+  finished: boolean;
+  training: {architecture: string | null; initialization: string | null; best_epoch: number | null; epochs: number | null;
+    epochs_run: number | null; best_validation_loss: number | null; input_size: string | null; anchor_min_ratio: number | null;
+    augmentation: boolean | null; gpu: string | null; families: CutterFamilies | null} | null;
+  test: CutterNumbers | null;
+  validation: CutterNumbers | null;
+  files: Record<string, boolean>;
 }
 
 // GET /api/panel/models and POST /api/panel/models/active (nnslr_tools.model_roles.ModelIndex): the Models tab.
@@ -491,13 +745,10 @@ export interface CutterNumbers {
   input_size: string | null;
   anchor_min_ratio: number | null;
   checkpoint_epoch: number | null;
-}
-
-export interface ClassifierNumbers {
-  samples: number;
-  accuracy: number | null;
-  human_samples: number | null;
-  human_accuracy: number | null;
+  /** What the report says the cutter finds (null in older reports). */
+  families: CutterFamilies | null;
+  /** Recall by family at this score (newer reports): the speed signs, and the other signs for a cutter of every sign. */
+  by_family: Record<string, {truth: number; found: number; recall: number | null}> | null;
 }
 
 /** An experiment B variant on one partition: whom the sign applies to, and the reading. */
@@ -545,6 +796,9 @@ export interface CutterModel extends ModelBase {
   anchor_min_ratio: number;
   anchor_recorded: boolean;
   augmentation: boolean | null;
+  /** What it finds; recorded false: from before it was recorded (the speed signs only). */
+  families: CutterFamilies;
+  families_recorded: boolean;
   test: CutterNumbers | null;
   validation: CutterNumbers | null;
 }
@@ -554,6 +808,15 @@ export interface ClassifierModel extends ModelBase {
   classes: number | null;
   best_validation_accuracy: number | null;
   test: ClassifierNumbers | null;
+  /** The classifier with “not a sign” (classifier:<run>/classifier) only; absent for a reader. */
+  class_scheme?: string;
+  /** The mean of the two below, which chose its best epoch. */
+  best_validation_balanced_accuracy?: number | null;
+  best_validation_sign_accuracy?: number | null;
+  best_validation_rejection?: number | null;
+  augmentation?: boolean | null;
+  chain?: ChainNumbers | null;
+  chain_old_reader?: ChainNumbers | null;
 }
 
 export interface DeciderModel extends ModelBase {

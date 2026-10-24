@@ -12,18 +12,22 @@ export const JOB_STATE: Record<JobState, [label: string, kind: string]> = {
 /** The group of each action (nnslr_tools.panel.ACTIONS): a terminal activity of the same group is that work. */
 export const ACTION_GROUP: Record<ActionName, string> = {
   fetch: 'fetch', prepare: 'prepare', dataset: 'train', train: 'train', train_continue: 'train', train_resume: 'train',
-  update: 'update',
+  train_classifier: 'train', train_cutter: 'train', update: 'update',
 };
 
 /** The icon of each action, on its button. */
 export const ACTION_ICON: Record<ActionName, IconName> = {
   fetch: 'download', prepare: 'prepare', dataset: 'import', train: 'train', train_continue: 'train',
-  train_resume: 'resume', update: 'update',
+  train_resume: 'resume', train_classifier: 'train', train_cutter: 'train', update: 'update',
 };
 
 /** The actions whose jobs the Prepare and Train tabs show. */
 export const PREPARE_ACTIONS: ActionName[] = ['fetch', 'prepare'];
-export const TRAIN_ACTIONS: ActionName[] = ['dataset', 'train', 'train_continue', 'train_resume'];
+export const TRAIN_ACTIONS: ActionName[] = ['dataset', 'train', 'train_continue', 'train_resume', 'train_classifier', 'train_cutter'];
+/** The trainings whose job shows its curves on the Train tab. */
+export const CHARTED_ACTIONS: ActionName[] = ['train', 'train_continue', 'train_classifier', 'train_cutter'];
+/** The trainings of the whole pipeline (helpers/3_train.sh): a stopped one can be resumed on its run. */
+export const PIPELINE_ACTIONS: ActionName[] = ['train', 'train_continue', 'train_resume'];
 
 /**
  * When the job started. The server writes started_at with its offset when it has it; otherwise "started",

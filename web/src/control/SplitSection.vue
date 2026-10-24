@@ -2,7 +2,8 @@
 // The dataset and the split a run learnt from and was measured on (its training plans and the split file they
 // name): their hashes, the policy of the split, the routes reviewed by hand whose places are the test, the objects of
 // each partition as one stacked bar (the colours of the dataset on the Train tab), and partition by partition the
-// detector's frames and boxes, the reader's crops and the objects a person confirmed.
+// detector's frames and boxes, the reader's crops (or the classifier's, with its “not a sign” crops) and the objects a
+// person confirmed.
 import {computed} from 'vue';
 import {thousands} from '../common/format';
 import type {DatasetUsed} from '../common/panel-types';
@@ -19,15 +20,23 @@ const bar = computed(() => {
   return {total, parts: keys.map((key) => ({key, label: PARTITION_LABEL[key] ?? key, count: counts[key] ?? 0, slot: SLOT[key] ?? 0,
     share: total ? Math.round((counts[key] ?? 0) * 100 / total) + '%' : ''}))};
 });
+/** The classifier with “not a sign”: its “not a sign” crops of a partition, whatever their source. */
+const classifier = computed(() => props.dataset.classifier ?? null);
+function notASign(key: string): string {
+  const counts = classifier.value?.negatives[key];
+  if (counts === undefined) return '–';
+  return thousands(typeof counts === 'number' ? counts : Object.values(counts).reduce((sum, count) => sum + count, 0));
+}
 /** Every partition named anywhere, with what each network had of it. */
 const rows = computed(() => {
   const value = props.dataset;
   const keys = partitionOrder([...new Set([...Object.keys(value.split?.counts ?? {}), ...Object.keys(value.detector?.frames ?? {}),
-    ...Object.keys(value.reader?.crops ?? {})])]);
+    ...Object.keys(value.reader?.crops ?? {}), ...Object.keys(value.classifier?.crops ?? {})])]);
   const cell = (map: Record<string, number> | undefined, key: string): string => map === undefined ? '–' : thousands(map[key] ?? 0);
   return keys.map((key) => ({key, label: PARTITION_LABEL[key] ?? key, objects: cell(value.split?.counts, key),
     human: cell(value.split?.human_reviewed_counts, key), frames: cell(value.detector?.frames, key), boxes: cell(value.detector?.boxes, key),
     negatives: cell(value.detector?.negative_frames, key), crops: cell(value.reader?.crops, key),
+    classifierCrops: cell(value.classifier?.crops, key), notASign: notASign(key),
     routes: value.split?.routes[key]?.length ?? null}));
 });
 </script>
@@ -64,17 +73,22 @@ const rows = computed(() => {
       <thead><tr><th>Partition</th><th class="num" title="Objects of the dataset">Objects</th><th class="num" title="Objects a person confirmed">Human</th>
         <th class="num" title="Routes with frames in this partition">Routes</th><th class="num" title="Frames the detector saw">Det. frames</th>
         <th class="num" title="Reviewed signs the detector learnt or was measured on">Det. boxes</th>
-        <th class="num" title="Frames reviewed as having no sign">No-sign frames</th><th class="num" title="Boxes the reader read">Reader crops</th></tr></thead>
+        <th class="num" title="Frames reviewed as having no sign">No-sign frames</th><th class="num" title="Boxes the reader read">Reader crops</th>
+        <template v-if="classifier"><th class="num" title="Crops the classifier learnt from or was measured on">Classifier crops</th>
+          <th class="num" title="Its “not a sign” crops: boxes reviewed as not a sign, rejected proposals, false boxes of the cutter">Not a sign</th></template></tr></thead>
       <tbody>
         <tr v-for="row in rows" :key="row.key" :class="{test: row.key === 'test'}">
           <th scope="row">{{ row.label }}</th><td class="num">{{ row.objects }}</td><td class="num">{{ row.human }}</td>
           <td class="num">{{ row.routes ?? '–' }}</td><td class="num">{{ row.frames }}</td><td class="num">{{ row.boxes }}</td>
           <td class="num">{{ row.negatives }}</td><td class="num">{{ row.crops }}</td>
+          <template v-if="classifier"><td class="num">{{ row.classifierCrops }}</td><td class="num">{{ row.notASign }}</td></template>
         </tr>
       </tbody>
     </table></div>
     <p class="note">The buffer is the places next to the test: neither learnt from nor measured, so a sign seen from a few metres
       away cannot leak into the test.</p>
+    <p v-if="classifier?.folded_labels?.length" class="note">Learnt as a broader label, for lack of crops of their own: {{ classifier.folded_labels
+      .map((row) => row.into_name ? row.name + ' → ' + row.into_name : row.name + (row.count !== undefined ? ' (' + row.count + ')' : '')).join(', ') }}.</p>
     <p v-for="(warning, index) in split?.warnings ?? []" :key="index" class="note ds-note">{{ warning }}</p>
   </section>
 </template>

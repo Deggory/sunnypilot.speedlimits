@@ -8,6 +8,8 @@ import type {RunSummary} from '../common/panel-types';
 import {pct, plain, points, signed} from './evaluate';
 
 const props = defineProps<{runs: RunSummary[]}>();
+/** The last (largest) size of the cutter in a run, if it has one. */
+const lastCutter = (run: RunSummary) => run.cutters?.[run.cutters.length - 1] ?? null;
 type Unit = 'percent' | 'count' | 'number';
 interface Measure {
   key: string;
@@ -29,6 +31,20 @@ const MEASURES: Measure[] = [
   {key: 'false', label: 'False boxes', unit: 'count', better: 'lower', pick: (run) => run.detector?.false_boxes},
   {key: 'val_accuracy', label: 'Reader, best validation accuracy', unit: 'percent', better: 'higher', pick: (run) => run.best.reader_val_accuracy},
   {key: 'val_loss', label: 'Detector, best validation loss', unit: 'number', better: 'lower', pick: (run) => run.best.detector_val_loss},
+  // The classifier with “not a sign” (scripts/run_classifier.sh) and the chain at the cutter's score 0.1.
+  {key: 'classifier', label: 'Classifier, signs read right', unit: 'percent', better: 'higher', pick: (run) => run.classifier?.accuracy},
+  {key: 'classifier_human', label: 'Classifier, human-reviewed', unit: 'percent', better: 'higher', pick: (run) => run.classifier?.human_accuracy},
+  {key: 'classifier_family', label: 'Classifier, other signs folded', unit: 'percent', better: 'higher', pick: (run) => run.classifier?.family_accuracy},
+  {key: 'rejection', label: '“Not a sign” rejected', unit: 'percent', better: 'higher', pick: (run) => run.classifier?.rejection_rate},
+  {key: 'signs_rejected', label: 'Signs thrown away', unit: 'percent', better: 'lower', pick: (run) => run.classifier?.signs_rejected_rate},
+  {key: 'chain_recall', label: 'Chain, speed signs end to end', unit: 'percent', better: 'higher', pick: (run) => run.chain?.recall},
+  {key: 'chain_surviving', label: 'Chain, false boxes left per frame', unit: 'number', better: 'lower', pick: (run) => run.chain?.surviving_false_per_frame},
+  // The cutter of scripts/run_detector_sizes.sh (its last size) at score 0.1: the speed signs alone stay comparable
+  // between a cutter of every sign and one of the speed signs only.
+  {key: 'cutter_recall', label: 'Cutter, signs found at 0.1', unit: 'percent', better: 'higher', pick: (run) => lastCutter(run)?.recall},
+  {key: 'cutter_speed', label: 'Cutter, speed signs found at 0.1', unit: 'percent', better: 'higher',
+    pick: (run) => { const line = lastCutter(run); return line?.families === 'all' ? line.speed_recall : line?.recall; }},
+  {key: 'cutter_false', label: 'Cutter, false boxes per frame', unit: 'number', better: 'lower', pick: (run) => lastCutter(run)?.false_per_frame},
 ];
 
 /** By default the newest evaluated run against the one before it. */

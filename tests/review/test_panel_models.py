@@ -20,7 +20,7 @@ from nnslr_tools.model_roles import ModelChoiceError, ModelIndex
 from nnslr_tools.panel import Panel, PanelError
 from nnslr_tools.runs import RunsIndex
 from review_helpers import TOKEN, RunningServer, json_of, make_report, sign_in
-from test_panel_runs import AI, HUMAN, experiment_result, make_run, write
+from test_panel_runs import AI, HUMAN, experiment_result, make_classifier_run, make_run, write
 
 THRESHOLDS = (0.05, 0.1, 0.25, 0.3, 0.5)
 # Signs 10, 15, 30 and 50 px wide. At score 0.1 the 10 and 30 px ones are found and a 60 px box is false; at 0.25
@@ -383,3 +383,95 @@ def test_on_127_0_0_1_the_choice_is_recorded_as_local(tmp_path):
         assert status == 200 and (json_of(data)['active']['who'], json_of(data)['active']['via']) == (None, 'local')
     finally:
         server.close()
+
+
+# -- the classifier with "not a sign" (scripts/run_classifier.sh) ----------------------------------------------------
+def test_the_classifier_with_not_a_sign_is_a_version_of_its_own(root, models):
+    run = make_classifier_run(root)
+    write(root / 'runs/r1/reader/reader-best.pt', 'weights')
+    touch(root / 'runs/r1/reader/reader-best.pt', 1_000_000)
+    roles = by_role(models.index())
+    new, old = roles['classifier']['versions']
+    assert (new['id'], new['run'], new['part'], new['label'], new['detail']) == (
+        f'classifier:{run.name}/classifier', run.name, 'classifier', 'Classifier', 'with “not a sign”')
+    assert (new['finished'], new['class_scheme'], new['classes'], new['best_epoch'], new['epochs'], new['epochs_run']) == (
+        True, 'v2', 8, 2, 3, 2)
+    assert (new['best_validation_balanced_accuracy'], new['best_validation_sign_accuracy'], new['best_validation_rejection']) == (
+        0.8, 0.7, 0.9)
+    assert (new['architecture'], new['initialization'], new['augmentation'], new['problems']) == (
+        'mobilenet_v3_small', 'imagenet1k_v1', True, [])
+    test = new['test']
+    assert (test['samples'], test['accuracy'], test['human_samples'], test['human_accuracy'], test['family_accuracy']) == (
+        5, 0.6, 1, 1.0, 0.8)
+    assert (test['rejection_rate'], test['not_a_sign_crops'], test['not_a_sign_rejected']) == (0.75, 4, 3)
+    assert (test['signs_rejected'], test['signs_rejected_rate']) == (1, 0.2)
+    chain = new['chain']
+    assert (chain['score_threshold'], chain['recall'], chain['correct'], chain['truth'], chain['recall_found']) == (0.1, 0.5, 4, 8, 0.75)
+    assert (chain['surviving_false_per_frame'], chain['false_per_frame'], chain['human_recall']) == (0.25, 1.0, 1.0)
+    assert (new['chain_old_reader']['recall'], new['chain_old_reader']['surviving_false_per_frame']) == (0.375, 1.0)
+    # The reader of the training pipeline stays as it was.
+    assert (old['id'], old['label'], old['detail']) == ('classifier:r1/reader', 'Reader', 'training pipeline')
+    assert old['test'] == {'samples': 6, 'accuracy': pytest.approx(4 / 6), 'human_samples': 2, 'human_accuracy': 1.0}
+    assert 'chain' not in old and 'class_scheme' not in old
+    json.dumps(models.index(), allow_nan=False)
+
+
+def test_a_classifier_still_training_and_one_without_measures(root, models):
+    make_classifier_run(root, 'c1', upto='classifier')
+    make_classifier_run(root, 'c2', upto='evaluate')
+    versions = {entry['run']: entry for entry in by_role(models.index())['classifier']['versions']}
+    assert (versions['c1']['finished'], versions['c1']['test'], versions['c1']['chain'], versions['c1']['class_scheme']) == (
+        False, None, None, 'v2')
+    assert (versions['c2']['finished'], versions['c2']['test'], versions['c2']['chain']) == (True, None, None)
+    with pytest.raises(ModelChoiceError) as error:
+        models.set_active('classifier', 'classifier:c1/classifier', who='admin', via='sign-in')
+    assert (error.value.status, error.value.reason) == (409, 'not_finished')
+    (root / 'runs/c2/classifier/result.json').write_text('{"task": "reader", ')
+    entry = next(entry for entry in by_role(models.index())['classifier']['versions'] if entry['run'] == 'c2')
+    assert entry['finished'] is False and entry['problems'] == ['classifier/result.json is unreadable']
+
+
+def test_the_classifier_with_not_a_sign_can_be_put_in_use(root, models):
+    run = make_classifier_run(root)
+    write(root / 'runs/r1/reader/reader-best.pt', 'weights')
+    model_id = f'classifier:{run.name}/classifier'
+    entry = models.set_active('classifier', model_id, who='admin', via='sign-in')
+    assert entry['id'] == model_id
+    roles = by_role(models.index())
+    assert roles['classifier']['active']['found']
+    assert {item['id']: item['in_use'] for item in roles['classifier']['versions']} == {model_id: True, 'classifier:r1/reader': False}
+    # The old id of a reader stays valid, and "classifier" is no part of another role.
+    models.set_active('classifier', 'classifier:r1/reader', who='admin', via='sign-in')
+    for role, wrong, reason in (('cutter', f'cutter:{run.name}/classifier', 404), ('classifier', f'classifier:{run.name}/detector', 404),
+                                ('classifier', f'classifier:{run.name}/classifier/x', 400)):
+        with pytest.raises(ModelChoiceError) as error:
+            models.set_active(role, wrong, who='admin', via='sign-in')
+        assert error.value.status == reason, wrong
+
+
+def test_the_cutter_in_use_with_its_files(root, models):
+    assert models.in_use('cutter') == (None, 'no cutter in use: choose one on the Models tab')
+    run = pipeline(root)
+    models.set_active('cutter', 'cutter:r1/detector', who='admin', via='sign-in')
+    version, why = models.in_use('cutter')
+    assert (version['id'], why) == ('cutter:r1/detector', '')
+    (run / 'detector/detector-best.pt').unlink()
+    assert models.in_use('cutter') == (None, 'the cutter in use is no longer on this server: choose another one on the Models tab')
+    (root / 'models/active.json').write_text('{"cutter": ')
+    assert models.in_use('cutter') == (None, 'models/active.json cannot be read')
+
+
+def test_what_a_cutter_finds_and_the_speed_signs_alone(root, models):
+    from test_panel_runs import make_cutter_run
+    make_cutter_run(root, 'k1', families='all')
+    make_cutter_run(root, 'k2', families='speed')
+    cutters = {entry['id']: entry for entry in by_role(models.index())['cutter']['versions']}
+    every = cutters['cutter:k1/detector-sizes/960x544']
+    assert (every['families'], every['families_recorded'], every['input_size']) == ('all', True, '960x544')
+    assert every['test']['by_family']['speed'] == {'truth': 3, 'found': 2, 'recall': pytest.approx(2 / 3)}
+    assert (every['test']['families'], every['test']['recall']) == ('all', 0.5)
+    assert 'other_sign' not in cutters['cutter:k2/detector-sizes/960x544']['test']['by_family']
+    # Before it was recorded, a cutter found the speed signs only.
+    write(root / 'runs/r1/detector/detector-best.pt', 'weights')
+    old = {entry['id']: entry for entry in by_role(models.index())['cutter']['versions']}['cutter:r1/detector']
+    assert (old['families'], old['families_recorded'], old['test']['by_family']) == ('speed', False, None)

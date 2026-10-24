@@ -1,8 +1,10 @@
 <script setup lang="ts">
 // One trained version of a role: its run, what it is and when its weights were saved, the headline numbers that judge
 // that role (the cutter: signs found overall and by width at a low score, boxes per frame, time per frame; the
-// classifier: right answers on the test; the decider: the "Another" road found, on validation and test), the button
-// that puts it in use and the link to its run on Evaluate.
+// classifier: right answers on the test, and for the classifier with “not a sign” the “not a sign” crops it rejects and
+// the chain end to end at the cutter's score, the speed signs found and read right and the false boxes per frame that
+// survive it; the decider: the "Another" road found, on validation and test), the button that puts it in use and the
+// link to its run on Evaluate.
 import {computed} from 'vue';
 import {isoWhen, thousands} from '../common/format';
 import type {DeciderNumbers, ModelVersion} from '../common/panel-types';
@@ -17,9 +19,15 @@ const classifier = computed(() => props.version.role === 'classifier' ? props.ve
 const decider = computed(() => props.version.role === 'decider' ? props.version : null);
 /** The cutter's numbers: on the test, else on validation (a size compared before its test was measured). */
 const cut = computed(() => cutter.value?.test ?? cutter.value?.validation ?? null);
-const evaluated = computed(() => cut.value !== null || (classifier.value?.test ?? null) !== null
+/** A cutter of every sign: the speed signs alone, comparable with a cutter of the speed signs only. */
+const speedSigns = computed(() => cutter.value?.families === 'all' ? cut.value?.by_family?.['speed'] ?? null : null);
+const evaluated = computed(() => cut.value !== null || (classifier.value?.test ?? null) !== null || (classifier.value?.chain ?? null) !== null
   || decider.value?.validation != null || decider.value?.test != null);
 const epoch = computed(() => epochText(props.version.best_epoch, props.version.epochs_run ?? props.version.epochs));
+/** The classifier with “not a sign” (classifier:<run>/classifier); an old reader has none of its numbers. */
+const rejects = computed(() => classifier.value?.class_scheme !== undefined);
+const chain = computed(() => classifier.value?.chain ?? null);
+const oldChain = computed(() => classifier.value?.chain_old_reader ?? null);
 
 /** Why the button is off, as its title. */
 const blocked = computed((): string => {
@@ -64,6 +72,8 @@ const noOtherOnTest = computed(() => decider.value?.test?.other_road_support ===
           <span>of the signs found<template v-if="cut.truth_boxes !== null">: {{ thousands(cut.found ?? 0) }} of {{ thousands(cut.truth_boxes) }}</template>
             · {{ (PARTITION_LABEL[cut.partition] ?? cut.partition).toLowerCase() }}, score {{ cut.score_threshold ?? '–' }}</span>
         </div>
+        <p v-if="speedSigns" class="note" :data-speed-recall="speedSigns.recall ?? undefined">Speed signs alone: <strong>{{ pct(speedSigns.recall) }}</strong>
+          ({{ thousands(speedSigns.found) }} of {{ thousands(speedSigns.truth) }}), comparable with a cutter of the speed signs only.</p>
         <ul v-if="cut.widths" class="model-widths" aria-label="Signs found by width in the frame">
           <li v-for="row in cut.widths" :key="row.key" :title="row.found + ' of ' + row.truth + ' signs ' + row.label + ' wide'">
             <span>{{ row.label }}</span><b>{{ row.truth ? pct(row.recall) : '–' }}</b><span>{{ row.found }} of {{ row.truth }}</span>
@@ -76,9 +86,43 @@ const noOtherOnTest = computed(() => decider.value?.test?.other_road_support ===
           <div><dt>Input</dt><dd>{{ sizeText(cutter.input_size) }}<span v-if="!cutter.input_size_recorded" class="muted"> (default)</span></dd></div>
           <div><dt>Default box</dt><dd>{{ cutter.anchor_min_ratio }}<span v-if="!cutter.anchor_recorded" class="muted"> (default)</span></dd></div>
           <div><dt>Best epoch</dt><dd>{{ epoch }}</dd></div>
+          <div><dt>Finds</dt><dd>{{ cutter.families === 'all' ? 'speed and other signs' : 'speed signs' }}<span v-if="!cutter.families_recorded"
+            class="muted"> (not recorded)</span></dd></div>
         </dl>
         <p v-if="!cut.at_cutter_score" class="note">At the report’s score {{ cut.score_threshold ?? '–' }}: it was evaluated before the cutter’s {{ score }} was measured.</p>
         <p v-if="cut.human" class="note">Frames a person confirmed: {{ pct(cut.human.recall) }} found ({{ cut.human.found ?? 0 }} of {{ cut.human.truth_boxes ?? 0 }}).</p>
+      </template>
+    </template>
+
+    <template v-else-if="classifier && rejects">
+      <template v-if="classifier.test || chain">
+        <div v-if="classifier.test" class="model-big">
+          <strong>{{ pct(classifier.test.accuracy) }}</strong>
+          <span>of the test signs read right<template v-if="classifier.test.samples !== null">: {{ thousands(classifier.test.samples) }} sign crops</template></span>
+        </div>
+        <dl class="model-facts">
+          <div v-if="classifier.test"><dt>Human-reviewed</dt><dd>{{ pct(classifier.test.human_accuracy) }}<span v-if="classifier.test.human_samples"
+            class="muted"> of {{ thousands(classifier.test.human_samples) }}</span></dd></div>
+          <div v-if="classifier.test"><dt title="Share of the “not a sign” test crops it answers “not a sign”">“Not a sign” rejected</dt><dd>{{
+            pct(classifier.test.rejection_rate) }}<span v-if="classifier.test.not_a_sign_crops" class="muted"> of {{ thousands(classifier.test.not_a_sign_crops) }}</span></dd></div>
+          <div v-if="classifier.test"><dt title="Sign crops it throws away as “not a sign”">Signs thrown away</dt><dd>{{
+            pct(classifier.test.signs_rejected_rate) }}<span v-if="classifier.test.signs_rejected !== null && classifier.test.signs_rejected !== undefined"
+            class="muted"> ({{ thousands(classifier.test.signs_rejected) }})</span></dd></div>
+          <div v-if="chain"><dt :title="'Speed signs of the test found by the cutter at score ' + chain.score_threshold + ' and read right by this classifier'">Chain, end to end</dt><dd>{{
+            pct(chain.recall) }}<span v-if="chain.truth" class="muted"> ({{ thousands(chain.correct ?? 0) }} of {{ thousands(chain.truth) }})</span></dd></div>
+          <div v-if="chain"><dt :title="'False boxes of the cutter at score ' + chain.score_threshold + ' that this classifier lets through, per frame'">Surviving false per frame</dt><dd>{{
+            perFrame(chain.surviving_false_per_frame) }}<span class="muted"> of {{ perFrame(chain.false_per_frame) }}</span></dd></div>
+          <div><dt title="Mean of the sign crops read right and the “not a sign” crops rejected, on validation: it chose the best epoch">Best validation</dt><dd>{{
+            pct(classifier.best_validation_balanced_accuracy ?? classifier.best_validation_accuracy) }}</dd></div>
+          <div><dt>Best epoch</dt><dd>{{ epoch }}</dd></div>
+          <div><dt>Classes</dt><dd>{{ classifier.classes ?? '–' }}</dd></div>
+        </dl>
+        <p v-if="chain" class="note">Chain at the cutter’s score {{ chain.score_threshold }}: the cutter alone finds {{ pct(chain.recall_found) }}
+          of the speed signs<template v-if="chain.human_recall !== null">; on the frames a person confirmed, {{ pct(chain.human_recall) }} end to end</template>.</p>
+        <p v-if="chain && oldChain" class="note">The old reader in the same chain: {{ pct(oldChain.recall) }} end to end, every false box
+          let through ({{ perFrame(oldChain.surviving_false_per_frame) }} per frame).</p>
+        <p v-if="classifier.test?.family_accuracy != null" class="note">With the kinds of other signs folded, as the old reader reads them:
+          {{ pct(classifier.test.family_accuracy) }} right.</p>
       </template>
     </template>
 
@@ -86,7 +130,7 @@ const noOtherOnTest = computed(() => decider.value?.test?.other_road_support ===
       <template v-if="classifier.test">
         <div class="model-big">
           <strong>{{ pct(classifier.test.accuracy) }}</strong>
-          <span>right answers on {{ thousands(classifier.test.samples) }} test crops</span>
+          <span>right answers on {{ thousands(classifier.test.samples ?? 0) }} test crops</span>
         </div>
         <dl class="model-facts">
           <div><dt>Human-reviewed</dt><dd>{{ pct(classifier.test.human_accuracy) }}<span v-if="classifier.test.human_samples" class="muted"> of {{ thousands(classifier.test.human_samples) }}</span></dd></div>

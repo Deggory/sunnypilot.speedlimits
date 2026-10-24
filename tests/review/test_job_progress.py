@@ -95,3 +95,136 @@ def test_the_current_step_has_its_own_percent_from_the_log():
 def test_the_last_line_is_never_a_piece_of_json():
     log = TRAIN_LOG.split('== 4/10')[0] + '{\n  "cuda": true,\n  "devices": [\n    "sm_90"\n  ],\n  "bytes": 3407,\n  12\n}\n'
     assert progress('train', 'running', log)['last_line'] == '== 3/10 Explicit CUDA smoke test =='
+
+
+# -- scripts/run_classifier.sh: the classifier with "not a sign" -----------------------------------------------------
+CLASSIFIER_LOG = """== scripts/run_classifier.sh 2026-10-24_1730-classifier
+== Classifier (cutter -> classifier -> decider) ==
+run:          2026-10-24_1730-classifier
+== 1/7 Check the dataset, the split and the cutter (CPU-only) ==
+== 2/7 Explicit CUDA smoke test ==
+== 3/7 Mine the cutter's false boxes ==
+== 4/7 Train the classifier ==
+classifier epoch 3/20 train_loss 0.5123 val_loss 0.6012 train_accuracy 0.8123 val_accuracy 0.8501 val_sign_accuracy 0.7012 val_rejection 0.9534 41s
+"""
+
+
+def test_the_classifier_training_has_its_own_steps_and_curves():
+    from nnslr_tools.job_progress import CLASSIFIER_STEPS
+    assert sum(weight for _, _, weight in CLASSIFIER_STEPS) == 100
+    assert max(CLASSIFIER_STEPS, key=lambda step: step[2])[0] == 'classifier'
+    result = progress('train_classifier', 'running', CLASSIFIER_LOG)
+    assert states(result) == {'checks': 'done', 'mine': 'done', 'classifier': 'current', 'evaluate': 'todo', 'chain': 'todo'}
+    assert [step['label'] for step in result['steps']] == ['Checks and GPU smoke test', 'Mine the cutter’s false boxes',
+                                                            'Train the classifier', 'Evaluate the classifier alone',
+                                                            'Evaluate the chain end to end']
+    # 4 + 14 done, and 3 of 20 epochs of the classifier's 60.
+    assert result['percent'] == 27.0
+    assert result['detail'] == 'classifier · epoch 3 of 20'
+    assert result['step_progress'] == {'done': 3, 'total': 20, 'percent': 15.0, 'text': 'epoch 3 of 20'}
+    [point] = result['curves']['classifier']['points']
+    assert point == {'epoch': 3, 'train_loss': 0.5123, 'val_loss': 0.6012, 'train_accuracy': 0.8123, 'val_accuracy': 0.8501,
+                     'val_sign_accuracy': 0.7012, 'val_rejection': 0.9534,
+                     'val_balanced_accuracy': (0.7012 + 0.9534) / 2, 'seconds': 41}
+    assert result['curves']['classifier']['epochs'] == 20 and 'stopped_early' not in result['curves']['classifier']
+
+
+def test_the_steps_of_the_classifier_training_from_its_phase_lines():
+    head = CLASSIFIER_LOG.split('== 2/7')[0]
+    checks = progress('train_classifier', 'running', head)
+    # The checks are the phases 1 and 2: at the first, none of the two is done.
+    assert states(checks)['checks'] == 'current' and checks['percent'] == 0.0
+    smoke = progress('train_classifier', 'running', CLASSIFIER_LOG.split('== 3/7')[0])
+    assert smoke['step_progress'] == {'done': 1, 'total': 2, 'percent': 50.0, 'text': 'Explicit CUDA smoke test · 2 of 2'}
+    assert smoke['percent'] == 2.0
+    later = CLASSIFIER_LOG + '== 5/7 Evaluate the classifier alone ==\n'
+    assert states(progress('train_classifier', 'running', later))['evaluate'] == 'current'
+    chain = later + '== 6/7 Evaluate the chain ==\n== 7/7 Compare with the old reader ==\n'
+    result = progress('train_classifier', 'running', chain)
+    assert states(result)['chain'] == 'current' and result['step_progress']['text'] == 'Compare with the old reader · 2 of 2'
+    assert result['percent'] == 92.5
+    failed = progress('train_classifier', 'failed', chain + 'error: no old reader\n\n== finito con codice 1\n')
+    assert states(failed)['chain'] == 'failed' and failed['last_line'] == 'error: no old reader'
+    assert progress('train_classifier', 'ok', chain)['percent'] == 100.0
+
+
+def test_the_phase_lines_of_one_script_never_move_the_steps_of_the_other():
+    # "== 4/10 Train detector" of run_v100_baseline.sh in a classifier log, "== 5/7" in a training log.
+    assert states(progress('train_classifier', 'running', '== 4/10 Train detector ==\n'))['checks'] == 'current'
+    train = progress('train', 'running', '== a. importo\n== b. controllo\n== c. ambiente GPU\n== 5/7 Evaluate the classifier alone ==\n')
+    assert states(train)['gpu_env'] == 'current'
+
+
+def test_a_classifier_that_stops_early():
+    log = CLASSIFIER_LOG + 'classifier stops early after epoch 3: validation balanced accuracy not better for 2 epochs (best 0.8300)\n'
+    result = progress('train_classifier', 'running', log)
+    assert result['curves']['classifier']['stopped_early'] == 3
+    assert result['step_progress'] == {'done': 1, 'total': 1, 'percent': 100.0, 'text': 'stopped early after epoch 3'}
+    assert result['detail'] == 'classifier · stopped early after epoch 3'
+    # 4 + 14 done and the whole of the classifier's 60.
+    assert result['percent'] == 78.0
+    # A training of the same network started again in the same log is not stopped any more.
+    again = progress('train_classifier', 'running', log + 'classifier epoch 1/20 train_loss 1.0 val_loss 1.0 3s\n')
+    assert 'stopped_early' not in again['curves']['classifier'] and again['detail'] == 'classifier · epoch 1 of 20'
+
+
+def test_the_reports_of_the_mining_the_classifier_and_the_chain():
+    from nnslr_tools.job_progress import with_step_progress
+    mining = progress('train_classifier', 'running', CLASSIFIER_LOG.split('== 4/7')[0])
+    inside = with_step_progress(mining, 'train_classifier', {'task': 'mine', 'done': 50, 'total': 200, 'text': '50 of 200 frames'})
+    assert inside['step_progress'] == {'done': 50, 'total': 200, 'percent': 25.0, 'text': '50 of 200 frames'}
+    # 4 done before the mining, and a quarter of its 14.
+    assert inside['percent'] == 7.5
+    training = with_step_progress(progress('train_classifier', 'running', CLASSIFIER_LOG), 'train_classifier',
+                                  {'task': 'classifier', 'done': 30, 'total': 100, 'text': 'epoch 3 of 20'})
+    assert training['percent'] == 36.0
+    chain = progress('train_classifier', 'running', CLASSIFIER_LOG + '== 5/7 x ==\n== 6/7 Evaluate the chain ==\n')
+    assert with_step_progress(chain, 'train_classifier', {'task': 'chain', 'done': 1, 'total': 4})['percent'] == 88.8
+    # The report of the mining is not the training's.
+    assert with_step_progress(chain, 'train_classifier', {'task': 'mine', 'done': 1, 'total': 4})['percent'] == chain['percent']
+
+
+# -- scripts/run_detector_sizes.sh with one size: "Train the cutter" -------------------------------------------------
+CUTTER_LOG = """== scripts/run_detector_sizes.sh 2026-10-24_1800-cutter 960x544
+== Detector input sizes ==
+run:          2026-10-24_1800-cutter
+== 1/4 Validate the training and evaluation populations (CPU-only) ==
+== 2/4 Explicit CUDA smoke test ==
+== 3/4 Train the detector at 960x544 ==
+detector epoch 3/20 train_loss 1.2000 val_loss 1.5000 val_recall 0.4125 87s
+"""
+
+
+def test_the_cutter_training_has_its_steps_from_the_titles_of_its_phases():
+    from nnslr_tools.job_progress import CUTTER_STEPS
+    assert sum(weight for _, _, weight in CUTTER_STEPS) == 100
+    result = progress('train_cutter', 'running', CUTTER_LOG)
+    assert states(result) == {'checks': 'done', 'detector': 'current', 'evaluate': 'todo'}
+    assert [step['label'] for step in result['steps']] == ['Checks and GPU smoke test', 'Train the cutter',
+                                                            'Evaluate on test and validation']
+    # 5 done, and 3 of 20 epochs of the cutter's 80.
+    assert result['percent'] == 17.0 and result['detail'] == 'detector · epoch 3 of 20'
+    assert result['curves']['detector']['points'] == [{'epoch': 3, 'train_loss': 1.2, 'val_loss': 1.5, 'val_recall': 0.4125, 'seconds': 87}]
+    smoke = progress('train_cutter', 'running', CUTTER_LOG.split('== 3/4')[0])
+    assert smoke['step_progress'] == {'done': 1, 'total': 2, 'percent': 50.0, 'text': 'Explicit CUDA smoke test · 2 of 2'}
+    evaluating = progress('train_cutter', 'running', CUTTER_LOG + '== 4/4 Evaluate the detector at 960x544 on test validation ==\n')
+    assert states(evaluating)['evaluate'] == 'current' and evaluating['percent'] == 85.0
+    # The totals change with the sizes: two sizes are out of 6, the titles say the same.
+    two = progress('train_cutter', 'running', '== 1/6 Validate the training and evaluation populations (CPU-only) ==\n'
+                                              '== 2/6 Explicit CUDA smoke test ==\n== 3/6 Train the detector at 640x360 ==\n')
+    assert states(two)['detector'] == 'current'
+    done = progress('train_cutter', 'ok', CUTTER_LOG + '== Comparison (the cutter\'s recall first) ==\nDetector sizes complete: x\n')
+    assert done['percent'] == 100.0 and done['last_line'] == 'Detector sizes complete: x'
+
+
+def test_the_cutter_that_stops_early_and_its_reports():
+    from nnslr_tools.job_progress import with_step_progress
+    log = CUTTER_LOG + 'detector stops early after epoch 3: validation recall not better for 5 epochs\n'
+    result = progress('train_cutter', 'running', log)
+    assert result['curves']['detector']['stopped_early'] == 3 and result['percent'] == 85.0
+    report = with_step_progress(progress('train_cutter', 'running', CUTTER_LOG), 'train_cutter',
+                                {'task': 'detector', 'done': 50, 'total': 100, 'text': 'epoch 3 of 20'})
+    assert report['percent'] == 45.0 and report['step_progress']['text'] == 'epoch 3 of 20'
+    # The numbered phases of the pipeline are not the cutter's, nor the cutter's titles the pipeline's.
+    assert states(progress('train_cutter', 'running', '== 4/10 Train detector ==\n'))['checks'] == 'current'
+    assert states(progress('train', 'running', '== a. importo\n== 3/4 Train the detector at 960x544 ==\n'))['import'] == 'current'

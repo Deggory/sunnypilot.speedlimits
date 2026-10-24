@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// "Train a model": where the networks start from (status.training_starts, one card each: ImageNet, random
+// "Whole pipeline": where the networks start from (status.training_starts, one card each: ImageNet, random
 // weights, the stable model, an earlier run of this server; unavailable ones disabled with their reason, the
 // suggested one chosen at first), then one Start training button (POST /api/panel/run/train {"start": key}).
 import {computed, ref} from 'vue';
@@ -28,7 +28,7 @@ const disabled = computed(() => props.state === null || !props.state.allowed || 
     <div class="ts-head">
       <span class="act-icon" aria-hidden="true"><Icon name="train"/></span>
       <div>
-        <h3 class="ts-title" id="train-start-title">Train a model</h3>
+        <h3 class="ts-title" id="train-start-title">Train the whole pipeline</h3>
         <p class="ts-text" id="train-start-text">Imports the new reviews, splits the dataset, then trains the detector and the reader on the GPU,
           evaluates them and builds the package. It takes hours.</p>
       </div>

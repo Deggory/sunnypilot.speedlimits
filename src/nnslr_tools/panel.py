@@ -1,7 +1,8 @@
 # [control-panel] - START
 """Control panel of the review site: the state of every route, the machine, and buttons that run
 the easy helpers (helpers/fetch_comma_segments.sh, helpers/1_prepare.sh, helpers/3_train.sh,
-helpers/update.sh) in the background with a live log.
+helpers/update.sh; scripts/run_detector_sizes.sh for the cutter and scripts/run_classifier.sh for the
+classifier with "not a sign") in the background with a live log.
 
 Only the fixed actions of ACTIONS can run, never a command taken from a request. They are the
 helpers of the checkout this package runs from (editable install); without them (wheel
@@ -50,17 +51,39 @@ WRAPPER = '"$@"; code=$?; echo; echo "== finito con codice $code"; exit $code'
 # A training run's name, as helpers/3_train.sh writes it: "== d. training <run> (<mode>) -> ...".
 RUN_NAME = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,99}')
 RUN_LINE = re.compile(r'^== d\. training (\S+) \(', re.M)
+# The classifier's and the cutter's trainings: the panel names their run after the command ("== scripts/run_classifier.sh
+# <run>", "== scripts/run_detector_sizes.sh <run> <size>", the first line of the log), and the script says it again near
+# its top ("run:          <run>").
+CLASSIFIER_SCRIPT = 'scripts/run_classifier.sh'
+CUTTER_SCRIPT = 'scripts/run_detector_sizes.sh'
+RUN_ARGUMENT_LINE = re.compile(r'^run:\s+(\S+)\s*$', re.M)
+RUN_LINES = {
+    'train_classifier': (re.compile(r'^== scripts/run_classifier\.sh (\S+)\s*$', re.M), RUN_ARGUMENT_LINE),
+    'train_cutter': (re.compile(r'^== scripts/run_detector_sizes\.sh (\S+)(?: \S+)*\s*$', re.M), RUN_ARGUMENT_LINE),
+}
+# The cutter's training: one input size of the detector (scripts/run_detector_sizes.sh NAME SIZE), and the boxes it
+# learns to find (NNSLR_CUTTER_FAMILIES): every sign (the speed signs and the other signs) or the speed signs only.
+CUTTER_SIZES = ('640x360', '960x544', '1344x760')
+CUTTER_SIZE = '960x544'
+CUTTER_FAMILIES = ('all', 'speed')
+CUTTER_FAMILY = 'all'
+# The options an action takes, besides a training's start and the run to resume (checked by Panel.start).
+ACTION_OPTIONS = {'train_cutter': ('size', 'families')}
 
 
-def _run_of(log: Path) -> str | None:
-    """The run a training job wrote to, from the start of its log (the line comes after the import)."""
+def _run_of(log: Path, action: str = 'train') -> str | None:
+    """The run a training job wrote to, from the start of its log (the line comes after the import; for the
+    classifier's training, the first line)."""
     try:
         with log.open('rb') as handle:
             head = handle.read(65536).decode('utf-8', 'replace')
     except OSError:
         return None
-    match = RUN_LINE.search(head)
-    return match.group(1) if match and RUN_NAME.fullmatch(match.group(1)) else None
+    for pattern in RUN_LINES.get(action, (RUN_LINE,)):
+        match = pattern.search(head)
+        if match and RUN_NAME.fullmatch(match.group(1)):
+            return match.group(1)
+    return None
 
 ACTIONS = {
     # Every route still on the comma, over ssh with this machine's key (Host comma in ~/.ssh/config).
@@ -68,11 +91,18 @@ ACTIONS = {
     'prepare': {'label': 'Prepare new routes', 'group': 'prepare', 'command': ['helpers/1_prepare.sh']},
     'dataset': {'label': 'Import reviews', 'group': 'train',
                 'command': ['helpers/3_train.sh', '--dataset-only']},
-    'train': {'label': 'Train', 'group': 'train', 'command': ['helpers/3_train.sh']},
+    # The whole pipeline: import, split, the detector and the reader, evaluation, export, bundle.
+    'train': {'label': 'Whole pipeline', 'group': 'train', 'command': ['helpers/3_train.sh']},
     'train_continue': {'label': 'Train from the stable model', 'group': 'train',
                        'command': ['helpers/3_train.sh', '--continue']},
     # The steps a stopped training still misses, on the same run ({'run': name}: helpers/3_train.sh --resume).
     'train_resume': {'label': 'Resume the training', 'group': 'train', 'command': ['helpers/3_train.sh']},
+    # The classifier with "not a sign": the false boxes of the cutter in use mined, the classifier trained on them,
+    # measured alone and in the chain, on a run of its own (its name is added by start(): <time>-classifier).
+    'train_classifier': {'label': 'Train the classifier', 'group': 'train', 'command': [CLASSIFIER_SCRIPT]},
+    # The cutter: one detector of the size chosen, trained and measured on test and validation, on a run of its own
+    # (start() adds <time>-cutter and the size; {'size', 'families'}).
+    'train_cutter': {'label': 'Train the cutter', 'group': 'train', 'command': [CUTTER_SCRIPT]},
     # git pull + restart of this server (KillMode=process: the action itself survives the restart).
     # --no-link: the link with the token must not land in the log.
     'update': {'label': 'Update the code', 'group': 'update', 'command': ['helpers/update.sh', '--no-link']},
@@ -86,6 +116,8 @@ ACTIVITIES = (
     ('prepare', 'pre-annotation', 'nnslr preannotate'),
     ('train', 'dataset and training', 'helpers/3_train.sh'),
     ('train', 'GPU training', 'run_v100_baseline.sh'),
+    ('train', 'classifier training', 'run_classifier.sh'),
+    ('train', 'cutter training', 'run_detector_sizes.sh'),
     ('update', 'code update', 'helpers/update.sh'),
     # Shown only: the driving model of openpilot.distill shares the GPU (the training refuses a busy GPU).
     ('other', 'openpilot.distill training', 'supervised.train'),
@@ -231,7 +263,7 @@ class Panel:
                 state = 'interrupted'
             started = datetime.strptime(job_id[:15], '%Y%m%d-%H%M%S')
             result.append({'id': job_id, 'action': action, 'label': ACTIONS[action]['label'],
-                           'run': _run_of(path) if ACTIONS[action]['group'] == 'train' else None,
+                           'run': _run_of(path, action) if ACTIONS[action]['group'] == 'train' else None,
                            'started': started.strftime('%Y-%m-%d %H:%M:%S'),
                            # The same moment with the server's offset, for the elapsed time in the page.
                            'started_at': started.astimezone().isoformat(timespec='seconds'),
@@ -295,6 +327,9 @@ class Panel:
             payload['reviewed_routes'] = sum(1 for row in rows if row['confirmed'])
             payload['next_action'] = _next_action(payload['next_step'])
         payload['actions'] = self._action_states(payload, activities)
+        # The choices of "Train the cutter", for its buttons.
+        payload['cutter_options'] = {'sizes': list(CUTTER_SIZES), 'size': CUTTER_SIZE, 'families': list(CUTTER_FAMILIES),
+                                     'family': CUTTER_FAMILY}
         payload['dataset'] = self.dataset_summary()
         payload['training_starts'] = self.training_starts()
         payload['next_step_text'], payload['all_ready'] = _next_step_text(payload)
@@ -305,20 +340,32 @@ class Panel:
 
     def _terminal_training(self, payload: dict) -> None:
         """A training started from a terminal (helpers/3_train.sh) is no job of the panel: its progress comes
-        from the log the helper writes itself, the newest data/logs/train-<run>.log."""
+        from the log the helper writes itself, the newest data/logs/train-<run>.log; the classifier's
+        (scripts/run_classifier.sh) from the newest data/runs/<run>/classifier.log; the cutter's
+        (scripts/run_detector_sizes.sh) from the newest data/runs/<run>/detector-sizes/<size>.log, which holds the
+        training of a size alone (its epochs: the checks before it are over)."""
         from_panel = any(job['state'] == 'running' and ACTIONS[job['action']]['group'] == 'train'
                          for job in payload['jobs'])
         trainings = [item for item in payload['activities'] if item['group'] == 'train']
-        logs = sorted((self.root / 'logs').glob('train-*.log'), key=lambda path: path.stat().st_mtime)
-        if from_panel or not trainings or not logs:
+        if from_panel or not trainings:
             return
-        size = logs[-1].stat().st_size
-        with logs[-1].open('rb') as log:
-            log.seek(max(0, size - PROGRESS_BYTES))
-            text = log.read().decode('utf-8', 'replace')
-        result = progress('train', 'running', text)
-        for item in trainings:
-            item['progress'] = result
+        terminal = {'classifier training': 'train_classifier', 'cutter training': 'train_cutter'}
+        patterns = (('train', 'logs/train-*.log'), ('train_classifier', 'runs/*/classifier.log'),
+                    ('train_cutter', 'runs/*/detector-sizes/*.log'))
+        for action, pattern in patterns:
+            items = [item for item in trainings if terminal.get(item['label'], 'train') == action]
+            logs = sorted(self.root.glob(pattern), key=lambda path: path.stat().st_mtime) if items else []
+            if not logs:
+                continue
+            size = logs[-1].stat().st_size
+            with logs[-1].open('rb') as log:
+                log.seek(max(0, size - PROGRESS_BYTES))
+                text = log.read().decode('utf-8', 'replace')
+            if action == 'train_cutter':
+                text = '== 3/4 Train the detector at ' + logs[-1].stem + ' ==\n' + text
+            result = progress(action, 'running', text)
+            for item in items:
+                item['progress'] = result
 
     def job_progress(self, job: dict, preparation: dict | None) -> dict:
         """Steps, percent and last line of a job, from its log (nnslr_tools.job_progress)."""
@@ -419,6 +466,10 @@ class Panel:
                 pass
             elif name == 'prepare' and not to_prepare:
                 reason = 'no new route to prepare'
+            elif name == 'train_classifier' and not (self.repo / CLASSIFIER_SCRIPT).is_file():
+                reason = CLASSIFIER_SCRIPT + ' is missing in this installation'
+            elif name == 'train_cutter' and not (self.repo / CUTTER_SCRIPT).is_file():
+                reason = CUTTER_SCRIPT + ' is missing in this installation'
             elif name != 'prepare' and not confirmed:
                 reason = 'no confirmed frame'
             elif name.startswith('train') and payload['reviewed_routes'] < payload['min_routes']:
@@ -426,6 +477,9 @@ class Panel:
                           f'now {payload["reviewed_routes"]}')
             elif name.startswith('train') and gpu is not None and gpu['processes']:
                 reason = 'the GPU is busy with another process'
+            elif name == 'train_classifier':
+                # It mines the false boxes of the cutter in use (models/active.json): there must be one.
+                reason = self.models_index.in_use('cutter')[1]
             states[name] = {'label': action['label'], 'allowed': not reason, 'reason': reason}
         return states
 
@@ -632,12 +686,25 @@ class Panel:
 
     # -- actions -------------------------------------------------------------------------------
     def start(self, action: str, options: dict | None = None) -> dict:
-        """Starts an action. The only option is the starting point of a training ({'start': key} of
-        training_starts()), turned into a flag or the environment of helpers/3_train.sh, never a command."""
+        """Starts an action. The only options are the starting point of a training ({'start': key} of
+        training_starts()), turned into a flag or the environment of helpers/3_train.sh, the run to resume, and the
+        cutter's size and families (one of CUTTER_SIZES, CUTTER_FAMILIES): never a command. The classifier's and the
+        cutter's trainings run on a new run named here (new_run_name)."""
         if action not in ACTIONS:
             raise PanelError(404, 'unknown_action', 'Unknown action.')
         start_env = {}
         start_args = []
+        for key in ('size', 'families'):
+            if (options or {}).get(key) is not None and key not in ACTION_OPTIONS.get(action, ()):
+                raise PanelError(400, 'bad_option', 'Only "Train the cutter" takes a ' + ('size' if key == 'size' else 'choice of signs') + '.')
+        if action == 'train_cutter':
+            size = (options or {}).get('size') or CUTTER_SIZE
+            families = (options or {}).get('families') or CUTTER_FAMILY
+            if size not in CUTTER_SIZES:
+                raise PanelError(400, 'bad_option', 'Unknown size of the cutter: ' + ', '.join(CUTTER_SIZES) + '.')
+            if families not in CUTTER_FAMILIES:
+                raise PanelError(400, 'bad_option', 'Unknown signs for the cutter: all or speed.')
+            start_env['NNSLR_CUTTER_FAMILIES'] = families
         resumed = (options or {}).get('run')
         if action == 'train_resume':
             if not isinstance(resumed, str) or not RUN_NAME.fullmatch(resumed) or not (self.root / 'runs' / resumed).is_dir():
@@ -672,6 +739,14 @@ class Panel:
             fetch_python = self.fetch_python()
             if fetch_python is None:
                 raise PanelError(403, 'actions_disabled', 'The reader of the comma logs is missing (see docs/GUIDA.md).')
+        if action == 'train_cutter' and not (self.repo / CUTTER_SCRIPT).is_file():
+            raise PanelError(403, 'actions_disabled', CUTTER_SCRIPT + ' is missing in this installation.')
+        if action == 'train_classifier':
+            if not (self.repo / CLASSIFIER_SCRIPT).is_file():
+                raise PanelError(403, 'actions_disabled', CLASSIFIER_SCRIPT + ' is missing in this installation.')
+            cutter, why = self.models_index.in_use('cutter')
+            if cutter is None:
+                raise PanelError(409, 'no_cutter', why[0].upper() + why[1:] + '.')
         with self._lock:
             conflict = _conflicting_group(group, self._running_groups(self.activities()))
             if conflict is not None:
@@ -684,6 +759,11 @@ class Panel:
             command = list(ACTIONS[action]['command']) + start_args
             if action == 'prepare':
                 command.append('--jobs=' + os.environ.get(PREPARE_JOBS_ENV, '2'))
+            if action == 'train_classifier':
+                command.append(self.new_run_name('classifier'))
+            if action == 'train_cutter':
+                # NAME SIZE: one size, so the run holds one cutter.
+                command += [self.new_run_name('cutter'), size]
             # Temporary files in the data root, not in /tmp: the service has a private /tmp (PrivateTmp)
             # that systemd empties at every restart, which broke a pip download of a running training.
             temporary = self.root / 'tmp'
@@ -705,6 +785,16 @@ class Panel:
         # Reaps the process as soon as it ends, so it never stays a zombie.
         threading.Thread(target=process.wait, daemon=True).start()
         return {'id': job_id, 'action': action, 'label': ACTIONS[action]['label']}
+
+    def new_run_name(self, kind: str) -> str:
+        """The run of a new classifier or cutter training: the time it starts and what it is,
+        2026-10-24_1730-classifier, 2026-10-24_1730-cutter; -2, -3... when a run of that name is already there."""
+        base = datetime.now().strftime('%Y-%m-%d_%H%M') + '-' + kind
+        name, number = base, 1
+        while (self.root / 'runs' / name).exists() or (self.root / 'runs' / name).is_symlink():
+            number += 1
+            name = f'{base}-{number}'
+        return name
 
     def _group(self, job_id: str) -> int | None:
         """The process group of an action still running, also one started before a restart of this

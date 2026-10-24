@@ -13,6 +13,23 @@ nnslr_tools.evaluation) and from the log of helpers/3_train.sh (<data root>/logs
 - ``export/detector.onnx``, ``export/reader.onnx``, ``bundle/sha256sums.json``: the last steps;
 - ``experiment-b/<variant>/result.json``: experiment B (nnslr_tools.context_experiment), read defensively.
 
+A run of scripts/run_classifier.sh (the classifier with "not a sign", trained on the false boxes of the cutter in
+use; kind ``classifier``) has its own files, read the same way:
+
+- ``classifier.log``: the whole output of the script (its steps and the curves of the classifier);
+- ``negatives.jsonl``: the false boxes mined with the cutter; only its first line, a header with the counts, is read;
+- ``classifier/training-plan.json``, ``classifier/result.json``, ``classifier/reader-best.pt``: its training;
+- ``evaluation/classifier-{test,validation}.json``: the classifier alone on the crops (the reader's report, plus
+  the sign crops apart and the "not a sign" crops it rejects);
+- ``evaluation/chain-{test,validation}.json``, ``evaluation/chain-test-old-reader.json``: the chain end to end
+  (cutter -> classifier), with the new classifier and with the old reader, at a few scores of the cutter;
+- ``comparison.txt``: the new classifier against the old reader, in plain text.
+
+A run of scripts/run_detector_sizes.sh alone (the panel's "Train the cutter": one input size; kind ``cutter``) has
+``detector-sizes/<size>/`` (training-plan.json, detector-best.pt, result.json, evaluation/detector-{test,validation}.json),
+``detector-sizes/<size>.log`` (the epochs) and ``detector-sizes/comparison.txt``; the same folders in a run of the
+pipeline are shown with it.
+
 Every file is reduced once to a small digest, kept while its size and mtime stay the same: the evaluation
 reports and the training plans (megabytes, a row per sample) are never parsed again at every request.
 Run and variant names follow a strict pattern, and a file is read only when its real path (after the
@@ -35,8 +52,9 @@ from nnslr_tools.job_progress import progress
 
 # The name of a run (helpers/3_train.sh: letters, digits, . _ -), never "." or "..".
 RUN_NAME = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,99}')
-# helpers/3_train.sh names a run by the time it starts: 2026-10-24_1452.
-TIME_NAME = re.compile(r'(\d{4})-(\d{2})-(\d{2})_(\d{2})(\d{2})')
+# helpers/3_train.sh names a run by the time it starts: 2026-10-24_1452; the panel's classifier training adds what it
+# is after the time: 2026-10-24_1730-classifier (-2, -3... when that folder exists).
+TIME_NAME = re.compile(r'(\d{4})-(\d{2})-(\d{2})_(\d{2})(\d{2})(?:-[A-Za-z0-9._-]+)?')
 LOG_TAIL_BYTES = 4 * 1024 * 1024
 HUMAN = 'human_review'
 
@@ -45,12 +63,42 @@ STAGE_LABELS = {'checks': 'checking the dataset and the GPU', 'detector': 'train
                 'reader': 'training the reader', 'evaluate': 'evaluating on the test', 'export': 'exporting to ONNX',
                 'bundle': 'packaging the bundle', 'done': 'finished',
                 # A folder of scripts/run_experiment_b.sh alone.
-                'experiment': 'training the variants of experiment B'}
+                'experiment': 'training the variants of experiment B',
+                # A run of scripts/run_classifier.sh (its checks are the dataset, the split and the cutter).
+                'mine': 'mining the cutter’s false boxes', 'classifier': 'training the classifier',
+                'chain': 'evaluating the chain end to end'}
+# The same steps in a classifier run and in a cutter run, where they mean something else.
+CLASSIFIER_STAGE_LABELS = {'checks': 'checking the dataset, the split and the cutter',
+                           'evaluate': 'evaluating the classifier alone'}
+CUTTER_STAGE_LABELS = {'detector': 'training the cutter', 'evaluate': 'evaluating on test and validation'}
+CLASSIFIER_STAGES = ('checks', 'mine', 'classifier', 'evaluate', 'chain', 'done')
 
 # The scripts that write into a run folder, named by the run in their first argument.
-SCRIPTS = ((b'run_v100_baseline.sh', 'pipeline'), (b'run_experiment_b.sh', 'experiment'))
+SCRIPTS = ((b'run_v100_baseline.sh', 'pipeline'), (b'run_experiment_b.sh', 'experiment'),
+           (b'run_classifier.sh', 'classifier'), (b'run_detector_sizes.sh', 'cutter'))
 # Folders and files of the training pipeline (a folder with none of them holds only experiment B).
 PIPELINE_PARTS = ('detector', 'reader', 'evaluation', 'export', 'bundle')
+# What scripts/run_classifier.sh writes first; a folder with one of them and none of the pipeline's own networks
+# (evaluation/ is in both) is a classifier run.
+CLASSIFIER_PARTS = ('classifier', 'negatives.jsonl', 'classifier.log')
+PIPELINE_ONLY = ('detector', 'reader', 'export', 'bundle')
+# scripts/run_detector_sizes.sh: a folder per input size (WIDTHxHEIGHT) and its log next to it.
+SIZES_DIR = 'detector-sizes'
+SIZE_FOLDER = re.compile(r'[1-9][0-9]{0,4}x[1-9][0-9]{0,4}')
+# The score of the cutter the chain is judged at (the cutter's own, nnslr_tools.model_roles.CUTTER_SCORE).
+CHAIN_SCORE = 0.1
+NOT_A_SIGN = 'not_a_sign'
+# Where a "not a sign" crop comes from (nnslr_tools.training.NEGATIVE_SOURCES): a proposal a reviewer removed, a false
+# box of the cutter mined for the training, a box a reviewer kept and marked "not a sign".
+SOURCES = ('rejected', 'mined', 'reviewed')
+SOURCE_LABELS = {'rejected': 'Removed proposals', 'mined': 'Cutter’s false boxes', 'reviewed': 'Reviewed “not a sign”'}
+# Rows of a label table of the chain, and labels of its lists, kept in a digest.
+MAX_LABEL_ROWS = 40
+MAX_LABELS = 15
+# The plain text comparison of a classifier run, as much as the page shows.
+MAX_COMPARISON = 12000
+# The header of negatives.jsonl is one line; never more than this is read.
+MAX_HEADER_BYTES = 4 * 1024 * 1024
 EXPERIMENT_EPOCH = re.compile(r'^experiment_b_(\w+) epoch (\d+)/(\d+)\b', re.M)
 
 # Sign sizes for the detector's recall: the width of the reviewed box in pixels of the frame.
@@ -114,12 +162,16 @@ def _read_json(path: Path) -> Any:
 
 
 def label_name(label: str) -> str:
-    """'maximum_speed:60' -> 'Speed limit 60', 'variable_display:unknown' -> 'Variable display, value unknown'."""
+    """'maximum_speed:60' -> 'Speed limit 60', 'variable_display:unknown' -> 'Variable display, value unknown',
+    'other_sign:give_way' -> 'Other sign: give way', 'not_a_sign' -> 'Not a sign'."""
     from nnslr_tools.panel import FAMILY_LABELS
     family, _, value = str(label).partition(':')
     name = FAMILY_LABELS.get(family, family.replace('_', ' ').capitalize())
     if value == 'unknown':
         return name + ', value unknown'
+    if family == 'other_sign' and value:
+        # The kind of another sign (nnslr_tools.sign_types.SIGN_TYPES), learnt by the classifier with "not a sign".
+        return name + ': ' + value.replace('_', ' ')
     return name + (' ' + value if value else '')
 
 
@@ -165,8 +217,90 @@ def _label_table(per_class: Any, confusion: Any) -> list[dict]:
     return sorted(rows, key=lambda row: (-row['count'], row['label']))
 
 
+def _human_share(value: Any) -> dict | None:
+    """human_reviewed of a reader report: {'samples', 'accuracy', 'correct'}, None without it."""
+    if not isinstance(value, dict):
+        return None
+    count = _int(value.get('sample_count')) or 0
+    accuracy = _num(value.get('accuracy'))
+    return {'samples': count, 'accuracy': accuracy, 'correct': round(accuracy * count) if accuracy is not None else None}
+
+
+def _signs_digest(signs: Any, samples: list | None) -> dict | None:
+    """The sign crops of a classifier evaluation (``signs``: every crop that is not "not a sign"): how many it reads
+    right, also with the kinds of other signs folded (comparable with the old reader), how many it throws away as
+    "not a sign", and label by label, as the reader's table."""
+    if not isinstance(signs, dict):
+        return None
+    if samples is not None:
+        own = [item for item in samples if isinstance(item, dict) and item.get('truth') != NOT_A_SIGN]
+        per_class, confusion = _tables_from_samples(own)
+        human_samples = [item for item in own if item.get('label_basis') == HUMAN]
+        human_tables = _tables_from_samples(human_samples) if human_samples else None
+    else:
+        per_class, confusion = signs.get('per_class'), signs.get('confusion')
+        human_report = signs.get('human_reviewed')
+        human_tables = ((human_report.get('per_class'), human_report.get('confusion'))
+                        if isinstance(human_report, dict) else None)
+    labels = _label_table(per_class, confusion)
+    count = _int(signs.get('sample_count'))
+    if count is None:
+        count = sum(row['count'] for row in labels)
+    correct = sum(row['correct'] for row in labels)
+    accuracy = _num(signs.get('accuracy'))
+    rejected = _int(signs.get('rejected'))
+    rejected_rate = _num(signs.get('rejected_rate'))
+    return {
+        'samples': count, 'correct': correct, 'accuracy': accuracy if accuracy is not None else _ratio(correct, count),
+        'family_accuracy': _num(signs.get('family_accuracy')),
+        'rejected': rejected,
+        'rejected_rate': rejected_rate if rejected_rate is not None or rejected is None else _ratio(rejected, count),
+        'human': _human_share(signs.get('human_reviewed')),
+        'labels': labels,
+        'labels_human': _label_table(*human_tables) if human_tables else None,
+        'unseen_labels': [str(item) for item in signs.get('unseen_truth_labels') or [] if isinstance(item, str)],
+    }
+
+
+def _rejection(value: Any) -> dict | None:
+    """{'crops', 'rejected', 'rejection_rate'} of "not a sign" crops, None when it is not such a count."""
+    if not isinstance(value, dict):
+        return None
+    crops, rejected = _int(value.get('crops')) or 0, _int(value.get('rejected')) or 0
+    rate = _num(value.get('rejection_rate'))
+    return {'crops': crops, 'rejected': rejected, 'rejection_rate': rate if rate is not None else _ratio(rejected, crops)}
+
+
+def _label_counts(value: Any, limit: int = MAX_LABELS) -> list[dict]:
+    """{label: count} as rows, the most frequent first: [{'label', 'name', 'count'}]."""
+    if not isinstance(value, dict):
+        return []
+    rows = [{'label': str(label), 'name': label_name(str(label)), 'count': _int(count) or 0}
+            for label, count in value.items() if _int(count)]
+    return sorted(rows, key=lambda row: (-row['count'], row['label']))[:limit]
+
+
+def _not_a_sign_digest(value: Any) -> dict | None:
+    """The "not a sign" crops of a classifier evaluation: how many it rejects, by where they come from (SOURCES), on
+    the frames a person reviewed, and what it calls the ones it lets through."""
+    total = _rejection(value)
+    if total is None:
+        return None
+    by_source = value.get('by_source') if isinstance(value.get('by_source'), dict) else {}
+    keys = [key for key in SOURCES if key in by_source] + sorted(str(key) for key in by_source if key not in SOURCES)
+    sources = []
+    for key in keys:
+        counts = _rejection(by_source.get(key))
+        if counts is not None:
+            sources.append({'source': key, 'label': SOURCE_LABELS.get(key, _words(key)), **counts})
+    return {**total, 'by_source': sources, 'human': _rejection(value.get('human_reviewed')),
+            'survivors': _label_counts(value.get('survivors'))}
+
+
 def reader_digest(report: Any) -> dict:
-    """The reader's evaluation (nnslr_tools.evaluation.evaluate_reader) without its list of samples."""
+    """The reader's evaluation (nnslr_tools.evaluation.evaluate_reader) without its list of samples. A report of the
+    classifier with "not a sign" (class_scheme v2: every crop counted, "not a sign" included) also has its sign
+    crops apart (``signs``) and its "not a sign" crops (``not_a_sign``); an older report has None for both."""
     if not isinstance(report, dict):
         raise ValueError('not a report')
     samples = report.get('samples') if isinstance(report.get('samples'), list) else None
@@ -206,7 +340,164 @@ def reader_digest(report: Any) -> dict:
         'classes': len(classes) if isinstance(classes, list) else None,
         'dataset_sha256': report.get('dataset_sha256') if isinstance(report.get('dataset_sha256'), str) else None,
         'split_sha256': report.get('split_sha256') if isinstance(report.get('split_sha256'), str) else None,
+        'class_scheme': report.get('class_scheme') if isinstance(report.get('class_scheme'), str) else None,
+        'signs': _signs_digest(report.get('signs'), samples),
+        'not_a_sign': _not_a_sign_digest(report.get('not_a_sign')),
     }
+
+
+def classifier_headline(digest: dict | None) -> dict:
+    """The numbers that judge a classifier, from reader_digest: right answers on the sign crops (on every crop for
+    an old reader, which has no "not a sign"), on those a person confirmed, with the kinds of other signs folded;
+    the "not a sign" crops it rejects and the sign crops it throws away. Every value None without a report."""
+    if digest is None:
+        digest = {'samples': None, 'accuracy': None, 'human': None, 'signs': None, 'not_a_sign': None, 'class_scheme': None}
+    signs = digest.get('signs')
+    rejection = digest.get('not_a_sign') or {}
+    measured = signs if signs is not None else digest
+    human = measured.get('human') or {}
+    return {'samples': measured['samples'], 'accuracy': measured['accuracy'],
+            'human_samples': human.get('samples'), 'human_accuracy': human.get('accuracy'),
+            'family_accuracy': (signs or {}).get('family_accuracy'),
+            'not_a_sign_crops': rejection.get('crops'), 'not_a_sign_rejected': rejection.get('rejected'),
+            'rejection_rate': rejection.get('rejection_rate'),
+            'signs_rejected': (signs or {}).get('rejected'), 'signs_rejected_rate': (signs or {}).get('rejected_rate'),
+            'class_scheme': digest.get('class_scheme')}
+
+
+# -- the chain: the cutter's boxes read by the classifier ---------------------------------------------------
+def _chain_counts(value: Any, widths: bool) -> dict | None:
+    """The reviewed boxes at one score of the cutter: found by the cutter, read right by the classifier (correct),
+    thrown away as "not a sign" (rejected); recall end to end (found and read right), of the cutter alone
+    (recall_found), and read right once found; by width and on the frames a person reviewed."""
+    if not isinstance(value, dict):
+        return None
+    truth, found, correct = (_int(value.get(key)) or 0 for key in ('truth', 'found', 'correct'))
+    pick = lambda key, part, whole: (_num(value.get(key)) if _num(value.get(key)) is not None  # noqa: E731
+                                     else _ratio(part, whole))
+    counts: dict[str, Any] = {'truth': truth, 'found': found, 'correct': correct, 'rejected': _int(value.get('rejected')),
+                              'recall': pick('recall', correct, truth), 'recall_found': pick('recall_found', found, truth),
+                              'read_right_when_found': pick('read_right_when_found', correct, found)}
+    human = value.get('human_reviewed')
+    counts['human'] = None
+    if isinstance(human, dict):
+        part = _chain_counts({key: item for key, item in human.items() if key != 'human_reviewed'}, False) or {}
+        counts['human'] = {key: part.get(key) for key in ('truth', 'found', 'correct', 'recall', 'recall_found')}
+    if widths:
+        table = value.get('by_width')
+        rows = None
+        if isinstance(table, dict):
+            rows = []
+            for key, label, _, _ in SIZE_BUCKETS:
+                row = _chain_counts(table.get(key) if isinstance(table.get(key), dict) else {}, False) or {}
+                rows.append({'key': key, 'label': label,
+                             **{name: row.get(name) for name in ('truth', 'found', 'correct', 'recall', 'recall_found')}})
+        counts['widths'] = rows
+    return counts
+
+
+def _chain_labels(confusion: Any) -> list[dict]:
+    """What the classifier answered on the boxes the cutter passed on, by the review of the box ("not a sign" for a
+    false box): as the reader's label table, its correct answer being the review (rejecting a false box)."""
+    if not isinstance(confusion, dict):
+        return []
+    per_class = {}
+    for truth, answers in confusion.items():
+        if isinstance(answers, dict):
+            per_class[str(truth)] = {'support': sum(_int(count) or 0 for count in answers.values()),
+                                     'correct': _int(answers.get(truth)) or 0}
+    return _label_table(per_class, confusion)[:MAX_LABEL_ROWS]
+
+
+def chain_digest(report: Any) -> dict:
+    """An evaluation of the chain (cutter -> classifier, evaluation/chain-<partition>.json) without its frames: per
+    score of the cutter, the speed signs and every reviewed box found and read right, the boxes and false boxes per
+    frame the cutter passes on and the false ones the classifier lets through; who the two networks were."""
+    if not isinstance(report, dict) or report.get('task', 'chain') != 'chain':
+        raise ValueError('not a chain report')
+    text = lambda value, key: value.get(key) if isinstance(value, dict) and isinstance(value.get(key), str) else None  # noqa: E731
+    flag = lambda value, key: value.get(key) if isinstance(value, dict) and isinstance(value.get(key), bool) else None  # noqa: E731
+    main = _num(report.get('main_score_threshold'))
+    by_score = report.get('by_score_threshold') if isinstance(report.get('by_score_threshold'), dict) else {}
+    thresholds = []
+    for key, metrics in by_score.items():
+        try:
+            score = float(key)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(metrics, dict) or not math.isfinite(score):
+            continue
+        human = metrics.get('human')
+        thresholds.append({
+            'score': score,
+            'speed_signs': _chain_counts(metrics.get('speed_signs'), True),
+            'all_boxes': _chain_counts(metrics.get('all_boxes'), False),
+            **{name: _num(metrics.get(name)) for name in ('boxes_per_frame', 'false_per_frame', 'surviving_false_per_frame',
+                                                          'false_rejected_rate')},
+            'false_boxes': _int(metrics.get('false_boxes')), 'surviving_false_boxes': _int(metrics.get('surviving_false_boxes')),
+            'human': None if not isinstance(human, dict) else {
+                'images': _int(human.get('images')), 'false_per_frame': _num(human.get('false_per_frame')),
+                'surviving_false_per_frame': _num(human.get('surviving_false_per_frame'))},
+            'surviving_false_by_label': _label_counts(metrics.get('surviving_false_by_label')),
+            # The answers label by label only at the main score: the table is the longest part of the report.
+            'labels': None,
+            '_confusion': metrics.get('confusion'),
+        })
+    thresholds.sort(key=lambda item: item['score'])
+    headline = _chain_entry(thresholds, main)
+    for item in thresholds:
+        confusion = item.pop('_confusion')
+        if item is headline:
+            item['labels'] = _chain_labels(confusion)
+    cutter = report.get('cutter') if isinstance(report.get('cutter'), dict) else {}
+    classifier = report.get('classifier') if isinstance(report.get('classifier'), dict) else {}
+    limitations = report.get('limitations') if isinstance(report.get('limitations'), list) else []
+    size = cutter.get('input_size')
+    return {
+        'partition': str(report.get('partition') or 'test'),
+        'cutter': {'checkpoint': text(cutter, 'checkpoint'), 'id': text(cutter, 'id'), 'same_split': flag(cutter, 'same_split'),
+                   'input_size': f'{size[0]}x{size[1]}' if isinstance(size, list) and len(size) == 2
+                   and all(_int(side) for side in size) else None},
+        'classifier': {'checkpoint': text(classifier, 'checkpoint'), 'class_scheme': text(classifier, 'class_scheme'),
+                       'classes': _int(classifier.get('classes')), 'rejects': flag(classifier, 'rejects'),
+                       'same_split': flag(classifier, 'same_split')},
+        'iou_threshold': _num(report.get('iou_threshold')),
+        **{key: _int(report.get(key)) for key in ('image_count', 'human_image_count', 'speed_sign_count', 'reviewed_box_count')},
+        'main_score_threshold': main,
+        'thresholds': thresholds,
+        'device': str(report.get('device')) if isinstance(report.get('device'), str) else None,
+        'seconds': _num(report.get('seconds')),
+        'limitations': [str(item)[:300] for item in limitations if isinstance(item, str)][:10],
+        'dataset_sha256': text(report, 'dataset_sha256'), 'split_sha256': text(report, 'split_sha256'),
+    }
+
+
+def _chain_entry(thresholds: list[dict], main: float | None) -> dict | None:
+    """The score the chain is judged at: CHAIN_SCORE when measured, else the report's main score, else the first."""
+    for wanted in (CHAIN_SCORE, main):
+        found = next((item for item in thresholds if wanted is not None and abs(item['score'] - wanted) < 1e-9), None)
+        if found is not None:
+            return found
+    return thresholds[0] if thresholds else None
+
+
+def chain_headline(digest: dict) -> dict | None:
+    """The numbers that judge the chain, at the cutter's score 0.1 (CHAIN_SCORE): the speed signs found and read right
+    end to end, found by the cutter alone, on the frames a person reviewed; the boxes and false boxes per frame of
+    the cutter, and the false ones that survive the classifier. None when the report has no score."""
+    entry = _chain_entry(digest['thresholds'], CHAIN_SCORE)
+    if entry is None:
+        return None
+    signs = entry['speed_signs'] or {}
+    human = signs.get('human') or {}
+    return {'score_threshold': entry['score'], 'at_chain_score': abs(entry['score'] - CHAIN_SCORE) < 1e-9,
+            'truth': signs.get('truth'), 'found': signs.get('found'), 'correct': signs.get('correct'),
+            'recall': signs.get('recall'), 'recall_found': signs.get('recall_found'),
+            'read_right_when_found': signs.get('read_right_when_found'),
+            'human_truth': human.get('truth'), 'human_recall': human.get('recall'),
+            'boxes_per_frame': entry['boxes_per_frame'], 'false_per_frame': entry['false_per_frame'],
+            'surviving_false_per_frame': entry['surviving_false_per_frame'],
+            'rejects': digest['classifier']['rejects'], 'images': digest['image_count']}
 
 
 # -- the detector's report -------------------------------------------------------------------------------
@@ -375,8 +666,72 @@ def result_digest(result: Any) -> dict:
     }
 
 
+# The values per epoch of the classifier with "not a sign" (result.json history -> the curves' names).
+CLASSIFIER_HISTORY = (('validation_sign_accuracy', 'val_sign_accuracy'), ('validation_rejection', 'val_rejection'),
+                      ('validation_balanced_accuracy', 'val_balanced_accuracy'), ('seconds', 'seconds'))
+
+
+def classifier_result_digest(result: Any) -> dict:
+    """result.json of the classifier with "not a sign" (nnslr_tools.training, task still "reader"): result_digest plus
+    the best epoch it chose and its numbers on validation (the sign crops read right, the "not a sign" crops
+    rejected, their mean that chose the epoch), the weight of "not a sign" in its loss, the augmentation and the
+    negatives it learnt from. An older reader's result.json has None for all of them."""
+    base = result_digest(result)
+    by_epoch = {point['epoch']: point for point in base['history']}
+    for item in result.get('history') or []:
+        if not isinstance(item, dict) or _int(item.get('epoch')) not in by_epoch:
+            continue
+        for source, target in CLASSIFIER_HISTORY:
+            value = _num(item.get(source))
+            if value is not None:
+                by_epoch[int(item['epoch'])][target] = int(value) if target == 'seconds' else value
+    selection = result.get('selection') if isinstance(result.get('selection'), dict) else {}
+    weights = result.get('loss_weights') if isinstance(result.get('loss_weights'), dict) else {}
+    negatives = result.get('negatives') if isinstance(result.get('negatives'), dict) else None
+    return {
+        **base,
+        'best_epoch': _int(result.get('best_epoch')) or base['best_epoch'],
+        'epochs_run': len(base['history']) or None,
+        'stopped_early': _int(result.get('stopped_early_after_epoch')),
+        'class_scheme': result.get('class_scheme') if isinstance(result.get('class_scheme'), str) else None,
+        'best_validation_sign_accuracy': _num(result.get('best_validation_sign_accuracy')),
+        'best_validation_rejection': _num(result.get('best_validation_rejection')),
+        'best_validation_balanced_accuracy': _num(result.get('best_validation_balanced_accuracy')),
+        'selection': str(selection['by']) if isinstance(selection.get('by'), str) else None,
+        'not_a_sign_weight': _num(weights.get('not_a_sign')),
+        'augmentation': None if 'augmentation' not in result else bool(result['augmentation']),
+        'negatives': None if negatives is None else {
+            'file': Path(negatives['file']).name if isinstance(negatives.get('file'), str) else None,
+            'sha256': negatives.get('sha256') if isinstance(negatives.get('sha256'), str) else None,
+            'by_split': _nested_counts(negatives.get('by_split'))},
+    }
+
+
 def _counts_map(value: Any) -> dict[str, int]:
     return {str(key): _int(count) or 0 for key, count in value.items()} if isinstance(value, dict) else {}
+
+
+def _nested_counts(value: Any) -> dict[str, dict[str, int] | int]:
+    """{split: {source: count}} (or {split: count}) of the negatives, numbers only."""
+    if not isinstance(value, dict):
+        return {}
+    return {str(key): _counts_map(item) if isinstance(item, dict) else _int(item) or 0 for key, item in value.items()
+            if isinstance(item, dict) or _int(item) is not None}
+
+
+def _folded(value: Any) -> list[dict] | None:
+    """folded_labels of a classifier plan: the labels learnt as a broader one (too few crops of their own), as rows
+    {'label', 'name', 'into', 'into_name'}; a count when the plan says only how many."""
+    if not isinstance(value, dict):
+        return None
+    rows = []
+    for label, into in list(value.items())[:MAX_LABEL_ROWS]:
+        if isinstance(into, str):
+            rows.append({'label': str(label), 'name': label_name(str(label)), 'into': into, 'into_name': label_name(into)})
+        elif _int(into) is not None:
+            rows.append({'label': str(label), 'name': label_name(str(label)), 'into': None, 'into_name': None,
+                         'count': _int(into)})
+    return rows
 
 
 def plan_digest(plan: Any) -> dict:
@@ -390,7 +745,45 @@ def plan_digest(plan: Any) -> dict:
             'counts_by_split': _counts_map(plan.get('counts_by_split')),
             'boxes_by_split': _counts_map(plan.get('boxes_by_split')),
             'negative_frames_by_split': _counts_map(plan.get('negative_frames_by_split')),
-            'classes': len(classes) if isinstance(classes, list) else None}
+            'classes': len(classes) if isinstance(classes, list) else None,
+            # The classifier with "not a sign": its "not a sign" crops per split by where they come from.
+            'class_scheme': text('class_scheme'), 'negatives': _nested_counts(plan.get('negatives')),
+            'folded_labels': _folded(plan.get('folded_labels'))}
+
+
+NEGATIVE_COUNTS = ('frames', 'frames_with_candidates', 'candidates', 'after_frame_cap', 'positives', 'cap', 'selected')
+NEGATIVE_SETTINGS = ('score_threshold', 'max_iou', 'per_frame', 'total_factor', 'seed')
+
+
+def negatives_digest(header: Any) -> dict:
+    """The first line of negatives.jsonl (the false boxes of the cutter mined for the classifier): the cutter that
+    drew them, the settings of the mining and, per split, the frames, the candidate boxes and the ones kept, by
+    tier of the review of their frame."""
+    if not isinstance(header, dict) or header.get('kind') != 'header':
+        raise ValueError('no header')
+    text = lambda value, key: value.get(key) if isinstance(value, dict) and isinstance(value.get(key), str) else None  # noqa: E731
+    cutter = header.get('cutter') if isinstance(header.get('cutter'), dict) else {}
+    settings = header.get('settings') if isinstance(header.get('settings'), dict) else {}
+    counts = header.get('counts') if isinstance(header.get('counts'), dict) else {}
+    size = cutter.get('input_size')
+    splits = []
+    for key in sorted(counts, key=lambda name: (('train', 'validation', 'test').index(name)
+                                                 if name in ('train', 'validation', 'test') else 3, str(name))):
+        value = counts[key]
+        if isinstance(value, dict):
+            splits.append({'split': str(key), **{name: _int(value.get(name)) for name in NEGATIVE_COUNTS},
+                           'by_tier': _counts_map(value.get('selected_by_tier'))})
+    return {
+        'created_at': text(header, 'created_at'), 'dataset_kind': text(header, 'dataset_kind'),
+        'dataset_sha256': text(header, 'dataset_sha256'), 'split_sha256': text(header, 'split_sha256'),
+        'cutter': {'checkpoint': text(cutter, 'checkpoint'), 'id': text(cutter, 'id'),
+                   'input_size': f'{size[0]}x{size[1]}' if isinstance(size, list) and len(size) == 2
+                   and all(_int(side) for side in size) else None,
+                   'same_split': cutter.get('same_split') if isinstance(cutter.get('same_split'), bool) else None},
+        'settings': {**{name: _num(settings.get(name)) for name in NEGATIVE_SETTINGS},
+                     'rule_change_at': text(settings, 'rule_change_at')},
+        'splits': splits,
+    }
 
 
 def split_digest(split: Any) -> dict:
@@ -432,6 +825,45 @@ def log_digest(text: str) -> dict:
     return {'modes': modes, 'weights': weights[0] if weights else None, 'error': error,
             'curves': running['curves'], 'detail': running['detail'], 'percent': running['percent'],
             'complete': 'Pipeline complete:' in text}
+
+
+def classifier_log_digest(text: str) -> dict:
+    """<run>/classifier.log (scripts/run_classifier.sh): the step it reached, the curves of the classifier, the last
+    error line."""
+    error = None
+    for line in reversed(text.splitlines()[-400:]):
+        line = line.strip()
+        if ERROR_LINE.match(line):
+            error = line[:300]
+            break
+    running = progress('train_classifier', 'running', text)
+    step = next((row['key'] for row in running['steps'] if row['state'] == 'current'), None)
+    return {'step': step, 'error': error, 'curves': running['curves'], 'detail': running['detail'],
+            'percent': running['percent']}
+
+
+def cutter_log_digest(text: str) -> dict:
+    """detector-sizes/<size>.log (the training of one size of scripts/run_detector_sizes.sh): the curves of the
+    detector, its last epoch in words, the last error line."""
+    error = None
+    for line in reversed(text.splitlines()[-400:]):
+        line = line.strip()
+        if ERROR_LINE.match(line):
+            error = line[:300]
+            break
+    curves = progress('train_cutter', 'running', text)['curves']
+    curve = curves.get('detector')
+    detail = ''
+    if curve and curve['points']:
+        last = max(point['epoch'] for point in curve['points'])
+        detail = ('detector · stopped early after epoch ' + str(curve['stopped_early']) if curve.get('stopped_early')
+                  else 'detector · epoch ' + str(last) + ' of ' + str(curve['epochs']))
+    return {'curves': curves, 'detail': detail, 'error': error}
+
+
+def comparison_digest(text: str) -> str:
+    """comparison.txt of a classifier run, as much as the page shows."""
+    return text[:MAX_COMPARISON]
 
 
 def experiment_log_digest(text: str) -> dict:
@@ -682,9 +1114,10 @@ class RunsIndex:
             return None
         return real
 
-    def _load(self, path: Path | None, digest: Callable[[Any], Any], *, text: bool = False) -> Any:
+    def _load(self, path: Path | None, digest: Callable[[Any], Any], *, text: bool = False, head: bool = False) -> Any:
         """The digest of a file (None when missing, UNREADABLE when it cannot be parsed), parsed again only
-        when its mtime or size changed."""
+        when its mtime or size changed. text: the end of a log; head: the JSON of the first line only (the header
+        of a JSON Lines file, never the rest)."""
         if path is None:
             return None
         try:
@@ -702,6 +1135,12 @@ class RunsIndex:
                     with path.open('rb') as source:
                         source.seek(max(0, info.st_size - LOG_TAIL_BYTES))
                         value = digest(source.read().decode('utf-8', 'replace'))
+                elif head:
+                    with path.open('rb') as source:
+                        line = source.readline(MAX_HEADER_BYTES)
+                    if not line.endswith(b'\n') and len(line) >= MAX_HEADER_BYTES:
+                        raise ValueError('header too long')
+                    value = digest(json.loads(line.decode('utf-8')))
                 else:
                     value = digest(_read_json(path))
             except (OSError, ValueError, TypeError, KeyError, AttributeError, RecursionError):
@@ -731,8 +1170,8 @@ class RunsIndex:
 
     # -- what is running -------------------------------------------------------------------------------
     def running_runs(self) -> dict[str, set[str]]:
-        """Runs with work running on this data root, and which: 'pipeline' (scripts/run_v100_baseline.sh <run>)
-        and/or 'experiment' (scripts/run_experiment_b.sh <run>)."""
+        """Runs with work running on this data root, and which: 'pipeline' (scripts/run_v100_baseline.sh <run>),
+        'experiment' (scripts/run_experiment_b.sh <run>) and/or 'classifier' (scripts/run_classifier.sh <run>)."""
         found: dict[str, set[str]] = {}
         proc = Path('/proc')
         if not proc.is_dir():
@@ -798,16 +1237,49 @@ class RunsIndex:
         log = None if log is UNREADABLE else log
         problems = [key for key, value in digests.items() if value is UNREADABLE]
         digests = {key: (None if value is UNREADABLE else value) for key, value in digests.items()}
+        # What scripts/run_classifier.sh writes (in a folder of its own, or into a run of the pipeline).
+        classifier_files = {key: self._file(run, relative) for key, relative in CLASSIFIER_FILES.items()}
+        classifier = {
+            'negatives': self._load(classifier_files['negatives'], negatives_digest, head=True),
+            'classifier_plan': self._load(classifier_files['classifier_plan'], plan_digest),
+            'classifier_result': self._load(classifier_files['classifier_result'], classifier_result_digest),
+            'classifier_eval': self._load(classifier_files['classifier_eval'], reader_digest),
+            'classifier_eval_validation': self._load(classifier_files['classifier_eval_validation'], reader_digest),
+            'chain': self._load(classifier_files['chain'], chain_digest),
+            'chain_validation': self._load(classifier_files['chain_validation'], chain_digest),
+            'chain_old_reader': self._load(classifier_files['chain_old_reader'], chain_digest),
+        }
+        problems += [key for key, value in classifier.items() if value is UNREADABLE]
+        classifier = {key: (None if value is UNREADABLE else value) for key, value in classifier.items()}
+        classifier_log = self._load(classifier_files['classifier_log'], classifier_log_digest, text=True)
+        classifier_log = None if classifier_log is UNREADABLE else classifier_log
+
+        cutters = self._cutters(run)
+        problems += cutters['problems']
 
         kinds = running.get(name, set())
         variants = self._variants(run)
-        # A folder of scripts/run_experiment_b.sh alone has experiment-b/ and nothing of the pipeline.
+        # A folder of scripts/run_experiment_b.sh alone has experiment-b/ and nothing of the pipeline; a folder of
+        # scripts/run_classifier.sh has its files and none of the pipeline's networks; a folder of
+        # scripts/run_detector_sizes.sh alone has detector-sizes/ and none of them.
         pipeline = log_path is not None or any((run / part).exists() for part in PIPELINE_PARTS)
-        kind = 'training' if pipeline or not (run / EXPERIMENT_DIR).is_dir() else 'experiment'
+        alone = log_path is None and not any((run / part).exists() for part in PIPELINE_ONLY)
+        if alone and ('classifier' in kinds or any((run / part).exists() for part in CLASSIFIER_PARTS)):
+            kind = 'classifier'
+        elif alone and ('cutter' in kinds or (run / SIZES_DIR).is_dir()):
+            kind = 'cutter'
+        else:
+            kind = 'training' if pipeline or not (run / EXPERIMENT_DIR).is_dir() else 'experiment'
         experiment_log = None
         if kind == 'experiment' or 'experiment' in kinds:
             experiment_log = self._experiment_log(run)
-        if kind == 'experiment':
+        if kind == 'classifier':
+            stage = self._classifier_stage(classifier_files, classifier_log, 'classifier' in kinds)
+        elif kind == 'cutter':
+            sizes = cutters['sizes']
+            stage = ('checks' if not sizes else 'detector' if not all(item['files']['result'] for item in sizes)
+                     else 'evaluate' if not all(item['files']['test'] for item in sizes) else 'done')
+        elif kind == 'experiment':
             done = sum(1 for variant, path in variants if variant in VARIANTS and path is not None)
             stage = 'done' if done == len(VARIANTS) else 'experiment'
         elif not files['detector_plan'] and not files['detector_result']:
@@ -824,12 +1296,13 @@ class RunsIndex:
             stage = 'bundle'
         else:
             stage = 'done'
-        is_running = ('pipeline' if kind == 'training' else 'experiment') in kinds
+        is_running = {'training': 'pipeline', 'experiment': 'experiment', 'classifier': 'classifier', 'cutter': 'cutter'}[kind] in kinds
         state = 'running' if is_running else 'finished' if stage == 'done' else 'incomplete'
 
         experiment_files = [path for _, path in variants]
         experiment_files += [self._inside(run / EXPERIMENT_DIR / (variant + '.log'), run) for variant in VARIANTS]
-        times = [time for time in (_mtime(path) for path in [*files.values(), log_path, *experiment_files]) if time is not None]
+        times = [time for time in (_mtime(path) for path in [*files.values(), log_path, *experiment_files,
+                                                             *classifier_files.values(), *cutters['paths']]) if time is not None]
         started = None
         match = TIME_NAME.fullmatch(name)
         if match:
@@ -841,13 +1314,100 @@ class RunsIndex:
             started = _iso(_mtime(files['detector_plan']) or _mtime(run))
         if started is None and kind == 'experiment':
             started = _iso(_mtime(run / EXPERIMENT_DIR / 'dry-run.json') or _mtime(run))
+        if started is None and kind == 'classifier':
+            started = _iso(min((time for time in (_mtime(classifier_files['classifier_log']), _mtime(classifier_files['negatives']))
+                                if time is not None), default=None) or _mtime(run))
+        if started is None and kind == 'cutter':
+            started = _iso(min((time for time in (_mtime(item['files']['log']) for item in cutters['sizes']) if time is not None),
+                               default=None) or _mtime(run))
+        finished = None
+        if stage == 'done' and kind == 'training':
+            finished = _iso(_mtime(files['bundle']))
+        elif stage == 'done' and kind == 'experiment':
+            finished = max((_iso(_mtime(path)) or '' for _, path in variants), default=None) or None
+        elif stage == 'done' and kind == 'cutter':
+            # The comparison is the last file of the sizes, else their last evaluation.
+            finished = _iso(max((time for time in [_mtime(cutters['comparison'])] + [
+                _mtime(item['files'][key]) for item in cutters['sizes'] for key in ('test', 'validation')] if time is not None),
+                default=None))
+        elif stage == 'done':
+            # The chain and the comparison with the old reader are the last files of a classifier run.
+            finished = _iso(max((time for time in (_mtime(classifier_files[key]) for key in
+                                                   ('chain', 'chain_validation', 'chain_old_reader', 'comparison'))
+                                 if time is not None), default=None))
         return {'name': name, 'run': run, 'kind': kind, 'files': files, 'digests': digests, 'log': log, 'problems': problems,
                 'stage': stage, 'state': state, 'started_at': started, 'variants': variants,
                 'experiment_running': 'experiment' in kinds, 'experiment_log': experiment_log,
-                'updated_at': _iso(max(times)) if times else None,
-                'finished_at': (_iso(_mtime(files['bundle'])) if kind == 'training' else
-                                max((_iso(_mtime(path)) or '' for _, path in variants), default=None) or None)
-                if stage == 'done' else None}
+                'classifier_files': classifier_files, 'classifier': classifier, 'classifier_log': classifier_log,
+                'cutters': cutters, 'updated_at': _iso(max(times)) if times else None, 'finished_at': finished}
+
+    def _cutters(self, run: Path) -> dict:
+        """The detectors of scripts/run_detector_sizes.sh in this run (detector-sizes/<size>/ or its log), with their
+        digests: as the Models tab judges a cutter (model_roles.cutter_digest at score 0.1), their training, their
+        curves and plan. {'sizes': [...], 'paths', 'problems', 'comparison', 'log': the newest size log}."""
+        from nnslr_tools.model_roles import cutter_digest, model_result_digest
+        base = run / SIZES_DIR
+        names: set[str] = set()
+        try:
+            if base.is_dir() and not base.is_symlink():
+                for entry in base.iterdir():
+                    stem = entry.name[:-len('.log')] if entry.name.endswith('.log') else entry.name
+                    if SIZE_FOLDER.fullmatch(stem) and (entry.name.endswith('.log') or (entry.is_dir() and not entry.is_symlink())):
+                        names.add(stem)
+        except OSError:
+            pass
+        sizes, paths, problems = [], [], []
+        newest: tuple[float, str, dict] | None = None
+        for size in sorted(names, key=lambda item: [int(side) for side in item.split('x')]):
+            folder = f'{SIZES_DIR}/{size}'
+            files = {'weights': self._file(run, folder + '/detector-best.pt'), 'result': self._file(run, folder + '/result.json'),
+                     'plan': self._file(run, folder + '/training-plan.json'),
+                     'test': self._file(run, folder + '/evaluation/detector-test.json'),
+                     'validation': self._file(run, folder + '/evaluation/detector-validation.json'),
+                     'log': self._file(run, folder + '.log')}
+            paths += [path for path in files.values() if path is not None]
+            loaded = {'training': self._load(files['result'], model_result_digest),
+                      'history': self._load(files['result'], result_digest),
+                      'plan': self._load(files['plan'], plan_digest),
+                      'test': self._load(files['test'], cutter_digest),
+                      'validation': self._load(files['validation'], cutter_digest)}
+            relative = {'training': '/result.json', 'plan': '/training-plan.json', 'test': '/evaluation/detector-test.json',
+                        'validation': '/evaluation/detector-validation.json'}
+            problems += sorted({folder + relative[key] for key, value in loaded.items() if value is UNREADABLE and key in relative})
+            loaded = {key: (None if value is UNREADABLE else value) for key, value in loaded.items()}
+            log = self._load(files['log'], cutter_log_digest, text=True)
+            log = None if log is UNREADABLE else log
+            if log is not None and (newest is None or (_mtime(files['log']) or 0) > newest[0]):
+                newest = (_mtime(files['log']) or 0, size, log)
+            sizes.append({'size': size, 'files': files, 'log': log, **loaded})
+        comparison = self._file(run, SIZES_DIR + '/comparison.txt')
+        if comparison is not None:
+            paths.append(comparison)
+        return {'sizes': sizes, 'paths': paths, 'problems': problems, 'comparison': comparison,
+                'log': None if newest is None else {**newest[2], 'size': newest[1]}}
+
+    @staticmethod
+    def _classifier_stage(files: dict[str, Path | None], log: dict | None, running: bool) -> str:
+        """The step a classifier run reached: the first of its files still missing; before the negatives, the
+        mining once the log says it started. While it runs, a step its log is still in (a file written as it goes)."""
+        if not files['negatives']:
+            stage = 'checks'
+        elif not files['classifier_result']:
+            stage = 'classifier'
+        elif not files['classifier_eval']:
+            stage = 'evaluate'
+        elif not files['chain']:
+            stage = 'chain'
+        else:
+            stage = 'done'
+        step = (log or {}).get('step')
+        if step not in CLASSIFIER_STAGES:
+            return stage
+        if stage == 'checks' and step == 'mine':
+            return 'mine'
+        if running and CLASSIFIER_STAGES.index(step) < CLASSIFIER_STAGES.index(stage):
+            return step
+        return stage
 
     def _start(self, gathered: dict) -> dict:
         """How the networks started: ImageNet, random weights, the stable model or an earlier run."""
@@ -857,6 +1417,10 @@ class RunsIndex:
         resumed = 'resume' in modes[1:] or mode == 'resume'
         weights = log.get('weights')
         results = [gathered['digests']['detector_result'], gathered['digests']['reader_result']]
+        if gathered['kind'] == 'classifier':
+            results = [gathered['classifier']['classifier_result']]
+        if gathered['kind'] == 'cutter':
+            results = [item['training'] for item in gathered['cutters']['sizes']]
         if gathered['kind'] == 'experiment':
             results = [self._load(path, experiment_digest) for _, path in gathered['variants'] if path is not None]
         initialization = next((digest['initialization'] for digest in results
@@ -876,6 +1440,10 @@ class RunsIndex:
             start = {'kind': 'imagenet', 'label': 'Pre-trained on ImageNet', 'run': None, 'source': None}
         elif initialization == 'random':
             start = {'kind': 'random', 'label': 'Random weights', 'run': None, 'source': None}
+        elif initialization and gathered['kind'] in ('classifier', 'cutter'):
+            # The classifier may start from other weights (an earlier reader): its result.json says which.
+            start = {'kind': 'weights', 'label': 'Started from ' + Path(initialization).name, 'run': None,
+                     'source': initialization}
         else:
             start = {'kind': None, 'label': 'Not recorded yet' if gathered['state'] == 'running' else 'Not recorded',
                      'run': None, 'source': None}
@@ -900,20 +1468,42 @@ class RunsIndex:
                 + ([experiment_log['variant']] if experiment_log.get('variant') else [])
                 + (['epoch ' + str(experiment_log['epoch']) + ' of ' + str(experiment_log['epochs'])]
                    if experiment_log.get('epoch') is not None else []))
+        classifier = gathered['classifier']
+        classifier_eval, chain = classifier['classifier_eval'], classifier['chain']
         if gathered['kind'] == 'experiment':
             first = next((self._load(path, experiment_digest) for _, path in experiment if path is not None), None)
             first = first if isinstance(first, dict) else {}
             split_sha = split_sha or first.get('split_sha256')
             dataset_sha = dataset_sha or first.get('dataset_sha256')
             progress_text, error = experiment_progress, experiment_log.get('error')
+        elif gathered['kind'] == 'classifier':
+            sources = [classifier_eval, chain, classifier['classifier_plan'], classifier['negatives']]
+            split_sha = next((item['split_sha256'] for item in sources if item and item.get('split_sha256')), None)
+            dataset_sha = next((item['dataset_sha256'] for item in sources if item and item.get('dataset_sha256')), None)
+            classifier_log = gathered['classifier_log'] or {}
+            progress_text, error = classifier_log.get('detail') or None, classifier_log.get('error')
+        elif gathered['kind'] == 'cutter':
+            plans = [item['plan'] for item in gathered['cutters']['sizes'] if item['plan']]
+            split_sha = next((plan['split_sha256'] for plan in plans if plan.get('split_sha256')), None)
+            dataset_sha = next((plan['dataset_sha256'] for plan in plans if plan.get('dataset_sha256')), None)
+            size_log = gathered['cutters']['log'] or {}
+            progress_text = size_log['size'] + ' · ' + size_log['detail'] if size_log.get('detail') else None
+            error = size_log.get('error')
         else:
             progress_text, error = log.get('detail') or None, log.get('error')
+        trained = classifier['classifier_result'] or {}
+        stage_label = STAGE_LABELS[stage]
+        if gathered['kind'] == 'classifier':
+            stage_label = CLASSIFIER_STAGE_LABELS.get(stage, stage_label)
+        if gathered['kind'] == 'cutter':
+            stage_label = CUTTER_STAGE_LABELS.get(stage, stage_label)
+        cutters = [self._cutter_headline(item) for item in gathered['cutters']['sizes']]
         summary = {
             'name': gathered['name'],
             'kind': gathered['kind'],
             'state': state,
             'stage': stage,
-            'stage_label': STAGE_LABELS[stage],
+            'stage_label': stage_label,
             'progress': progress_text if state == 'running' else None,
             'error': error if state == 'incomplete' else None,
             'experiment_running': gathered['experiment_running'],
@@ -924,7 +1514,8 @@ class RunsIndex:
             **self._start(gathered),
             'dataset_sha256': dataset_sha,
             'split_sha256': split_sha,
-            'evaluated': reader is not None or detector is not None,
+            'evaluated': (reader is not None or detector is not None or classifier_eval is not None or chain is not None
+                          or any(item['evaluated'] for item in cutters)),
             'reader': None if reader is None else {
                 'samples': reader['samples'], 'accuracy': reader['accuracy'],
                 'human_samples': (reader['human'] or {}).get('samples'), 'human_accuracy': (reader['human'] or {}).get('accuracy')},
@@ -935,8 +1526,19 @@ class RunsIndex:
                 'human_recall': (detector['human'] or {}).get('recall'), 'human_precision': (detector['human'] or {}).get('precision')},
             'best': {'detector_val_loss': (digests['detector_result'] or {}).get('best_validation_loss'),
                      'reader_val_accuracy': (digests['reader_result'] or {}).get('best_validation_accuracy')},
+            # The classifier with "not a sign" (scripts/run_classifier.sh): alone on the test crops, its best epoch on
+            # validation, and the chain end to end at the cutter's score 0.1, with the old reader beside it.
+            'classifier': None if classifier_eval is None and not trained else {
+                **classifier_headline(classifier_eval),
+                'best_validation_balanced_accuracy': trained.get('best_validation_balanced_accuracy'),
+                'best_validation_accuracy': trained.get('best_validation_accuracy'),
+                'best_epoch': trained.get('best_epoch')},
+            'chain': None if chain is None else chain_headline(chain),
+            'chain_old_reader': None if classifier['chain_old_reader'] is None else chain_headline(classifier['chain_old_reader']),
+            # The detectors of scripts/run_detector_sizes.sh (a cutter run, or the sizes compared in a pipeline run).
+            'cutters': cutters or None,
             'experiment_b': [variant for variant, path in experiment if path is not None],
-            'problems': [PROBLEM_FILES[key] + ' is unreadable' for key in gathered['problems']],
+            'problems': [PROBLEM_FILES.get(key, key) + ' is unreadable' for key in gathered['problems']],
         }
         summary['version'] = hashlib.sha1(json.dumps([summary, self._stat_key(gathered)], sort_keys=True, default=str)
                                           .encode()).hexdigest()[:12]
@@ -945,7 +1547,7 @@ class RunsIndex:
     @staticmethod
     def _stat_key(gathered: dict) -> list:
         key = []
-        for path in gathered['files'].values():
+        for path in [*gathered['files'].values(), *gathered['classifier_files'].values(), *gathered['cutters']['paths']]:
             if path is not None:
                 try:
                     info = path.stat()
@@ -953,6 +1555,36 @@ class RunsIndex:
                 except OSError:
                     pass
         return key
+
+    @staticmethod
+    def _cutter_headline(item: dict) -> dict:
+        """One size of the cutter in a line: its signs found at score 0.1 (on test, else validation), the speed signs
+        among them for a cutter that also finds the other signs, the boxes per frame it passes on."""
+        measured = item['test'] or item['validation'] or {}
+        trained = item['training'] or {}
+        speed = (measured.get('by_family') or {}).get('speed') or {}
+        return {'size': item['size'], 'families': measured.get('families') or trained.get('families') or 'speed',
+                'finished': item['training'] is not None, 'evaluated': bool(measured),
+                'partition': measured.get('partition'), 'score_threshold': measured.get('score_threshold'),
+                'recall': measured.get('recall'), 'found': measured.get('found'), 'truth_boxes': measured.get('truth_boxes'),
+                'speed_recall': speed.get('recall'), 'boxes_per_frame': measured.get('boxes_per_frame'),
+                'false_per_frame': measured.get('false_per_frame'), 'ms_per_frame': measured.get('ms_per_frame')}
+
+    def _cutter_detail(self, gathered: dict) -> dict | None:
+        """What scripts/run_detector_sizes.sh wrote in this run: each size with its training and its numbers on test
+        and validation (as the Models tab judges a cutter), and the comparison in plain text. None without a size."""
+        cutters = gathered['cutters']
+        if not cutters['sizes']:
+            return None
+        comparison = self._load(cutters['comparison'], comparison_digest, text=True)
+        return {
+            'sizes': [{'size': item['size'], 'label': item['size'].replace('x', ' × '),
+                       'families': self._cutter_headline(item)['families'], 'finished': item['training'] is not None,
+                       'training': item['training'], 'test': item['test'], 'validation': item['validation'],
+                       'files': {key: path is not None for key, path in item['files'].items()}}
+                      for item in cutters['sizes']],
+            'comparison': None if comparison is UNREADABLE else comparison,
+        }
 
     def _variants(self, run: Path) -> list[tuple[str, Path | None]]:
         """Experiment B: the known variants first, then any other folder with a result.json."""
@@ -1006,7 +1638,11 @@ class RunsIndex:
     def _dataset(self, gathered: dict) -> dict | None:
         digests = gathered['digests']
         detector_plan, reader_plan = digests['detector_plan'], digests['reader_plan']
-        plan = detector_plan or reader_plan
+        classifier_plan = gathered['classifier']['classifier_plan']
+        if detector_plan is None and gathered['kind'] == 'cutter':
+            # A cutter run: the plan of its (newest) size is its detector's.
+            detector_plan = next((item['plan'] for item in reversed(gathered['cutters']['sizes']) if item['plan']), None)
+        plan = detector_plan or reader_plan or classifier_plan
         if plan is None:
             return None
         split_path = self._split_file(plan)
@@ -1032,17 +1668,63 @@ class RunsIndex:
                 'frames': detector_plan['counts_by_split'], 'boxes': detector_plan['boxes_by_split'],
                 'negative_frames': detector_plan['negative_frames_by_split']},
             'reader': None if reader_plan is None else {'crops': reader_plan['counts_by_split'], 'classes': reader_plan['classes']},
+            # The classifier with "not a sign": its crops, its "not a sign" crops by where they come from, the labels
+            # it learnt as a broader one.
+            'classifier': None if classifier_plan is None else {
+                'crops': classifier_plan['counts_by_split'], 'classes': classifier_plan['classes'],
+                'class_scheme': classifier_plan['class_scheme'], 'negatives': classifier_plan['negatives'],
+                'folded_labels': classifier_plan['folded_labels']},
         }
 
     @staticmethod
     def _curves(gathered: dict) -> dict:
-        """The curves of the two networks: from the log (with the time of each epoch), else from result.json."""
+        """The curves of the networks: from the log (with the time of each epoch), else from result.json; the
+        classifier with "not a sign" from its own classifier.log, else from its result.json."""
         curves = dict((gathered['log'] or {}).get('curves') or {})
         for net in ('detector', 'reader'):
             result = gathered['digests'][net + '_result']
             if net not in curves and result and result['history']:
                 curves[net] = {'epochs': result['epochs'] or result['history'][-1]['epoch'], 'points': result['history']}
+        if gathered['kind'] == 'cutter':
+            # The detector of the size trained last: from its log, else from its result.json.
+            size_log = gathered['cutters']['log']
+            if size_log and (size_log.get('curves') or {}).get('detector'):
+                curves['detector'] = size_log['curves']['detector']
+            else:
+                history = next((item['history'] for item in reversed(gathered['cutters']['sizes'])
+                                if item['history'] and item['history']['history']), None)
+                if history:
+                    curves['detector'] = {'epochs': history['epochs'] or history['history'][-1]['epoch'],
+                                          'points': history['history']}
+        logged = ((gathered['classifier_log'] or {}).get('curves') or {}).get('classifier')
+        result = gathered['classifier']['classifier_result']
+        if logged:
+            curves['classifier'] = logged
+        elif result and result['history']:
+            curves['classifier'] = {'epochs': result['epochs'] or result['history'][-1]['epoch'], 'points': result['history']}
+            if result['stopped_early']:
+                curves['classifier']['stopped_early'] = result['stopped_early']
         return curves
+
+    def _classifier_detail(self, gathered: dict) -> dict | None:
+        """What scripts/run_classifier.sh wrote in this run: the classifier alone on test and validation, the chain
+        (test, validation, the old reader in the same chain), the negatives it learnt from, its training, the
+        comparison in plain text. None when it wrote nothing."""
+        files = gathered['classifier_files']
+        if not any(path is not None for key, path in files.items() if key != 'classifier_log'):
+            return None
+        digests = gathered['classifier']
+        result = digests['classifier_result']
+        comparison = self._load(files['comparison'], comparison_digest, text=True)
+        return {
+            'files': {key: path is not None for key, path in files.items()},
+            'training': None if result is None else {key: value for key, value in result.items() if key != 'history'},
+            'negatives': digests['negatives'],
+            'evaluations': {'test': digests['classifier_eval'], 'validation': digests['classifier_eval_validation']},
+            'chains': {'test': digests['chain'], 'validation': digests['chain_validation'],
+                       'old_reader': digests['chain_old_reader']},
+            'comparison': None if comparison is UNREADABLE else comparison,
+        }
 
     # -- the endpoints ---------------------------------------------------------------------------------
     def names(self) -> list[str]:
@@ -1086,6 +1768,8 @@ class RunsIndex:
             'dataset': self._dataset(gathered),
             'curves': self._curves(gathered),
             'experiment': self._experiment(run),
+            'classifier_run': self._classifier_detail(gathered),
+            'cutter_run': self._cutter_detail(gathered),
         }
 
     def _prune(self) -> None:
@@ -1095,7 +1779,17 @@ class RunsIndex:
                 del self._cache[slot]
 
 
+# The files of a classifier run (scripts/run_classifier.sh), by the key of RunsIndex._gather.
+CLASSIFIER_FILES = {
+    'negatives': 'negatives.jsonl', 'classifier_plan': 'classifier/training-plan.json',
+    'classifier_result': 'classifier/result.json', 'classifier_weights': 'classifier/reader-best.pt',
+    'classifier_eval': 'evaluation/classifier-test.json', 'classifier_eval_validation': 'evaluation/classifier-validation.json',
+    'chain': 'evaluation/chain-test.json', 'chain_validation': 'evaluation/chain-validation.json',
+    'chain_old_reader': 'evaluation/chain-test-old-reader.json', 'comparison': 'comparison.txt',
+    'classifier_log': 'classifier.log',
+}
 PROBLEM_FILES = {'detector_plan': 'detector/training-plan.json', 'reader_plan': 'reader/training-plan.json',
                  'detector_result': 'detector/result.json', 'reader_result': 'reader/result.json',
-                 'detector_eval': 'evaluation/detector-test.json', 'reader_eval': 'evaluation/reader-test.json'}
+                 'detector_eval': 'evaluation/detector-test.json', 'reader_eval': 'evaluation/reader-test.json',
+                 **CLASSIFIER_FILES}
 # [control-panel] - END

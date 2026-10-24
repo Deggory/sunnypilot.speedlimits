@@ -22,9 +22,10 @@ export const ROLE_TEXT: Record<ModelRole, {what: string; today: string; empty: s
   },
   classifier: {
     what: 'Says what each box is: a speed value, end of limit, another sign, or not a sign.',
-    today: 'Today: the reader, judged on right answers per sign.',
+    today: 'Today: the reader, judged on right answers per sign; the classifier with “not a sign” also on the false boxes '
+      + 'it rejects and on the chain end to end.',
     empty: 'No classifier trained yet: the reader of a training run plays this role.',
-    emptyMore: 'Start a training on the Train tab; its reader appears here.',
+    emptyMore: 'Start a training, or “Train the classifier”, on the Train tab; it appears here.',
   },
   decider: {
     what: 'Says whom each sign applies to: our road, another road, or abstain.',
