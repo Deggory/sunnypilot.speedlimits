@@ -51,10 +51,16 @@ def root(tmp_path):
     return data
 
 
+def passed_test(root: Path, provider_id: str, ok: bool = True) -> None:
+    """The last Test of a provider, as Settings records it: only one that passed may review."""
+    llm_providers.record_test(root, provider_id, {'ok': ok, 'message': 'Sees images' if ok else 'Cannot see'})
+
+
 def add_provider(root: Path, name: str = 'fake', *, reviewer: bool = True) -> dict:
     provider = llm_providers.save_provider(root, {'name': name, 'base_url': 'http://127.0.0.1:9/v1',
                                                    'model': 'fake-vl', 'key': KEY})
     if reviewer:
+        passed_test(root, provider['id'])
         llm_providers.set_reviewer(root, provider['id'])
     return provider
 
@@ -150,6 +156,13 @@ def test_option_checks(root, checkout):
     refused(panel, 'prepare', {'provider': 'fake'})
     refused(panel, 'train', {'limit': '5'})
     refused(panel, 'ai_review', {'route': ROUTE, 'proposer': 'ours'})
+    # Saving needs a provider that passed its last Test: never tested, or failed, it is refused.
+    add_provider(root, 'Untested', reviewer=False)
+    error = refused(panel, 'ai_review', {'route': ROUTE, 'provider': 'untested', 'save': 'yes'}, 409, 'ai_not_tested')
+    assert error.message.startswith('Test Untested in Settings first')
+    passed_test(root, 'fake', ok=False)
+    error = refused(panel, 'ai_review', {'route': ROUTE, 'save': 'yes'}, 409, 'ai_not_tested')
+    assert error.message == 'fake did not pass its last Test. Fix it, then test it again in Settings.'
     assert panel.jobs() == []
 
 
@@ -199,7 +212,14 @@ def test_action_states_and_status(root, checkout):
     assert status['actions']['ai_review']['reason'] == 'no AI reviewer: choose one in Settings'
     # A provider, but no frame confirmed by anybody yet: nothing to measure on.
     assert status['actions']['measure_ai_reviewer']['reason'] == 'no confirmed frame'
+    passed_test(root, 'fake')
     llm_providers.set_reviewer(root, 'fake')
+    # The reviewer chosen fails its Test again: it cannot review until it passes.
+    passed_test(root, 'fake', ok=False)
+    status = panel.status()
+    assert status['actions']['ai_review']['reason'] == 'the AI reviewer has not passed its Test: test it in Settings'
+    assert status['ai_reviewer']['available'] is False and status['ai_reviewer']['provider']['id'] == 'fake'
+    passed_test(root, 'fake')
     status = panel.status()
     # The AI reviews the frames nobody confirmed: it needs no confirmed frame.
     assert status['actions']['ai_review'] == {'label': 'Review a route with AI', 'allowed': True, 'reason': ''}

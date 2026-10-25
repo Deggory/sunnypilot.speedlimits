@@ -31,11 +31,12 @@ function photoDone(event: Event, failed: boolean): void {
 
 const drawing = computed(() => drawStage(props.work.detections, state.selected,
   state.showHints ? hintsOf(props.row.frame_key) : [], props.row.height,
-  sceneScale(size.value, props.row.width, props.row.height), coarsePointer()));
+  sceneScale(size.value, props.row.width, props.row.height), coarsePointer(), props.row.width));
 const aiBoxes = computed(() => {
   const ask = ai.asks[props.row.frame_key];
   if (ask?.phase !== 'ready' || !ask.suggestion) return [];
-  return drawAi(ask.suggestion, props.row.height, sceneScale(size.value, props.row.width, props.row.height));
+  return drawAi(ask.suggestion, props.row.height, sceneScale(size.value, props.row.width, props.row.height),
+    props.row.width);
 });
 const resizing = computed(() => (state.drag?.kind === 'resize' || state.drag?.kind === 'move') && state.drag.svg === 'scene');
 </script>

@@ -23,9 +23,11 @@ Each artifact has a stable id ``<role>:<run>/<part>``: ``cutter:2026-10-24_1452/
 ``decider:<run>/experiment-b/crop_geom``.
 
 The model in use for each role is <data root>/models/active.json, ``{"cutter": {"id", "who", "via", "at"} or null,
-"classifier": ..., "decider": ...}``: null until someone picks one, never a default. Nothing reads it yet besides
-this site: choosing copies, exports or deploys nothing. Only ModelIndex.set_active writes, only that file, atomically;
-the id must be one of the index, and nothing else of a request reaches the file system.
+"classifier": ..., "decider": ...}``: null until someone picks one, never a default here. Prepare's "ours" proposer
+reads the cutter and the classifier in use (nnslr_tools.preannotate.our_networks; without a classifier in use it takes
+the newest classifier with "not a sign"), scripts/run_classifier.sh the cutter in use; nothing reads the decider yet.
+Choosing copies, exports or deploys nothing. Only ModelIndex.set_active writes, only that file, atomically; the id
+must be one of the index, and nothing else of a request reaches the file system.
 
 The files are read through the RunsIndex of the Evaluate tab (its strict names, its checks that a file is inside its
 run, its digests kept while a file does not change).

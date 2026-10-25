@@ -121,9 +121,10 @@ class RouteStatusTests(unittest.TestCase):
         self.assertIn("fetch_comma_segments", status.next_step([]))
         self.assertEqual(status.next_step([{"state": "revisionare"}, {"state": "estrarre"}]), "helpers/1_prepare.sh")
         self.assertEqual(status.next_step([{"state": "revisionare"}]), "helpers/2_review.sh")
-        self.assertIn("almeno 5 route revisionate (ora 1)", status.next_step([{"state": "importare", "confirmed": 3}]))
+        self.assertIn(f"at least {status.MIN_REVIEWED_ROUTES} reviewed routes (now 1)",
+                      status.next_step([{"state": "importare", "confirmed": 3}]))
         five = [{"state": "pronta", "confirmed": 1}] * 4
-        self.assertIn("tutto pronto", status.next_step(five + [{"state": "pronta", "confirmed": 1}]))
+        self.assertIn("all ready", status.next_step(five + [{"state": "pronta", "confirmed": 1}]))
         self.assertEqual(status.next_step(five + [{"state": "importare", "confirmed": 1}]), "helpers/3_train.sh")
 
 

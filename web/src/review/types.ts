@@ -56,6 +56,9 @@ export interface FrameRow {
   country_proposed?: string | null;
   /** gps: from this frame's position; nearest_fix: from the nearest frame with one. */
   country_from?: string | null;
+  /** Seconds into its segment (one minute each), when the extraction knows it. */
+  media_time_s?: number | null;
+  requested_sample_fps?: number | null;
 }
 
 /** One sign seen by the second reading (nnslr_tools.review_hints). */
@@ -95,6 +98,10 @@ export interface RouteLink {
   url: string;
   /** The drive: "Herznach → Zürich · Fri 23 Oct 2026 · 08:01"; null when nothing is known of it. */
   name?: string | null;
+  /** The same apart, for the two lines of the menu: "Herznach → Zürich", "Fri 23 Oct 2026 · 08:01", 49. */
+  title?: string | null;
+  when?: string | null;
+  minutes?: number | null;
 }
 
 /** The JSON in <script id="payload">. server is false in the static index.html of write_review (offline). */
@@ -109,6 +116,8 @@ export interface Payload {
   routes: RouteLink[];
   /** The countries the review knows, code: English name (nnslr_tools.gps.country_names). */
   countries?: Record<string, string>;
+  /** Who proposed the signs: vietnam, ours or qwen; null offline (not known). */
+  proposer?: string | null;
 }
 
 /** One saved frame as the server sends it (review_db.public_review). */
@@ -202,8 +211,9 @@ export interface FrameEdit {
   base?: ConfirmedCopy | null | undefined;
 }
 
-/** Which frames the arrows walk through: the top filters, the AI one and the doubt counters. */
-export type Filter = 'todo' | 'suspicious' | 'proposals' | 'all' | 'ai' | 'unknown' | 'unreadable' | 'road';
+/** Which frames the arrows walk through: the top filters, the AI ones and the doubt counters. trial: the frames of
+ * the route's last "Try without saving" still to review. */
+export type Filter = 'todo' | 'suspicious' | 'proposals' | 'all' | 'ai' | 'trial' | 'unknown' | 'unreadable' | 'road';
 export type QualityFilter = 'unknown' | 'unreadable' | 'road';
 
 /** todo, dirty (edited, not confirmed), saving, error (confirmed, not on the server yet) or done. */
@@ -212,7 +222,8 @@ export type FrameStatus = 'todo' | 'dirty' | 'saving' | 'error' | 'done';
 /** body[data-server] for whoever drives the page. */
 export type ServerState = 'offline' | 'loading' | 'ready' | 'stale' | 'error';
 
-export type SaveResult = 'saving' | 'ok' | 'error' | 'unchanged' | 'need-reviewer' | 'need-check' | 'withdrawn';
+export type SaveResult = 'saving' | 'ok' | 'error' | 'unchanged' | 'need-reviewer' | 'need-check' | 'need-duplicate-check'
+  | 'withdrawn';
 
 /** The outcome of the last save, as body data attributes. */
 export interface LastSave {

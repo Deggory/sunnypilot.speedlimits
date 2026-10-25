@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // Account and settings: who is signed in, sign out, change the password (the appearance is in the Account menu),
-// and the AI reviewer (AiProviders.vue). The site on 127.0.0.1 has no sign-in: there only the AI reviewer.
-import {onMounted, ref} from 'vue';
+// and the AI reviewer (AiProviders.vue). The site on 127.0.0.1 has no sign-in: there only the AI reviewer. Opened
+// with the access token (an agent), nobody is signed in: one read-only line instead of the account cards.
+import {computed, onMounted, ref} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import type {AuthAnswer, AuthState} from '../common/auth-types';
 import {askConfirm} from '../composables/confirm';
@@ -16,6 +17,10 @@ const repeat = ref('');
 const error = ref('');
 const done = ref('');
 const busy = ref(false);
+/** A browser signed in on the LAN: the account cards. */
+const account = computed(() => auth.value !== null && auth.value.signed_in && !auth.value.local);
+/** Opened with the access token: nobody to sign out, no password to change. */
+const readOnly = computed(() => auth.value !== null && !auth.value.signed_in && !auth.value.local);
 
 function show(state: AuthState): void {
   auth.value = state;
@@ -61,7 +66,11 @@ onMounted(() => {
 <template>
   <main class="page settings">
     <h1 class="sr-only">Account and settings</h1>
-    <section v-if="!auth?.local" class="card state-box">
+    <section v-if="readOnly" class="card state-box" id="read-only">
+      <h2>Read only</h2>
+      <p>Nobody is signed in, so this page can only show the settings. Sign in on the site to change them.</p>
+    </section>
+    <section v-if="account" class="card state-box">
       <h2>Administrator</h2>
       <p id="admin-sub">{{ who }}</p>
       <div class="buttons">
@@ -69,7 +78,7 @@ onMounted(() => {
         <button id="btn-signout-all" class="btn danger" type="button" @click="signOut(true)">Sign out everywhere</button>
       </div>
     </section>
-    <section v-if="!auth?.local" class="card state-box">
+    <section v-if="account" class="card state-box">
       <h2>Change the password</h2>
       <form id="password-form" class="auth-form" novalidate @submit.prevent="changePassword">
         <input type="text" name="username" autocomplete="username" hidden>
@@ -80,7 +89,7 @@ onMounted(() => {
         <div id="password-ok" class="auth-ok" role="status">{{ done }}</div>
         <button id="btn-password" class="btn primary" type="submit" :disabled="busy">Change the password</button>
       </form>
-      <p class="note">After the change every other browser has to sign in again. Forgotten password: someone with access to the server stops the site, moves <code>web/auth/admin.json</code> out of the data folder and starts it again; the next visit asks for the setup code again.</p>
+      <p class="note">After the change every other browser has to sign in again.</p>
     </section>
     <AiProviders/>
   </main>

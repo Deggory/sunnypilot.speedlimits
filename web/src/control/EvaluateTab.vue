@@ -1,7 +1,9 @@
 <script setup lang="ts">
 // Evaluate, by network: choose what to judge (the whole chain, the cutter, the classifier, the decider); every
 // version of it in one table, judged by the one number that matters for that network, next to the version in use;
-// the version chosen played frame by frame on the test (WatchSection), and all the numbers of its run folded below.
+// the version chosen (or the one “Open the run ›” of Models and Train asks for, ?model=) played frame by frame on the
+// test (WatchSection), and all the numbers of its run folded below. Chains measured with another cutter are marked
+// not comparable.
 // The proposers of Prepare (the Vietnamese YOLO, our networks, Qwen3-VL) are judged the same way, each measured on the
 // reviewed test frames with its Measure button (helpers/measure_proposer.sh); so are the AI reviewers of Settings, each
 // asked about the same frames a person reviewed (helpers/measure_ai_reviewer.sh).
@@ -9,17 +11,29 @@ import {computed, onBeforeUnmount, onMounted, ref, shallowRef, watch} from 'vue'
 import type {AiProvider, AiReviewerReport, AiReviewersPayload} from '../common/ai-types';
 import {api, messageOf} from '../common/api';
 import {isoWhen, thousands} from '../common/format';
-import type {ActionName, ActionOptions, ActionState, ClassifierModel, CutterModel, DeciderModel, ModelVersion, PanelStatus,
-  Proposer, ProposersPayload, WatchModel} from '../common/panel-types';
+import type {ActionName, ActionOptions, ActionState, ClassifierModel, CutterModel, DeciderModel, ModelRole, ModelVersion,
+  PanelStatus, Proposer, ProposersPayload, WatchModel} from '../common/panel-types';
+import type {Job} from '../common/panel-types';
 import ActionList from './ActionList.vue';
-import {pct, points, useRunDetail, useRuns} from './evaluate';
+import {pct, points, selectedModel, selectedRun, useRunDetail, useRuns} from './evaluate';
+import JobProgress from './JobProgress.vue';
+import {EVALUATE_ACTIONS, jobOf} from './jobs';
 import {perFrame, sizeText, useModels} from './models';
 import RunDetailView from './RunDetail.vue';
 import Segmented from './Segmented.vue';
 import WatchSection from './WatchSection.vue';
 
 const props = defineProps<{status: PanelStatus | null}>();
-const emit = defineEmits<{run: [name: ActionName, state: ActionState, start?: undefined, options?: ActionOptions]}>();
+const emit = defineEmits<{run: [name: ActionName, state: ActionState, start?: undefined, options?: ActionOptions]; stop: [job: Job];
+  details: [job: Job]}>();
+/** A measure (of a proposer, of an AI reviewer) running, or the last one when it failed: its card at the top, in every
+ * view (its dot in the top bar leads here, jobs.ts ACTION_TAB). */
+const measureJob = computed(() => {
+  const job = jobOf(props.status, EVALUATE_ACTIONS);
+  return job && (job.state === 'running' || job.state === 'failed') ? job : null;
+});
+/** The words of a proposer or AI reviewer not measured yet: Measure is pressed only when no measure runs. */
+const notMeasured = computed(() => measureJob.value?.state === 'running' ? 'not measured yet' : 'not measured yet: press Measure');
 
 type View = 'proposers' | 'chain' | 'cutter' | 'classifier' | 'decider' | 'ai';
 const VIEWS: {key: View; label: string}[] = [
@@ -55,8 +69,12 @@ interface Row {
   run: string;
   /** The report of the run the player shows for this row. */
   watch: string | null;
+  /** The run of that report when it is not the row's own (the old reader is played in the chain of a classifier run). */
+  watchRun?: string | undefined;
   /** Its own comparison (the chain: with the old reader on the same frames). */
   vs?: {text: string; kind: string} | undefined;
+  /** Why its number cannot be compared with the others (a chain measured with another cutter). */
+  apart?: string | undefined;
   /** What the mark of the one in use says ("in use"; an AI reviewer: "reviews"). */
   badge?: string | undefined;
 }
@@ -113,7 +131,7 @@ function aiRow(name: string, model: string, providerId: string, report: AiReview
   const speed = report?.speed_signs;
   return {id: 'ai:' + providerId + '/' + model, name, when: model + (report ? ' · ' + isoWhen(report.measured_at) : ''),
     main: speed ? speed.read_right_share ?? share(speed.read_right, speed.truth) : null,
-    mainText: speed ? ofText(speed.read_right, speed.truth, 'speed signs with the right number') : 'not measured yet: press Measure',
+    mainText: speed ? ofText(speed.read_right, speed.truth, 'speed signs with the right number') : notMeasured.value,
     second: report ? aiSecond(report) : '', inUse: reviews, badge: 'reviews', run: '', watch: null};
 }
 function aiSecond(report: AiReviewerReport): string {
@@ -134,7 +152,7 @@ const rows = computed((): Row[] => {
       list.push({id: 'proposer:' + item.key, name: item.label, when: report ? isoWhen(report.measured_at) + (report.limited ? ' · a few frames only' : '') : '',
         main: speed ? share(speed.read_right, speed.truth) : null,
         mainText: speed ? ofText(speed.read_right, speed.truth, 'speed signs proposed with the right number')
-          : item.unavailable ? 'not installed' : 'not measured yet: press Measure',
+          : item.unavailable ? 'not installed' : notMeasured.value,
         second: report ? 'found ' + speed!.found + ' of ' + speed!.truth + ' · ' + perFrame(report.false_per_frame)
           + ' false proposals per frame · ' + report.seconds_per_frame.toFixed(1) + ' s per frame' : '',
         inUse: false, run: '', watch: null});
@@ -152,19 +170,30 @@ const rows = computed((): Row[] => {
       if (!shownReports.has(report)) list.push(aiRow(report.provider_name, report.model, report.provider_id, report, false));
     }
   } else if (view.value === 'chain') {
-    for (const version of versionsOf('classifier') as ClassifierModel[]) {
-      const chain = version.chain;
-      if (!chain) continue;
+    const versions = (versionsOf('classifier') as ClassifierModel[]).filter((version) => version.chain);
+    // The cutter the chains are compared with: the one in use when a chain was measured with it, else the newest
+    // chain's. A chain measured with another cutter found other boxes: its number is not comparable.
+    const cutters = versions.map((version) => version.chain?.cutter_id ?? null);
+    const inUseCutter = versionsOf('cutter').find((version) => version.in_use)?.id ?? null;
+    const common = inUseCutter !== null && cutters.includes(inUseCutter) ? inUseCutter : cutters[0] ?? null;
+    const commonSize = versions.find((version) => version.chain?.cutter_id === common)?.chain?.cutter_size ?? null;
+    const apart = 'Measured with another cutter: not comparable with the rows of '
+      + (commonSize ? 'the cutter ' + sizeText(commonSize) : common === inUseCutter ? 'the cutter in use' : 'the newest') + '.';
+    for (const version of versions) {
+      const chain = version.chain!;
       const main = share(chain.correct, chain.truth);
       const old = version.chain_old_reader;
       const oldMain = old ? share(old.correct, old.truth) : null;
-      list.push({id: version.id, name: 'Classifier', when: isoWhen(version.trained_at), main,
+      const other = common !== null && chain.cutter_id != null && chain.cutter_id !== common;
+      list.push({id: version.id, name: 'Classifier',
+        when: isoWhen(version.trained_at) + (chain.cutter_size ? ' · cutter ' + sizeText(chain.cutter_size) : ''), main,
         mainText: ofText(chain.correct, chain.truth, 'found and read right'),
         second: perFrame(chain.surviving_false_per_frame) + ' false boxes per frame left, of '
           + perFrame(chain.false_per_frame) + ' from the cutter',
         inUse: version.in_use, run: version.run, watch: 'chain',
         vs: main === null || oldMain === null ? undefined : {text: points(main - oldMain) + ' vs the old reader (it keeps every false box)',
-          kind: Math.abs(main - oldMain) < 0.005 ? 'same' : main > oldMain ? 'better' : 'worse'}});
+          kind: Math.abs(main - oldMain) < 0.005 ? 'same' : main > oldMain ? 'better' : 'worse'},
+        apart: other ? apart : undefined});
     }
   } else if (view.value === 'cutter') {
     for (const version of versionsOf('cutter') as CutterModel[]) {
@@ -172,19 +201,24 @@ const rows = computed((): Row[] => {
       const speed = test?.by_family?.speed;
       list.push({id: version.id, name: 'Cutter ' + sizeText(version.input_size) + (version.families === 'all' ? ' · all signs' : ' · speed signs'),
         when: isoWhen(version.trained_at), main: speed ? share(speed.found, speed.truth) : share(test?.found, test?.truth_boxes),
-        mainText: speed ? ofText(speed.found, speed.truth, 'speed signs found') : ofText(test?.found, test?.truth_boxes, 'signs found'),
+        mainText: speed ? ofText(speed.found, speed.truth, 'speed signs found')
+          : ofText(test?.found, test?.truth_boxes, version.families === 'all' ? 'signs found' : 'speed signs found'),
         second: test ? perFrame(test.boxes_per_frame) + ' boxes per frame' : '', inUse: version.in_use, run: version.run,
         watch: version.part});
     }
   } else if (view.value === 'classifier') {
-    for (const version of versionsOf('classifier') as ClassifierModel[]) {
+    const versions = versionsOf('classifier') as ClassifierModel[];
+    for (const version of versions) {
       const test = version.test;
       const old = !version.class_scheme;
+      // An old reader is played in the chain of the newest classifier run that measured it (its own run keeps no chain).
+      const chained = old ? versions.find((other) => other.chain_old_reader
+        && (other.chain_old_reader.classifier_id ?? version.id) === version.id) ?? null : null;
       list.push({id: version.id, name: old ? 'Old reader (no “not a sign”)' : 'Classifier', when: isoWhen(version.trained_at),
         main: test?.accuracy ?? null,
         mainText: test?.accuracy == null ? 'not measured' : pct(test.accuracy) + ' of ' + thousands(test.samples ?? 0) + ' signs read right',
         second: test?.rejection_rate == null ? (old ? 'cannot say “not a sign”' : '') : pct(test.rejection_rate) + ' of the false boxes thrown away',
-        inUse: version.in_use, run: version.run, watch: old ? 'chain-old-reader' : 'chain'});
+        inUse: version.in_use, run: version.run, watch: old ? (chained ? 'chain-old-reader' : null) : 'chain', watchRun: chained?.run});
     }
   } else {
     for (const version of versionsOf('decider') as DeciderModel[]) {
@@ -201,7 +235,7 @@ const rows = computed((): Row[] => {
 /** The version the others are compared with: the one in use, else the best. */
 const reference = computed(() => rows.value.find((row) => row.inUse)
   ?? [...rows.value].filter((row) => row.main !== null).sort((a, b) => (b.main ?? 0) - (a.main ?? 0))[0] ?? null);
-const best = computed(() => Math.max(...rows.value.map((row) => row.main ?? -1)));
+const best = computed(() => Math.max(...rows.value.filter((row) => !row.apart).map((row) => row.main ?? -1)));
 function versus(row: Row): {text: string; kind: string} {
   if (view.value === 'chain') return row.vs ?? {text: '', kind: ''};
   const ref0 = reference.value;
@@ -218,7 +252,30 @@ const proposerReport = computed(() => proposers.value?.reports.find((entry) => e
 const proposerMissing = computed(() => proposers.value?.proposers.find((item) => item.key === shownProposer.value)?.unavailable ?? null);
 const MEASURE: [ActionName, string][] = [['measure_proposer', 'Proposes the signs of the reviewed test frames as Prepare would, '
   + 'and compares them with the boxes you kept. Nothing changes in the reviews; minutes to an hour.']];
-watch(view, () => { picked.value = null; });
+/** The row to choose once another view is shown (a view shown starts from its reference row). */
+let pendingPick: string | null = null;
+watch(view, () => { picked.value = pendingPick; pendingPick = null; });
+
+/** The view of each role, for a version asked for by the address. */
+const ROLE_VIEW: Record<ModelRole, View> = {cutter: 'cutter', classifier: 'classifier', decider: 'decider'};
+/** The version “Open the run ›” of Models and Train asks for (?model=, else the newest version of ?run=): chosen in the
+ * view of its role once the versions have come, then forgotten. */
+function openWanted(): void {
+  if (selectedModel.value === null && selectedRun.value === null) return;
+  const versions = models.value?.roles.flatMap((role) => role.versions);
+  if (versions === undefined) return;
+  const version = versions.find((item) => item.id === selectedModel.value) ?? versions.find((item) => item.run === selectedRun.value) ?? null;
+  selectedModel.value = null;
+  selectedRun.value = null;
+  if (version === null) return;
+  if (view.value === ROLE_VIEW[version.role]) {
+    picked.value = version.id;
+  } else {
+    pendingPick = version.id;
+    view.value = ROLE_VIEW[version.role];
+  }
+}
+watch(models, openWanted, {immediate: true});
 
 /** The AI reviewer of the row chosen: its measure, and its provider when it still uses that model (for Measure). */
 const shownAi = computed((): {report: AiReviewerReport | null; provider: AiProvider | null} | null => {
@@ -249,13 +306,32 @@ const {detail, loading, error} = useRunDetail(computed(() => runSummary.value?.n
   computed(() => runSummary.value?.version ?? null));
 const watchModels = computed((): WatchModel[] => {
   const key = shown.value?.watch;
+  if (!key) return [];
+  // The old reader in the chain of a classifier run: measured on the test only (runs.watch_file).
+  if (shown.value?.watchRun) return [{model: key, label: 'Chain, old reader', kind: 'chain', partitions: ['test']}];
   const list = detail.value?.name === shown.value?.run ? detail.value?.watch ?? [] : [];
-  return key ? list.filter((item) => item.model === key) : [];
+  return list.filter((item) => item.model === key);
+});
+/** The run of the report played, and its version (so the player asks again when it changes). */
+const watchRun = computed(() => shown.value?.watchRun ?? shown.value?.run ?? '');
+const watchVersion = computed(() => runsPayload.value?.runs.find((run) => run.name === watchRun.value)?.version ?? null);
+/** Why there is nothing to play. */
+const nothingToPlay = computed((): string => {
+  if (view.value === 'decider') return 'Nothing to play: the decider is judged on its table.';
+  if (shown.value?.watch === null) return 'Nothing to play yet: this reader is played in the chain of a classifier run, and none has measured it.';
+  return 'No frames to play for this version: its run kept none.';
 });
 </script>
 
 <template>
   <h1 class="sr-only">Evaluate</h1>
+
+  <section v-if="measureJob" class="live-section" :class="{now: measureJob.state === 'running'}" aria-labelledby="measure-job-title">
+    <h2 class="section-title" id="measure-job-title">{{ measureJob.state === 'running' ? 'Running' : 'Last measure failed' }}</h2>
+    <div class="jp-list" aria-live="polite">
+      <JobProgress :job="measureJob" @details="emit('details', $event)" @stop="emit('stop', $event)"/>
+    </div>
+  </section>
 
   <section class="card ev-card" aria-labelledby="eval-title">
     <div class="ev-head">
@@ -272,7 +348,8 @@ const watchModels = computed((): WatchModel[] => {
         <div class="ev-name"><strong>{{ row.name }}</strong><span v-if="row.inUse" class="ev-in-use">{{ row.badge ?? 'in use' }}</span>
           <span class="ev-when">{{ row.when }}</span></div>
         <div class="ev-main" :class="{top: row.main !== null && row.main === best && rows.length > 1}">{{ row.mainText }}</div>
-        <div class="ev-second">{{ row.second }}<span v-if="versus(row).text" :class="['ev-vs', versus(row).kind]">{{ versus(row).text }}</span></div>
+        <div class="ev-second">{{ row.second }}<span v-if="versus(row).text" :class="['ev-vs', versus(row).kind]">{{ versus(row).text }}</span><span
+          v-if="row.apart" class="ev-vs apart">{{ row.apart }}</span></div>
       </li>
     </ul>
   </section>
@@ -333,9 +410,9 @@ const watchModels = computed((): WatchModel[] => {
     <section class="card ev-card" aria-labelledby="watch-title">
       <h2 id="watch-title">{{ shown.name }} <span class="ev-when">{{ shown.when }}</span></h2>
       <p class="ev-goal">{{ shown.mainText }}<template v-if="shown.second"> · {{ shown.second }}</template></p>
-      <WatchSection v-if="watchModels.length" :key="shown.id" :run="shown.run" :models="watchModels" :version="runSummary?.version ?? null"/>
+      <WatchSection v-if="watchModels.length" :key="shown.id" :run="watchRun" :models="watchModels" :version="watchVersion"/>
       <p v-else-if="loading" class="empty">Loading the frames…</p>
-      <p v-else class="empty">{{ shown.watch ? 'No frames to play for this version: its run kept none.' : 'Nothing to play: the decider is judged on its table.' }}</p>
+      <p v-else class="empty">{{ nothingToPlay }}</p>
     </section>
     <details v-if="runSummary" class="card ev-more">
       <summary>All the numbers of run {{ shown.run }}</summary>

@@ -1,7 +1,8 @@
 // Keyboard shortcuts: ← → frame (with Shift: the frame before or after in the filter), ↑ ↓ box, the speed typed
 // as it reads ("5 0" = 50, "1 2 0" = 120, "0" alone = not readable), O A U the road, Enter confirm, N new box,
-// P apply previous, I ask the AI, H second reading, Del removes a box the reviewer selected (never one the page
-// opened on), Esc cancel.
+// P apply previous, I ask the AI, H second reading, Del removes a box the reviewer selected (on the one the page
+// opened on it says to click it first), Esc cancel. While a menu or panel of the site's top bar is open, the keys
+// are its own.
 import {onBeforeUnmount, onMounted} from 'vue';
 import {askAi} from './ai';
 import {applyPrevious} from './carry';
@@ -29,6 +30,18 @@ function stepBox(delta: number): void {
 
 // Enter on these buttons just pressed with the mouse still confirms, as the shortcut list says.
 const CONFIRM_ON_ENTER = new Set(['prev', 'next', 'mPrev', 'mNext', 'draw']);
+
+// The menus and panels of the site's top bar: the Account menu (AccountMenu.vue), the server and the comma
+// (TopMachine.vue, TopComma.vue), and any dialog.
+const POPOVERS = '#account-pop, .tm-pop';
+const INSIDE_POPOVER = POPOVERS + ', [role="dialog"], [role="alertdialog"]';
+
+/** A key pressed inside one of them, or while one is open: it is not for the frame behind. */
+export function popoverHasKeys(target: Element | null): boolean {
+  if (target?.closest(INSIDE_POPOVER)) return true;
+  // Closed, the Account menu is display:none and the two panels are not in the page.
+  return [...document.querySelectorAll(POPOVERS)].some((element) => element.getClientRects().length > 0);
+}
 
 export function useKeyboard(): void {
   // The button last pressed with the mouse or a finger; Tab moves the focus elsewhere and forgets it.
@@ -60,6 +73,8 @@ export function useKeyboard(): void {
   };
   const onKeyDown = (event: KeyboardEvent): void => {
     const target = event.target instanceof HTMLElement ? event.target : null;
+    // Never a frame step, a value or a confirmation from a key meant for an open menu or panel.
+    if (popoverHasKeys(event.target instanceof Element ? event.target : null)) return;
     const tag = target ? target.tagName.toLowerCase() : '';
     if (tag === 'input' || tag === 'select' || tag === 'textarea') {
       if (event.key === 'Escape') target?.blur();
@@ -148,6 +163,10 @@ export function useKeyboard(): void {
         if (state.selected >= 0 && state.selectedByUser) {
           event.preventDefault();
           removeSelected();
+        } else if (state.selected >= 0 && state.currentKey !== null) {
+          event.preventDefault();
+          state.notice = {key: state.currentKey, error: false, warn: true,
+            text: 'Click box ' + (state.selected + 1) + ' first (or pick it with ↑ ↓), then press Del to delete it.'};
         }
         break;
       case 'Escape':

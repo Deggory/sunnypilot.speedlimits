@@ -295,13 +295,14 @@ const scoreText = computed(() => score.value.toFixed(2));
 const levelNote = computed((): string => {
   const value = payload.value;
   if (!value) return '';
-  if (value.level === 'none') return 'This report has no per-frame boxes: re-run the evaluation. Only the reviewed signs are drawn.';
+  // An older report kept less of the cutter's boxes; the site cannot measure it again, so the note only says what it shows.
+  if (value.level === 'none') return 'This report kept none of the cutter’s boxes: only the reviewed signs are drawn.';
   if (value.level === 'verdicts') {
-    return 'This report has no per-frame boxes: re-run the evaluation to see every box of the cutter. Drawn here, at score '
-      + (value.main_score ?? '–') + ': the signs it found or missed, what the classifier called them, and the false boxes it let through.';
+    return 'This report kept only score ' + (value.main_score ?? '–') + ': the signs the cutter found or missed, what the '
+      + 'classifier called them, and the false boxes it let through.';
   }
   if (value.level === 'above') {
-    return 'This report kept the cutter’s boxes from score ' + (value.min_score ?? '–') + ' only: re-run the evaluation to see them down to 0.05.';
+    return 'This report kept the cutter’s boxes from score ' + (value.min_score ?? '–') + ' up: lower scores cannot be shown.';
   }
   return '';
 });

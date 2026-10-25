@@ -10,9 +10,9 @@
 # Usage: helpers/1_prepare.sh [--jobs=<n>] [--background] [--again] [<route> ...]
 #   helpers/1_prepare.sh --again             (proposes again the routes nobody has reviewed a frame of yet,
 #                                             e.g. after choosing another proposer)
-#   helpers/1_prepare.sh                     (tutte le route nuove, una alla volta)
-#   helpers/1_prepare.sh --jobs=4            (4 route in parallelo: piu' core, piu' veloce)
-#   helpers/1_prepare.sh --background        (continua anche se chiudi la ssh)
+#   helpers/1_prepare.sh                     (every new route, one at a time)
+#   helpers/1_prepare.sh --jobs=4            (4 routes at once: more cores, faster)
+#   helpers/1_prepare.sh --background        (goes on after the ssh session is closed)
 #   helpers/1_prepare.sh 0000011e--0c8825628a
 #
 # A route that already has a pre-annotation report is never processed again: a new report
@@ -77,23 +77,23 @@ prepare_route() {
     return 0
   fi
   if todo extract | grep -qx "$route"; then
-    echo "$route: estraggo i frame..."
+    echo "$route: taking the pictures out of the videos..."
     "$NN" extract-frames --route "$route" --overwrite < /dev/null >> "$log" 2>&1 \
-      || { echo "$route: estrazione fallita (vedi $log)"; return 1; }
+      || { echo "$route: taking the pictures out failed (see $log)"; return 1; }
     worked=1
   fi
   if todo preannotate | grep -qx "$route"; then
-    echo "$route: propongo i cartelli..."
+    echo "$route: proposing the signs (${NNSLR_PROPOSER:-vietnam})..."
     "$NN" preannotate --route "$route" < /dev/null >> "$log" 2>&1 \
-      || { echo "$route: pre-annotazione fallita (vedi $log)"; return 1; }
+      || { echo "$route: proposing failed (see $log)"; return 1; }
     # Where the car was at every frame and in which country (the review proposes it): not fatal.
     "$NN" gps --route "$route" < /dev/null >> "$log" 2>&1 \
-      || echo "$route: posizione GPS non letta (vedi $log): il paese si indica a mano"
-    echo "$route: pronta per la revisione"
+      || echo "$route: GPS position not read (see $log): choose the country by hand in the review"
+    echo "$route: ready to review"
     worked=1
   fi
   if [ "$worked" -eq 0 ]; then
-    echo "$route: niente da fare (gia' pre-annotata, o senza video collegati)"
+    echo "$route: nothing to do (already proposed, or no videos linked)"
   fi
 }
 
@@ -117,12 +117,12 @@ while [ $# -gt 0 ]; do
   elif [[ "$1" =~ ^[0-9a-f]{8}--[0-9a-f]{10}$ ]]; then
     routes+=("$1")
   else
-    die "opzione o route non valida: $1 (vedi --help)"
+    die "unknown option or route: $1 (see --help)"
   fi
   shift
 done
 
-[[ "$jobs" =~ ^[1-9][0-9]*$ ]] || die "--jobs vuole un numero da 1 in su"
+[[ "$jobs" =~ ^[1-9][0-9]*$ ]] || die "--jobs takes a number from 1 up"
 # Every pre-annotation uses its share of the cores: all of them across the routes prepared
 # together (nnslr_tools.onnx_device). The routes of --jobs inherit the value of the first call.
 if [ -z "${NNSLR_PREANNOTATE_THREADS:-}" ]; then
@@ -133,7 +133,7 @@ if [ -z "${NNSLR_PREANNOTATE_THREADS:-}" ]; then
   fi
   export NNSLR_PREANNOTATE_THREADS="$threads"
 fi
-[ -x "$NN" ] || die "manca $NN: crea l'ambiente come in docs/INSTALL.md (python -m venv .venv, pip install -e '.[preannotate]')"
+[ -x "$NN" ] || die "$NN is missing: create the environment as in docs/INSTALL.md (python -m venv .venv, pip install -e '.[preannotate]')"
 mkdir -p "$LOG_DIR"
 
 if [ -n "$one" ]; then
@@ -145,14 +145,15 @@ if [ "$background" -eq 1 ]; then
   args=(--jobs="$jobs" "${routes[@]}")
   [ "${PREPARE_AGAIN:-0}" != 1 ] || args+=(--again)
   nohup "$0" "${args[@]}" < /dev/null > "$DATA_ROOT/logs/prepare.log" 2>&1 &
-  echo "Partito in background (pid $!). Segui con:  tail -f $DATA_ROOT/logs/prepare.log"
-  echo "A che punto sei:  helpers/status.sh"
+  echo "Started in the background (pid $!). Follow it with:  tail -f $DATA_ROOT/logs/prepare.log"
+  echo "How far it is:  helpers/status.sh"
   exit 0
 fi
 
-echo "== a. collego i video di $COMMA_VIDEOS_DIR"
+# "== a. linking" is the step of the progress (nnslr_tools.job_progress.MARKERS).
+echo "== a. linking the videos of $COMMA_VIDEOS_DIR"
 "$NN" link-videos < /dev/null > "$LOG_DIR/link-videos.json" 2> "$LOG_DIR/link-videos.err" \
-  || die "nnslr link-videos fallito: vedi $LOG_DIR/link-videos.json e .err"
+  || die "nnslr link-videos failed: see $LOG_DIR/link-videos.json and .err"
 
 if [ "${#routes[@]}" -eq 0 ]; then
   if [ "${PREPARE_AGAIN:-0}" = 1 ]; then
@@ -163,10 +164,10 @@ if [ "${#routes[@]}" -eq 0 ]; then
 fi
 if [ "${#routes[@]}" -eq 0 ]; then
   rm -f "$LOG_DIR/batch.json"
-  echo "Niente da preparare: nessuna route nuova."
+  echo "Nothing to prepare: no new drive."
 else
   write_batch "${routes[@]}"
-  echo "== b+c. ${#routes[@]} route da preparare, $jobs alla volta (log in $LOG_DIR/)"
+  echo "== b+c. ${#routes[@]} drives to prepare, $jobs at a time (logs in $LOG_DIR/)"
   failed=0
   if [ "$jobs" -eq 1 ]; then
     for route in "${routes[@]}"; do
@@ -176,12 +177,12 @@ else
     # xargs reads the routes from the pipe; the commands it starts get /dev/null as stdin.
     printf '%s\n' "${routes[@]}" | xargs -P "$jobs" -I{} "$0" --one={} || failed=1
   fi
-  [ "$failed" -eq 0 ] || echo "Qualche route e' fallita: guarda i log in $LOG_DIR/"
+  [ "$failed" -eq 0 ] || echo "Some drives failed: see their logs in $LOG_DIR/"
 fi
 
 # Routes prepared before the GPS was read: their positions too (nnslr gps, quick).
 "$NN" gps --all --missing < /dev/null >> "$LOG_DIR/gps.log" 2>&1 \
-  || echo "Posizione GPS non letta per qualche route: vedi $LOG_DIR/gps.log"
+  || echo "GPS position not read for some drives: see $LOG_DIR/gps.log"
 
 echo
 (cd "$ROOT" && "$PY" -m helpers.route_status)

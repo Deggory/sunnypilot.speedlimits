@@ -38,6 +38,10 @@ export interface ProposerReport {
 export interface ProposersPayload {
   proposers: {key: Proposer; label: string; unavailable: string | null}[];
   reports: ProposerReport[];
+  /** The choice of Prepare, kept on the server (POST /api/panel/proposer); the best measured before one is made. */
+  chosen?: Proposer;
+  /** The proposer measured best that can run here (most speed signs read right), or null. */
+  best?: Proposer | null;
 }
 /** The options of an action: the cutter's size and signs, the proposer of a preparation, or what an AI review
  * reviews (the route, the provider, save yes or no, how many frames at most, as text). */
@@ -106,9 +110,13 @@ export interface JobProgress {
   steps: JobStep[];
   /** 0-100 when known from steps, epochs or finished routes; null otherwise (never a guess). */
   percent: number | null;
-  /** e.g. "detector · epoch 5 of 20", "2 of 5 routes ready". */
+  /** e.g. "detector · epoch 5 of 20", "2 of 5 drives ready". */
   detail: string;
   last_line: string;
+  /** Propose again running: the server's time left in seconds (null while unknown); the only one its card shows. */
+  seconds_left?: number | null;
+  /** A failed job: what went wrong in one sentence, when the log shows a known failure ('' otherwise). */
+  failure?: string;
   /** A running job: how far its current step is (images checked, batches, the file being downloaded). */
   step_progress?: StepProgress | null;
   /** Training only: the curves of the detector and of the reader (or of the classifier), one point per epoch done. */
@@ -123,6 +131,10 @@ export interface Job {
   started: string;
   /** The same instant with its offset ("2026-10-23T18:55:09+00:00"), when the server sends it. */
   started_at?: string;
+  /** When it ended (the last write of its log), with its offset; null while it runs. */
+  ended_at?: string | null;
+  /** Who proposes (a preparation) or is measured; null when the helpers' default was used. */
+  proposer?: Proposer | null;
   state: JobState;
   code: number | null;
   stoppable: boolean;
@@ -240,18 +252,27 @@ export interface DatasetSummary {
   per_route: DatasetRoute[];
   /** ISO time of the last change of the dataset file, or null. */
   changed_at: string | null;
+  /** The sha256 of the dataset file, as a split records it. */
+  sha256?: string;
   split: {
     /** train, validation, test, buffer (older splits: route-held-out, hard-negative): objects in each. */
     counts: Record<string, number>;
     made_at: string | null;
     warnings: string[];
+    /** The sha256 of the dataset it was made of (null in an older split). */
+    dataset_sha256?: string | null;
+    /** The proposals a person rejected, which it leaves out. */
+    rejected?: number;
   } | null;
   last_import: {
     at: string | null;
     new_frames: number;
     already: number;
-    /** Confirmed frames changed after their import, not applied (the dataset is append-only). */
+    /** Confirmed frames changed after their import, not applied (an import made before they were replaced). */
     changed_after_import: number;
+    /** Frames reviewed again after their import, their old rows replaced; withdrawn frames that left the dataset. */
+    replaced_frames?: number;
+    removed_frames?: number;
     warnings: string[];
   } | null;
 }
@@ -291,8 +312,9 @@ export interface PanelStatus {
   training_starts: TrainingStart[];
   /** The choices of “Train the cutter”: its input sizes and the default one, what it finds and the default. */
   cutter_options?: {sizes: string[]; size: string; families: CutterFamilies[]; family: CutterFamilies};
-  /** Why a proposer cannot run on this server (null: it can). */
-  proposers?: {qwen: string | null};
+  /** Why a proposer cannot run on this server (null: it can): qwen not installed, or qwen_gpu, the GPU memory it
+   * needs taken now. */
+  proposers?: {qwen: string | null; qwen_gpu?: string | null};
   /** The AI reviewer chosen in Settings (llm_providers.ai_state: a file read, no network). */
   ai_reviewer: AiState;
 }
@@ -372,6 +394,11 @@ export interface ChainNumbers {
   /** The classifier can say “not a sign” (the old reader cannot). */
   rejects: boolean | null;
   images: number | null;
+  /** The cutter and the classifier measured, as ids of the Models tab ("cutter:<run>/detector-sizes/1344x760"); the
+   * cutter's input size ("1344x760"); null when the report does not say. */
+  cutter_id?: string | null;
+  cutter_size?: string | null;
+  classifier_id?: string | null;
 }
 
 /** One size of the cutter (scripts/run_detector_sizes.sh) in a line: at score 0.1 on test (else validation). */

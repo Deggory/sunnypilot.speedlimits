@@ -409,11 +409,29 @@ def test_the_classifier_with_not_a_sign_is_a_version_of_its_own(root, models):
     assert (chain['score_threshold'], chain['recall'], chain['correct'], chain['truth'], chain['recall_found']) == (0.1, 0.5, 4, 8, 0.75)
     assert (chain['surviving_false_per_frame'], chain['false_per_frame'], chain['human_recall']) == (0.25, 1.0, 1.0)
     assert (new['chain_old_reader']['recall'], new['chain_old_reader']['surviving_false_per_frame']) == (0.375, 1.0)
+    # The cutter the chain was measured with (the id it recorded), and a classifier its report does not name.
+    assert (chain['cutter_id'], chain['cutter_size'], chain['classifier_id']) == ('cutter:r1/detector', '320x320', None)
     # The reader of the training pipeline stays as it was.
     assert (old['id'], old['label'], old['detail']) == ('classifier:r1/reader', 'Reader', 'training pipeline')
     assert old['test'] == {'samples': 6, 'accuracy': pytest.approx(4 / 6), 'human_samples': 2, 'human_accuracy': 1.0}
     assert 'chain' not in old and 'class_scheme' not in old
     json.dumps(models.index(), allow_nan=False)
+
+
+@pytest.mark.parametrize('role, model, expected', [
+    ('cutter', {'id': None, 'checkpoint': '/srv/sl/data/runs/2026-10-24_1452/detector-sizes/1344x760/detector-best.pt'},
+     'cutter:2026-10-24_1452/detector-sizes/1344x760'),
+    ('cutter', {'id': None, 'checkpoint': 'data/runs/r1/detector/detector-best.pt'}, 'cutter:r1/detector'),
+    ('cutter', {'id': 'cutter:k1/detector', 'checkpoint': '/elsewhere/detector-best.pt'}, 'cutter:k1/detector'),
+    ('classifier', {'checkpoint': '/srv/sl/data/runs/2026-10-24_1452/reader/reader-best.pt'}, 'classifier:2026-10-24_1452/reader'),
+    ('classifier', {'checkpoint': '/srv/sl/data/runs/c1/classifier/reader-best.pt'}, 'classifier:c1/classifier'),
+    ('classifier', {'checkpoint': '/srv/sl/data/runs/c1/classifier/reader-last.pt'}, None),
+    ('cutter', {'checkpoint': '/srv/sl/data/runs/r1/reader/reader-best.pt'}, None),
+    ('cutter', {'checkpoint': None}, None),
+])
+def test_the_networks_of_a_chain_by_the_id_of_the_models_tab(role, model, expected):
+    from nnslr_tools.runs import _chain_model_id
+    assert _chain_model_id(role, model) == expected
 
 
 def test_a_classifier_still_training_and_one_without_measures(root, models):

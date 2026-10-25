@@ -33,7 +33,11 @@ font-variant-numeric:tabular-nums}
 .stats span{margin-left:-14px;white-space:nowrap}
 .stats span::before{content:"·";display:inline-block;width:14px;text-align:center}
 .stats .sus{color:var(--sus);font-weight:600}
-.card-row .bar{grid-area:bar;height:6px}
+.card-row .bar{grid-area:bar;height:6px;display:flex}
+.card-row .bar span{flex:none;border-radius:0}
+/* The share an AI reviewer confirmed: hatched, as on the review page's timeline. */
+.card-row .bar .ai{background:repeating-linear-gradient(135deg,var(--accent) 0 2px,transparent 2px 4px),var(--accent-soft)}
+.card-row.done .bar .ai{background:repeating-linear-gradient(135deg,var(--ok) 0 2px,transparent 2px 4px),var(--ok-soft)}
 /* A route proposed again now (site.ts): who, how far, the time left, under the row. */
 .row-live{grid-column:2/-1;display:flex;align-items:center;gap:10px;margin-top:6px;font-size:13px;color:var(--rev);font-weight:500}
 .row-live[hidden]{display:none}
@@ -42,6 +46,13 @@ font-variant-numeric:tabular-nums}
 .count{grid-area:count;justify-self:end;text-align:right;white-space:nowrap;font-size:14px;font-weight:600;
 font-variant-numeric:tabular-nums}
 .count .unit{font-weight:400;color:var(--muted)}
+.count .by-ai{display:block;font-size:12.5px;font-weight:400;color:var(--muted)}
+/* No AI reviewer chosen: one link to set it up, above the drives. */
+.ai-setup{margin:0 2px;font-size:14px;color:var(--muted)}
+.ai-setup a{font-weight:600;white-space:nowrap}
+/* A drive without "Review with AI" (done) keeps the columns of the others while some have it. */
+.page:has(.ai-route) .cards > li:not(:has(> .ai-route))::after{content:"";width:var(--ai-route-w,136px);margin-right:20px}
+.ai-route{width:var(--ai-route-w,136px);justify-content:center}
 .card-row.done .route,.card-row.done .count{color:var(--muted)}
 /* Scoped: .open is also the shown state of a sheet and its backdrop. */
 .card-row .open{grid-area:open;justify-self:end;min-width:96px}
@@ -81,6 +92,12 @@ border-radius:12px;padding:10px 12px;min-height:44px;width:100%;transition:borde
 .auth-ok{color:var(--ok);font-size:14px}
 .auth-error:empty,.auth-ok:empty{display:none}
 .auth-foot{text-align:center;padding-top:12px;border-top:1px solid var(--line)}
+/* "Forgot the password?" under Sign in: a link that opens what to do. */
+.auth-forgot summary{list-style:none;text-align:center;color:var(--accent);font-size:14px;font-weight:500;cursor:pointer;
+padding:6px 0;min-height:32px}
+.auth-forgot summary::-webkit-details-marker{display:none}
+.auth-forgot[open] summary{color:var(--fg)}
+.auth-forgot .note{margin:2px 0 0;text-align:center}
 .settings{max-width:720px}
 .settings .state-box{max-width:none}
 .settings .auth-form{max-width:420px}
@@ -113,7 +130,15 @@ button.ai-prov-main:hover{background:var(--surface-3)}
 .ai-prov-test.ok{color:var(--ok)}.ai-prov-test.bad{color:var(--bad)}
 .ai-prov-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding-right:16px}
 .ai-prov-actions:empty{display:none}
-.btn.ai-reviews[aria-pressed="true"]{background:var(--ok-soft);color:var(--ok)}
+/* "Who reviews": a checkmark list (the rows of the model list of the sheet), "Don't use AI" last. */
+.ai-group-title{margin:6px 4px 0;font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.ai-picks{display:flex;flex-direction:column}
+.ai-pick-text{display:flex;flex-direction:column;gap:1px;flex:1;min-width:0}
+.ai-pick-note{font-size:13px;color:var(--muted);overflow-wrap:anywhere}
+.ai-pick-note.bad{color:var(--bad)}
+.ai-pick:disabled{cursor:default}
+.ai-pick:disabled:hover{background:none}
+.ai-pick:disabled .ai-model-id{color:var(--muted)}
 .ai-add .ai-prov-main{flex-direction:row;align-items:center;gap:12px;color:var(--accent);font-size:15.5px;font-weight:500}
 .ai-plus{width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;display:grid;place-items:center;font-size:18px;line-height:1;flex:none}
 /* The sheets: fields and lists on the grey of a grouped list. */
@@ -195,6 +220,9 @@ border-radius:14px;background:var(--surface-2);cursor:pointer;transition:backgro
   .card-row .open{min-width:0}
   .cards > li{grid-template-columns:minmax(0,1fr)}
   .ai-route{justify-self:start;margin:-4px 16px 14px 44px}
+  .page:has(.ai-route) .cards > li:not(:has(> .ai-route))::after{display:none}
+  .count .by-ai{display:inline;font-size:inherit}
+  .count .by-ai::before{content:" · "}
 }
 @media (max-width:480px){
   .brand-name{font-size:17px}

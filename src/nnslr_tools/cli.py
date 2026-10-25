@@ -1705,10 +1705,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_llm_add.add_argument("--model", help="the model; default: the first one the server lists")
     p_llm_add.add_argument("--key-file", help="a file holding the API key (read, never printed); without it a "
                                               "new provider has no key and an update keeps its key")
-    p_llm_add.add_argument("--reviewer", action="store_true", help="also make it the AI reviewer")
+    p_llm_add.add_argument("--reviewer", action="store_true",
+                           help="test it, and make it the AI reviewer if it passes")
     p_llm_remove = llm_sub.add_parser("remove", help="remove a provider and its key")
     p_llm_remove.add_argument("id")
-    p_llm_use = llm_sub.add_parser("use", help="choose the AI reviewer ('none' for none)")
+    p_llm_use = llm_sub.add_parser("use", help="choose the AI reviewer, one that passed its test ('none' for none)")
     p_llm_use.add_argument("id", help="a provider id, or none")
     p_llm_models = llm_sub.add_parser("models", help="the models the provider's server lists")
     p_llm_models.add_argument("id")
@@ -1961,10 +1962,17 @@ def _llm_add(root: Path, args: argparse.Namespace) -> int:
     if key is not None:
         body["key"] = key
     saved = llm_providers.save_provider(root, body)
-    if args.reviewer:
-        llm_providers.set_reviewer(root, saved["id"])
-        saved["is_reviewer"] = True
     print(("updated  " if existing is not None else "added  ") + _llm_line(saved))
+    if args.reviewer:
+        # Only a provider that passed its Test reviews (llm_providers.set_reviewer): test it first.
+        from nnslr_tools import ai_review
+        result = ai_review.test_provider(_ai_service(root), saved["id"])
+        print("test: " + result["message"], file=sys.stderr)
+        if not result["ok"]:
+            print(f"error: {saved['id']} did not pass its test: it is not the AI reviewer", file=sys.stderr)
+            return 1
+        llm_providers.set_reviewer(root, saved["id"])
+        print(f"AI reviewer: {saved['id']}")
     return 0
 
 

@@ -74,7 +74,7 @@ MARKERS = (
     (re.compile(r'^== a\. importo'), 'import', ()),
     (re.compile(r'^== b\. '), 'split', ()),
     (re.compile(r'^== c\. '), 'gpu_env', ()),
-    (re.compile(r'^== a\. collego'), 'link', ()),
+    (re.compile(r'^== a\. (?:linking|collego)'), 'link', ()),
     (re.compile(r'^== b\+c\. '), 'frames', ()),
 )
 SUBSTEP = re.compile(r'^== (\d+)/(\d+) ')
@@ -90,7 +90,10 @@ METRIC = re.compile(r'\b(train_loss|val_loss|train_accuracy|val_accuracy|val_rec
 SECONDS = re.compile(r'\b([0-9]+)s$')
 FETCHED = re.compile(r'^== (\S+)--(\d+) -> ')
 ON_COMMA = re.compile(r'^(\S+) sul comma: ')
-FINISHED = re.compile(r'^== finito con codice ')
+# A proposer measured (helpers/measure_proposer.sh): its worker writes a line per frame, "Preannotating 280/604: ...".
+PREANNOTATING = re.compile(r'^Preannotating (\d+)/(\d+)\b')
+# The last line the panel's wrapper writes (nnslr_tools.panel.WRAPPER; in Italian in the older logs).
+FINISHED = re.compile(r'^== (?:finished with code|finito con codice) ')
 # A line of JSON printed in the log (the report of the CUDA smoke test, ...): a brace, a bracket, a quoted key
 # or a bare value. Never the last line shown: a lone "}" says nothing. A frame counter ("[12/60] 3/27: 2 signs ...",
 # nnslr ai-review) is no JSON.
@@ -99,6 +102,24 @@ JSON_LINE = re.compile(r'^(?!\[\d+/\d+\] )(?:[{}\[\]"]|(?:-?\d[\d.eE+-]*|true|fa
 
 # Lines a library prints after its error, pointing to its documentation: they say nothing of what went wrong.
 HINT_LINE = re.compile(r'^(Search for `|For debugging consider passing|Compile with `TORCH_USE_CUDA_DSA`)')
+# The failures seen in the logs, each with what the page says instead of the exit code and the paths (the log, with
+# them, stays in Details). The first that matches the end of the log wins.
+FAILURES = (
+    (re.compile(r'CUDA out of memory|CUDA error: out of memory|OutOfMemoryError|OOM on device'),
+     'The GPU ran out of memory: another job or program was using it. Free the GPU, then try again.'),
+    (re.compile(r'No space left on device'), 'The disk is full: free some space, then try again.'),
+    (re.compile(r'creazione di \.venv-gpu fallita|\.venv-gpu.*failed'),
+     'Setting up the GPU programs failed. Details has the log.'),
+    (re.compile(r'servono almeno \d+ route|at least \d+ (?:independent )?(?:reviewed )?(?:routes|drives)'),
+     'More reviewed drives are needed before the dataset can be split.'),
+    (re.compile(r'modifiche locali|local changes'),
+     'The code on this server has changes of its own: the update leaves them alone.'),
+    (re.compile(r'Connection refused|Connection timed out|No route to host|Could not resolve hostname|'
+                r'Permission denied \(publickey'),
+     'The comma did not answer, or refused this server: is it on, and on the same network?'),
+)
+# How far back from the end of a failed log a known failure is looked for.
+FAILURE_LINES = 60
 
 
 def last_line(text: str) -> str:
@@ -112,6 +133,13 @@ def last_line(text: str) -> str:
     return ''
 
 
+def failure_text(text: str) -> str:
+    """What went wrong in one plain sentence, when the end of the log shows a known failure (FAILURES); ''
+    otherwise."""
+    tail = '\n'.join(text.splitlines()[-FAILURE_LINES:])
+    return next((sentence for pattern, sentence in FAILURES if pattern.search(tail)), '')
+
+
 def duration_text(seconds: float | None) -> str:
     """"about 2 h 50 min", "about 12 min", "under a minute"; '' when unknown."""
     if seconds is None:
@@ -123,17 +151,9 @@ def duration_text(seconds: float | None) -> str:
 
 
 def again_detail(preparation: dict) -> str:
-    """Propose again in one line: "Qwen3-VL · Basel → Mumpf, 138 of 2,160 frames · 0 of 4 drives ready · about
-    10 h 50 min left" (panel.Panel._again_progress)."""
-    parts = []
-    working = [item for item in preparation.get('working', []) if item.get('phase') == 'proposing again']
-    if working:
-        item = working[0]
-        parts.append((item.get('title') or item['route']) + f", {item['done']:,} of {item['total']:,} frames")
-    parts.append(f"{preparation.get('routes_done', 0)} of {preparation.get('routes_total', 0)} drives ready")
-    left = duration_text(preparation.get('seconds_left'))
-    if left:
-        parts.append(left + ' left')
+    """Propose again in one line: "Qwen3-VL · 0 of 4 drives ready" (panel.Panel._again_progress). The drive at
+    work and its frames are in the list of drives under it, the time left once, as the job's 'seconds_left'."""
+    parts = [f"{preparation.get('routes_done', 0)} of {preparation.get('routes_total', 0)} drives ready"]
     head = preparation.get('proposer')
     return ((head + ' · ') if head else '') + ' · '.join(parts)
 
@@ -144,7 +164,8 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
     _inside_step) or None, 'curves': {'detector'|'reader'|'classifier': {'epochs': total, ('stopped_early': epoch,)
     'points': [{'epoch', 'train_loss', 'val_loss', ('train_accuracy', 'val_accuracy',) ('val_recall',)
     ('val_sign_accuracy', 'val_rejection', 'val_balanced_accuracy',) 'seconds'}]}}} for an action in state running,
-    ok, failed or interrupted."""
+    ok, failed or interrupted; with 'seconds_left' (the server's time left, None while unknown) for Propose again
+    running and 'failure' (failure_text, '' when unknown) for a failed job."""
     steps = STEPS.get(action, ())
     keys = [key for key, _, _ in steps]
     current = keys[0] if keys else ''
@@ -157,6 +178,8 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
     stopped: dict[str, int] = {}
     fetched = 0
     route = ''
+    # A proposer measured: the frames proposed so far and all of them.
+    proposed: tuple[int, int] | None = None
     # The curves of the training: per network, one point per epoch.
     curves: dict[str, dict] = {}
     for raw in text.splitlines():
@@ -202,6 +225,9 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
         match = ON_COMMA.match(line)
         if match:
             route = match.group(1)
+        match = PREANNOTATING.match(line)
+        if match and int(match.group(2)):
+            proposed = (int(match.group(1)), int(match.group(2)))
     if current in keys:
         done.update(keys[:keys.index(current)])
 
@@ -230,6 +256,8 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
         percent = round(reached * 100 / total, 1)
     elif action in ('prepare', 'prepare_again') and preparation is not None and preparation.get('percent') is not None:
         percent = float(preparation['percent'])
+    elif action == 'measure_proposer' and proposed is not None:
+        percent = round(min(proposed) * 100 / proposed[1], 1)
 
     if epoch is not None and epoch[0] == current and state == 'running' and epoch[0] in stopped:
         detail = epoch[0] + ' · stopped early after epoch ' + str(stopped[epoch[0]])
@@ -238,12 +266,24 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
     elif action == 'prepare_again' and preparation is not None and preparation.get('again'):
         detail = again_detail(preparation)
     elif action == 'prepare' and preparation is not None and preparation.get('routes_total'):
-        detail = str(preparation['routes_done']) + ' of ' + str(preparation['routes_total']) + ' routes ready'
+        detail = str(preparation['routes_done']) + ' of ' + str(preparation['routes_total']) + ' drives ready'
     elif action == 'fetch' and (fetched or route):
         detail = (str(fetched) + (' segment downloaded' if fetched == 1 else ' segments downloaded')
                   + (' · ' + route if route and state == 'running' else ''))
-    return {'steps': rows, 'percent': percent, 'detail': detail, 'last_line': last_line(text),
-            'step_progress': inside if state == 'running' and current in keys else None, 'curves': curves}
+    elif action == 'measure_proposer' and proposed is not None and state == 'running':
+        detail = f'{proposed[0]:,} of {proposed[1]:,} frames'
+    result = {'steps': rows, 'percent': percent, 'detail': detail, 'last_line': last_line(text),
+              'step_progress': inside if state == 'running' and current in keys else None, 'curves': curves}
+    preparing = action in ('prepare', 'prepare_again') and preparation is not None and state == 'running'
+    if preparing:
+        # Its drives are listed with their phase under the card: the raw line of the helper says it again.
+        result['last_line'] = ''
+    if preparing and preparation.get('again'):
+        # The time left of Propose again, from the pace of the drive at work: the only one the card shows.
+        result['seconds_left'] = preparation.get('seconds_left')
+    if state == 'failed':
+        result['failure'] = failure_text(text)
+    return result
 
 
 def _inside_step(current: str, epoch: tuple[str, int, int] | None, substep: tuple[int, str] | None,

@@ -36,6 +36,8 @@ def test_review_flow_with_the_plain_tools(service, tmp_path):
     tools = ReviewTools(service, client='test')
     routes = tools.list_routes()['routes']
     assert [r['route_id'] for r in routes] == [ROUTE] and routes[0]['frame_count'] == 7
+    # The drive, as the site names the route (nothing known of it in the test).
+    assert routes[0]['drive'] == {'when': None, 'minutes': None, 'start': None, 'from': None, 'to': None, 'title': None}
     following = tools.next_frame(ROUTE)
     frame = following['frame']
     assert frame['frame_key'] == '0/0' and frame['save'] == {'run_id': RUN_ID, 'base_revision': 0}

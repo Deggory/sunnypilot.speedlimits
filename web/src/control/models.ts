@@ -12,13 +12,17 @@ import {goTo} from './tabs';
 
 const INTERVAL_MS = 10000;
 
-/** What each role does, what plays it today, and the words when none is trained yet. */
-export const ROLE_TEXT: Record<ModelRole, {what: string; today: string; empty: string; emptyMore: string}> = {
+/** What each role does, what plays it today, the words when none is trained yet, and what uses the one in use
+ * (Prepare's “Our networks” proposer, nnslr_tools.preannotate.our_networks; the classifier's training, which learns
+ * from the false boxes of the cutter in use and is measured with it, scripts/run_classifier.sh). */
+export const ROLE_TEXT: Record<ModelRole, {what: string; today: string; empty: string; emptyMore: string; uses: string}> = {
   cutter: {
     what: 'Finds every box that could be a sign. It must miss nothing: the classifier drops its false boxes.',
     today: 'Today: the detector, judged on the signs it misses by size.',
     empty: 'No cutter trained yet: the detector of a training run plays this role.',
     emptyMore: 'Start a training on the Train tab; its detector appears here.',
+    uses: 'Prepare’s “Our networks” finds the signs with it. The next “Train the classifier” learns from its '
+      + 'false boxes and is measured with it.',
   },
   classifier: {
     what: 'Says what each box is: a speed value, end of limit, another sign, or not a sign.',
@@ -26,12 +30,14 @@ export const ROLE_TEXT: Record<ModelRole, {what: string; today: string; empty: s
       + 'it rejects and on the chain end to end.',
     empty: 'No classifier trained yet: the reader of a training run plays this role.',
     emptyMore: 'Start a training, or “Train the classifier”, on the Train tab; it appears here.',
+    uses: 'Prepare’s “Our networks” reads the signs with it.',
   },
   decider: {
     what: 'Says whom each sign applies to: our road, another road, or abstain.',
     today: 'Today: only the prototypes of experiment B.',
     empty: 'No decider trained yet: experiment B is the first prototype.',
     emptyMore: 'Its variants appear here once scripts/run_experiment_b.sh has trained them.',
+    uses: 'Nothing uses the decider yet: the choice is only noted for later.',
   },
 };
 
@@ -66,8 +72,8 @@ export async function putInUse(version: ModelVersion, roleLabel: string): Promis
   const role = roleLabel.toLowerCase();
   const ok = await askConfirm({
     title: 'Use this ' + role + '?', action: 'Use this one',
-    text: versionName(version) + ' becomes the ' + role + ' in use on this server. It is only recorded '
-      + '(models/active.json): nothing is copied, exported or sent to the comma.',
+    text: versionName(version) + ' becomes the ' + role + ' in use on this server. ' + ROLE_TEXT[version.role].uses
+      + ' Nothing is copied or sent to the comma.',
   });
   if (!ok) return false;
   try {
@@ -89,12 +95,18 @@ export function chosenText(active: ActiveModel): string {
   return ['chosen', when, who].filter(Boolean).join(' ');
 }
 
-/** Opens a run on the Evaluate tab (a click with a modifier key opens the link as usual). */
-export function openRun(event: MouseEvent, run: string): void {
+/** The address of a version on the Evaluate tab: its run and its id. */
+export function evaluateHref(version: ModelVersion): string {
+  return '/evaluate?run=' + encodeURIComponent(version.run) + '&model=' + encodeURIComponent(version.id);
+}
+
+/** Opens a version on the Evaluate tab, chosen in the view of its role (a click with a modifier key opens the link as
+ * usual). */
+export function openRun(event: MouseEvent, version: ModelVersion): void {
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   event.preventDefault();
   goTo('evaluate');
-  chooseRun(run);
+  chooseRun(version.run, version.id);
 }
 
 /** "320x320" -> "320 × 320". */

@@ -4,8 +4,10 @@
 import {computed, ref, useTemplateRef, watchEffect} from 'vue';
 import {BOOLEAN_FIELDS, FAMILIES, QUICK_VALUES, ROADS, SELECT_FIELDS, SIGN_KIND_GROUPS, familyHasValue,
   type BooleanField, type SelectField} from './catalog';
+import {addedBy, originalOf} from './boxes';
 import {coarsePointer, releaseFocus} from './dom';
 import {setFamily, setField, setKind, setValue} from './edits';
+import {workOf} from './frames';
 import {vFill} from './fill';
 import {handlesOf, sceneScale, zoomView, type Rect} from './overlay';
 import {finishDrag, onPointerDown, onPointerMove, onTouchStart} from './pointer';
@@ -49,6 +51,16 @@ const hasValueField = computed(() => props.detection !== null && familyHasValue(
 const noValue = computed(() => hasValueField.value
   && (props.detection?.value_kph === null || props.detection?.value_kph === undefined));
 const road = computed(() => props.detection?.applicability || 'unresolved');
+// Where the box comes from: the model's proposal, else who added it (the reviewer by hand, or an AI reviewer).
+const evidence = computed(() => {
+  const d = props.detection;
+  if (d === null) return '';
+  const original = originalOf(props.row, d);
+  const label = d.model_label || original?.model_label;
+  if (label) return 'Model proposal: ' + label;
+  if (original !== null) return 'Model proposal.';
+  return 'Box ' + addedBy(workOf(props.row), d) + '.';
+});
 
 const SELECT_CHOICES: Record<SelectField, [string, string][]> = {
   visibility: [['unknown', 'To assess'], ['clear', 'Clear'], ['partial', 'Partial'], ['poor', 'Poor']],
@@ -112,7 +124,7 @@ function booleanChanged(key: BooleanField, event: Event): void {
         </g>
       </svg>
     </div>
-    <p class="evidence" id="evidence">{{ detection?.model_label ? 'Model proposal: ' + detection.model_label : 'Box added by hand.' }}</p>
+    <p class="evidence" id="evidence">{{ evidence }}</p>
     <!-- Asked for nearly every box: right under the zoom. -->
     <p class="field-label">Road</p>
     <div class="segmented" id="roads" role="group" aria-label="Which road it applies to">

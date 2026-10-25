@@ -14,6 +14,7 @@ survives a restart of the server.
 """
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import os
@@ -46,9 +47,12 @@ DOWNLOADING = re.compile(r'Downloading (\S+?)(?:\.whl)? \(([0-9.]+) (kB|MB|GB)\)
 RUN_NAME = re.compile(r'[A-Za-z0-9._-]+')
 STABLE_CHECK_SECONDS = 600
 JOB_ID = re.compile(r'[0-9]{8}-[0-9]{6}-[a-z_]+')
-FINISHED = re.compile(r'== finito con codice (\d+)\s*$')
+# The last line of a log; "finito con codice" in the logs written before it was in English.
+FINISHED = re.compile(r'== (?:finished with code|finito con codice) (\d+)\s*$')
 # Runs the helper and appends its exit code as the last line of the log.
-WRAPPER = '"$@"; code=$?; echo; echo "== finito con codice $code"; exit $code'
+WRAPPER = '"$@"; code=$?; echo; echo "== finished with code $code"; exit $code'
+# The wrapper of the actions started before the footer was in English: still running ones are still ours (_group).
+OLD_WRAPPERS = ('"$@"; code=$?; echo; echo "== finito con codice $code"; exit $code',)
 # A training run's name, as helpers/3_train.sh writes it: "== d. training <run> (<mode>) -> ...".
 RUN_NAME = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,99}')
 RUN_LINE = re.compile(r'^== d\. training (\S+) \(', re.M)
@@ -82,8 +86,19 @@ AI_OPTIONS = ('route', 'provider', 'save', 'limit')
 PROVIDER_ID = re.compile(r'[a-z][a-z0-9-]{0,31}')
 MAX_AI_LIMIT = 5000
 # [ai-reviewer] - END
-# Who proposes the signs of a route (nnslr preannotate --proposer): the choice of the Prepare tab.
+# Who proposes the signs of a route (nnslr preannotate --proposer): the choice of the Prepare tab, kept on the server
+# (PROPOSER_FILE in the data root) once chosen; before that, the one measured best (Panel.proposer_choice).
 PROPOSERS = ('vietnam', 'ours', 'qwen')
+PROPOSER_FILE = 'web/proposer.json'
+# The proposer when none is measured yet: the helpers' own default (helpers/1_prepare.sh).
+DEFAULT_PROPOSER = 'vietnam'
+# The actions that take a proposer, and the two that prepare routes (their progress is the preparation's).
+PROPOSER_ACTIONS = ('prepare', 'prepare_again', 'measure_proposer')
+PREPARING = ('prepare', 'prepare_again')
+# A proposer in the log of a job started before the panel kept its options (<job id>.json): "Measuring the proposer
+# qwen" (helpers/measure_proposer.sh), "proposing the signs (again) (qwen)" (helpers/1_prepare.sh).
+PROPOSER_LINE = re.compile(r'(?:Measuring the proposer |(?:proposing the signs(?: again)?|propongo di nuovo i cartelli) \()'
+                           r'(vietnam|ours|qwen)\b')
 
 
 def _run_of(log: Path, action: str = 'train') -> str | None:
@@ -103,7 +118,7 @@ def _run_of(log: Path, action: str = 'train') -> str | None:
 ACTIONS = {
     # Every route still on the comma, over ssh with this machine's key (Host comma in ~/.ssh/config).
     'fetch': {'label': 'Download from the comma', 'group': 'fetch', 'command': ['helpers/fetch_comma_segments.sh']},
-    'prepare': {'label': 'Prepare new routes', 'group': 'prepare', 'command': ['helpers/1_prepare.sh']},
+    'prepare': {'label': 'Prepare new drives', 'group': 'prepare', 'command': ['helpers/1_prepare.sh']},
     # The routes nobody has reviewed a frame of, proposed again (after choosing another proposer).
     'prepare_again': {'label': 'Propose again', 'group': 'prepare', 'command': ['helpers/1_prepare.sh', '--again']},
     'dataset': {'label': 'Import reviews', 'group': 'train',
@@ -161,6 +176,20 @@ ACTIVITIES = (
 OWN_GROUPS = ('prepare', 'train', 'update', 'ai')
 GROUP_NAMES = {'fetch': 'a download from the comma', 'prepare': 'a preparation',
                'train': 'an import or a training', 'update': 'a code update', 'ai': 'an AI review'}
+# What runs, in the reason of an action that must wait ("A proposer measurement is running"): the job of the site by
+# its action, the work from a terminal by its label (ACTIVITIES); GROUP_NAMES when neither is known.
+RUNNING_NAMES = {'fetch': 'a download from the comma', 'prepare': 'a preparation', 'prepare_again': 'a preparation',
+                 'measure_proposer': 'a proposer measurement', 'setup_vlm': 'the install of Qwen3-VL',
+                 'dataset': 'an import of the reviews', 'train': 'a training', 'train_continue': 'a training',
+                 'train_resume': 'a training', 'train_classifier': 'a classifier training',
+                 'train_cutter': 'a cutter training', 'update': 'a code update', 'ai_review': 'an AI review',
+                 'measure_ai_reviewer': 'an AI reviewer measurement'}
+ACTIVITY_NAMES = {'download from the comma': 'a download from the comma', 'preparation': 'a preparation',
+                  'frame extraction': 'a preparation', 'pre-annotation': 'a preparation',
+                  'dataset and training': 'an import or a training', 'GPU training': 'a training',
+                  'classifier training': 'a classifier training', 'cutter training': 'a cutter training',
+                  'code update': 'a code update', 'AI review': 'an AI review',
+                  'AI reviewer measure': 'an AI reviewer measurement'}
 # Groups that never run together with a group, besides itself. The download and the preparation
 # both write the links of data/raw/routes; the update rewrites the helpers under a running bash
 # and restarts this server; a preparation replaces the report an AI review is working on.
@@ -270,6 +299,30 @@ class Panel:
                     groups.add(ACTIONS[job_id.split('-', 2)[2]]['group'])
         return groups
 
+    def _busy_reason(self, group: str, activities: list[dict]) -> str:
+        """Why an action waits for `group`, in words: "A proposer measurement is running" (the running job of the site
+        in that group, else the work from a terminal, else the group)."""
+        name = None
+        with self._lock:
+            for job_id, process in self._processes.items():
+                action = job_id.split('-', 2)[2]
+                if process.poll() is None and ACTIONS[action]['group'] == group:
+                    name = RUNNING_NAMES.get(action)
+                    break
+        if name is None:
+            name = next((ACTIVITY_NAMES[item['label']] for item in activities
+                         if item['group'] == group and item['label'] in ACTIVITY_NAMES), None)
+        name = name or GROUP_NAMES[group]
+        return name[0].upper() + name[1:] + ' is running'
+
+    def running(self) -> dict:
+        """What runs now, for the dots of the busy tabs on the pages outside the panel (GET /api/panel/system): the
+        running jobs of the site (id, action, label, state) and the work started from a terminal."""
+        activities = self.activities()
+        jobs = [{key: job[key] for key in ('id', 'action', 'label', 'state')}
+                for job in self.jobs(activities) if job['state'] == 'running']
+        return {'jobs': jobs, 'activities': activities}
+
     def jobs(self, activities: list[dict] | None = None) -> list[dict]:
         """The last actions started from the panel, newest first."""
         if activities is None:
@@ -298,14 +351,25 @@ class Panel:
             else:
                 state = 'interrupted'
             started = datetime.strptime(job_id[:15], '%Y%m%d-%H%M%S')
-            result.append({'id': job_id, 'action': action, 'label': ACTIONS[action]['label'],
+            info = path.stat()
+            # Who proposes (a preparation) or is measured: "Measure Qwen3-VL" rather than "Measure a proposer".
+            proposer = _proposer_of(path) if action in PROPOSER_ACTIONS else None
+            label = ACTIONS[action]['label']
+            if action == 'measure_proposer' and proposer is not None:
+                from nnslr_tools.preannotate import PROPOSER_NAMES
+                label = 'Measure ' + PROPOSER_NAMES.get(proposer, proposer)
+            result.append({'id': job_id, 'action': action, 'label': label,
                            'run': _run_of(path, action) if ACTIONS[action]['group'] == 'train' else None,
+                           'proposer': proposer,
                            'started': started.strftime('%Y-%m-%d %H:%M:%S'),
                            # The same moment with the server's offset, for the elapsed time in the page.
                            'started_at': started.astimezone().isoformat(timespec='seconds'),
+                           # When it ended: the last write of its log (the wrapper's exit code, or where it stopped).
+                           'ended_at': None if state == 'running'
+                           else datetime.fromtimestamp(info.st_mtime).astimezone().isoformat(timespec='seconds'),
                            'state': state, 'code': code,
                            'stoppable': state == 'running' and self._group(job_id) is not None,
-                           'size': path.stat().st_size})
+                           'size': info.st_size})
         return result
 
     # -- the machine ---------------------------------------------------------------------------
@@ -392,7 +456,8 @@ class Panel:
         # [ai-reviewer] - END
         # Who can propose the signs on this server (the choice of the Prepare tab), and why not.
         from nnslr_tools.preannotate import vlm_missing
-        payload['proposers'] = {'qwen': vlm_missing(self.root)}
+        # qwen: why it is not installed; qwen_gpu: why it cannot load on the GPU now (start() refuses it then).
+        payload['proposers'] = {'qwen': vlm_missing(self.root), 'qwen_gpu': _qwen_gpu_reason(system['gpu']) or None}
         # The choices of "Train the cutter", for its buttons.
         payload['cutter_options'] = {'sizes': list(CUTTER_SIZES), 'size': CUTTER_SIZE, 'families': list(CUTTER_FAMILIES),
                                      'family': CUTTER_FAMILY}
@@ -438,7 +503,7 @@ class Panel:
         key = (job['size'], job['state'])
         cached = self._progress.get(job['id'])
         # A preparation's percent changes without its log growing: never cached while it runs.
-        if cached is not None and cached[:2] == key and not (job['action'] == 'prepare' and job['state'] == 'running'):
+        if cached is not None and cached[:2] == key and not (job['action'] in PREPARING and job['state'] == 'running'):
             result = cached[2]
         else:
             result = self._read_progress(job, preparation)
@@ -455,7 +520,7 @@ class Panel:
                 text = log.read().decode('utf-8', 'replace')
         except OSError:
             text = ''
-        return progress(job['action'], job['state'], text, preparation if job['action'] == 'prepare' else None)
+        return progress(job['action'], job['state'], text, preparation if job['action'] in PREPARING else None)
 
     def _with_step_progress(self, result: dict, action: str, started_at: str) -> dict:
         """The progress inside the current step: the last report of a command (logs/progress.json, written
@@ -519,7 +584,7 @@ class Panel:
             if not payload['actions_enabled']:
                 reason = 'the panel is read-only'
             elif conflict is not None:
-                reason = GROUP_NAMES[conflict][0].upper() + GROUP_NAMES[conflict][1:] + ' is running'
+                reason = self._busy_reason(conflict, activities)
             elif name == 'update' and not (self.repo / 'helpers/update.sh').is_file():
                 reason = 'helpers/update.sh is missing in this installation'
             elif name == 'update':
@@ -531,7 +596,7 @@ class Panel:
             elif name == 'fetch':
                 pass
             elif name == 'prepare' and not to_prepare:
-                reason = 'no new route to prepare'
+                reason = 'no new drive to prepare'
             elif name == 'train_classifier' and not (self.repo / CLASSIFIER_SCRIPT).is_file():
                 reason = CLASSIFIER_SCRIPT + ' is missing in this installation'
             elif name == 'train_cutter' and not (self.repo / CUTTER_SCRIPT).is_file():
@@ -540,9 +605,11 @@ class Panel:
             elif name in AI_ACTIONS and not (self.repo / action['command'][0]).is_file():
                 reason = action['command'][0] + ' is missing in this installation'
             elif name == 'ai_review' and not payload.get('ai_reviewer', {}).get('available'):
-                reason = 'no AI reviewer: choose one in Settings'
+                # A reviewer chosen but not passing its Test is named in the state, with why it cannot review.
+                reason = ('the AI reviewer has not passed its Test: test it in Settings'
+                          if payload.get('ai_reviewer', {}).get('provider') else 'no AI reviewer: choose one in Settings')
             elif name == 'ai_review' and not any(row.get('run_id') for row in rows):
-                reason = 'no prepared route'
+                reason = 'no prepared drive'
             elif name == 'ai_review':
                 # It reviews the frames nobody confirmed: it needs no confirmed frame.
                 pass
@@ -552,7 +619,7 @@ class Panel:
             elif name != 'prepare' and not confirmed:
                 reason = 'no confirmed frame'
             elif name.startswith('train') and payload['reviewed_routes'] < payload['min_routes']:
-                reason = (f'{payload["min_routes"]} reviewed routes are needed, '
+                reason = (f'{payload["min_routes"]} reviewed drives are needed, '
                           f'now {payload["reviewed_routes"]}')
             elif name.startswith('train') and gpu is not None and gpu['processes']:
                 reason = 'the GPU is busy with another process'
@@ -658,8 +725,33 @@ class Panel:
         """The latest measure of each proposer of Prepare (helpers/measure_proposer.sh), and why one cannot run."""
         from nnslr_tools.preannotate import PROPOSERS, vlm_missing
         from nnslr_tools.proposer_eval import latest_reports
-        return {'proposers': [{'key': key, 'label': label, 'unavailable': vlm_missing(self.root) if key == 'qwen' else None}
-                              for key, label in PROPOSERS.items()], 'reports': latest_reports(self.root)}
+        reports = latest_reports(self.root)
+        missing = vlm_missing(self.root)
+        best = _best_proposer(reports, {'qwen'} if missing else set())
+        return {'proposers': [{'key': key, 'label': label, 'unavailable': missing if key == 'qwen' else None}
+                              for key, label in PROPOSERS.items()], 'reports': reports,
+                # The choice of Prepare: kept on the server once made, else the best measured.
+                'chosen': self._kept_proposer() or best or DEFAULT_PROPOSER, 'best': best}
+
+    def _kept_proposer(self) -> str | None:
+        """The proposer chosen on the Prepare tab (PROPOSER_FILE), or None before a choice."""
+        kept = (_read_json(self.root / PROPOSER_FILE) or {}).get('proposer')
+        return kept if kept in PROPOSERS else None
+
+    def set_proposer(self, body) -> dict:
+        """Keeps the choice of Prepare's Found by ({'proposer': 'ours'}) for every browser; proposers() with it. A
+        read-only panel refuses it, as it refuses the actions."""
+        if not self.actions_enabled:
+            raise PanelError(403, 'actions_disabled', 'The panel is read-only on this server.')
+        proposer = body.get('proposer') if isinstance(body, dict) else None
+        if proposer not in PROPOSERS:
+            raise PanelError(400, 'bad_option', 'Unknown proposer: ' + ', '.join(PROPOSERS) + '.')
+        path = self.root / PROPOSER_FILE
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name('.' + path.name + '.tmp')
+        temporary.write_text(json.dumps({'proposer': proposer}) + '\n', encoding='utf-8')
+        os.replace(temporary, path)
+        return self.proposers()
 
     # [ai-reviewer] - START
     def ai_reviewers(self) -> dict:
@@ -709,6 +801,10 @@ class Panel:
         if save not in ('yes', 'no'):
             raise PanelError(400, 'bad_option', 'Save is yes or no.')
         if save == 'yes':
+            # Its saves are final: only a provider that passed its last Test (also checked by the job itself).
+            refusal = llm_providers.review_refusal(llm_providers.provider(self.root, provider))
+            if refusal:
+                raise PanelError(409, 'ai_not_tested', refusal)
             arguments.append('--save')
         limit = options.get('limit')
         if limit is not None:
@@ -939,11 +1035,9 @@ class Panel:
                     raise PanelError(409, 'not_available', missing + '.')
                 # Qwen3-VL needs about 17.5 GB of the GPU: refused, not run out of memory, when they are taken
                 # (another Qwen job, a training, llama.cpp in another container).
-                gpu = self.system().get('gpu') or {}
-                used, total = gpu.get('memory_used_mb'), gpu.get('memory_total_mb')
-                if used is not None and total and total - used < QWEN_GPU_MB:
-                    raise PanelError(409, 'gpu_taken', f'Qwen3-VL needs about {QWEN_GPU_MB // 1024} GB of the GPU, and only '
-                                     f'{(total - used) / 1024:.1f} GB are free: another job or program uses it.')
+                taken = _qwen_gpu_reason(self.system().get('gpu'))
+                if taken:
+                    raise PanelError(409, 'gpu_taken', taken + '.')
             start_env['NNSLR_PROPOSER'] = proposer
         if action == 'train_cutter':
             size = (options or {}).get('size') or CUTTER_SIZE
@@ -1000,9 +1094,10 @@ class Panel:
             if cutter is None:
                 raise PanelError(409, 'no_cutter', why[0].upper() + why[1:] + '.')
         with self._lock:
-            conflict = _conflicting_group(group, self._running_groups(self.activities()))
+            activities = self.activities()
+            conflict = _conflicting_group(group, self._running_groups(activities))
             if conflict is not None:
-                raise PanelError(409, 'busy', GROUP_NAMES[conflict][0].upper() + GROUP_NAMES[conflict][1:] + ' is running: wait for it to finish.')
+                raise PanelError(409, 'busy', self._busy_reason(conflict, activities) + ': wait for it to finish.')
             self.logs.mkdir(parents=True, exist_ok=True)
             job_id = datetime.now().strftime('%Y%m%d-%H%M%S') + '-' + action
             path = self.logs / (job_id + '.log')
@@ -1023,6 +1118,9 @@ class Panel:
             environment = dict(os.environ, NNSLR_DATA_ROOT=str(self.root), TMPDIR=str(temporary), **start_env)
             if fetch_python:
                 environment[FETCH_PYTHON_ENV] = fetch_python
+            if proposer is not None:
+                # Who proposes, for the page (the running job's choice) and Try again: the log does not always say.
+                path.with_suffix('.json').write_text(json.dumps({'proposer': proposer}) + '\n', encoding='utf-8')
             with path.open('wb') as log:
                 log.write(('== ' + ' '.join(command) + '\n').encode())
                 log.flush()
@@ -1065,7 +1163,8 @@ class Panel:
         # The pid may have been reused by another program: it must be the wrapper of this action.
         action = job_id.split('-', 2)[2]
         wanted = [part.encode() for part in ACTIONS.get(action, {}).get('command', [])]
-        if not wanted or command[:4] != [b'bash', b'-c', WRAPPER.encode(), b'panel'] or command[4:4 + len(wanted)] != wanted:
+        wrappers = [[b'bash', b'-c', wrapper.encode(), b'panel'] for wrapper in (WRAPPER, *OLD_WRAPPERS)]
+        if not wanted or command[:4] not in wrappers or command[4:4 + len(wanted)] != wanted:
             return None
         return pid
 
@@ -1083,10 +1182,10 @@ class Panel:
 
     def log(self, job_id: str, offset: int) -> dict:
         if not JOB_ID.fullmatch(job_id):
-            raise PanelError(404, 'unknown_job', 'Azione sconosciuta.')
+            raise PanelError(404, 'unknown_job', 'This job is not on the server.')
         path = self.logs / (job_id + '.log')
         if not path.is_file():
-            raise PanelError(404, 'unknown_job', 'Azione sconosciuta.')
+            raise PanelError(404, 'unknown_job', 'This job is not on the server.')
         size = path.stat().st_size
         if offset < 0 or offset > size:
             offset = 0
@@ -1133,6 +1232,43 @@ def _exit_code(path: Path) -> int | None:
     return int(match.group(1)) if match else None
 
 
+def _proposer_of(log: Path) -> str | None:
+    """The proposer of a job: the one kept next to its log when it started (<job id>.json, Panel.start), else the
+    one its log names near its top (PROPOSER_LINE); None when neither says (the helpers' default)."""
+    options = _read_json(log.with_suffix('.json'))
+    if options is not None and options.get('proposer') in PROPOSERS:
+        return options['proposer']
+    try:
+        with log.open('rb') as handle:
+            head = handle.read(65536).decode('utf-8', 'replace')
+    except OSError:
+        return None
+    match = PROPOSER_LINE.search(head)
+    return match.group(1) if match else None
+
+
+def _best_proposer(reports: list[dict], left_out: set[str]) -> str | None:
+    """The proposer whose latest measure on the test frames reads the most speed signs right (then finds the most,
+    then is the fastest), among those not left out (one that cannot run here); None when none is measured."""
+    def score(report: dict) -> tuple:
+        speed = report.get('speed_signs') or {}
+        return (speed.get('read_right_share') or 0.0, speed.get('found_share') or 0.0,
+                -(report.get('seconds_per_frame') or 0.0))
+    measured = [report for report in reports if report.get('partition') == 'test' and report.get('proposer') in PROPOSERS
+                and report['proposer'] not in left_out and (report.get('speed_signs') or {}).get('truth')]
+    return max(measured, key=score)['proposer'] if measured else None
+
+
+def _qwen_gpu_reason(gpu: dict | None) -> str:
+    """Why Qwen3-VL cannot load on the GPU now ('' when it can, or when the GPU is not known): it needs QWEN_GPU_MB
+    free (another Qwen job, a training, llama.cpp in another container take it)."""
+    used, total = (gpu or {}).get('memory_used_mb'), (gpu or {}).get('memory_total_mb')
+    if used is None or not total or total - used >= QWEN_GPU_MB:
+        return ''
+    return (f'Qwen3-VL needs about {QWEN_GPU_MB // 1024} GB of the GPU and only {max(0, total - used) / 1024:.1f} GB '
+            'are free: another job or program is using it')
+
+
 # English names of the sign families of the dataset (sign_family of objects.jsonl).
 FAMILY_LABELS = {'maximum_speed': 'Speed limit', 'variable_display': 'Variable display', 'zone': 'Zone',
                  'cancellation': 'End of limit', 'other_sign': 'Other sign', 'not_a_sign': 'Not a sign',
@@ -1145,8 +1281,11 @@ def _dataset_summary(root: Path) -> dict:
     per_route: dict[str, dict] = {}
     frames: set[str] = set()
     human = ai = objects = 0
-    with (root / 'annotations' / 'objects.jsonl').open(encoding='utf-8') as source:
+    # The sha256 of the file, as a split records it (dataset_sha256): the split is of this dataset when they match.
+    digest = hashlib.sha256()
+    with (root / 'annotations' / 'objects.jsonl').open('rb') as source:
         for line in source:
+            digest.update(line)
             try:
                 item = json.loads(line)
             except ValueError:
@@ -1178,8 +1317,13 @@ def _dataset_summary(root: Path) -> dict:
                        'speed_signs': values['speed_signs'], 'human': values['human'], 'ai': values['ai']}
                       for name, values in sorted(per_route.items())],
         'changed_at': _mtime(root / 'annotations' / 'objects.jsonl'),
+        'sha256': digest.hexdigest(),
         'split': None if not split or split_path is None else {'counts': split.get('counts') or {}, 'made_at': _mtime(split_path),
-                                         'warnings': split.get('warnings') or []},
+                                         'warnings': split.get('warnings') or [],
+                                         # The dataset it was made of, and the proposals a person rejected it leaves out.
+                                         'dataset_sha256': split.get('dataset_sha256') if isinstance(split.get('dataset_sha256'), str) else None,
+                                         'rejected': len(split['excluded_rejected_ids'])
+                                         if isinstance(split.get('excluded_rejected_ids'), list) else 0},
         'last_import': None if not imported else {
             'at': _mtime(root / 'logs' / 'import.json'),
             'new_frames': imported.get('imported_frame_count') or 0,
@@ -1210,18 +1354,18 @@ def _mtime(path: Path) -> str | None:
 
 
 def _next_step_text(payload: dict) -> tuple[str, bool]:
-    """The next step in English for the page (route_status.next_step stays Italian for the terminal), and
+    """The next step in words for the page (route_status.next_step names the helpers, for the terminal), and
     whether everything is ready (dataset current, a training can start)."""
     rows = payload['routes']
     states = {row['state'] for row in rows}
     if not rows:
-        return 'No routes yet: download drives from the comma.', False
+        return 'No drives yet: download drives from the comma.', False
     if states & {'collegare', 'estrarre', 'preannotare'}:
-        return 'New videos to turn into frames with proposed signs: prepare the new routes.', False
+        return 'New videos to turn into frames with proposed signs: prepare the new drives.', False
     if 'revisionare' in states:
-        return 'Open the routes to review and confirm or correct the signs.', False
+        return 'Open the drives to review and confirm or correct the signs.', False
     if payload['reviewed_routes'] < payload['min_routes']:
-        return (f'Training needs at least {payload["min_routes"]} reviewed routes (now {payload["reviewed_routes"]}): '
+        return (f'Training needs at least {payload["min_routes"]} reviewed drives (now {payload["reviewed_routes"]}): '
                 'download more drives from the comma.'), False
     if 'importare' in states:
         return 'The reviews are ready: import them and train the detector and the reader on the GPU.', False

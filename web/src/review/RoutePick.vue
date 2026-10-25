@@ -1,9 +1,19 @@
 <script setup lang="ts">
 // The drive under review, the menu to open another one, its count and who reviews (ReviewToolbar.vue), at the top
-// of the inspector (above the country of the frame): its name ("Basel → Mumpf · Wed 21 Oct 2026 · 13:55", pages.route_links), the route's code only in the title.
+// of the inspector (above the country of the frame): its name on two lines ("Basel → Mumpf", then "Wed 21 Oct 2026 ·
+// 13:55 · 38 min", review.route_links), so the time is never cut; the route's code only in the title. The menu is the
+// real select, invisible over those two lines.
 import {computed} from 'vue';
 import ReviewToolbar from './ReviewToolbar.vue';
 import {report} from './store';
+
+/** The two lines of the drive on screen; offline, or for a drive nothing is known of, its code. */
+const face = computed(() => {
+  const link = report.routes.find((route) => route.route_id === report.routeId);
+  const title = link?.title || link?.name || report.routeId || 'Local report';
+  const when = link?.title ? [link.when, link.minutes ? link.minutes + ' min' : null].filter(Boolean).join(' · ') : '';
+  return {title, when};
+});
 
 /** The routes of the server, this one chosen; offline only this report. */
 const options = computed(() => {
@@ -25,10 +35,14 @@ function changeRoute(event: Event): void {
 <template>
   <div class="route-pick" :title="report.routeId">
     <label for="route" class="route-pick-label">Drive</label>
-    <select id="route" :disabled="report.routes.length <= 1" @change="changeRoute">
-      <option v-for="option in options" :key="option.value + option.text" :value="option.value"
-              :selected="option.selected">{{ option.text }}</option>
-    </select>
+    <div class="route-face">
+      <span class="route-face-text" aria-hidden="true"><span class="route-title">{{ face.title }}</span><span
+        v-if="face.when" class="route-when">{{ face.when }}</span></span>
+      <select id="route" :disabled="report.routes.length <= 1" @change="changeRoute">
+        <option v-for="option in options" :key="option.value + option.text" :value="option.value"
+                :selected="option.selected">{{ option.text }}</option>
+      </select>
+    </div>
     <ReviewToolbar/>
   </div>
 </template>

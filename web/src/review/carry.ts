@@ -53,7 +53,13 @@ export function uncheckedIndices(work: FrameEdit): number[] {
 export async function applyPrevious(): Promise<void> {
   const row = currentRow();
   const apiBase = report.apiBase;
-  if (!row || !apiBase || !carryState(row).enabled) return;
+  if (!row || !apiBase) return;
+  const carry = carryState(row);
+  if (!carry.enabled) {
+    // Why not, said where it is seen (a tooltip never shows on a touch screen).
+    state.notice = {key: row.frame_key, text: 'Apply previous: ' + carry.title, error: false, warn: true};
+    return;
+  }
   const key = row.frame_key;
   const work = workOf(row);
   try {

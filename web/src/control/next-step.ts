@@ -18,7 +18,7 @@ export interface NextStep {
 }
 
 const TITLE: Record<NextAction, string> = {
-  prepare: 'Prepare the new routes',
+  prepare: 'Prepare the new drives',
   review: 'Review the signs',
   train: 'Train the model',
   fetch: 'Download new drives',

@@ -1,7 +1,9 @@
 <script setup lang="ts">
 // One role of the pipeline (cutter, classifier or decider): what it does, the version in use (or none yet: there is
-// no default), and every version trained here, newest first.
+// no default; with no classifier in use Prepare takes the newest, and says so), and every version trained here, newest
+// first.
 import {computed} from 'vue';
+import {isoWhen} from '../common/format';
 import type {ModelVersion, RoleModels} from '../common/panel-types';
 import ModelItem from './ModelItem.vue';
 import {ROLE_TEXT, chosenText} from './models';
@@ -10,6 +12,12 @@ const props = defineProps<{role: RoleModels; score: number; readOnly: boolean; b
 const emit = defineEmits<{use: [version: ModelVersion, roleLabel: string]}>();
 const text = computed(() => ROLE_TEXT[props.role.role]);
 const inUse = computed(() => props.role.versions.find((version) => version.in_use) ?? null);
+/** What Prepare uses while no classifier is in use (none chosen, or its files gone): the newest classifier with “not a
+ * sign” (nnslr_tools.preannotate.our_networks); the versions are newest first. */
+const fallback = computed(() => props.role.role === 'classifier' && inUse.value === null
+  ? props.role.versions.find((version) => version.part === 'classifier') ?? null : null);
+const fallbackText = computed(() => fallback.value === null ? ''
+  : 'Prepare uses the newest, ' + fallback.value.label + ' ' + (isoWhen(fallback.value.trained_at) || fallback.value.run) + ', until you pick one.');
 </script>
 
 <template>
@@ -22,8 +30,8 @@ const inUse = computed(() => props.role.versions.find((version) => version.in_us
     <div class="role-use" :class="{set: inUse !== null, missing: role.active !== null && !role.active.found}">
       <span class="role-use-label">In use</span>
       <template v-if="role.active === null">
-        <strong>None yet</strong>
-        <span class="role-use-sub">{{ role.versions.length ? 'Pick one below: there is no default.' : 'Nothing to pick yet.' }}</span>
+        <strong>{{ fallback ? 'None chosen' : 'None yet' }}</strong>
+        <span class="role-use-sub">{{ fallbackText || (role.versions.length ? 'Pick one below: there is no default.' : 'Nothing to pick yet.') }}</span>
       </template>
       <template v-else-if="inUse">
         <strong>{{ inUse.run }} · {{ inUse.label }}</strong>
@@ -31,7 +39,7 @@ const inUse = computed(() => props.role.versions.find((version) => version.in_us
       </template>
       <template v-else>
         <strong><code>{{ role.active.id }}</code></strong>
-        <span class="role-use-sub">Its files are no longer on this server: pick another one. {{ chosenText(role.active) }}</span>
+        <span class="role-use-sub">Its files are no longer on this server: pick another one. {{ fallbackText }} {{ chosenText(role.active) }}</span>
       </template>
     </div>
 

@@ -3,7 +3,8 @@
 // grouped list. Each row: the name, the model, the host of its address, a dot for its key, what its last Test said,
 // and "Reviews" on the one the site asks (on the review page, and for a whole drive from the route list). A row
 // opens its sheet (ProviderSheet.vue); "Add a provider" opens an empty one. Test asks the model about one reviewed
-// frame and says whether it answered and sees images. Read-only when the browser may not change them.
+// frame and says whether it answered and sees images. "Who reviews" under it is a checkmark list: a provider that
+// passed its Test, or "Don't use AI" (the server refuses the others). Read-only when the browser may not change them.
 import {computed, nextTick, onMounted, ref} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import type {AiProvider, AiSettings, AiTestResult} from '../common/ai-types';
@@ -81,14 +82,27 @@ async function test(provider: AiProvider): Promise<void> {
   }
 }
 
-/** "Reviews": the site asks this provider; pressed again, no provider reviews. */
-async function choose(provider: AiProvider): Promise<void> {
-  if (choosing.value) return;
+/** Only a provider whose last Test passed may review: its saves are final. */
+function passed(provider: AiProvider): boolean {
+  return provider.last_test?.ok === true;
+}
+
+/** Under a provider of "Who reviews": why it cannot be chosen, or why the one chosen cannot review now. */
+function pickNote(provider: AiProvider): string {
+  if (testing.value === provider.id) return 'Testing…';
+  if (passed(provider)) return provider.model;
+  if (provider.last_test === null) return 'Test it first';
+  return provider.is_reviewer ? 'Didn’t pass its last Test: it can’t review until it does' : 'Didn’t pass its last Test';
+}
+
+/** "Who reviews": the site asks this provider (null: none). Choosing the one already chosen does nothing. */
+async function choose(id: string | null): Promise<void> {
+  if (choosing.value || (settings.value?.reviewer ?? null) === id) return;
   choosing.value = true;
   done.value = '';
   error.value = '';
   try {
-    take(await post<AiSettings & {ok: true}>('/api/settings/ai/reviewer', {id: provider.is_reviewer ? null : provider.id}));
+    take(await post<AiSettings & {ok: true}>('/api/settings/ai/reviewer', {id}));
   } catch (problem) {
     error.value = messageOf(problem);
   } finally {
@@ -129,11 +143,8 @@ onMounted(async () => {
             <span class="ai-prov-test" :class="testClass(provider)" role="status">{{ testText(provider) }}</span>
           </component>
           <div class="ai-prov-actions">
+            <span v-if="provider.is_reviewer" class="pill ok">Reviews</span>
             <button v-if="canEdit" type="button" class="btn small" :disabled="testing !== null" @click="test(provider)">{{ testing === provider.id ? 'Testing…' : 'Test' }}</button>
-            <button v-if="canEdit" type="button" class="btn small ai-reviews" :aria-pressed="provider.is_reviewer" :disabled="choosing"
-                    :title="provider.is_reviewer ? 'The site asks this one. Press to stop.' : 'Make the site ask this one.'"
-                    @click="choose(provider)">{{ provider.is_reviewer ? '✓ Reviews' : 'Use to review' }}</button>
-            <span v-else-if="provider.is_reviewer" class="pill ok">Reviews</span>
           </div>
         </li>
         <li v-if="canEdit && settings.providers.length < MAX_PROVIDERS" class="ai-prov ai-add">
@@ -141,8 +152,25 @@ onMounted(async () => {
         </li>
         <li v-if="settings.providers.length === 0 && !canEdit" class="ai-prov"><span class="ai-prov-main">No AI provider yet.</span></li>
       </ul>
-      <p v-if="settings.providers.length > 0 && settings.reviewer === null" class="note">No provider reviews yet: press “Use to review” on one.</p>
-      <p v-if="!canEdit" class="note">Read-only: sign in on the site to change the AI reviewer.</p>
+      <template v-if="canEdit && settings.providers.length > 0">
+        <h3 class="ai-group-title" id="ai-who-title">Who reviews</h3>
+        <div class="ios-list ai-picks" id="ai-who" role="radiogroup" aria-labelledby="ai-who-title">
+          <button v-for="provider in settings.providers" :key="provider.id" type="button" role="radio" class="ai-model-row ai-pick"
+                  :data-pick="provider.id" :aria-checked="provider.is_reviewer"
+                  :disabled="choosing || (!provider.is_reviewer && !passed(provider))" @click="choose(provider.id)">
+            <span class="ai-check" aria-hidden="true"></span>
+            <span class="ai-pick-text"><span class="ai-model-id">{{ provider.name }}</span>
+              <span class="ai-pick-note" :class="{bad: provider.is_reviewer && !passed(provider) && testing !== provider.id}">{{ pickNote(provider) }}</span></span>
+          </button>
+          <button type="button" role="radio" class="ai-model-row ai-pick" data-pick="none" :aria-checked="settings.reviewer === null"
+                  :disabled="choosing" @click="choose(null)">
+            <span class="ai-check" aria-hidden="true"></span>
+            <span class="ai-pick-text"><span class="ai-model-id">Don’t use AI</span></span>
+          </button>
+        </div>
+        <p class="ai-help">Only a provider that passed its Test can review.</p>
+      </template>
+      <p v-if="!canEdit && settings.providers.length > 0 && settings.reviewer === null" class="note">No provider reviews the signs.</p>
       <p class="note">What the AI saves is recorded as <code>ai/&lt;provider&gt;/&lt;model&gt;</code> and is final: no person approves it
         again. Keys stay on the server, never sent back to a browser.</p>
     </template>

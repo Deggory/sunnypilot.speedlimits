@@ -56,7 +56,11 @@ def test_a_failed_step_is_marked_and_a_finished_job_is_complete():
 def test_preparation_uses_its_own_count_and_fetch_counts_segments():
     prepared = progress('prepare', 'running', '== a. collego i video\n== b+c. 3 route da preparare\n',
                         {'percent': 40, 'routes_done': 1, 'routes_total': 3, 'working': []})
-    assert prepared['percent'] == 40.0 and prepared['detail'] == '1 of 3 routes ready'
+    assert prepared['percent'] == 40.0 and prepared['detail'] == '1 of 3 drives ready'
+    # The helper speaks English now; the steps and the end of its log read the same.
+    english = progress('prepare', 'failed', '== a. linking the videos of /v\n== b+c. 3 drives to prepare, 2 at a time\n'
+                       'r1: proposing failed (see r1.log)\n\n== finished with code 1\n')
+    assert states(english)['link'] == 'done' and english['last_line'] == 'r1: proposing failed (see r1.log)'
     fetched = progress('fetch', 'running', 'r1 sul comma: 0 1. Salto:. Scarico: 0 1\n== r1--0 -> /x\n')
     assert fetched['percent'] is None and fetched['detail'] == '1 segment downloaded · r1'
 
@@ -234,3 +238,41 @@ def test_the_last_line_is_the_error_not_the_hint_after_it():
     log = ('== 3/3 Try it on the GPU\ntorch.AcceleratorError: CUDA error: out of memory\n'
            "Search for `cudaErrorMemoryAllocation' in https://docs.nvidia.com/cuda/ for more information.\n\n== finito con codice 1\n")
     assert last_line(log) == 'torch.AcceleratorError: CUDA error: out of memory'
+
+
+def test_a_proposer_measured_counts_its_frames():
+    log = ('== helpers/measure_proposer.sh\nMeasuring the proposer qwen on the test frames...\n'
+           'Preannotating 279/604: segment 17, frame 24, 0 proposals\n[transformers] Kwargs passed\n'
+           'Preannotating 280/604: segment 17, frame 25, 1 proposals\n')
+    running = progress('measure_proposer', 'running', log)
+    assert running['percent'] == 46.4 and running['detail'] == '280 of 604 frames'
+    assert progress('measure_proposer', 'running', log.splitlines()[0])['percent'] is None
+    assert progress('measure_proposer', 'ok', log + 'Done\n== finito con codice 0\n')['percent'] == 100.0
+
+
+def test_propose_again_has_one_time_left_and_no_raw_line():
+    preparation = {'percent': 12.5, 'routes_done': 1, 'routes_total': 4, 'again': True, 'seconds_left': 7380,
+                   'proposer': 'Qwen3-VL', 'working': [{'route': 'r2', 'title': 'Basel → Mumpf', 'phase': 'proposing again',
+                                                       'done': 612, 'total': 1560, 'seconds_left': 1440}]}
+    log = '== helpers/1_prepare.sh --again\n00000128--edfa65432f: proposing the signs again (qwen)...\n'
+    result = progress('prepare_again', 'running', log, preparation)
+    assert result['percent'] == 12.5 and result['seconds_left'] == 7380
+    assert result['detail'] == 'Qwen3-VL · 1 of 4 drives ready' and result['last_line'] == ''
+    # Before the pace is known the time left is unknown, not guessed from the percent.
+    assert progress('prepare_again', 'running', log, {**preparation, 'seconds_left': None})['seconds_left'] is None
+    # A new preparation has no time of the server; a finished one keeps its last line.
+    assert 'seconds_left' not in progress('prepare', 'running', log, {**preparation, 'again': False})
+    assert progress('prepare_again', 'ok', log)['last_line'].endswith('(qwen)...')
+
+
+def test_a_known_failure_is_one_plain_sentence():
+    from nnslr_tools.job_progress import failure_text
+    oom = ('Measuring the proposer qwen on the test frames...\npreannotation worker error: CUDA out of memory. Tried to '
+           'allocate 16.33 GiB.\nerror: preannotation failed; diagnostic request: /root/x/data/tmp/proposer-1/request.json\n'
+           '== finito con codice 2\n')
+    failed = progress('measure_proposer', 'failed', oom)
+    assert failed['failure'].startswith('The GPU ran out of memory') and 'request.json' in failed['last_line']
+    assert failure_text('ERROR: per dividere il dataset servono almeno 5 route (o luoghi) indipendenti\n').startswith('More reviewed')
+    assert failure_text('ssh: connect to host comma port 22: Connection refused\n').startswith('The comma did not answer')
+    assert failure_text('Traceback\nValueError: something new\n') == ''
+    assert 'failure' not in progress('measure_proposer', 'running', oom)

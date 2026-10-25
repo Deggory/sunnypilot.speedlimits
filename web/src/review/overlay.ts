@@ -96,9 +96,14 @@ export function handlesOf(b: Box, size: number, hit: number, outside: boolean): 
   });
 }
 
+/** Where a label starts: at the left of its box, moved left when it would run off the right edge of the photo. */
+function labelX(left: number, width: number, imageWidth: number, k: number): number {
+  return Math.max(0, Math.min(left, imageWidth - width - 4 / k));
+}
+
 /** Boxes, labels, hints and handles of a frame shown at scale k. */
 export function drawStage(detections: readonly Detection[], selected: number, hints: readonly Hint[],
-  imageHeight: number, k: number, coarse: boolean): StageDrawing {
+  imageHeight: number, k: number, coarse: boolean, imageWidth = Number.POSITIVE_INFINITY): StageDrawing {
   const fontSize = 14 / k;
   const placed: PlacedLabel[] = [];
   const handleSize = 8 / k;
@@ -122,13 +127,14 @@ export function drawStage(detections: readonly Detection[], selected: number, hi
     if (isSelected) cls += ' selected';
     const text = (i + 1) + ' · ' + shortName(d) + (d.check_position ? ' · check' : '');
     const width = labelWidth(text, fontSize);
+    const x = labelX(b[0], width, imageWidth, k);
     // The selected box has its corners outside: its label goes above them.
     const top = isSelected ? b[1] - handleSize - fontSize * 0.2 : b[1] - fontSize * 0.35;
-    const y = Math.max(fontSize, freeLabelY(placed, b[0], Math.max(fontSize, top), width, fontSize, -fontSize));
-    placed.push({x: b[0], y, w: width, h: fontSize, text});
+    const y = Math.max(fontSize, freeLabelY(placed, x, Math.max(fontSize, top), width, fontSize, -fontSize));
+    placed.push({x, y, w: width, h: fontSize, text});
     boxes.push({
       index: i, cls, rect: rectOf(b), stroke: isSelected ? null : d.check_position ? 'var(--warn)' : boxColor(d),
-      label: label(text, b[0], y, fontSize, k),
+      label: label(text, x, y, fontSize, k),
     });
   }
   const drawnHints: DrawnHint[] = [];
@@ -141,9 +147,10 @@ export function drawStage(detections: readonly Detection[], selected: number, hi
     // The two passes often see the same sign: one label is enough.
     if (!placed.some((p) => p.text === text && p.box && boxesOverlap(p.box, b))) {
       // Below the box, where the label of a reviewed box never is.
-      const y = Math.min(imageHeight, freeLabelY(placed, b[0], b[3] + hintFont * 1.05, width, hintFont, hintFont));
-      placed.push({x: b[0], y, w: width, h: hintFont, text, box: b});
-      hintText = label(text, b[0], y, hintFont, k);
+      const x = labelX(b[0], width, imageWidth, k);
+      const y = Math.min(imageHeight, freeLabelY(placed, x, b[3] + hintFont * 1.05, width, hintFont, hintFont));
+      placed.push({x, y, w: width, h: hintFont, text, box: b});
+      hintText = label(text, x, y, hintFont, k);
     }
     drawnHints.push({confidence: h.confidence, rect: rectOf(b), label: hintText});
   }
@@ -156,16 +163,18 @@ export function drawStage(detections: readonly Detection[], selected: number, hi
  * The AI suggestion on the photo, in its own colour: "AI n · 80" under each box it suggests (n: the box's number once
  * applied), "✕ n" under each box of the frame it would delete. A box it did not judge is the frame's own, already drawn.
  */
-export function drawAi(suggestion: Pick<AiSuggestion, 'detections' | 'deleted'>, imageHeight: number, k: number): DrawnAi[] {
+export function drawAi(suggestion: Pick<AiSuggestion, 'detections' | 'deleted'>, imageHeight: number, k: number,
+  imageWidth = Number.POSITIVE_INFINITY): DrawnAi[] {
   const fontSize = 12 / k;
   const placed: PlacedLabel[] = [];
   const drawn: DrawnAi[] = [];
   const add = (kind: DrawnAi['kind'], b: Box, text: string): void => {
     const width = labelWidth(text, fontSize);
+    const x = labelX(b[0], width, imageWidth, k);
     // Below the box, where the label of a box of the frame never is.
-    const y = Math.min(imageHeight, freeLabelY(placed, b[0], b[3] + fontSize * 1.05, width, fontSize, fontSize));
-    placed.push({x: b[0], y, w: width, h: fontSize, text});
-    drawn.push({kind, rect: rectOf(b), label: label(text, b[0], y, fontSize, k)});
+    const y = Math.min(imageHeight, freeLabelY(placed, x, b[3] + fontSize * 1.05, width, fontSize, fontSize));
+    placed.push({x, y, w: width, h: fontSize, text});
+    drawn.push({kind, rect: rectOf(b), label: label(text, x, y, fontSize, k)});
   };
   suggestion.detections.forEach((d, i) => {
     if (d.ai_action !== 'unjudged') add(d.ai_action, d.bbox_xyxy, 'AI ' + (i + 1) + ' · ' + shortName(d));

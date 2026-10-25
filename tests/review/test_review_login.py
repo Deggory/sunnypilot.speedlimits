@@ -142,3 +142,17 @@ def test_loopback_has_no_sign_in(tmp_path):
     finally:
         server.close()
 # [site-login] - END
+
+
+def test_the_wait_after_too_many_wrong_attempts_reads_well():
+    now = [0.0]
+    throttle = review_auth.Throttle(clock=lambda: now[0])
+    for _ in range(review_auth.FAILS_PER_ADDRESS):
+        throttle.failed('10.0.0.9')
+    with pytest.raises(review_auth.ReviewRejected) as wait:
+        throttle.check('10.0.0.9')
+    assert wait.value.message.endswith('try again in 15 minutes.')
+    now[0] = review_auth.FAIL_WINDOW_SECONDS - 30
+    with pytest.raises(review_auth.ReviewRejected) as wait:
+        throttle.check('10.0.0.9')
+    assert wait.value.message.endswith('try again in a minute.')

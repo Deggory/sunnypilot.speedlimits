@@ -12,7 +12,7 @@ import stat
 import pytest
 
 from fake_llm import FakeLlm, answer_json
-from nnslr_tools import llm_providers, review_auth
+from nnslr_tools import ai_review, llm_providers, review_auth
 from nnslr_tools.pages import _route_row
 from review_helpers import (HEIGHT, ROUTE, RUN_ID, TOKEN, WIDTH, RunningServer, json_of, make_report, page_body,
                             sign_in)
@@ -51,10 +51,17 @@ def fake():
         yield llm
 
 
+def passed_test(root, provider_id: str) -> None:
+    """A Test that passed, as Settings records it: only such a provider may review."""
+    llm_providers.record_test(root, provider_id, {'ok': True, 'answered_json': True, 'sees_images': True,
+                                                  'message': 'Sees images · 1.0 s'})
+
+
 def add_provider(root, base_url: str, *, reviewer: bool = True) -> dict:
     provider = llm_providers.save_provider(root, {'name': 'fake', 'base_url': base_url, 'model': 'fake-vl',
                                                   'key': KEY})
     if reviewer:
+        passed_test(root, provider['id'])
         llm_providers.set_reviewer(root, provider['id'])
     return provider
 
@@ -123,6 +130,12 @@ def test_a_session_manages_the_providers_and_never_sees_a_key(lan, fake):
         'id': 'fake', 'name': 'Fake', 'base_url': 'ftp://' + KEY, 'model': 'fake-vl', 'key': KEY})
     assert status == 400 and json_of(data)['error'] == 'invalid_provider' and KEY.encode() not in data
 
+    # Never tested (a new model clears the Test): it cannot review yet. Test it, then it can.
+    status, response, data = server.request('POST', '/api/settings/ai/reviewer', headers=session, body={'id': 'fake'})
+    assert status == 409 and json_of(data)['error'] == 'ai_not_tested'
+    assert json_of(data)['message'].startswith('Test Fake in Settings first')
+    status, response, data = server.request('POST', '/api/settings/ai/test', headers=session, body={'id': 'fake'})
+    assert status == 200 and json_of(data)['result']['ok'] is True, data
     status, response, data = server.request('POST', '/api/settings/ai/reviewer', headers=session, body={'id': 'fake'})
     assert status == 200 and json_of(data)['reviewer'] == 'fake'
     assert json_of(data)['providers'][0]['is_reviewer'] is True
@@ -242,6 +255,11 @@ def test_a_provider_error_never_repeats_the_key(local):
         status, response, data = server.request('POST', '/api/settings/ai/test', body={'id': 'fake'})
         assert status == 200 and KEY.encode() not in data
         assert json_of(data)['result']['ok'] is False
+    # Its Test failed: it is not asked any more until it passes again.
+    status, response, data = server.request('POST', f'/api/route/{ROUTE}/frame/0/0/ai-suggest',
+                                            body={'run_id': RUN_ID})
+    assert status == 409 and json_of(data)['error'] == 'ai_not_tested' and KEY.encode() not in data
+    passed_test(root, 'fake')
     # The server is gone: unreachable, still without the key.
     status, response, data = server.request('POST', f'/api/route/{ROUTE}/frame/0/0/ai-suggest',
                                             body={'run_id': RUN_ID})
@@ -273,11 +291,61 @@ def test_models_and_test(local, fake):
         assert text_only.requests == []
 
 
-def test_the_route_list_offers_the_ai_on_routes_not_done(local):
+def test_a_provider_that_did_not_pass_its_test_never_reviews(local):
     server, root = local
+    with FakeLlm(text_only=True, require_key=KEY) as blind:
+        add_provider(root, blind.base_url, reviewer=False)
+        status, response, data = server.request('POST', '/api/settings/ai/test', body={'id': 'fake'})
+        assert status == 200 and json_of(data)['result']['ok'] is False
+        status, response, data = server.request('POST', '/api/settings/ai/reviewer', body={'id': 'fake'})
+        assert status == 409 and json_of(data)['error'] == 'ai_not_tested'
+        assert json_of(data)['message'] == 'fake did not pass its last Test. Fix it, then test it again in Settings.'
+        assert llm_providers.public_settings(root)['reviewer'] is None
+        # Chosen when it passed, then failing again: Ask AI is off, with the reason, and the server refuses it.
+        passed_test(root, 'fake')
+        assert server.request('POST', '/api/settings/ai/reviewer', body={'id': 'fake'})[0] == 200
+        llm_providers.record_test(root, 'fake', {'ok': False, 'message': 'It cannot see the frames.'})
+        state = json_of(server.request('GET', '/api/ai/state')[2])
+        assert state['available'] is False and state['can_ask'] is True and state['provider']['id'] == 'fake'
+        assert state['reason'] == 'fake did not pass its last Test. Fix it, then test it again in Settings.'
+        status, response, data = server.request('POST', f'/api/route/{ROUTE}/frame/0/0/ai-suggest',
+                                                body={'run_id': RUN_ID})
+        assert status == 409 and json_of(data)['error'] == 'ai_not_tested'
+        assert blind.requests == []
+        # "Don't use AI" is always possible.
+        status, response, data = server.request('POST', '/api/settings/ai/reviewer', body={'id': None})
+        assert status == 200 and json_of(data)['reviewer'] is None
+
+
+def test_the_review_page_reads_the_last_trial(lan, fake):
+    server, root = lan
+    add_provider(root, fake.base_url)
+    token = {'X-Review-Token': TOKEN}
+    status, response, data = server.request('GET', f'/api/route/{ROUTE}/ai-trial', headers=token)
+    assert status == 200 and json_of(data) == {'ok': True, 'trial': None}
+    ai_review.review_route(server.app, ROUTE, llm_providers.provider(root, 'fake'), save=False, log=lambda text: None)
+    # The access token reads it too: it holds no key and saves nothing.
+    status, response, data = server.request('GET', f'/api/route/{ROUTE}/ai-trial', headers=token)
+    assert status == 200 and KEY.encode() not in data
+    trial = json_of(data)['trial']
+    assert trial['run_id'] == RUN_ID and trial['provider'] == {'id': 'fake', 'name': 'fake', 'model': 'fake-vl'}
+    assert [frame['frame_key'] for frame in trial['frames']] == ['0/0', '0/1', '0/2']
+    assert trial['frames'][0]['detections'][0]['ai_action'] == 'correct'
+    assert server.app.store.confirmed_count(ROUTE, RUN_ID) == 0
+    assert server.request('GET', '/api/route/00000009--abcdef1234/ai-trial', headers=token)[0] == 404
+    assert server.request('GET', f'/api/route/{ROUTE}/ai-trial')[0] == 401
+
+
+def test_the_route_list_offers_the_ai_on_routes_not_done(local, fake):
+    server, root = local
+    # No AI reviewer chosen: one link to set it up, no button on each drive.
+    page = server.request('GET', '/routes')[2].decode()
+    assert 'Set up AI review' in page and 'data-ai-route="' not in page
+    add_provider(root, fake.base_url)
     status, response, data = server.request('GET', '/routes')
     assert status == 200
     page = data.decode()
+    assert 'Set up AI review' not in page
     assert (f'<button type="button" class="btn small ai-route" data-ai-route="{ROUTE}" data-ai-name="{ROUTE}" '
             f'data-ai-left="3">Review with AI</button></li>') in page
     summary = {'route_id': ROUTE, 'url': f'/route/{ROUTE}/', 'frame_count': 1200, 'confirmed_count': 200,

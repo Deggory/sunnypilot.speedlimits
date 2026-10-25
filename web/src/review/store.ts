@@ -28,11 +28,13 @@ export interface Report {
   apiBase: string | null;
   storageKey: string;
   lastKeyStorage: string;
+  /** Who proposed the signs (vietnam, ours, qwen), null when not known. */
+  proposer: string | null;
 }
 
 export const report: Report = {
   runId: '', routeId: '', rows: [], routes: [], countries: {}, hintStats: null, routeHasHints: false, apiBase: null,
-  storageKey: '', lastKeyStorage: '',
+  storageKey: '', lastKeyStorage: '', proposer: null,
 };
 
 let hintsByFrame: Record<string, Hint[]> = {};
@@ -84,6 +86,8 @@ export interface ReviewState {
   retrying: boolean;
   /** The frame whose "Withdraw confirmation" was pressed once: the second press withdraws. */
   withdrawArmed: string | null;
+  /** "<frame key>#<version>": Confirm already asked about the same sign drawn twice; pressed again it saves. */
+  duplicateAsked: string | null;
   saveCount: number;
   lastSave: LastSave | null;
   server: ServerState;
@@ -115,6 +119,7 @@ export const state: ReviewState = reactive({
   serverWarning: '',
   retrying: false,
   withdrawArmed: null,
+  duplicateAsked: null,
   saveCount: 0,
   lastSave: null,
   server: 'offline',
@@ -135,6 +140,7 @@ export function initStore(raw: Partial<Payload>): void {
     apiBase: raw.server ? '/api/route/' + encodeURIComponent(routeId) : null,
     storageKey: 'nnslr-review-v1-' + String(raw.run_id),
     lastKeyStorage: 'nnslr-review-last-' + String(raw.run_id),
+    proposer: typeof raw.proposer === 'string' ? raw.proposer : null,
   } satisfies Report);
   rowIndex = new Map(report.rows.map((row, index) => [row.frame_key, index]));
   state.suspicious = isRecord(raw.suspicious) ? raw.suspicious as Suspicious : {};

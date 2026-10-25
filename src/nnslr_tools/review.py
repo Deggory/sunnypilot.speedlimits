@@ -54,8 +54,11 @@ LOGIN_MESSAGE = 'Sign-in required: reload the page and sign in with your name an
 PUBLIC_AUTH_ROUTES = ('/api/auth/login', '/api/auth/setup/check', '/api/auth/setup')
 AUTH_ROUTES = PUBLIC_AUTH_ROUTES + ('/api/auth/logout', '/api/auth/logout-all', '/api/auth/password')
 # The pages a browser opens: without a session they show the sign-in page instead.
-PAGE_RE = re.compile(r'/(index\.html|routes|prepare|train|evaluate|models|panoramica|prepara|allena|pannello|stato|account|route/[^/]+(/(index\.html)?)?)?')
+PAGE_RE = re.compile(r'/(index\.html|routes|prepare|train|evaluate|models|panoramica|prepara|allena|pannello|stato|account|'
+                     r'settings|review|route/[^/]+(/(index\.html)?)?)?')
 # [site-login] - END
+# A drive page whose route has no report (or an id that is no route), in words.
+UNKNOWN_DRIVE_MESSAGE = 'This drive is not on the server, or it is not prepared yet.'
 API_TOKEN_MESSAGE = ('Missing or wrong token: send it in the header "Authorization: Bearer <token>" '
                      '(or "X-Review-Token"), never in the address.')
 DEFAULT_CSP = "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
@@ -292,12 +295,14 @@ class ReviewApp(ReviewService):
 
     def route_links(self) -> list[dict]:
         """Every route with a report, for the route menu of the review page, named as the drive it was
-        ("Herznach → Zürich · Fri 23 Oct 2026 · 08:01", nnslr_tools.drives)."""
+        ("Herznach → Zürich · Fri 23 Oct 2026 · 08:01", nnslr_tools.drives); its title and when apart, for the
+        two lines of the menu."""
         links = []
         for route, directory in list_reports(self.root):
             drive = drive_of(self.root, route)
             name = ' · '.join(part for part in (drive['title'], drive['when']) if part) or None
-            links.append({'route_id': route, 'url': '/route/' + route + '/', 'name': name})
+            links.append({'route_id': route, 'url': '/route/' + route + '/', 'name': name, 'title': drive['title'],
+                          'when': drive['when'], 'minutes': drive['minutes']})
         return links
 
     def route_summaries(self) -> list[dict]:
@@ -320,6 +325,8 @@ class ReviewApp(ReviewService):
                 'frame_count': len(rows),
                 'frames_with_proposals': with_proposals,
                 'confirmed_count': self.store.confirmed_count(route, directory.name),
+                # Of those, the frames an AI reviewer confirmed (REST API, MCP, Review with AI).
+                'confirmed_by_ai': self.store.confirmed_count(route, directory.name, reviewer_kind='ai'),
                 'suspicious_count': len(suspicious),
                 'hint_frames': hint_stats['frames'],
                 'url': '/route/' + route + '/',
@@ -535,7 +542,10 @@ def make_handler(app: ReviewApp):
             # [site-login] - END
             if path in ('/routes', '/index.html'):
                 nonce = secrets.token_urlsafe(18)
-                page = render_index(app.route_summaries(), db_path(app.root), nonce)
+                from nnslr_tools import llm_providers
+                # No AI reviewer chosen in Settings: one link to set it up instead of a button on every drive.
+                page = render_index(app.route_summaries(), db_path(app.root), nonce,
+                                    ai_reviewer=llm_providers.ai_state(app.root)['provider'] is not None)
                 self._send(200, 'text/html; charset=utf-8', page.encode('utf-8'),
                            "default-src 'none'; script-src 'nonce-" + nonce + "'; style-src 'unsafe-inline'; "
                            "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
@@ -559,9 +569,10 @@ def make_handler(app: ReviewApp):
             if path == '/api/panel/status':
                 self._json(200, app.panel.status())
                 return
-            # The machine alone, for the strip in the tab row of the pages outside the panel (every 4 s).
+            # The machine, for the server pill of the pages outside the panel (every 4 s), and what runs: the dots of
+            # the busy tabs.
             if path == '/api/panel/system':
-                self._json(200, {'system': app.panel.system()})
+                self._json(200, {'system': app.panel.system(), 'running': app.panel.running()})
                 return
             if path == '/api/panel/comma':
                 self._json(200, {'comma': app.panel.comma()})
@@ -610,6 +621,12 @@ def make_handler(app: ReviewApp):
             # The providers with the latest measure of each, for the AI reviewers view of the Evaluate tab.
             if path == '/api/panel/ai-reviewers':
                 self._json(200, app.panel.ai_reviewers())
+                return
+            # The newest "Try without saving" of the route, on the frames still to review: no key, nothing saved.
+            match = re.fullmatch(r'/api/route/([^/]+)/ai-trial', path)
+            if match:
+                from nnslr_tools import ai_review
+                self._json(200, {'ok': True, 'trial': ai_review.latest_trial(app, match.group(1))})
                 return
             if (path in AI_SETTINGS_POSTS or AI_DELETE_RE.fullmatch(path)
                     or re.fullmatch(r'/api/route/[^/]+/frame/[^/]+/[^/]+/ai-suggest', path)):
@@ -791,8 +808,7 @@ def make_handler(app: ReviewApp):
                 parse_route_id(route)
                 app.report(route)
             except (PreannotationError, ValueError, OSError):
-                self._problem(404, 'unknown_route', 'Unknown route, or route without a pre-annotation report.',
-                              False)
+                self._problem(404, 'unknown_route', UNKNOWN_DRIVE_MESSAGE, False)
                 return None
             return route
 
@@ -800,14 +816,14 @@ def make_handler(app: ReviewApp):
             try:
                 directory, rows, by_key = app.report(route)
             except (PreannotationError, ValueError, OSError):
-                self._problem(404, 'unknown_route', 'Unknown route, or route without a pre-annotation report.', False)
+                self._problem(404, 'unknown_route', UNKNOWN_DRIVE_MESSAGE, False)
                 return
             hints_by_frame, hint_stats = app.hints(route, rows)
             suspicious = app.suspicious(route, directory.name, rows, hints_by_frame)
             nonce = secrets.token_urlsafe(18)
             page = render_review(rows, directory.name, route_id=route, server=True, nonce=nonce,
                                  hints=hints_by_frame, hint_stats=hint_stats, suspicious=suspicious,
-                                 routes=app.route_links())
+                                 routes=app.route_links(), proposer=_report_proposer(directory))
             csp = ("default-src 'none'; script-src 'nonce-" + nonce + "'; style-src 'unsafe-inline'; "
                    "img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
             self._send(200, 'text/html; charset=utf-8', page.encode('utf-8'), csp)
@@ -888,7 +904,9 @@ def make_handler(app: ReviewApp):
             run = re.fullmatch(r'/api/panel/run/([a-z_]+)', path)
             stop = re.fullmatch(r'/api/panel/job/([0-9a-z_-]+)/stop', path)
             active = path == '/api/panel/models/active'
-            if run or stop or active:
+            # Who proposes the signs in Prepare ({"proposer"}), kept for every browser.
+            chosen = path == '/api/panel/proposer'
+            if run or stop or active or chosen:
                 # Same protections as saving a frame: same origin, JSON only (no form can send it).
                 if not self._same_origin():
                     self._problem(403, 'cross_origin', 'Request from another origin refused.', True)
@@ -926,6 +944,8 @@ def make_handler(app: ReviewApp):
                     role = body['role']
                     print(f'Panel: {role} in use {entry["id"]} ({terminal_text(who or via)})', flush=True)
                     self._json(200, {'ok': True, 'role': role, 'active': entry})
+                elif chosen:
+                    self._json(200, {'ok': True, **app.panel.set_proposer(body)})
                 else:
                     self._json(200, {'ok': True, **app.panel.stop(stop.group(1))})
                 return
@@ -1103,6 +1123,7 @@ def make_handler(app: ReviewApp):
             provider = llm_providers.reviewer_provider(app.root)
             if provider is None:
                 raise ReviewRejected(409, 'no_ai_reviewer', 'Choose an AI reviewer in Settings.')
+            llm_providers.check_can_review(provider)
             if not app.ai_slots.acquire(blocking=False):
                 raise ReviewRejected(429, 'ai_busy', 'The AI is already answering two frames: try again in a moment.')
             try:
@@ -1184,7 +1205,8 @@ def make_handler(app: ReviewApp):
                 self._json(status, {'ok': False, 'error': reason, 'message': message})
             else:
                 nonce = secrets.token_urlsafe(18)
-                self._send(status, 'text/html; charset=utf-8', render_problem(status, message, nonce).encode('utf-8'),
+                page = render_problem(status, message, nonce, drive=reason == 'unknown_route')
+                self._send(status, 'text/html; charset=utf-8', page.encode('utf-8'),
                            "default-src 'none'; script-src 'nonce-" + nonce + "'; style-src 'unsafe-inline'; "
                            "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 

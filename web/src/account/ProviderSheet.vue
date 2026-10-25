@@ -5,6 +5,7 @@
 // one is saved ("Saved (leave empty to keep)"), and "Remove key" removes it on Save. Delete removes the provider.
 import {computed, ref, useTemplateRef, watch} from 'vue';
 import {messageOf, post} from '../common/api';
+import {sentence} from '../common/format';
 import type {AiModel, AiProvider, AiProviderBody, AiSettings} from '../common/ai-types';
 import {askConfirm} from '../composables/confirm';
 import {useSheet} from '../composables/sheet';
@@ -85,7 +86,7 @@ async function listModels(): Promise<void> {
   } catch (problem) {
     if (ticket !== listTicket) return;
     models.value = null;
-    listError.value = 'Models not listed: ' + messageOf(problem) + ' Type the model name instead.';
+    listError.value = 'Models not listed. ' + sentence(messageOf(problem)) + ' Type the model name instead.';
   } finally {
     if (ticket === listTicket) listing.value = false;
   }

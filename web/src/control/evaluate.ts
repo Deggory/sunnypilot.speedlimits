@@ -16,11 +16,16 @@ export const RUN_STATE: Record<RunState, [label: string, kind: string]> = {
 
 /** The run chosen on the page, from ?run= at the first load. */
 export const selectedRun = ref<string | null>(new URLSearchParams(location.search).get('run'));
+/** The version chosen in that run (an id of the Models tab, "cutter:<run>/detector-sizes/960x544"), from ?model=. */
+export const selectedModel = ref<string | null>(new URLSearchParams(location.search).get('model'));
 
-/** Chooses a run and puts it in the address (no new history entry). */
-export function chooseRun(name: string): void {
+/** Chooses a run, and a version of it, and puts them in the address (no new history entry). The Evaluate tab shows
+ * that version in the view of its role, then forgets them. */
+export function chooseRun(name: string, model: string | null = null): void {
   selectedRun.value = name;
-  history.replaceState(history.state, '', '/evaluate?run=' + encodeURIComponent(name));
+  selectedModel.value = model;
+  history.replaceState(history.state, '', '/evaluate?run=' + encodeURIComponent(name)
+    + (model === null ? '' : '&model=' + encodeURIComponent(model)));
 }
 
 /** The runs, asked every 10 s while the tab is shown. */

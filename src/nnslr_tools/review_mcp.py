@@ -184,6 +184,8 @@ def build_server(service, *, client: str, read_only: bool = False):
         suspicious_count: int
         frames_with_proposals: int
         hint_frames: int
+        # title ("Herznach → Zürich"), when ("Fri 23 Oct 2026 · 08:01"), minutes, start, from, to; None if unknown.
+        drive: dict[str, Any]
 
     class RouteList(TypedDict):
         routes: list[RouteSummary]
@@ -274,7 +276,8 @@ def build_server(service, *, client: str, read_only: bool = False):
     @server.tool(annotations=reading)
     def list_routes() -> RouteList:
         """Routes with a pre-annotation report and their progress: current run_id, frames, confirmed
-        (by humans and by AI), missing, suspicious."""
+        (by humans and by AI), missing, suspicious, and the drive (title "Herznach → Zürich", when, minutes)
+        to tell the routes apart as the site names them."""
         return call(tools.list_routes)
 
     @server.tool(annotations=reading)

@@ -56,18 +56,18 @@ if [ "${1:-}" = "--no-link" ]; then
   print_link=0
   shift
 fi
-[ $# -eq 0 ] || die "opzione non valida: $1 (vedi --help)"
+[ $# -eq 0 ] || die "unknown option: $1 (see --help)"
 
 cd "$ROOT"
 [ -z "$(git status --porcelain --untracked-files=no)" ] \
-  || die "files of the site are being changed here on the server (git status), so the update would overwrite them: nothing was changed. Try again when that work is committed."
+  || die "the site's files are being changed on this server right now, and updating would overwrite that work. Nothing was changed: try again once that work is committed."
 
 before="$(git rev-parse HEAD)"
 echo "== a. git pull ($(git branch --show-current))"
-git pull --ff-only || die "git pull non riuscito (branch divergente?): niente e' cambiato"
+git pull --ff-only || die "could not get the latest version from GitHub (git pull: has this copy changed apart?): nothing was changed."
 after="$(git rev-parse HEAD)"
 if [ "$before" = "$after" ]; then
-  echo "Gia' aggiornato: $(git log --oneline -1)"
+  echo "Already up to date: $(git log --oneline -1)"
 else
   git log --oneline "$before..$after"
 fi
@@ -88,13 +88,13 @@ if [ "$before" != "$after" ] && git diff --name-only "$before" "$after" | grep -
   changed=1
 fi
 if [ "$changed" -eq 1 ] || [ -n "$wrong" ]; then
-  echo "== b. aggiorno .venv (.[$extra])"
+  echo "== b. updating .venv (.[$extra])"
   if [ -n "$wrong" ]; then
-    echo "tolgo $wrong: su questa macchina serve l'altro onnxruntime"
-    venv_pip uninstall "$wrong" || die "non riesco a togliere $wrong da .venv"
+    echo "removing $wrong: this machine needs the other onnxruntime"
+    venv_pip uninstall "$wrong" || die "could not remove $wrong from .venv"
   fi
   venv_pip install -q -e "$ROOT[$extra]" \
-    || die "aggiornamento di .venv fallito: rilancia helpers/update.sh, o a mano: uv pip install --python .venv/bin/python -e '.[$extra]'"
+    || die "updating .venv failed: run helpers/update.sh again, or by hand: uv pip install --python .venv/bin/python -e '.[$extra]'"
 fi
 
 installed=0
@@ -106,21 +106,21 @@ if systemctl list-unit-files "$OLD_SERVICE.service" 2>/dev/null | grep -q "^$OLD
 fi
 
 if [ "$installed" -eq 1 ]; then
-  echo "== c. servizio $SERVICE"
+  echo "== c. service $SERVICE"
   bash "$ROOT/scripts/install_review_service.sh" < /dev/null | grep -v -e '^Apri nel browser' -e '^  http' || true
   systemctl restart "$SERVICE"
   sleep 2
-  systemctl is-active --quiet "$SERVICE" || die "il servizio non riparte: journalctl -u $SERVICE -n 50"
-  echo "Servizio riavviato con il codice nuovo."
+  systemctl is-active --quiet "$SERVICE" || die "the site did not start again: journalctl -u $SERVICE -n 50"
+  echo "Site restarted with the new version."
 elif [ -f "$ROOT/data/logs/review.pid" ] && kill -0 "$(cat "$ROOT/data/logs/review.pid")" 2>/dev/null; then
-  echo "== c. riavvio il sito di revisione acceso da helpers/2_review.sh"
+  echo "== c. restarting the review site started by helpers/2_review.sh"
   local_flag=()
   if grep -q "in ascolto su 127.0.0.1" "$ROOT/data/logs/review.log" 2>/dev/null; then local_flag=(--local); fi
   "$ROOT/helpers/2_review.sh" --stop
   "$ROOT/helpers/2_review.sh" "${local_flag[@]}" > /dev/null
-  echo "Sito riavviato."
+  echo "Site restarted."
 else
-  echo "== c. nessun sito di revisione acceso: niente da riavviare (helpers/2_review.sh lo accende)"
+  echo "== c. no review site running: nothing to restart (helpers/2_review.sh starts it)"
   exit 0
 fi
 

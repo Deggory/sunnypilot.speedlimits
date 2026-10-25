@@ -18,8 +18,8 @@ anywhere lock sign-in for everyone for 15 minutes (sessions already open keep wo
 password checks run at once, so a flood of attempts cannot take all the CPU.
 
 Files (<data root>/web/auth/, folder 700, files 600, written all at once): admin.json and sessions.json.
-To start over (a forgotten password) stop the site and move admin.json away: the next visit asks for the
-setup code again. Standard library only. Ported from openpilot.distill's web/auth.py (same author, MIT).
+To start over (a forgotten password) helpers/reset_password.sh stops the site, moves admin.json away and starts
+it again: the next visit asks for the setup code again. Standard library only. Ported from openpilot.distill's web/auth.py (same author, MIT).
 """
 from __future__ import annotations
 
@@ -177,9 +177,10 @@ class Throttle:
             if len(self._all) >= FAILS_IN_ALL:
                 wait = max(wait, self._all[-FAILS_IN_ALL] + FAIL_WINDOW_SECONDS - now)
             if wait > 0:
-                minutes = max(1, int(wait // 60) + 1)
+                # Whole minutes, rounded up: 15 for a full window, "a minute" for the last seconds.
+                minutes = max(1, int(-(-wait // 60)))
                 raise ReviewRejected(429, 'too_many_attempts', 'Too many wrong attempts: try again in '
-                                     + str(minutes) + ' minutes.')
+                                     + ('a minute.' if minutes == 1 else str(minutes) + ' minutes.'))
 
     def failed(self, address: str) -> None:
         with self._lock:

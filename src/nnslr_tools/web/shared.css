@@ -86,10 +86,16 @@ place-items:center;flex:none;box-shadow:inset 0 0 0 1px rgba(255,255,255,.08)}
 .brand-mark svg{width:100%;height:100%;display:block}
 .brand-name{margin:0;font-size:17px;font-weight:600;letter-spacing:-.022em;white-space:nowrap}
 .bar-end{grid-column:3;justify-self:end;display:flex;align-items:center;gap:8px;min-width:0}
-/* The connection: nothing while the site answers, a red dot and why when it does not. */
-.live{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--bad);min-width:0}
+/* The connection (composables/connection.ts): nothing while the site answers, a red dot and one sentence when it does
+   not, and the pills greyed out (what they show is old). */
+/* A small pill centred under the bar (one row or two), where the sentence has room on any width. */
+.live{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--bad);position:absolute;left:50%;top:calc(100% + 8px);
+transform:translateX(-50%);z-index:20;padding:6px 12px;border-radius:999px;background:var(--surface);box-shadow:var(--pop-shadow);
+max-width:calc(100vw - 24px)}
 .live:not(.off){display:none}
-.live span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:24ch}
+.live span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar-end.stale .tm-pill{opacity:.45}
+.bar-end.stale .tm-pill .dot{animation:none}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--ok);flex:none}
 .dot.off{background:var(--bad)}
 .tabs{grid-column:2;display:flex;gap:2px;padding:2px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;
@@ -100,6 +106,12 @@ border-radius:8px;white-space:nowrap;min-height:30px;display:inline-flex;align-i
 transition:background .2s,box-shadow .2s;opacity:.82}
 .tabs a:hover{opacity:1}
 .tabs a[aria-current="page"]{opacity:1;font-weight:600;background:var(--seg-on);box-shadow:var(--seg-on-shadow)}
+/* A tab with work running (composables/busy.ts): a pulsing dot on its link, and on its row of the phone menu. */
+.tabs a[data-busy="true"]::after,.pop-page[data-busy="true"]::after{content:"";width:7px;height:7px;margin-left:8px;
+border-radius:50%;background:var(--rev);flex:none;animation:pulse 1.2s infinite}
+.pop-page[data-busy="true"]::after{order:1;margin:0 auto 0 10px}
+.pop-page[data-busy="true"] span{order:2}
+@media (prefers-reduced-motion:reduce){.tabs a[data-busy="true"]::after,.pop-page[data-busy="true"]::after{animation:none}}
 @media (max-width:980px){
   .site-bar{grid-template-columns:minmax(0,1fr) auto}
   .bar-end{grid-column:2}
@@ -118,7 +130,9 @@ font-variant-numeric:tabular-nums;transition:background .2s}
 .tm-pill .dot.hot{background:var(--bad)}
 .tm-pill .dot.on{background:var(--ok)}.tm-pill .dot.off{background:var(--placeholder)}
 .tm-pop{position:absolute;right:0;top:calc(100% + 10px);z-index:30;width:300px;padding:14px 16px 10px;border-radius:16px;
-background:var(--surface);border:.5px solid var(--line-strong);box-shadow:var(--pop-shadow)}
+background:var(--surface);border:.5px solid var(--line-strong);box-shadow:var(--pop-shadow);
+/* Under the sticky bar: scrolls inside itself on a short window (a phone held sideways), never past its bottom. */
+max-height:calc(100dvh - 72px - env(safe-area-inset-bottom,0px));overflow-y:auto;overscroll-behavior:contain}
 .tm-pop h2{margin:0 0 2px;font-size:15px;font-weight:600;letter-spacing:-.01em}
 .tm-pop .tm-sub{margin:0 0 8px;font-size:12.5px;color:var(--muted)}
 .tm-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 10px;padding:9px 0;border-top:.5px solid var(--line)}
@@ -129,6 +143,8 @@ background:var(--surface);border:.5px solid var(--line-strong);box-shadow:var(--
 .tm-meter{grid-column:1/-1;height:4px;border-radius:2px;background:var(--surface-3);overflow:hidden}
 .tm-meter span{display:block;height:100%;border-radius:2px;background:var(--ok);transition:width .6s}
 .tm-meter.warm span{background:var(--todo)}.tm-meter.hot span{background:var(--bad)}
+/* How busy the GPU or the CPU is: work, not a fault, in the accent at any level. */
+.tm-meter.use span{background:var(--accent)}
 .tm-running{padding:10px 0 8px;border-top:.5px solid var(--line)}
 .tm-running h3{margin:0 0 4px;font-size:13px;font-weight:600;color:var(--muted)}
 .tm-running .tm-sub{margin:0}
@@ -155,7 +171,8 @@ background:var(--surface);border:.5px solid var(--line-strong);box-shadow:var(--
 @media (max-width:560px){
   .brand-name{display:none}
   .tabs a{flex:1 1 auto;padding:5px 5px;font-size:12.5px;letter-spacing:-.02em}
-  .tm-pop{position:fixed;left:12px;right:12px;top:calc(env(safe-area-inset-top,0px) + 58px);width:auto}
+  .tm-pop{position:fixed;left:12px;right:12px;top:calc(env(safe-area-inset-top,0px) + 58px);width:auto;
+    max-height:calc(100dvh - 70px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px))}
 }
 
 /* page */
@@ -247,7 +264,7 @@ border:1px solid var(--line);color:var(--muted);font-family:var(--font-data);fon
 .toast{position:fixed;right:16px;bottom:calc(24px + env(safe-area-inset-bottom,0px));z-index:30;max-width:min(460px,calc(100vw - 32px));padding:12px 14px;
 border-radius:14px;background:var(--surface-2);border:1px solid var(--line-strong);box-shadow:var(--pop-shadow);display:none}
 .toast.show{display:block}.toast.error{border-color:var(--bad);color:var(--bad)}
-.sheet.open ~ .toast{bottom:auto;top:16px}
+.sheet.open ~ .toast,body:has(.sheet.open) .toast{bottom:auto;top:16px}
 body.sheet-open{overflow:hidden}
 @media (prefers-reduced-motion:reduce){.pill.run::before{animation:none}.bar span,.btn,.tabs a,.sheet,.sheet-backdrop{transition:none}}
 /* The Account menu at the right of the top bar (account-menu.ts): who is signed in, the appearance, the
@@ -260,7 +277,8 @@ cursor:pointer;flex:none;display:grid;place-items:center;transition:color .2s,ba
 .account-menu{position:relative;flex:none}
 .topbar-inner>.account-menu:last-child{margin-left:auto}
 .account-pop{position:absolute;right:0;top:calc(100% + 10px);z-index:30;width:300px;padding:6px;border-radius:16px;
-background:var(--surface);border:1px solid var(--line-strong);box-shadow:var(--pop-shadow);display:flex;flex-direction:column}
+background:var(--surface);border:1px solid var(--line-strong);box-shadow:var(--pop-shadow);display:flex;flex-direction:column;
+max-height:calc(100dvh - 72px - env(safe-area-inset-bottom,0px));overflow-y:auto;overscroll-behavior:contain}
 .pop-head{display:flex;align-items:center;gap:12px;padding:10px 10px 12px}
 .pop-avatar{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;flex:none;font-weight:700;
 color:var(--tab-on-fg);background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--tab-on-ring)}

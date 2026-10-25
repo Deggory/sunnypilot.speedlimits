@@ -69,7 +69,7 @@ Where things stand and what to do next. A banner names the next step. Three card
 
 ### Prepare
 
-This tab turns drives on the comma into frames ready for review, automatically, with two buttons. **Download from the comma** copies new drives over SSH. It leaves out trips shorter than five minutes, the first and last two minutes of every trip, and any minute in reverse gear. **Prepare new routes** extracts one frame per second, lets pre-annotation models propose sign boxes, and reads the GPS position and country of every frame. A table shows the state of each route.
+This tab turns drives on the comma into frames ready for review, automatically, with two buttons. **Download from the comma** copies new drives over SSH. It leaves out trips shorter than five minutes, the first and last two minutes of every trip, and any minute in reverse gear. **Prepare new drives** extracts one frame per second, lets pre-annotation models propose sign boxes, and reads the GPS position and country of every frame. A table shows the state of each route.
 
 ### Review a route
 

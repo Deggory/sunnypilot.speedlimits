@@ -2,6 +2,7 @@
 import {hasValue, isSpeedFamily} from './catalog';
 import {clone} from './dom';
 import {report, rowOf, state} from './store';
+import {trialKeys} from './trial';
 import type {
   ConfirmedCopy, Detection, Filter, FrameEdit, FrameRow, FrameStatus, QualityFilter, SuspiciousReason,
 } from './types';
@@ -10,8 +11,35 @@ export function currentRow(): FrameRow | null {
   return state.currentKey === null ? null : rowOf(state.currentKey);
 }
 
+/** How far into the drive the frame is, "12:46" (1:02:05 past an hour): the segment's minute and the second in it;
+ * null when the extraction did not record the second. */
+export function driveTime(row: FrameRow): string | null {
+  const fps = row.requested_sample_fps;
+  const second = typeof row.media_time_s === 'number' ? row.media_time_s
+    : typeof fps === 'number' && fps > 0 ? row.output_index / fps : null;
+  if (second === null || !Number.isFinite(second)) return null;
+  const total = Math.floor(row.segment_index * 60 + second + 1e-6);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const pad = (value: number): string => String(value).padStart(2, '0');
+  return (hours > 0 ? hours + ':' + pad(minutes) : String(minutes)) + ':' + pad(total % 60);
+}
+
+/** "12:46 into the drive", else the segment and the image ("Segment 12 · image 46"). */
+export function framePlace(row: FrameRow): string {
+  const time = driveTime(row);
+  return time === null ? 'Segment ' + row.segment_index + ' · image ' + row.output_index : time + ' into the drive';
+}
+
 export function proposalsOf(row: FrameRow): Detection[] {
   return Array.isArray(row.detections) ? row.detections : [];
+}
+
+/** The boxes a frame starts with: its proposals, numbered from left to right as they appear on the photo. */
+export function startingDetections(row: FrameRow): Detection[] {
+  const detections = clone(proposalsOf(row));
+  detections.sort((a, b) => a.bbox_xyxy[0] - b.bbox_xyxy[0]);
+  return detections;
 }
 
 // The page's working copy of a frame: the proposals until the reviewer changes or confirms it.
@@ -19,9 +47,7 @@ export function workOf(row: FrameRow): FrameEdit {
   const key = row.frame_key;
   let work = state.edits[key];
   if (!work) {
-    const detections = clone(proposalsOf(row));
-    // Numbered from left to right, as they appear on the photo.
-    detections.sort((a, b) => a.bbox_xyxy[0] - b.bbox_xyxy[0]);
+    const detections = startingDetections(row);
     state.edits[key] = {review_state: 'pending', detections, saved: true, revision: 0};
     // The reactive copy: changes made through it reach the page.
     work = state.edits[key];
@@ -112,7 +138,8 @@ export function statusLabel(key: string): string {
   if (status === 'done') return 'Confirmed';
   if (status === 'saving') return 'Saving…';
   if (status === 'error') return s && s.error ? 'Not saved' : 'Waiting';
-  if (status === 'dirty') return s && s.server_confirmed ? 'To confirm again' : 'To confirm';
+  // Not "To confirm": too close to the "To review" filter beside it.
+  if (status === 'dirty') return 'Unsaved changes';
   if (reasonsOf(key).length > 0) return 'Suspicious';
   return 'To review';
 }
@@ -149,6 +176,7 @@ export function confirmedFilter(filter: string): boolean {
   return isQualityFilter(filter) || filter === 'ai';
 }
 
+// "AI trial" is not kept for the next visit: its frames are known only once the page has read the trial.
 export function isFilter(value: string | null | undefined): value is Filter {
   return value === 'todo' || value === 'suspicious' || value === 'proposals' || value === 'all'
     || (value !== null && value !== undefined && confirmedFilter(value));
@@ -161,6 +189,7 @@ export function matchesFilter(row: FrameRow, filter: Filter): boolean {
     case 'suspicious': return reasonsOf(key).length > 0;
     case 'proposals': return proposalsOf(row).length > 0;
     case 'ai': return aiConfirmed(key);
+    case 'trial': return trialKeys.has(key) && frameStatus(key) !== 'done';
     case 'unknown': return doubtsOf(key).unknown > 0;
     case 'unreadable': return doubtsOf(key).unreadable > 0;
     case 'road': return doubtsOf(key).road > 0;

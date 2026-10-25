@@ -5,7 +5,9 @@ ssh host of helpers/fetch_comma_segments.sh: COMMA_HOST (default "comma", the Ho
 with ``ssh -G`` to its address and port. The panel's download gets the same address (--host). The check only opens a
 TCP connection to that port and closes it. When the comma answers, a login is tried too, every LOGIN_SECONDS: ssh with
 this server's key in batch mode, running ``true`` (nothing changes on the comma). The comma takes the public keys of
-the GitHub user set in its Settings → Network → SSH Keys, so a refused key is fixed on GitHub (server_key). A thread
+the GitHub user set in its Settings → Network → SSH Keys, so a refused key is fixed on GitHub (server_key). The time of
+the last login that worked is kept (``<data root>/web/comma-seen.json``): a comma that is only switched off is not
+offered the setup from zero again, the panel says when it was last connected. A thread
 repeats the checks while the site asks, so a page never waits for a comma that is away (car off, not on the Wi-Fi).
 """
 from __future__ import annotations
@@ -43,6 +45,33 @@ class AddressError(ValueError):
 
 def settings_path(root: Path) -> Path:
     return Path(root) / 'web' / 'comma.json'
+
+
+def seen_path(root: Path) -> Path:
+    """When this server last logged in to the comma: a comma that is only switched off is not one to set up again."""
+    return Path(root) / 'web' / 'comma-seen.json'
+
+
+def last_login(root: Path) -> str | None:
+    """ISO time of the last login that worked, or None (never, or the file unreadable)."""
+    try:
+        seen = json.loads(seen_path(root).read_text(encoding='utf-8')).get('login')
+    except (OSError, ValueError, AttributeError):
+        return None
+    return seen if isinstance(seen, str) else None
+
+
+def _remember_login(root: Path | None, when: str) -> None:
+    if root is None:
+        return
+    path = seen_path(root)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name('.' + path.name + '.tmp')
+        temporary.write_text(json.dumps({'login': when}) + '\n', encoding='utf-8')
+        os.replace(temporary, path)
+    except OSError:
+        pass
 
 
 def configured(root: Path) -> str | None:
@@ -140,6 +169,8 @@ def _loop() -> None:
             login = None
         elif login is None or time.monotonic() - _login_at > LOGIN_SECONDS:
             login, _login_at = _login(), time.monotonic()
+            if login:
+                _remember_login(_root, datetime.now(timezone.utc).isoformat(timespec='seconds'))
         with _lock:
             _state.update(online=online, login=login, checked=datetime.now(timezone.utc).isoformat(timespec='seconds'))
             if time.monotonic() - _asked > IDLE_SECONDS:
@@ -156,16 +187,19 @@ def check_now(root: Path) -> dict:
         _root = Path(root)
     online = _check()
     login = _login() if online else None
+    checked = datetime.now(timezone.utc).isoformat(timespec='seconds')
+    if login:
+        _remember_login(Path(root), checked)
     with _lock:
         _login_at = time.monotonic()
-        _state.update(online=online, login=login, checked=datetime.now(timezone.utc).isoformat(timespec='seconds'))
+        _state.update(online=online, login=login, checked=checked)
     return state(root)
 
 
 def state(root: Path) -> dict:
     """{'online': True / False / None (not checked yet), 'login': whether this server's key is accepted (None while
     the comma is away), 'checked': ISO time of the last check, 'address': what is tried, 'configured': whether it was
-    set in the panel, 'server_key': this server's public key}."""
+    set in the panel, 'server_key': this server's public key, 'last_login': ISO time of the last login that worked}."""
     global _asked, _thread, _root
     with _lock:
         _root = Path(root)
@@ -178,4 +212,5 @@ def state(root: Path) -> dict:
     if address is None:
         resolved = _address
         address = os.environ.get('COMMA_HOST', 'comma') + (' (' + resolved[0] + ')' if resolved else '')
-    return {**tried, 'address': address, 'configured': configured(root) is not None, 'server_key': server_key()}
+    return {**tried, 'address': address, 'configured': configured(root) is not None, 'server_key': server_key(),
+            'last_login': last_login(root)}

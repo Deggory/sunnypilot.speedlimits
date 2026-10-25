@@ -16,6 +16,15 @@ const OFFLINE_NOTE = 'The changes are saved in this browser. Export the JSONL to
   + 'original file of the proposals stays as it is. A frame without boxes is not a negative example by itself: it has '
   + 'to be checked and confirmed.';
 
+// Who proposed the signs of this report (run.json, as the route list says "signs by …").
+const PROPOSED_BY: Record<string, string> = {
+  vietnam: 'The signs were proposed by a model trained on Vietnamese roads, and the numbers painted on the road by '
+    + 'a text reader. Neither was made for Swiss roads.',
+  ours: 'The signs were proposed by our own networks, trained on the drives reviewed here.',
+  qwen: 'The signs were proposed by Qwen3-VL, a model that looks at the whole picture and says what it sees.',
+};
+const proposedBy = PROPOSED_BY[report.proposer ?? ''] ?? 'The signs were proposed by a model.';
+
 </script>
 
 <template>
@@ -38,8 +47,8 @@ const OFFLINE_NOTE = 'The changes are saved in this browser. Export the JSONL to
                 id="exportMsg" role="status">{{ state.exportMessage?.text }}</span>
         </div>
         <p id="storageNote">{{ report.apiBase ? SERVER_NOTE : OFFLINE_NOTE }}</p>
-        <p>Sign proposals come from a model trained in Vietnam, and the numbers on the road from OCR checked with road segmentation. The models are not validated on Swiss roads. Confirm only what you can see. The proposed number is not the limit that applies to the car.</p>
-        <p>Leave unknown what you cannot check. The moment of passing stays unannotated. Every review is checked against the rules of import-annotations before it enters the dataset.</p>
+        <p id="proposedBy">{{ proposedBy }} Confirm only what you can see. The proposed number is not the limit that applies to the car.</p>
+        <p>Leave unknown what you cannot check. The moment of passing stays unannotated. Every review is checked again before it enters the training data.</p>
       </div>
     </details>
   </section>

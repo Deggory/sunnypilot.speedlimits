@@ -1,8 +1,9 @@
 <script setup lang="ts">
 // "Review with AI" on the route list (pages.render_index): the button of a drive (button[data-ai-route], drawn by
 // the server) opens this sheet. It reads the AI reviewer of Settings (GET /api/ai/state) and starts the panel job
-// ai_review on the drive (POST /api/panel/run/ai_review): "Try without saving" suggests the boxes of 20 frames
-// into a file; "Review and save" saves what the AI says, after a question, because AI saves are final.
+// ai_review on the drive (POST /api/panel/run/ai_review): "Try without saving" suggests the boxes of 20 frames,
+// which the review page of the drive shows (its "AI trial" filter); "Review and save" saves what the AI says, after
+// a question, because AI saves are final. Only a reviewer that passed its Test in Settings can do either.
 import {computed, onBeforeUnmount, onMounted, ref, useTemplateRef} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import type {AiState} from '../common/ai-types';
@@ -109,7 +110,8 @@ onBeforeUnmount(() => document.removeEventListener('click', onClick));
         <p class="ai-started" role="status"><span class="pill run">{{ started.saving ? 'Reviewing' : 'Trying' }}</span>
           <span>Started: follow it on the <a href="/">Overview</a>.</span></p>
         <p class="ai-help">{{ started.saving ? 'Each frame the AI reviews completely is saved as ' + recordedAs + '; the others stay for you.'
-          : 'The suggestions go to a file under ai_reviews/ of the data folder; nothing is saved in the reviews.' }}</p>
+          : 'Nothing is saved. When it is done, open the drive: the frames the AI tried are under “AI trial”, ready to apply or dismiss.' }}</p>
+        <a v-if="!started.saving && drive" class="btn primary" id="ai-route-open" :href="'/route/' + encodeURIComponent(drive.route) + '/'">Open the drive</a>
       </template>
       <template v-else-if="blocker">
         <p class="ai-help" role="status">{{ blocker }}</p>
@@ -124,7 +126,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onClick));
           <button type="button" class="ai-choice" id="ai-route-try" :disabled="busy" @click="start(false)">
             <span class="ai-choice-icon"><Icon name="ai"/></span>
             <span class="ai-choice-body"><strong>Try without saving</strong>
-              <span>The AI suggests the boxes of {{ TRY_LIMIT }} frames left to review, into a file. Nothing changes in the reviews.</span></span>
+              <span>The AI suggests the boxes of {{ TRY_LIMIT }} frames left to review. You see them on the review page; nothing is saved.</span></span>
           </button>
           <button type="button" class="ai-choice save" id="ai-route-save" :disabled="busy" @click="start(true)">
             <span class="ai-choice-icon"><Icon name="ai"/></span>

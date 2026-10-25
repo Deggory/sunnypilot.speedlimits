@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 __NNSLR_THEME__
-<title>Speed limits · Overview</title>
+<title>__NNSLR_TITLE__</title>
 <style>
 __NNSLR_SHARED_CSS__
 /* Overview, Prepare, Train, Evaluate: one page, a tab each (web/src/pages/control.ts, web/src/control/ControlApp.vue). */
@@ -17,9 +17,6 @@ __NNSLR_SHARED_CSS__
 .page>section{min-width:0}
 /* Prepare, Train: work running goes first, under the title; the last finished job stays at the bottom. */
 .page>.banner{order:-3}.page>.page-head{order:-2}.page>.live-section.now{order:-1}
-/* A tab with work running: a pulsing dot on its link in the top bar. */
-.tabs a[data-busy="true"]::after{content:"";width:7px;height:7px;margin-left:8px;border-radius:50%;background:var(--rev);flex:none;
-animation:pulse 1.2s infinite}
 .section-title{display:flex;align-items:center;gap:8px;margin:6px 2px 8px;font-size:20px;font-weight:600;letter-spacing:-.018em;
 color:var(--fg)}
 .count-badge{min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:var(--rev-soft);color:var(--rev);font-size:12px;
@@ -116,11 +113,16 @@ background:linear-gradient(90deg,transparent,rgba(255,255,255,.35),transparent);
 @keyframes live-slide{0%{left:-35%}100%{left:100%}}
 .jp-detail{margin:0;font-size:15px;font-weight:650;font-variant-numeric:tabular-nums}
 .jp-stopped{margin:0;color:var(--bad);font-size:14px}
+.jp-failure{margin:0;font-size:15px;font-weight:600;line-height:1.35}
 .jp-line{margin:0;color:var(--muted);font-size:13.5px;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;line-clamp:2;
 -webkit-box-orient:vertical;overflow:hidden}
 .jp-line.bad{color:var(--fg)}
 .jp-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px}
 .jp-actions .btn{min-width:104px}
+/* A button that stays on (Follow of the log sheet): tinted like the chosen tab. */
+.btn[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent)}
+.sheet-outcome{margin:0 0 12px;font-size:15px;line-height:1.4}
+.sheet-outcome small{display:block;margin-top:2px;font-size:13px;color:var(--muted)}
 
 .spinner{width:16px;height:16px;border-radius:50%;border:2.5px solid var(--line-strong);border-top-color:var(--rev);flex:none;
 animation:live-spin .8s linear infinite}
@@ -161,6 +163,8 @@ border:1.5px solid var(--line-strong);background:var(--surface);color:var(--mute
 .prep-routes .bar{grid-column:1/-1;height:6px}
 .prep-route{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .prep-phase{color:var(--muted);text-align:right;font-variant-numeric:tabular-nums}
+/* A phone: the drive's name on its own line, what it is doing under it, so neither cuts the other. */
+@media (max-width:600px){.prep-routes li{grid-template-columns:minmax(0,1fr)}.prep-phase{text-align:left}}
 
 /* Prepare, Train: the card with the figure and the actions. */
 .tab-card{display:flex;flex-direction:column;gap:16px}
@@ -452,6 +456,7 @@ font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 border-radius:8px;cursor:pointer;min-height:30px;opacity:.85;transition:background .2s,box-shadow .2s}
 .seg button:hover{opacity:1}
 .seg button[aria-checked="true"]{opacity:1;font-weight:600;background:var(--seg-on);box-shadow:var(--seg-on-shadow)}
+.seg button:disabled{cursor:default}.seg button:disabled:not([aria-checked="true"]){opacity:.4}
 .seg-row{display:flex;flex-wrap:wrap;gap:8px 12px}
 .eval-table{font-size:13.5px}
 .eval-table th,.eval-table td{padding:8px 10px}
@@ -729,7 +734,7 @@ border-top:1px solid var(--line)}
 .ev-second{color:var(--muted);font-size:13px;display:flex;flex-wrap:wrap;gap:2px 12px}
 .ev-in-use{padding:1px 8px;border-radius:999px;font-size:11.5px;font-weight:650;border:1px solid currentColor;color:var(--accent);white-space:nowrap}
 .ev-vs{font-size:12.5px}
-.ev-vs.better{color:var(--ok)}.ev-vs.worse{color:var(--bad)}.ev-vs.same{color:var(--muted)}
+.ev-vs.better{color:var(--ok)}.ev-vs.worse{color:var(--bad)}.ev-vs.same{color:var(--muted)}.ev-vs.apart{color:var(--warn)}
 .ev-more>summary{cursor:pointer;font-weight:650}
 .ev-widths{list-style:none;margin:0 0 12px;padding:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
 .ev-widths li{display:flex;flex-direction:column;padding:8px 10px;border-radius:10px;background:var(--surface-2);border:1px solid var(--line)}

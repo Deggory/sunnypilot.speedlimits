@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 __NNSLR_THEME__
-<title>Sign review</title>
+<title>__NNSLR_TITLE__</title>
 <style>
 __NNSLR_SHARED_CSS__
 /* The sign review (web/src/review/ReviewApp.vue): patterns built from the shared tokens. */
@@ -40,8 +40,23 @@ kbd {
 /* The drive, at the top of the inspector (RoutePick.vue): its name in a menu to open another one. */
 .route-pick { display: flex; flex-direction: column; gap: 4px; min-width: 0; margin: 0 0 14px; }
 .route-pick-label { font-size: 13px; font-weight: 500; color: var(--muted); }
-.route-pick select { width: 100%; min-height: 40px; padding: 6px 10px; font-size: 15px; font-weight: 600; text-overflow: ellipsis;
-  cursor: pointer; border-radius: 10px; }
+/* Two lines (where to where, then when): the real select lies invisible over them and opens the menu. */
+.route-face {
+  position: relative; display: flex; align-items: center; min-height: 48px; padding: 6px 34px 6px 12px; border-radius: 10px;
+  background: var(--surface-2); border: 1px solid var(--line-strong); transition: border-color 0.2s, box-shadow 0.2s;
+}
+.route-face:hover { border-color: var(--hover-line); }
+.route-face:focus-within { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+.route-face::after {
+  content: ""; position: absolute; right: 14px; top: 50%; width: 7px; height: 7px; margin-top: -5px; pointer-events: none;
+  border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(45deg);
+}
+.route-face-text { display: flex; flex-direction: column; min-width: 0; }
+.route-title { font-size: 15px; font-weight: 650; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.route-when { font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.route-pick select { position: absolute; inset: 0; width: 100%; height: 100%; min-height: 0; opacity: 0; cursor: pointer; }
+.route-pick select:disabled { cursor: default; }
+.route-face:has(select:disabled)::after { display: none; }
 select, input[type="text"], input[type="number"] {
   width: 100%; min-width: 0; min-height: 44px; padding: 10px 12px; font-size: 16px; color: var(--fg);
   background: var(--surface-2); border: 1px solid var(--line-strong); border-radius: 12px; transition: border-color 0.2s, box-shadow 0.2s;
@@ -65,6 +80,9 @@ input::placeholder { color: var(--placeholder); }
 .filters button[aria-pressed="true"], .segmented button[aria-pressed="true"] {
   opacity: 1; font-weight: 600; background: var(--seg-on); box-shadow: var(--seg-on-shadow);
 }
+/* A doubt counter of the timeline in use (ReviewFilters.vue): pressed, with × to remove it. */
+.filters .doubt-on { color: var(--tab-on-fg); }
+.filters .doubt-on .x { margin-left: 6px; font-size: 15px; line-height: 1; opacity: 0.7; }
 /* The drive's count under its name in the inspector (ReviewToolbar.vue): the count, the bar, who reviews. */
 .route-status { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
 .progress { display: flex; flex-direction: column; align-items: stretch; gap: 6px; min-width: 0; }
@@ -145,7 +163,7 @@ input::placeholder { color: var(--placeholder); }
 .pill::before { flex: none; }
 /* Frame state tag: a solid pill, readable at a glance; its square marker is the timeline cell of the same state.
    Fixed width on a computer, so the bar never shifts between frames. Text on a solid fill is the page colour. */
-.pill.state { width: 162px; height: 30px; padding: 0 12px; gap: 8px; font-size: 13px; font-weight: 700; overflow: hidden; }
+.pill.state { flex: none; width: 162px; height: 30px; padding: 0 12px; gap: 8px; font-size: 13px; font-weight: 700; overflow: hidden; }
 .pill.state::before { width: 10px; height: 10px; border-radius: 2px; }
 .pill.state.todo, .pill.state.saving { background: var(--surface-2); border-color: var(--line-strong); color: var(--fg); }
 .pill.state.todo::before, .pill.state.saving::before { background: var(--none-cell); box-shadow: inset 0 0 0 1px var(--hover-line); }
@@ -252,6 +270,7 @@ details[open] summary::after, .tl-toggle[aria-expanded="true"]::after { transfor
 .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .section-head .count { margin-left: auto; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .section-head .btn.carry { align-self: center; min-height: 30px; padding: 4px 10px; font-size: 12.5px; }
+.section-head .btn.carry[aria-disabled="true"] { opacity: 0.4; box-shadow: none; }
 .reasons { margin: 0; font-size: 13px; color: var(--sus); background: var(--sus-soft); border-radius: 12px; padding: 9px 12px; overflow-wrap: anywhere; }
 .reasons strong { font-weight: 650; }
 .reasons .carry-hint { display: flex; margin-top: 8px; min-height: 30px; gap: 8px; }
@@ -323,8 +342,9 @@ details[open] summary::after, .tl-toggle[aria-expanded="true"]::after { transfor
 }
 .chip:hover { border-color: var(--hover-line); background: var(--surface-3); }
 .chip[aria-pressed="true"], .chip[aria-pressed="true"]:hover { color: var(--tab-on-fg); background: var(--accent-soft); border-color: var(--accent); }
-.chips.minor { gap: 2px; margin-top: -6px; }
-.chips.minor .chip { border-color: transparent; background: transparent; color: var(--muted); padding: 2px 9px; min-height: 28px; font-size: 12.5px; }
+/* The rarer types: quieter chips (an outline, no fill), still buttons at a glance. */
+.chips.minor { gap: 4px; margin-top: -4px; }
+.chips.minor .chip { border-color: var(--line-strong); background: transparent; color: var(--muted); padding: 2px 10px; min-height: 28px; font-size: 12.5px; }
 .chips.minor .chip:hover { background: var(--surface-2); color: var(--fg); }
 .chips.minor .chip[aria-pressed="true"] { color: var(--tab-on-fg); background: var(--accent-soft); border-color: var(--accent); }
 .segmented { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
@@ -441,13 +461,27 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
   /* "+ Box" and "Cancel" take the same width: the bar never re-wraps while drawing. */
   #draw { min-width: 7.5em; }
 }
-@media (min-width: 981px) and (max-width: 1400px) {
-  /* The frame data get their own line; the height is the same on every frame. */
+@media (min-width: 981px) and (max-width: 1680px) {
+  /* The frame data get their own line (up to 1680px the bar's row has no room for them); the height is the same on
+     every frame. */
   .stage-bar { flex-wrap: wrap; row-gap: 8px; }
   .stage-bar .data { order: 5; flex-basis: 100%; }
   #scene { max-height: min(72vh, calc(100vh - var(--topbar-h, 57px) - 230px)); }
   /* Two even rows of four: no label left alone on a second line. */
   .legend { display: grid; grid-template-columns: repeat(4, max-content); gap: 4px 18px; font-size: 11.5px; }
+}
+@media (min-width: 1681px) {
+  /* With the second-reading switch the row is full at any width: the frame data get their own line there too. */
+  .stage-bar:has(> #hintToggle:not([hidden])) { flex-wrap: wrap; row-gap: 8px; }
+  .stage-bar:has(> #hintToggle:not([hidden])) .data { order: 5; flex-basis: 100%; }
+  body:has(#hintToggle:not([hidden])) #scene { max-height: min(72vh, calc(100vh - var(--topbar-h, 57px) - 230px)); }
+}
+@media (min-width: 981px) {
+  /* The second-reading switch starts the frame data's line (a line break before it), instead of a line of its own. */
+  .stage-bar:has(> #hintToggle:not([hidden]))::before { content: ""; order: 3; flex-basis: 100%; height: 0; }
+  /* The empty line of the break adds a second row gap: taken back. */
+  .stage-bar:has(> #hintToggle:not([hidden])) #hintToggle { order: 4; margin-top: -8px; }
+  .stage-bar:has(> #hintToggle:not([hidden])) .data { flex: 1 1 0; margin-top: -8px; }
 }
 @media (min-width: 981px) and (max-width: 1240px) {
   :root { --inspector: 352px; }
@@ -522,6 +556,13 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
   .filters { grid-area: filters; display: flex; min-width: 0; overflow-x: auto; scrollbar-width: none; }
   .filters::-webkit-scrollbar { display: none; }
   .filters button { flex: 1 0 auto; padding: 3px 6px; font-size: 12.5px; }
+  /* The drive in a compact block, so the signs come sooner: no "Drive" label, the count beside its bar. */
+  .route-pick { gap: 8px; margin-bottom: 10px; }
+  .route-pick-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .route-status { margin-top: 0; }
+  .progress { flex-direction: row; align-items: center; gap: 10px; }
+  .progress-bar { flex: 1 1 auto; width: auto; }
+  .progress-text strong { font-size: 14px; }
 
   .page { padding-top: 0; padding-left: max(12px, env(safe-area-inset-left, 0px)); padding-right: max(12px, env(safe-area-inset-right, 0px)); }
   /* The photo first, edge to edge. */

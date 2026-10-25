@@ -8,6 +8,11 @@ import type {InjectionKey} from 'vue';
 
 /** The resume() of the control app, for the job cards (provided by ControlApp.vue). */
 export const RESUME_JOB: InjectionKey<(job: Job) => Promise<void>> = Symbol('resume-job');
+/** "Try again" on the card of a failed job (provided by ControlApp.vue): whether it can start now, and start it with
+ * the proposer it had. */
+export const RETRY_JOB: InjectionKey<{can: (job: Job) => boolean; run: (job: Job) => void}> = Symbol('retry-job');
+/** The actions whose failed job can simply run again: no option but the proposer (a training has Resume). */
+export const RETRY_ACTIONS: ActionName[] = ['fetch', 'prepare', 'prepare_again', 'setup_vlm', 'dataset', 'measure_proposer'];
 
 /** The question before an action; null: it starts at the click (preparing, importing the reviews). */
 /** The proposer as the Prepare tab names it. */
@@ -40,7 +45,7 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
   if (name === 'measure_proposer') {
     return {title: 'Measure ' + proposerName(options?.proposer) + '?', action: 'Measure',
       text: 'It proposes the signs of the reviewed test frames, as Prepare would, and compares them with the boxes you kept. '
-        + 'Nothing changes in the reviews or the routes. Our networks and Qwen3-VL use the GPU.'};
+        + 'Nothing changes in the reviews or the drives. Our networks and Qwen3-VL use the GPU.'};
   }
   if (name === 'ai_review' && options?.save === 'yes') {
     return {title: 'Review and save with the AI?', action: 'Review and save', danger: true,
@@ -50,7 +55,7 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
   if (name === 'ai_review') {
     return {title: 'Try the AI reviewer?', action: 'Try',
       text: 'It suggests the boxes of ' + (options?.limit ? 'up to ' + options.limit + ' ' : 'the ')
-        + 'frames still to review and writes them to a file. Nothing is saved.'};
+        + 'frames still to review; the review page shows them on each frame. Nothing is saved.'};
   }
   if (name === 'measure_ai_reviewer') {
     return {title: 'Measure ' + (options?.provider ?? 'the AI reviewer') + '?', action: 'Measure',
@@ -59,8 +64,8 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
   }
   if (name === 'prepare_again') {
     return {title: 'Propose the signs again?', action: 'Propose again',
-      text: 'The routes nobody has reviewed a frame of get new proposals from ' + proposerName(options?.proposer)
-        + '. Routes already in review are left as they are.'};
+      text: 'The drives nobody has reviewed a frame of get new proposals from ' + proposerName(options?.proposer)
+        + '. Drives already in review are left as they are.'};
   }
   if (name === 'fetch') {
     return {title: state.label + '?', action: 'Download',
@@ -72,6 +77,24 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
   }
   return null;
 }
+
+/** What stopping a job keeps, and what starting it again does: only a download and the install carry on from where
+ * they stopped; a training of the whole pipeline has Resume; a measure starts over. */
+const STOP_TEXT: Partial<Record<ActionName, string>> = {
+  fetch: 'The drives already copied stay: downloading again carries on from there.',
+  prepare: 'The drives already prepared stay. The one being prepared now starts again from its first picture next time.',
+  prepare_again: 'The drives already done keep their new signs; the one at work keeps its old ones. Propose again '
+    + 'starts over on every drive nobody has reviewed, those done now included.',
+  measure_proposer: 'The measurement is lost: measuring again starts from the first frame.',
+  measure_ai_reviewer: 'The measurement is lost: measuring again starts from the first frame.',
+  setup_vlm: 'The files already downloaded stay: installing again carries on from there.',
+  train: 'The steps already done stay: Resume runs the missing ones on the same run.',
+  train_continue: 'The steps already done stay: Resume runs the missing ones on the same run.',
+  train_resume: 'The steps already done stay: Resume runs the missing ones on the same run.',
+  train_classifier: 'This training is lost: training again starts a new run from the beginning.',
+  train_cutter: 'This training is lost: training again starts a new run from the beginning.',
+  ai_review: 'The frames already saved stay saved; the others are left to review.',
+};
 
 /** run() and stop() for the buttons; refresh reads /api/panel/status again. */
 export function usePanelActions(refresh: () => Promise<void>) {
@@ -93,7 +116,7 @@ export function usePanelActions(refresh: () => Promise<void>) {
 
   async function stop(job: Job): Promise<void> {
     const ok = await askConfirm({title: 'Stop “' + job.label + '”?', action: 'Stop', danger: true,
-      text: 'The work already done stays: starting it again carries on from there.'});
+      text: STOP_TEXT[job.action] ?? 'It stops where it is now.'});
     if (!ok) return;
     try {
       await post('/api/panel/job/' + job.id + '/stop');
@@ -120,5 +143,10 @@ export function usePanelActions(refresh: () => Promise<void>) {
     }
   }
 
-  return {run, stop, resume};
+  /** "Try again": the same action, with the proposer it had (asked first as the action's own button asks). */
+  async function retry(job: Job, state: ActionState): Promise<void> {
+    await run(job.action, state, null, job.proposer ? {proposer: job.proposer} : null);
+  }
+
+  return {run, stop, resume, retry};
 }

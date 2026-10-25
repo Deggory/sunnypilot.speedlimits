@@ -17,24 +17,24 @@ const TO_PREPARE: RouteState[] = ['collegare', 'estrarre', 'preannotare'];
 const prepare = computed((): [string, string] => {
   if (!props.status) return ['–', ''];
   const count = props.status.routes.filter((row) => TO_PREPARE.includes(row.state)).length;
-  return count ? [plural(count, 'new route'), 'to turn into frames'] : ['All prepared', 'no video waiting'];
+  return count ? [plural(count, 'new drive'), 'to turn into frames'] : ['All prepared', 'no video waiting'];
 });
 const review = computed(() => reviewSummary(props.status));
-/** "2 routes in progress · 4 to start", or how the review stands when nothing is left. */
+/** "2 drives in progress · 4 to start", or how the review stands when nothing is left. */
 const reviewLine = computed(() => {
   const value = review.value;
   if (!props.status) return '';
   if (!value.frames) return 'nothing to review yet';
   const parts: string[] = [];
-  if (value.inProgress) parts.push(plural(value.inProgress, 'route') + ' in progress');
-  if (value.toStart) parts.push((parts.length ? thousands(value.toStart) : plural(value.toStart, 'route')) + ' to start');
-  return parts.length ? parts.join(' · ') : 'every route reviewed';
+  if (value.inProgress) parts.push(plural(value.inProgress, 'drive') + ' in progress');
+  if (value.toStart) parts.push((parts.length ? thousands(value.toStart) : plural(value.toStart, 'drive')) + ' to start');
+  return parts.length ? parts.join(' · ') : 'every drive reviewed';
 });
 const train = computed((): [string, string] => {
   if (!props.status) return ['–', ''];
   const {reviewed_routes: reviewed, min_routes: needed, routes} = props.status;
   const fresh = routes.reduce((total, row) => total + row.new_reviews, 0);
-  const figure = reviewed >= needed ? plural(reviewed, 'route') + ' ready' : reviewed + ' of ' + needed + ' routes';
+  const figure = reviewed >= needed ? plural(reviewed, 'drive') + ' ready' : reviewed + ' of ' + needed + ' drives';
   return [figure, fresh ? thousands(fresh) + ' frames to import' : reviewed >= needed ? 'ready to train' : needed + ' are needed to train'];
 });
 </script>
@@ -54,7 +54,7 @@ const train = computed((): [string, string] => {
       <div class="flow-actions">
         <a v-if="review.resume" class="btn small primary" id="resume-review" :href="review.resume.href"
            :title="review.resume.route + ' · ' + thousands(review.resume.left) + ' frames left'"><Icon name="resume"/>Resume review</a>
-        <a class="flow-link" id="all-routes" href="/routes"><Icon name="routes"/>All routes →</a>
+        <a class="flow-link" id="all-routes" href="/routes"><Icon name="routes"/>All drives →</a>
       </div>
     </section>
     <a class="flow-tile k-train" :class="{attention: attention === 'train'}" href="/train">

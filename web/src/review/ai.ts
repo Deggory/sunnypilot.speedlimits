@@ -2,16 +2,19 @@
 // asks the model chosen in Settings (POST …/ai-suggest, nnslr_tools.ai_review.suggest_frame) and answers with a
 // suggestion for each box. Nothing is saved: Apply makes the suggestion the frame's unsaved edits, and the
 // reviewer's Confirm saves them as their own review. The suggestions live in this page only, by frame: an answer
-// that comes after the reviewer moved on is kept for its frame. Not offline (the static report has no server).
+// that comes after the reviewer moved on is kept for its frame. The route's last "Try without saving" (GET
+// …/ai-trial) comes in the same way, one ready suggestion per frame it tried, and fills the "AI trial" filter.
+// Not offline (the static report has no server).
 import {reactive} from 'vue';
 import {messageOf} from '../common/api';
-import type {AiAction, AiState, AiSuggestion} from '../common/ai-types';
+import type {AiAction, AiState, AiSuggestion, AiTrial} from '../common/ai-types';
 import {askConfirm} from '../composables/confirm';
 import {clone} from './dom';
 import {changed} from './edits';
-import {currentRow, workOf} from './frames';
+import {currentRow, startingDetections, workOf} from './frames';
 import {call} from './server';
-import {report, state} from './store';
+import {report, rowOf, state} from './store';
+import {trialKeys} from './trial';
 
 /** What the page has for a frame: nothing, a question on its way, a suggestion, or the error of the last one. */
 export type AiPhase = 'none' | 'asking' | 'ready' | 'failed';
@@ -26,6 +29,8 @@ export interface AiAsk {
   sent: string;
   suggestion: AiSuggestion | null;
   error: string;
+  /** From the route's "Try without saving", not asked on this page: the boxes sent were the proposals. */
+  trial?: {at: string | null};
 }
 
 interface AiPage {
@@ -47,14 +52,48 @@ export const VERDICT: Record<AiAction | 'delete', [label: string, kind: string]>
   unjudged: ['Not judged', 'muted'],
 };
 
-/** Reads (again) which AI reviewer the server has and whether this browser may ask it. */
+let trialRead = false;
+
+/** Reads (again) which AI reviewer the server has and whether this browser may ask it; the first time, the trial. */
 export async function loadAiState(): Promise<void> {
   if (!report.apiBase) return;
+  if (!trialRead) {
+    trialRead = true;
+    void loadAiTrial();
+  }
   try {
     ai.state = await call<AiState>('GET', '/api/ai/state');
     ai.error = '';
   } catch (error) {
     ai.error = 'The AI reviewer cannot be read: ' + messageOf(error);
+  }
+}
+
+/** The route's last "Try without saving": a ready suggestion for each frame it tried that nobody confirmed, unless
+ * this page already asked the AI about it. Nothing is saved; without a trial nothing changes. */
+async function loadAiTrial(): Promise<void> {
+  const apiBase = report.apiBase;
+  if (!apiBase) return;
+  let answer: {trial: AiTrial | null};
+  try {
+    answer = await call<{trial: AiTrial | null}>('GET', apiBase + '/ai-trial');
+  } catch {
+    // An older server, or no trial to read: the page works as before.
+    return;
+  }
+  const trial = answer.trial;
+  if (trial === null || trial.run_id !== report.runId) return;
+  for (const frame of trial.frames) {
+    const row = rowOf(frame.frame_key);
+    if (!row) continue;
+    trialKeys.add(frame.frame_key);
+    if (ai.asks[frame.frame_key]) continue;
+    ai.asks[frame.frame_key] = {
+      phase: 'ready', ticket: ++tickets, since: Date.now(), sent: JSON.stringify(startingDetections(row)), error: '',
+      suggestion: {...frame, ok: true, route_id: trial.route_id, run_id: trial.run_id, provider: trial.provider,
+        reviewer: trial.reviewer},
+      trial: {at: trial.finished_at ?? trial.started_at},
+    };
   }
 }
 

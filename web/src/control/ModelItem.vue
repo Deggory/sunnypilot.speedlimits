@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // One trained version of a role: its run, what it is and when its weights were saved, the headline numbers that judge
-// that role (the cutter: signs found overall and by width at a low score, boxes per frame, time per frame; the
+// that role (the cutter: the speed signs found at a low score, as on Evaluate, then every sign and by width, boxes per
+// frame, time per frame; the
 // classifier: right answers on the test, and for the classifier with “not a sign” the “not a sign” crops it rejects and
 // the chain end to end at the cutter's score, the speed signs found and read right and the false boxes per frame that
 // survive it; the decider: the "Another" road found, on validation and test), the button that puts it in use and the
@@ -9,7 +10,7 @@ import {computed} from 'vue';
 import {isoWhen, thousands} from '../common/format';
 import type {DeciderNumbers, ModelVersion} from '../common/panel-types';
 import {PARTITION_LABEL, pct} from './evaluate';
-import {epochText, openRun, perFrame, sizeText} from './models';
+import {ROLE_TEXT, epochText, evaluateHref, openRun, perFrame, sizeText} from './models';
 
 const props = defineProps<{version: ModelVersion; roleLabel: string; score: number; readOnly: boolean; busy: string | null}>();
 const emit = defineEmits<{use: [version: ModelVersion]}>();
@@ -21,6 +22,14 @@ const decider = computed(() => props.version.role === 'decider' ? props.version 
 const cut = computed(() => cutter.value?.test ?? cutter.value?.validation ?? null);
 /** A cutter of every sign: the speed signs alone, comparable with a cutter of the speed signs only. */
 const speedSigns = computed(() => cutter.value?.families === 'all' ? cut.value?.by_family?.['speed'] ?? null : null);
+/** The cutter's headline, as on Evaluate: the speed signs found at its score (every sign below it, for a cutter of
+ * every sign); every sign only when its report does not count the speed signs apart. */
+const headline = computed(() => {
+  const numbers = cut.value;
+  if (numbers === null) return null;
+  if (speedSigns.value) return {speed: true, recall: speedSigns.value.recall, found: speedSigns.value.found, truth: speedSigns.value.truth as number | null};
+  return {speed: cutter.value?.families !== 'all', recall: numbers.recall, found: numbers.found ?? 0, truth: numbers.truth_boxes};
+});
 const evaluated = computed(() => cut.value !== null || (classifier.value?.test ?? null) !== null || (classifier.value?.chain ?? null) !== null
   || decider.value?.validation != null || decider.value?.test != null);
 const epoch = computed(() => epochText(props.version.best_epoch, props.version.epochs_run ?? props.version.epochs));
@@ -66,13 +75,13 @@ const noOtherOnTest = computed(() => decider.value?.test?.other_road_support ===
 
     <template v-if="cutter">
       <template v-if="cut">
-        <div class="model-big">
-          <strong>{{ pct(cut.recall) }}</strong>
-          <span>of the signs found<template v-if="cut.truth_boxes !== null">: {{ thousands(cut.found ?? 0) }} of {{ thousands(cut.truth_boxes) }}</template>
-            · {{ (PARTITION_LABEL[cut.partition] ?? cut.partition).toLowerCase() }}, score {{ cut.score_threshold ?? '–' }}</span>
+        <div v-if="headline" class="model-big" :data-speed-recall="headline.speed ? headline.recall ?? undefined : undefined">
+          <strong>{{ pct(headline.recall) }}</strong>
+          <span>of the {{ headline.speed ? 'speed signs' : 'signs' }} found<template v-if="headline.truth !== null">: {{ thousands(headline.found) }}
+            of {{ thousands(headline.truth) }}</template> · {{ (PARTITION_LABEL[cut.partition] ?? cut.partition).toLowerCase() }}, score {{ cut.score_threshold ?? '–' }}</span>
         </div>
-        <p v-if="speedSigns" class="note" :data-speed-recall="speedSigns.recall ?? undefined">Speed signs alone: <strong>{{ pct(speedSigns.recall) }}</strong>
-          ({{ thousands(speedSigns.found) }} of {{ thousands(speedSigns.truth) }}), comparable with a cutter of the speed signs only.</p>
+        <p v-if="speedSigns" class="note">Every sign, speed and other: <strong>{{ pct(cut.recall) }}</strong><template
+          v-if="cut.truth_boxes !== null"> ({{ thousands(cut.found ?? 0) }} of {{ thousands(cut.truth_boxes) }})</template>.</p>
         <details class="model-more"><summary>Details</summary>
         <ul v-if="cut.widths" class="model-widths" aria-label="Signs found by width in the frame">
           <li v-for="row in cut.widths" :key="row.key" :title="row.found + ' of ' + row.truth + ' signs ' + row.label + ' wide'">
@@ -101,7 +110,8 @@ const noOtherOnTest = computed(() => decider.value?.test?.other_road_support ===
           <strong>{{ pct(classifier.test.accuracy) }}</strong>
           <span>of the test signs read right<template v-if="classifier.test.samples !== null">: {{ thousands(classifier.test.samples) }} sign crops</template></span>
         </div>
-        <p v-if="chain" class="model-line">With the cutter: <strong>{{ pct(chain.recall) }}</strong> of the speed signs found and read right.</p>
+        <p v-if="chain" class="model-line">With the cutter{{ chain.cutter_size ? ' ' + sizeText(chain.cutter_size) : '' }}:
+          <strong>{{ pct(chain.recall) }}</strong> of the speed signs found and read right.</p>
         <details class="model-more"><summary>Details</summary>
         <dl class="model-facts">
           <div v-if="classifier.test"><dt>Human-reviewed</dt><dd>{{ pct(classifier.test.human_accuracy) }}<span v-if="classifier.test.human_samples"
@@ -176,8 +186,8 @@ const noOtherOnTest = computed(() => decider.value?.test?.other_road_support ===
     <p v-for="problem in version.problems" :key="problem" class="note ds-note">{{ problem }}.</p>
 
     <div class="model-actions">
-      <a class="flow-link" :href="'/evaluate?run=' + encodeURIComponent(version.run)" @click="openRun($event, version.run)">Open the run ›</a>
-      <button v-if="!version.in_use" class="btn small" type="button" :disabled="blocked !== '' || busy !== null" :title="blocked"
+      <a class="flow-link" :href="evaluateHref(version)" @click="openRun($event, version)">Open the run ›</a>
+      <button v-if="!version.in_use" class="btn small" type="button" :disabled="blocked !== '' || busy !== null" :title="blocked || ROLE_TEXT[version.role].uses"
               :aria-label="'Use ' + version.run + ' · ' + version.label + ' as the ' + roleLabel.toLowerCase()"
               @click="emit('use', version)">{{ busy === version.id ? 'Saving…' : 'Use this one' }}</button>
     </div>

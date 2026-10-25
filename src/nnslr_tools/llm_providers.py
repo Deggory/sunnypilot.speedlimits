@@ -277,15 +277,36 @@ def reviewer_provider(root: Path) -> dict | None:
     return copy.deepcopy(record)
 
 
+def review_refusal(record: dict) -> str:
+    """Why this provider may not review ('' when it may). Only a provider whose last Test passed reviews: a model
+    that cannot see the frames, or does not answer, must never save final reviews. A new address or model clears
+    the Test (save_provider), so it has to pass again."""
+    test = record.get('last_test')
+    if not isinstance(test, dict):
+        return f'Test {record["name"]} in Settings first: only a provider that passed its Test can review.'
+    if test.get('ok') is not True:
+        return f'{record["name"]} did not pass its last Test. Fix it, then test it again in Settings.'
+    return ''
+
+
+def check_can_review(record: dict) -> None:
+    """ReviewRejected 409 ai_not_tested unless the provider passed its last Test (review_refusal)."""
+    refusal = review_refusal(record)
+    if refusal:
+        raise ReviewRejected(409, 'ai_not_tested', refusal)
+
+
 def ai_state(root: Path) -> dict:
-    """Whether an AI reviewer is chosen (a file read, no network): {available, reason, provider}."""
+    """Whether an AI reviewer is chosen and passed its Test (a file read, no network): {available, reason,
+    provider}. A reviewer that did not pass is named in provider, with available False and the reason."""
     try:
         record = reviewer_provider(root)
     except ReviewRejected as exc:
         return {'available': False, 'reason': exc.message, 'provider': None}
     if record is None:
         return {'available': False, 'reason': 'Choose an AI reviewer in Settings.', 'provider': None}
-    return {'available': True, 'reason': '',
+    refusal = review_refusal(record)
+    return {'available': not refusal, 'reason': refusal,
             'provider': {'id': record['id'], 'name': record['name'], 'model': record['model'],
                          'reviewer_name': 'ai/' + reviewer_name(record)}}
 
@@ -344,11 +365,15 @@ def delete_provider(root: Path, provider_id) -> None:
 
 
 def set_reviewer(root: Path, provider_id) -> None:
-    """The provider that reviews (the site's Ask AI, the AI review jobs), or None for none."""
+    """The provider that reviews (the site's Ask AI, the AI review jobs), or None for none. Only one that passed
+    its last Test (check_can_review)."""
     with _LOCK:
         data = _load(root)
-        if provider_id is not None and _find(data, provider_id) is None:
-            raise _unknown()
+        if provider_id is not None:
+            record = _find(data, provider_id)
+            if record is None:
+                raise _unknown()
+            check_can_review(record)
         data['reviewer'] = provider_id
         _store(root, data)
 

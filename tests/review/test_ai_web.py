@@ -5,6 +5,7 @@ the sources."""
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import pytest
 
@@ -31,9 +32,23 @@ def test_settings_lists_the_providers_and_never_reads_a_key_back():
     # Only "a key is set" comes back: the placeholder says so, "Remove key" sends "" on Save.
     assert 'Saved (leave empty to keep)' in script
     assert 'Remove key' in script and 'has_key' in script
-    assert 'Use to review' in script and 'Not tested yet' in script
-    # The local site hides the Administrator and password cards.
-    assert '.local' in script
+    assert 'Not tested yet' in script
+    # "Who reviews": a checkmark list of the providers and "Don't use AI", never a toggle that turns it off at a tap.
+    assert 'Who reviews' in script and 'Don’t use AI' in script and 'radiogroup' in script
+    assert 'Use to review' not in script and 'Press to stop' not in script
+    # Only a provider that passed its Test can be chosen.
+    assert 'Only a provider that passed its Test can review.' in script and 'Test it first' in script
+    # The local site hides the Administrator and password cards; the access token alone gets one read-only card.
+    assert '.local' in script and '.signed_in' in script
+    assert 'Nobody is signed in, so this page can only show the settings.' in script
+    assert 'admin.json' not in script
+
+
+def test_the_sign_in_page_says_what_to_do_with_a_forgotten_password():
+    script = asset('js/login.js')
+    assert 'Forgot the password?' in script and 'helpers/reset_password.sh' in script
+    assert (Path(__file__).resolve().parents[2] / 'helpers/reset_password.sh').is_file()
+    assert '.auth-forgot summary{' in asset('site.css')
 
 
 def test_the_review_page_asks_the_ai_and_applies_without_saving():
@@ -43,6 +58,8 @@ def test_the_review_page_asks_the_ai_and_applies_without_saving():
     for verdict in ('Keep', 'Correct', 'Add', 'Delete', 'Not judged'):
         assert verdict in script, verdict
     assert 'AI suggestion · added' in script
+    # The route's last "Try without saving": its suggestions as AI answers, and the "AI trial" filter.
+    assert '/ai-trial' in script and 'AI trial · ' in script and 'From “Try without saving”' in script
     # Key I, in the legend too.
     assert 'ask AI' in script
     page = asset('review.html')
@@ -74,6 +91,8 @@ def test_the_route_list_opens_review_with_ai_and_saving_is_asked_first():
     assert 'Try without saving' in script and 'Review and save' in script
     assert 'AI saves are final: nobody approves them again' in script
     assert 'Started: follow it on the' in script
+    # A trial is seen on the review page, not in a folder of the server.
+    assert 'ai_reviews/' not in script and 'Open the drive' in script
 
 
 def test_a_sheet_and_its_backdrop_are_not_styled_as_the_open_button_of_a_route():

@@ -40,12 +40,15 @@ def key_file(tmp_path, mode=0o600):
 def test_add_list_use_models_remove(root, capsys):
     data = str(root)
     with FakeLlm(models=('vl-first', 'vl-second'), require_key=KEY) as fake:
+        # --reviewer tests it first: it answers in JSON (no reviewed sign to read here), so it becomes the reviewer.
         code, out = invoke(capsys, 'llm-provider', 'add', '--name', 'Strata', '--base-url', fake.base_url + '/',
                            '--key-file', str(key_file(root, 0o644)), '--reviewer', '--data-root', data)
         assert code == 0
         assert 'warning: other users can read the key file' in out.err
         assert 'model: vl-first (the first the server lists)' in out.err
-        assert out.out.strip() == f'added  strata  Strata  {fake.base_url}  vl-first  key: set  [reviewer]'
+        assert 'test: Answered in JSON' in out.err
+        assert out.out.splitlines() == [f'added  strata  Strata  {fake.base_url}  vl-first  key: set',
+                                        'AI reviewer: strata']
         assert llm_providers.provider(root, 'strata')['key'] == KEY
 
         # The same name updates it; without --key-file the key stays, and the stored key lists the models.
@@ -64,6 +67,11 @@ def test_add_list_use_models_remove(root, capsys):
         code, out = invoke(capsys, 'llm-provider', 'list', '--data-root', data)
         assert out.out.splitlines() == [f'strata  strata  {fake.base_url}  vl-first  key: set  [reviewer]',
                                         f'local  local  {fake.base_url}  vl-second  key: none']
+        # Never tested: it cannot be the reviewer; once its test passed, it can.
+        code, out = invoke(capsys, 'llm-provider', 'use', 'local', '--data-root', data)
+        assert code == 2 and 'ai_not_tested' in out.err
+        assert llm_providers.public_settings(root)['reviewer'] == 'strata'
+        llm_providers.record_test(root, 'local', {'ok': True, 'message': 'Sees images · 1.0 s'})
         code, out = invoke(capsys, 'llm-provider', 'use', 'local', '--data-root', data)
         assert out.out.strip() == 'AI reviewer: local'
         code, out = invoke(capsys, 'llm-provider', 'use', 'none', '--data-root', data)
@@ -73,8 +81,9 @@ def test_add_list_use_models_remove(root, capsys):
         assert code == 0 and out.out.strip() == 'removed local'
         code, out = invoke(capsys, 'llm-provider', 'remove', 'local', '--data-root', data)
         assert code == 2 and 'unknown_provider' in out.err
-    # /models of the first add (the key file), of the update and of "models" (the stored key, same address).
-    assert fake.auth_headers == ['Bearer ' + KEY] * 3
+    # /models of the first add (the key file) and of its test, its test's chat, /models of the update and of
+    # "models" (the stored key, same address).
+    assert fake.auth_headers == ['Bearer ' + KEY] * 5
 
 
 def test_the_key_is_never_printed(root, capsys):
@@ -127,8 +136,16 @@ def test_ai_review_and_measure_commands(root, capsys):
         text = chat['messages'][1]['content'][0]['text']
         return answer if '\n1. [' in text else answer_json(no_sign=True)
     with FakeLlm(reply) as fake:
-        invoke(capsys, 'llm-provider', 'add', '--name', 'fake', '--base-url', fake.base_url, '--model', 'fake-vl',
-               '--reviewer', '--data-root', data)
+        # Its test: the frame a person reviewed, without boxes, and it answers "no sign": it missed the 30.
+        code, out = invoke(capsys, 'llm-provider', 'add', '--name', 'fake', '--base-url', fake.base_url,
+                           '--model', 'fake-vl', '--reviewer', '--data-root', data)
+        assert code == 1 and 'missed the 30 sign' in out.err and 'it is not the AI reviewer' in out.err
+        assert llm_providers.public_settings(root)['reviewer'] is None
+        # Saving needs a provider that passed its test, also from a terminal.
+        code, out = invoke(capsys, 'ai-review', ROUTE, '--save', '--provider', 'fake', '--data-root', data)
+        assert code == 2 and 'ai_not_tested' in out.err and len(store.reviews(ROUTE, RUN_ID)) == 1
+        llm_providers.record_test(root, 'fake', {'ok': True, 'message': 'Sees images · 1.0 s'})
+        invoke(capsys, 'llm-provider', 'use', 'fake', '--data-root', data)
         code, out = invoke(capsys, 'ai-review', ROUTE, '--data-root', data)
         assert code == 0
         summary = json.loads(out.out)

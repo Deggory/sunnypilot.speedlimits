@@ -69,6 +69,17 @@ export interface ConfirmLabels {
   already: boolean;
 }
 
+/** Where Confirm goes on a frame already confirmed: the next frame of the filter in use. */
+function nextInFilter(): string {
+  switch (state.filter) {
+    case 'todo': return 'Next to review';
+    case 'suspicious': return 'Next suspicious';
+    case 'proposals': return 'Next with proposals';
+    case 'all': return 'Next frame';
+    default: return 'Next in the filter';
+  }
+}
+
 /** Confirm on the panel and on the phone bar: they say what they save ("Confirm · 60 · 40"). */
 export function confirmLabels(key: string, work: FrameEdit, status: FrameStatus): ConfirmLabels {
   const names = work.detections.map(shortName);
@@ -77,12 +88,13 @@ export function confirmLabels(key: string, work: FrameEdit, status: FrameStatus)
   let mobileLabel = label;
   if (work.detections.length === 0) {
     label = 'Confirm · no sign';
-    mobileLabel = 'No sign';
+    mobileLabel = 'Confirm no sign';
   }
   let already = false;
   if (status === 'done' && report.apiBase && sameAsServer(state.edits[key])) {
     label = 'Already confirmed · next →';
-    mobileLabel = 'Next →';
+    // Between ‹ and › (the frames beside this one) the phone's button says where it goes: on in the filter.
+    mobileLabel = nextInFilter() + ' →';
     already = true;
   } else if (status === 'done') {
     label = 'Confirmed ✓ · confirm again';

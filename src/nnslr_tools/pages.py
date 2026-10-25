@@ -13,6 +13,7 @@ Placeholders of the templates:
 - ``__NNSLR_SHARED_CSS__``, ``__NNSLR_SITE_CSS__``: the two style sheets;
 - ``__NNSLR_TOPBAR__``: brand, live state, Account menu and tabs;
 - ``__NNSLR_BAR_END__``: only the Account menu (the review page has its own bar);
+- ``__NNSLR_TITLE__``: the window title, "Speed limits · " and the name of the page as the bar says it;
 - ``__NNSLR_SCRIPT__``: the page script; ``__NNSLR_NONCE__``: the nonce, where a template needs it;
 - ``__NNSLR_DATA__``: the frames of the review page.
 """
@@ -53,8 +54,11 @@ SITE_TABS = (('overview', '/', 'Overview'), ('prepare', '/prepare', 'Prepare'), 
 # The tabs that are one Vue app (web/src/control), by address: the app shows the tab of the address. The
 # route list (/routes) is reached from the Overview.
 CONTROL_TABS = {'/': 'overview', '/prepare': 'prepare', '/train': 'train', '/evaluate': 'evaluate', '/models': 'models'}
-# Earlier addresses of these pages, kept working.
-OLD_ADDRESSES = {'/panoramica': '/', '/pannello': '/', '/stato': '/', '/prepara': '/prepare', '/allena': '/train'}
+# Earlier addresses of these pages, kept working, and the names of the bar typed as addresses (Settings, Review).
+OLD_ADDRESSES = {'/panoramica': '/', '/pannello': '/', '/stato': '/', '/prepara': '/prepare', '/allena': '/train',
+                 '/settings': '/account', '/review': '/routes'}
+# The name of each control tab in the window title, as in the bar.
+TAB_TITLES = {key: label for key, _, label in SITE_TABS}
 # Dark (the default) or the choice kept in this browser, applied before the first paint
 # (web/src/common/theme.ts changes it).
 THEME_HEAD = ('<script nonce="{nonce}">try{{var t=localStorage.getItem(\'nnslr-theme\');'
@@ -72,7 +76,7 @@ ACCOUNT_MENU = (
     ' stroke-width="1.8" stroke-linecap="round"/></svg></button>'
     '<div class="account-pop" id="account-pop" role="dialog" aria-label="Account and settings" hidden></div></div>')
 LIVE = ('<span class="live" role="status"><span class="dot" id="live-dot"></span>'
-        '<span id="live-text">connecting…</span></span>')
+        '<span id="live-text"></span></span>')
 # Groups of the route list, in this order: the work in progress first, finished routes last.
 ROUTE_GROUPS = (('doing', 'In progress'), ('todo', 'To start'), ('done', 'Done'))
 
@@ -106,17 +110,20 @@ def top_bar(current: str = '', *, live: bool = False, signed_in: bool = True) ->
         return '<header class="topbar"><div class="topbar-inner">' + brand + '</div></header>'
     tabs = ''.join('<a href="' + href + '"' + (' aria-current="page"' if key == current else '') + '>'
                    + label + '</a>' for key, href, label in SITE_TABS)
+    # The connection state on every page (web/src/composables/connection.ts): fed by the status of the control pages
+    # (live), by the server pill elsewhere.
     return ('<header class="topbar"><div class="topbar-inner site-bar">' + brand
             + '<nav class="tabs" aria-label="Sections">' + tabs + '</nav>'
-            + '<div class="bar-end">' + (LIVE if live else '') + COMMA_PILL
+            + '<div class="bar-end">' + LIVE + COMMA_PILL
             + TABS_MACHINE.format(feed='status' if live else 'system') + bar_end(current) + '</div></div></header>')
 
 
 def fill(template: str, nonce: str, page: str, current: str = '', *, live: bool = False,
-         signed_in: bool = True, data: str = '') -> str:
+         signed_in: bool = True, data: str = '', title: str = '') -> str:
     """A template with its placeholders replaced (see the module docstring)."""
     values = {
         '__NNSLR_THEME__': THEME_HEAD.format(nonce=nonce),
+        '__NNSLR_TITLE__': html.escape('Speed limits · ' + title if title else 'Speed limits'),
         '__NNSLR_SHARED_CSS__': asset('shared.css'),
         '__NNSLR_SITE_CSS__': asset('site.css'),
         '__NNSLR_TOPBAR__': top_bar(current, live=live, signed_in=signed_in),
@@ -134,10 +141,12 @@ def fill(template: str, nonce: str, page: str, current: str = '', *, live: bool 
 
 def render_review(rows: list[dict], run_id: str, *, route_id: str = '', server: bool = False,
                   nonce: str = '', hints: dict | None = None, hint_stats: dict | None = None,
-                  suspicious: dict | None = None, routes: list[dict] | None = None) -> str:
+                  suspicious: dict | None = None, routes: list[dict] | None = None,
+                  proposer: str | None = None) -> str:
     """The review page with its data embedded. Hints and suspicious flags travel apart from the
-    frame rows, so the JSONL export (which copies the rows) never contains them."""
-    data = {'run_id': run_id, 'route_id': route_id, 'server': server, 'frames': rows,
+    frame rows, so the JSONL export (which copies the rows) never contains them. proposer: who proposed the
+    signs of the report (vietnam, ours, qwen; None when not known), for the page's "More"."""
+    data = {'run_id': run_id, 'route_id': route_id, 'server': server, 'frames': rows, 'proposer': proposer,
             'hints': hints if hints is not None else {},
             'hint_stats': hint_stats if hint_stats is not None else empty_stats(),
             'suspicious': suspicious if suspicious is not None else {},
@@ -146,27 +155,30 @@ def render_review(rows: list[dict], run_id: str, *, route_id: str = '', server: 
     payload = json.dumps(data, ensure_ascii=True, allow_nan=False)
     payload = payload.replace('<', '\\u003c').replace('>', '\\u003e').replace('&', '\\u0026')
     # The same top bar as every page (the Review tab marked); the offline report has no site: only the brand.
-    return fill(asset('review.html'), nonce, 'review', 'review', signed_in=server, data=payload)
+    # The window title names the drive ("Herznach → Zürich"), as the route list does; Review without a name.
+    drive = next((link.get('title') for link in (routes or []) if link.get('route_id') == route_id), None)
+    return fill(asset('review.html'), nonce, 'review', 'review', signed_in=server, data=payload,
+                title=drive or 'Review')
 
 
 # [control-panel] - START
 def render_control(nonce: str, tab: str) -> str:
     """Overview, Prepare, Train, Evaluate, Models: one page (control.html, web/src/control), the tab marked in the
     bar; data from /api/panel/status (and /api/panel/runs for Evaluate, /api/panel/models for Models)."""
-    return fill(asset('control.html'), nonce, 'control', tab, live=True)
+    return fill(asset('control.html'), nonce, 'control', tab, live=True, title=TAB_TITLES.get(tab, ''))
 # [control-panel] - END
 
 
 # [site-login] - START
 def render_login(nonce: str) -> str:
     """The sign-in page (also the first visit, which creates the administrator)."""
-    return fill(asset('login.html'), nonce, 'login', signed_in=False)
+    return fill(asset('login.html'), nonce, 'login', signed_in=False, title='Sign in')
 
 
 def render_account(nonce: str) -> str:
     """The Account & Settings page (web/src/account): who is signed in, sign out, change the password, the
     appearance, the AI reviewer. On 127.0.0.1, where nobody signs in, the app shows the settings alone."""
-    return fill(asset('account.html'), nonce, 'account', 'account')
+    return fill(asset('account.html'), nonce, 'account', 'account', title='Settings')
 # [site-login] - END
 
 
@@ -201,24 +213,31 @@ def route_state(confirmed: int, total: int) -> str:
     return 'doing'
 
 
-def _route_row(summary: dict) -> str:
+def _route_row(summary: dict, *, ai_reviewer: bool = True) -> str:
     total = summary['frame_count']
     confirmed = summary['confirmed_count']
-    percent = round(confirmed * 100 / total) if total else 0
+    by_ai = min(summary.get('confirmed_by_ai') or 0, confirmed)
+    # The bar: the frames people confirmed, then the AI's share hatched (as on the review page's timeline).
+    by_people_percent = round((confirmed - by_ai) * 100 / total) if total else 0
+    by_ai_percent = round(by_ai * 100 / total) if total else 0
     state = route_state(confirmed, total)
     # What opening the route means: carry on (the one obvious action), start, or look again at a finished one.
     action_class, action = {'doing': ('btn small primary open', 'Resume'),
                             'todo': ('btn small open', 'Start'),
                             'done': ('btn small open again', 'Open')}[state]
     suspicious = summary.get('suspicious_count', 0)
-    # Only what says something: how many frames, how many with signs proposed, the suspicious ones when there are.
-    stats = ['<span>' + _plural(total, 'frame', 'frames').replace(str(total), f'{total:,}', 1) + '</span>',
-             '<span>' + f"{summary['frames_with_proposals']:,}" + ' with signs</span>']
+    # Only what says something: how many frames, while the drive is to review how many have a sign the model
+    # proposed (not confirmed signs: the review page's "With proposals"), the suspicious ones when there are.
+    stats = ['<span>' + _plural(total, 'frame', 'frames').replace(str(total), f'{total:,}', 1) + '</span>']
+    if state != 'done':
+        stats.append('<span>' + f"{summary['frames_with_proposals']:,}" + ' with proposals</span>')
     if suspicious:
         stats.append('<span class="sus">' + _plural(suspicious, 'suspicious', 'suspicious') + '</span>')
     from nnslr_tools.preannotate import PROPOSER_NAMES
-    stats.append('<span>signs by ' + html.escape(PROPOSER_NAMES.get(summary.get('proposer') or 'vietnam', 'Vietnamese YOLO'))
-                 + '</span>')
+    # Mid-sentence, "our networks" in lower case ("signs by our networks"); the other names are names.
+    proposer = summary.get('proposer') or 'vietnam'
+    proposer_name = 'our networks' if proposer == 'ours' else PROPOSER_NAMES.get(proposer, 'Vietnamese YOLO')
+    stats.append('<span>signs by ' + html.escape(proposer_name) + '</span>')
     route = html.escape(summary['route_id'])
     # The drive (when, how long, from where to where); the route's code only in the tooltip.
     drive = summary.get('drive') or {}
@@ -229,7 +248,7 @@ def _route_row(summary: dict) -> str:
     # The frames still to confirm can be reviewed by the AI of Settings: the button opens its sheet (site.ts,
     # AiRouteSheet), which names the drive and how many frames are left.
     ai = ''
-    if confirmed < total:
+    if confirmed < total and ai_reviewer:
         drive_name = ' · '.join(part for part in (drive.get('title'), drive.get('when')) if part) or summary['route_id']
         ai = ('<button type="button" class="btn small ai-route" data-ai-route="' + route + '" data-ai-name="'
               + html.escape(drive_name) + '" data-ai-left="' + str(total - confirmed) + '">Review with AI</button>')
@@ -239,22 +258,28 @@ def _route_row(summary: dict) -> str:
             + '<span class="route" title="' + route + '"><span class="drive">' + name + '</span>'
             + '<span class="drive-when">' + detail + '</span></span>'
             + '<span class="count">' + f'{confirmed:,}' + ' of ' + f'{total:,}'
-            + ' <span class="unit">confirmed</span></span>'
-            + '<span class="bar" aria-hidden="true"><span style="width:' + str(percent) + '%"></span></span>'
+            + ' <span class="unit">confirmed</span>'
+            + ('<span class="by-ai">' + f'{by_ai:,}' + ' by AI</span>' if by_ai else '') + '</span>'
+            + '<span class="bar" aria-hidden="true"><span style="width:' + str(by_people_percent) + '%"></span>'
+            + ('<span class="ai" style="width:' + str(by_ai_percent) + '%"></span>' if by_ai else '') + '</span>'
             + '<span class="stats">' + ''.join(stats) + '</span>'
             + '<span class="' + action_class + '">' + action + '</span>'
             # Filled by the page script while the route is proposed again (web/src/pages/site.ts).
             + '<span class="row-live" data-live="' + route + '" hidden></span></a>' + ai + '</li>')
 
 
-def render_index(summaries: list[dict], database: Path, nonce: str = '') -> str:
-    """The route list, grouped: in progress, to start, done."""
+def render_index(summaries: list[dict], database: Path, nonce: str = '', *, ai_reviewer: bool = True) -> str:
+    """The route list, grouped: in progress, to start, done. ai_reviewer: an AI reviewer is chosen in Settings
+    (each drive left to review gets "Review with AI"); without one, a single link to set it up."""
     main = ['<main class="page">',
             '<h1 class="sr-only">Review</h1>']
+    if not ai_reviewer and any(s['confirmed_count'] < s['frame_count'] for s in summaries):
+        main.append('<p class="ai-setup">An AI can review the drives for you. '
+                    '<a href="/account#ai-reviewer">Set up AI review ›</a></p>')
     if not summaries:
-        main.append('<div class="card state-box"><h2>No routes to review</h2><p>Prepare a route with '
-                    '<code>nnslr extract-frames</code> and <code>nnslr preannotate</code>, then reload this '
-                    'page.</p></div>')
+        main.append('<div class="card state-box"><h2>No drives to review yet</h2><p>Download the drives from the '
+                    'comma (the comma button at the top), then prepare them on the <a href="/prepare">Prepare</a> '
+                    'tab. They show up here when they are ready.</p></div>')
     grouped: dict[str, list[dict]] = {key: [] for key, _ in ROUTE_GROUPS}
     for summary in summaries:
         grouped[route_state(summary['confirmed_count'], summary['frame_count'])].append(summary)
@@ -264,25 +289,27 @@ def render_index(summaries: list[dict], database: Path, nonce: str = '') -> str:
         main.append('<section class="group" aria-labelledby="group-' + key + '">'
                     '<h2 class="group-title" id="group-' + key + '">' + title
                     + ' <span class="n">' + str(len(grouped[key])) + '</span></h2><ul class="cards">')
-        main.extend(_route_row(summary) for summary in grouped[key])
+        main.extend(_route_row(summary, ai_reviewer=ai_reviewer) for summary in grouped[key])
         main.append('</ul></section>')
     main.append('<details class="foot"><summary>Technical details</summary>'
                 '<p>Review database: <code>' + html.escape(str(database)) + '</code></p></details>')
     main.append('</main>')
-    return simple_page('Routes', 'review', nonce, '\n'.join(main))
+    return simple_page('Review', 'review', nonce, '\n'.join(main))
 
 
-def render_problem(status: int, message: str, nonce: str = '') -> str:
-    """An error page (404, 403, ...)."""
-    title = {404: 'Page not found', 403: 'Access denied'}.get(status, 'Error')
+def render_problem(status: int, message: str, nonce: str = '', *, drive: bool = False) -> str:
+    """An error page (404, 403, ...): a title and one sentence in words, no code, and the way back: Review for a
+    drive that is not there (drive), else Overview."""
+    title = ({404: 'Drive not found' if drive else 'Page not found', 403: 'Access denied'}.get(status)
+             or 'Something went wrong')
     main = ['<main class="page"><div class="card state-box center">',
-            '<p class="code">HTTP code ' + str(status) + '</p>',
             '<h1>' + html.escape(title) + '</h1>']
     # "Page not found." under the title "Page not found" would only repeat it.
     if message.rstrip('.') != title:
         main.append('<p>' + html.escape(message) + '</p>')
     # Every 403 page (token missing or wrong, host not allowed) would come back here from the list.
     if status != 403:
-        main.append('<a class="btn back" href="/routes">← All routes</a>')
+        main.append('<a class="btn back" href="/routes">← Review</a>' if drive
+                    else '<a class="btn back" href="/">← Overview</a>')
     main.append('</div></main>')
-    return simple_page(title, '', nonce, '\n'.join(main))
+    return simple_page(title, 'review' if drive else '', nonce, '\n'.join(main))

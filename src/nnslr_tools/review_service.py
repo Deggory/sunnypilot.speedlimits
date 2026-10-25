@@ -24,6 +24,7 @@ from pathlib import Path
 
 from nnslr_tools.annotations import ENUMS, LABEL_KEYS
 from nnslr_tools.carry_over import carry_over, unchecked_boxes
+from nnslr_tools.drives import drive_of
 from nnslr_tools.sign_types import SIGN_TYPES
 from nnslr_tools.gps import load_positions, positions_path
 from nnslr_tools.manifest import parse_route_id
@@ -263,6 +264,9 @@ class ReviewService:
             'suspicious_count': len(snapshot.suspicious),
             'frames_with_proposals': with_proposals,
             'hint_frames': snapshot.hint_stats['frames'],
+            # The route as the drive it was, as the route list names it: title ("Herznach → Zürich"), when,
+            # minutes, start, from, to (nnslr_tools.drives; None for what cannot be known).
+            'drive': drive_of(self.root, snapshot.route),
         }
 
     def list_routes(self) -> list[dict]:

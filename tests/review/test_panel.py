@@ -71,8 +71,8 @@ def test_status_explains_why_each_action_is_not_available(root, checkout, monkey
     assert [row['route'] for row in status['routes']] == [ROUTE]
     assert status['routes'][0]['state'] == 'revisionare'
     assert status['next_action'] == 'review'
-    assert status['actions']['prepare'] == {'label': 'Prepare new routes', 'allowed': False,
-                                            'reason': 'no new route to prepare'}
+    assert status['actions']['prepare'] == {'label': 'Prepare new drives', 'allowed': False,
+                                            'reason': 'no new drive to prepare'}
     assert status['actions']['dataset']['reason'] == 'no confirmed frame'
     assert status['actions']['train']['allowed'] is False
     # The machine for the Stato page: GPU, CPU per core, RAM, disk, as distill-web's Status.
@@ -82,12 +82,12 @@ def test_status_explains_why_each_action_is_not_available(root, checkout, monkey
 def test_action_runs_in_background_and_keeps_its_exit_code(root, checkout):
     panel = Panel(root, repo=checkout)
     job = panel.start('prepare')
-    assert job['action'] == 'prepare' and job['label'] == 'Prepare new routes'
+    assert job['action'] == 'prepare' and job['label'] == 'Prepare new drives'
     done = finished(panel, job['id'])
     assert (done['state'], done['code']) == ('ok', 0)
     text = full_log(panel, job['id'])
     assert 'prepare --jobs=2' in text and f'data root {root}' in text
-    assert text.rstrip().endswith('== finito con codice 0')
+    assert text.rstrip().endswith('== finished with code 0')
     failed = finished(panel, panel.start('dataset')['id'])
     assert (failed['state'], failed['code']) == ('failed', 3)
     assert 'train --dataset-only' in full_log(panel, failed['id'])
@@ -110,6 +110,57 @@ def test_one_action_per_kind_and_stop(root, checkout, monkeypatch):
     with pytest.raises(PanelError) as unknown:
         panel.stop('20260101-000000-prepare')
     assert unknown.value.status == 404
+
+
+def test_a_waiting_action_names_the_job_that_runs_and_the_pages_see_it(root, checkout, monkeypatch):
+    # An import is in the group of the trainings: the refusal says what runs, not "an import or a training".
+    (checkout / 'helpers/3_train.sh').write_text('#!/usr/bin/env bash\nsleep 30\n')
+    panel = Panel(root, repo=checkout)
+    job = panel.start('dataset')
+    try:
+        assert panel.status()['actions']['train']['reason'] == 'An import of the reviews is running'
+        with pytest.raises(PanelError) as busy:
+            panel.start('train')
+        assert busy.value.message == 'An import of the reviews is running: wait for it to finish.'
+        running = panel.running()
+        assert running['jobs'] == [{'id': job['id'], 'action': 'dataset', 'label': 'Import reviews', 'state': 'running'}]
+        assert [item['label'] for item in running['activities']] == ['dataset and training']
+    finally:
+        panel.stop(job['id'])
+        finished(panel, job['id'])
+    assert panel.running()['jobs'] == []
+    # Work from a terminal is named by its label; a label it does not know by its group.
+    assert panel._busy_reason('train', [{'group': 'train', 'label': 'GPU training', 'pid': 1}]) == 'A training is running'
+    assert panel._busy_reason('train', [{'group': 'train', 'label': 'something new', 'pid': 1}]) == (
+        'An import or a training is running')
+
+
+def test_logs_and_wrappers_from_before_the_english_footer_still_count(root, checkout, monkeypatch):
+    import subprocess
+
+    import nnslr_tools.panel as panel_module
+    panel = Panel(root, repo=checkout)
+    panel.logs.mkdir(parents=True)
+    (panel.logs / '20261025-090500-update.log').write_text('== helpers/update.sh --no-link\nERROR: no\n\n'
+                                                           '== finito con codice 1\n')
+    (panel.logs / '20261025-090600-fetch.log').write_text('== helpers/fetch_comma_segments.sh\n\n== finito con codice 0\n')
+    states = {job['action']: (job['state'], job['code']) for job in panel.jobs()}
+    assert states == {'update': ('failed', 1), 'fetch': ('ok', 0)}
+    # An action the old server started (its wrapper wrote the footer in Italian) is still stopped by the new one.
+    monkeypatch.setenv('FAKE_SLEEP', '30')
+    job_id = '20261025-090700-prepare'
+    log = (panel.logs / (job_id + '.log')).open('wb')
+    process = subprocess.Popen(['bash', '-c', panel_module.OLD_WRAPPERS[0], 'panel', 'helpers/1_prepare.sh'], cwd=checkout,
+                               stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+    (panel.logs / (job_id + '.pid')).write_text(f'{process.pid}\n')
+    try:
+        assert [job['stoppable'] for job in panel.jobs() if job['id'] == job_id] == [True]
+        assert panel.stop(job_id)['stopping'] is True
+        process.wait(timeout=10)
+    finally:
+        if process.poll() is None:
+            process.kill()
+        log.close()
 
 
 def test_stop_works_after_a_restart_of_the_server(root, checkout, monkeypatch):
@@ -289,17 +340,21 @@ def test_panel_page_status_and_run_over_http(served):
     nonce = csp.split("'nonce-")[1].split("'")[0]
     assert f'<script nonce="{nonce}">' in data.decode()
     # The tabs are one page (Overview is the home page); the old addresses lead to them.
-    for path in ('/prepare', '/train', '/evaluate', '/models'):
-        assert served.request('GET', path)[0] == 200, path
+    # Each tab served with its own window title, as the bar names it.
+    for path, title in (('/', 'Overview'), ('/prepare', 'Prepare'), ('/train', 'Train'), ('/evaluate', 'Evaluate'),
+                        ('/models', 'Models')):
+        status, response, data = served.request('GET', path)
+        assert status == 200 and f'<title>Speed limits · {title}</title>' in data.decode(), path
     for path, target in (('/pannello', '/'), ('/stato', '/'), ('/panoramica', '/'), ('/prepara', '/prepare'),
-                         ('/allena', '/train')):
+                         ('/allena', '/train'), ('/settings', '/account'), ('/review', '/routes')):
         status, response, data = served.request('GET', path)
         assert status == 303 and response.getheader('Location') == target, path
     payload = json_of(served.request('GET', '/api/panel/status')[2])
     assert payload['routes'][0]['route'] == ROUTE and 'prepare' in payload['actions']
-    # The machine alone, for the strip in the tab row of the other pages.
+    # The machine and what runs, for the server pill and the dots of the busy tabs of the other pages.
     machine = json_of(served.request('GET', '/api/panel/system')[2])
-    assert set(machine) == {'system'} and 'memory' in machine['system'] and 'disk' in machine['system']
+    assert set(machine) == {'system', 'running'} and 'memory' in machine['system'] and 'disk' in machine['system']
+    assert machine['running'] == {'jobs': [], 'activities': []}
 
     status, response, data = served.request('POST', '/api/panel/run/prepare', body={})
     assert status == 200, data

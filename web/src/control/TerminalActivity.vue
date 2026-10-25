@@ -34,7 +34,7 @@ const where = computed(() => props.activity.group === 'other' ? 'another program
              aria-valuemin="0" aria-valuemax="100" :aria-valuenow="percent ?? undefined"
              :aria-valuetext="percent === null ? 'running, progress unknown' : undefined"><span
           :style="percent === null ? undefined : {width: percent + '%'}"></span></div>
-        <p v-if="prep && prep.routes_total" class="jp-detail">{{ prep.routes_done }} of {{ prep.routes_total }} routes ready</p>
+        <p v-if="prep && prep.routes_total" class="jp-detail">{{ prep.routes_done }} of {{ prep.routes_total }} drives ready</p>
         <p v-if="progress?.detail" class="jp-detail">{{ progress.detail }}</p>
         <p v-if="progress?.last_line" class="jp-line">{{ progress.last_line }}</p>
         <PrepRoutes v-if="prep" :routes="prep.working"/>

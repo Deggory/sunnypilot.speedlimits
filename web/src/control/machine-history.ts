@@ -74,7 +74,7 @@ export function machineCells(system: SystemInfo, points: number, disk = false, s
     }
     if (gpu.temperature !== null) {
       list.push({key: 'gpu-temp', label: short ? 'Temp' : 'GPU temp', value: Math.round(gpu.temperature) + ' °C',
-        title: gpu.power_w === null ? gpu.name : Math.round(gpu.power_w) + ' W', values: recent(history.gpuTemp),
+        title: gpu.power_w === null ? gpu.name : 'Drawing ' + Math.round(gpu.power_w) + ' W', values: recent(history.gpuTemp),
         color: 'var(--spark-gpu)', hot: gpu.temperature >= 80, level: (gpu.temperature - 30) * 100 / 60});
     }
   }

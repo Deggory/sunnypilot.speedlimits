@@ -90,6 +90,11 @@ onMounted(() => {
         <label class="field">Password<input id="login-password" v-model="password" type="password" name="password" autocomplete="current-password" maxlength="256" required></label>
         <div class="auth-error" role="alert">{{ error }}</div>
         <button id="login-submit" class="btn primary" type="submit" :disabled="busy">Sign in</button>
+        <details class="auth-forgot" id="login-forgot">
+          <summary>Forgot the password?</summary>
+          <p class="note">Someone who can open a terminal on the server runs <code>helpers/reset_password.sh</code> in the
+            site’s folder. The next visit then asks for the setup code, and you choose a new name and password.</p>
+        </details>
       </form>
 
       <form v-else-if="view === 'code'" id="form-code" class="auth-form" novalidate @submit.prevent="checkCode">

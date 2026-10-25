@@ -1,14 +1,17 @@
 // Confirm, Withdraw confirmation, Discard changes: what the reviewer decides about the frame on screen. With the
 // server a confirmation is saved at once; offline it stays in this browser until the JSONL export.
+import {nextTick} from 'vue';
 import {messageOf} from '../common/api';
 import {hourMinute} from '../common/format';
+import {duplicatesOf} from './boxes';
 import {clone, writeLocal} from './dom';
 import {countryOf, currentRow, frameStatus, fromServer, sameAsServer, workOf} from './frames';
 import {blockUnchecked} from './carry';
-import {advanceAfterConfirm, go} from './navigation';
+import {advanceAfterConfirm, allConfirmed, allConfirmedText, go} from './navigation';
+import {revealEditor} from './scroll';
 import {call, reviewerName, send, takeSuspicious} from './server';
 import {report, state, store} from './store';
-import type {SaveAnswer} from './types';
+import type {FrameRow, SaveAnswer} from './types';
 
 function needReviewer(key: string): void {
   state.reviewerNeeded = true;
@@ -19,6 +22,28 @@ function needReviewer(key: string): void {
 
 function timeNow(): string {
   return hourMinute(new Date());
+}
+
+/** A box that repeats an earlier one (the same sign drawn twice, "same sign as 1" in the list): the first Confirm
+ * selects it and asks; Confirm again on the same boxes saves both. True: asked, nothing saved. */
+function askAboutDuplicate(row: FrameRow): boolean {
+  const work = workOf(row);
+  const duplicates = duplicatesOf(work);
+  const index = duplicates.findIndex((earlier) => earlier !== null);
+  const earlier = duplicates[index];
+  if (index < 0 || earlier === null || earlier === undefined) return false;
+  // Asked once for these boxes: any change (a box deleted or moved) asks again.
+  const asked = row.frame_key + '#' + (work.version || 0);
+  if (state.duplicateAsked === asked) return false;
+  state.duplicateAsked = asked;
+  state.selected = index;
+  state.selectedByUser = true;
+  state.drawing = false;
+  state.notice = {key: row.frame_key, error: true, text: 'Box ' + (index + 1) + ' looks like the same sign as box '
+    + (earlier + 1) + ': delete it (✕ or Del), or press Confirm again to keep both.'};
+  state.lastSave = {key: row.frame_key, result: 'need-duplicate-check', revision: work.revision || 0};
+  void nextTick(revealEditor);
+  return true;
 }
 
 export async function confirmFrame(): Promise<void> {
@@ -33,12 +58,14 @@ export async function confirmFrame(): Promise<void> {
     state.lastSave = {key, result: 'unchanged', revision: current.revision || 0};
     go(1);
     if (state.currentKey === key) {
-      state.notice = {key, text: 'Already confirmed: there are no more frames with this filter.', error: false};
+      const text = allConfirmed() ? allConfirmedText() : 'Already confirmed: there are no more frames with this filter.';
+      state.notice = {key, text, error: false};
     }
     return;
   }
   // Boxes "Apply previous" placed where a sign should be: the reviewer looks at each before saving.
   if (blockUnchecked(row)) return;
+  if (askAboutDuplicate(row)) return;
   const reviewer = reviewerName();
   if (!reviewer) {
     needReviewer(key);

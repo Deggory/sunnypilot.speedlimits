@@ -131,23 +131,47 @@ def test_the_env_variable_names_the_file(tmp_path, monkeypatch):
     assert not (tmp_path / 'root' / 'web').exists()
 
 
+def refused_reviewer(root, provider_id) -> str:
+    with pytest.raises(ReviewRejected) as error:
+        llm_providers.set_reviewer(root, provider_id)
+    assert (error.value.status, error.value.reason) == (409, 'ai_not_tested')
+    return error.value.message
+
+
 def test_reviewer_choice_tests_and_removal(tmp_path):
     add(tmp_path)
     assert llm_providers.ai_state(tmp_path) == {'available': False, 'reason': 'Choose an AI reviewer in Settings.',
                                                'provider': None}
+    # Only a provider that passed its last Test reviews: never tested, then failed, it is refused.
+    assert refused_reviewer(tmp_path, 'strata') == ('Test strata in Settings first: only a provider that passed its '
+                                                    'Test can review.')
+    llm_providers.record_test(tmp_path, 'strata', {'ok': False, 'message': 'It cannot see the frames.'})
+    assert refused_reviewer(tmp_path, 'strata') == ('strata did not pass its last Test. Fix it, then test it again '
+                                                    'in Settings.')
+    assert llm_providers.public_settings(tmp_path)['reviewer'] is None
+    llm_providers.record_test(tmp_path, 'strata', {'ok': True, 'message': 'Sees images · 1.0 s', 'extra': 1})
+    test = llm_providers.public_settings(tmp_path)['providers'][0]['last_test']
+    assert test['ok'] is True and 'extra' not in test
     llm_providers.set_reviewer(tmp_path, 'strata')
     state = llm_providers.ai_state(tmp_path)
     assert state['available'] is True and state['reason'] == ''
     assert state['provider'] == {'id': 'strata', 'name': 'strata', 'model': 'qwen3-vl-32b-instruct',
                                  'reviewer_name': 'ai/strata/qwen3-vl-32b-instruct'}
     assert llm_providers.public_settings(tmp_path)['providers'][0]['is_reviewer'] is True
-    llm_providers.record_test(tmp_path, 'strata', {'ok': True, 'message': 'Sees images · 1.0 s', 'extra': 1})
-    test = llm_providers.public_settings(tmp_path)['providers'][0]['last_test']
-    assert test['ok'] is True and 'extra' not in test
     add(tmp_path, id='strata', name='strata farm')
     assert llm_providers.public_settings(tmp_path)['providers'][0]['last_test'] is not None
+    # A new model clears the Test: the reviewer stays chosen but cannot review until it passes again.
     add(tmp_path, id='strata', model='another-model')
     assert llm_providers.public_settings(tmp_path)['providers'][0]['last_test'] is None
+    state = llm_providers.ai_state(tmp_path)
+    assert state['available'] is False and state['provider']['id'] == 'strata'
+    assert state['reason'] == 'Test strata in Settings first: only a provider that passed its Test can review.'
+    with pytest.raises(ReviewRejected) as error:
+        llm_providers.check_can_review(llm_providers.reviewer_provider(tmp_path))
+    assert error.value.reason == 'ai_not_tested'
+    # No reviewer is always possible.
+    llm_providers.set_reviewer(tmp_path, None)
+    assert llm_providers.public_settings(tmp_path)['reviewer'] is None
     with pytest.raises(ReviewRejected) as error:
         llm_providers.set_reviewer(tmp_path, 'nobody')
     assert error.value.status == 404 and error.value.reason == 'unknown_provider'

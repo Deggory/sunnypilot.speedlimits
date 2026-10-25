@@ -5,7 +5,8 @@
 // action "fetch", to that address). It asks /api/panel/comma every 10 s (nnslr_tools.comma_link: only the ssh port
 // is tried, nothing runs on the comma).
 import {computed, onBeforeUnmount, onMounted, ref} from 'vue';
-import {api, messageOf, post} from '../common/api';
+import {messageOf, poll, post, signedOut} from '../common/api';
+import {isoWhen} from '../common/format';
 import {askConfirm} from '../composables/confirm';
 
 interface CommaState {
@@ -19,6 +20,8 @@ interface CommaState {
   login: boolean | null;
   /** This server's public ssh key, for the GitHub user whose keys the comma takes. */
   server_key: string | null;
+  /** ISO time of the last login that worked (nnslr_tools.comma_link.last_login); null: never. */
+  last_login?: string | null;
 }
 
 const INTERVAL_MS = 10000;
@@ -43,10 +46,15 @@ async function saveAddress(): Promise<void> {
 const dot = computed(() => comma.value?.downloading ? 'busy' : comma.value?.online && comma.value.login === false ? 'warm'
   : comma.value?.online ? 'on' : 'off');
 const copied = ref(false);
-/** The setup from zero, open until the comma answers and takes this server's key (or when asked). */
+/** The setup from zero, open until the comma answers and takes this server's key (or when asked); folded for a comma
+ * this server once logged in to, which is only switched off or away now. */
 const setupOpen = ref<boolean | null>(null);
 const ready = computed(() => comma.value?.online === true && comma.value.login === true);
-const showSetup = computed(() => setupOpen.value ?? !ready.value);
+const known = computed(() => Boolean(comma.value?.last_login) && comma.value?.login !== false);
+const showSetup = computed(() => setupOpen.value ?? (!ready.value && !known.value));
+/** "Last connected 18:55" (or "24 Oct 18:55") for a known comma that is away. */
+const lastSeen = computed(() => comma.value?.online === false && comma.value.last_login
+  ? 'Last connected ' + isoWhen(comma.value.last_login) + '.' : '');
 const testing = ref(false);
 async function testNow(): Promise<void> {
   testing.value = true;
@@ -78,9 +86,11 @@ const word = computed(() => comma.value?.downloading ? 'Downloading' : comma.val
 
 async function ask(): Promise<void> {
   try {
-    comma.value = (await api<{comma: CommaState}>('/api/panel/comma')).comma;
-  } catch {
-    // An old server without the address, or the network: the pill stays as it was.
+    comma.value = (await poll<{comma: CommaState}>('/api/panel/comma')).comma;
+  } catch (error) {
+    // An old server without the address, or the network: the pill stays as it was (greyed out by the connection
+    // state of the top bar). Signed out: no more asking, the page stays as it is.
+    if (signedOut(error)) window.clearInterval(timer);
   }
 }
 
@@ -99,7 +109,10 @@ async function download(): Promise<void> {
 }
 
 function onDocument(event: Event): void {
-  if (open.value && root.value && !root.value.contains(event.target as Node)) open.value = false;
+  const target = event.target as Node;
+  // The confirm dialog of Download is outside the panel: answering it keeps the panel open, to show how it goes.
+  if (document.getElementById('dialog-host')?.contains(target)) return;
+  if (open.value && root.value && !root.value.contains(target)) open.value = false;
 }
 function onKey(event: KeyboardEvent): void {
   if (event.key === 'Escape') open.value = false;
@@ -128,7 +141,7 @@ onBeforeUnmount(() => {
     <div v-if="open" id="comma-pop" class="tm-pop" role="dialog" aria-label="The comma">
       <h2>comma</h2>
       <p class="tm-sub">{{ word }}<template v-if="comma.online === false && !comma.downloading">: the car is off, or not on the
-        Wi-Fi of this server</template></p>
+        Wi-Fi of this server.</template> {{ lastSeen }}</p>
       <div class="tm-row tm-address">
         <template v-if="editing === null">
           <span class="tm-name">Address<small>{{ comma.address }}</small></span>

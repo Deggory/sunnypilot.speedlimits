@@ -44,6 +44,17 @@ const split = computed(() => {
   return {parts: parts.map((part) => ({...part, share: percentText(part.count, total), width: percentOf(part.count, total)})),
     total, made: isoWhen(value.made_at), warnings: value.warnings};
 });
+/** Why the split counts fewer objects than the dataset: the dataset changed after it (the sha256 the split recorded is
+ * not the dataset's; by the counts for an older split without one), or the proposals a person rejected, left out. */
+const splitNote = computed((): string => {
+  const value = props.dataset;
+  if (value === null || value.split === null || split.value === null) return '';
+  const rejected = value.split.rejected ?? 0;
+  const recorded = value.split.dataset_sha256 ?? null;
+  const changed = recorded !== null && value.sha256 ? recorded !== value.sha256 : split.value.total + rejected !== value.objects;
+  if (changed) return 'The dataset has changed since this split: the next training splits it again.';
+  return rejected ? 'The split leaves out ' + plural(rejected, 'rejected proposal') + '.' : '';
+});
 const routes = computed(() => {
   const value = props.dataset;
   if (value === null) return [];
@@ -93,7 +104,8 @@ const imported = computed(() => props.dataset?.last_import ?? null);
           <h3 class="ds-title">Last import</h3>
           <div v-if="imported" class="ds-import" id="ds-import">
             <p><template v-if="imported.at">{{ isoWhen(imported.at) }}: </template><strong>{{ plural(imported.new_frames, 'new frame') }}</strong>,
-              {{ thousands(imported.already) }} already in the dataset.</p>
+              {{ thousands(imported.replaced_frames ?? 0) }} updated, {{ thousands(imported.removed_frames ?? 0) }} removed<template
+                v-if="imported.already">, {{ thousands(imported.already) }} unchanged</template>.</p>
             <p v-if="imported.changed_after_import > 0" class="ds-warn" id="ds-changed">
               {{ plural(imported.changed_after_import, 'confirmed frame was', 'confirmed frames were') }} changed after their import and
               not applied: the dataset only adds new frames, it never rewrites one it already holds.</p>
@@ -115,8 +127,7 @@ const imported = computed(() => props.dataset?.last_import ?? null);
           </ul>
           <p class="note">Training learns from <em>train</em>, picks its best epoch on <em>validation</em> and is measured on <em>test</em>; whole
             routes held out and hard negatives (things that look like signs) check that it generalises.<template
-              v-if="split.total !== dataset.objects"> The split counts {{ thousands(split.total) }} objects, the dataset has {{ thousands(dataset.objects) }} now:
-              the next training splits it again.</template></p>
+              v-if="splitNote"> {{ splitNote }}</template></p>
           <p v-for="(warning, index) in split.warnings" :key="index" class="note ds-note">{{ warning }}</p>
         </template>
         <p v-else class="empty">No split yet: the next training makes it.</p>

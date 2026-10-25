@@ -8,7 +8,7 @@ import type {ActionName, ActionState, Job, PanelStatus} from '../common/panel-ty
 import FlowTiles from './FlowTiles.vue';
 import JobItem from './JobItem.vue';
 import JobProgress from './JobProgress.vue';
-import {terminalActivities} from './jobs';
+import {gpuProcessNames, terminalActivities} from './jobs';
 import NextStepCard from './NextStepCard.vue';
 import {nextStep, WAITING} from './next-step';
 import PrepRoutes from './PrepRoutes.vue';
@@ -19,7 +19,7 @@ import TerminalActivity from './TerminalActivity.vue';
 const props = defineProps<{status: PanelStatus | null; busy: ReadonlySet<ControlTab>}>();
 defineEmits<{run: [name: ActionName, state: ActionState]; stop: [job: Job]; details: [job: Job]}>();
 
-/** Jobs shown before "Show all". */
+/** Jobs shown before "Show the last 12" (the server sends the latest 12 only, panel.HISTORY). */
 const FEW = 4;
 const showAll = ref(false);
 const next = computed(() => props.status ? nextStep(props.status) : WAITING);
@@ -31,6 +31,8 @@ const activities = computed(() => terminalActivities(props.status));
 const failed = computed(() => jobs.value[0]?.state === 'failed' ? jobs.value[0] : null);
 const shown = computed(() => showAll.value ? jobs.value : jobs.value.slice(0, FEW));
 const gpuProcesses = computed(() => props.status?.system.gpu?.process_list ?? []);
+/** What each of them is, when the server can tell (jobs.ts gpuProcessNames). */
+const gpuNames = computed(() => gpuProcessNames(props.status));
 </script>
 
 <template>
@@ -58,14 +60,14 @@ const gpuProcesses = computed(() => props.status?.system.gpu?.process_list ?? []
         <JobItem v-for="job in shown" :key="job.id" :job="job" @details="$emit('details', $event)" @stop="$emit('stop', $event)"/>
       </ul>
       <button v-if="jobs.length > FEW" type="button" class="link-button more" @click="showAll = !showAll">
-        {{ showAll ? 'Show fewer' : 'Show all ' + jobs.length }}</button>
+        {{ showAll ? 'Show fewer' : 'Show the last ' + jobs.length }}</button>
       <p v-if="status && jobs.length === 0" class="empty">No jobs yet: the buttons of Prepare and Train start them.</p>
     </div>
     <div v-if="gpuProcesses.length" class="card">
       <h2>On the GPU</h2>
       <ul class="gpu-procs">
         <li v-for="(process, index) in gpuProcesses" :key="index">
-          <span class="grow">{{ !process.name || process.name.startsWith('[') ? 'A program outside this container' : process.name }}</span>
+          <span class="grow">{{ gpuNames[index] }}</span>
           <span class="num">{{ process.memory_mb === null ? '–' : Math.round(process.memory_mb) + ' MiB' }}</span>
         </li>
       </ul>

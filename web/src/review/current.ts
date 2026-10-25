@@ -1,9 +1,9 @@
 // The frame on screen, as computed values the components share: its row, its working copy, its state, the
 // box selected in it, its place in the route.
 import {computed, watchEffect} from 'vue';
-import {aiConfirmed, currentRow, frameStatus, isConfirmed, reasonsOf, workOf} from './frames';
+import {aiConfirmed, currentRow, doubtsOf, frameStatus, isConfirmed, reasonsOf, workOf} from './frames';
 import {indexOf, report, state} from './store';
-import type {Detection, FrameEdit, FrameRow, FrameStatus} from './types';
+import type {Detection, FrameEdit, FrameRow, FrameStatus, QualityFilter} from './types';
 
 export const row = computed<FrameRow | null>(() => currentRow());
 /** The working copy of the frame on screen (ensureCurrentFrame makes sure there is one). */
@@ -28,6 +28,23 @@ export const routeCounts = computed(() => {
     if (aiConfirmed(item.frame_key)) byAi += 1;
   }
   return {done, suspicious, byAi, total: report.rows.length};
+});
+
+/** What each doubt filter shows, after its count: "26 without a number". */
+export const DOUBT_LABELS: Record<QualityFilter, string> = {
+  unknown: 'without a number', unreadable: 'with unreadable signs', road: 'road not set',
+};
+
+/** The confirmed frames that still carry each doubt (the counters of the timeline card, each one a filter). */
+export const doubtCounts = computed<Record<QualityFilter, number>>(() => {
+  const counts = {unknown: 0, unreadable: 0, road: 0};
+  for (const item of report.rows) {
+    const doubts = doubtsOf(item.frame_key);
+    if (doubts.unknown > 0) counts.unknown += 1;
+    if (doubts.unreadable > 0) counts.unreadable += 1;
+    if (doubts.road > 0) counts.road += 1;
+  }
+  return counts;
 });
 
 /** Before each drawing: a frame is on screen when the report has frames, it has its working copy (the

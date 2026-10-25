@@ -20,3 +20,20 @@ def test_anything_but_a_host_is_refused(tmp_path, address):
     with pytest.raises(comma_link.AddressError):
         comma_link.set_address(tmp_path, address)
     assert comma_link.configured(tmp_path) is None
+
+
+def test_the_last_login_that_worked_is_remembered(tmp_path, monkeypatch):
+    # A comma switched off after it once took this server's key is not offered the setup from zero again.
+    assert comma_link.last_login(tmp_path) is None
+    monkeypatch.setattr(comma_link, '_check', lambda: True)
+    monkeypatch.setattr(comma_link, '_login', lambda: False)
+    monkeypatch.setattr(comma_link, 'state', lambda root: {'last_login': comma_link.last_login(root)})
+    assert comma_link.check_now(tmp_path) == {'last_login': None}
+    monkeypatch.setattr(comma_link, '_login', lambda: True)
+    seen = comma_link.check_now(tmp_path)['last_login']
+    assert seen and seen.endswith('+00:00')
+    # Away now: the check fails, the time of the last login stays.
+    monkeypatch.setattr(comma_link, '_check', lambda: False)
+    assert comma_link.check_now(tmp_path)['last_login'] == seen
+    comma_link.seen_path(tmp_path).write_text('not json')
+    assert comma_link.last_login(tmp_path) is None

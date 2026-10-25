@@ -1,6 +1,7 @@
 """The Train tab's data: what the dataset holds, where a training can start, and the start option."""
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import time
@@ -47,6 +48,23 @@ def test_the_dataset_summary_counts_frames_objects_families_and_reviewers(root, 
         'changed_after_import': ['a', 'b'], 'removed_withdrawn_frame_count': 3}))
     imported = Panel(root, repo=checkout).dataset_summary()['last_import']
     assert (imported['changed_after_import'], imported['replaced_frames'], imported['removed_frames']) == (0, 2, 3)
+
+
+def test_the_split_says_which_dataset_it_was_made_of_and_the_rejected_proposals_it_leaves_out(root, checkout):
+    write_dataset(root)
+    sha = hashlib.sha256((root / 'annotations' / 'objects.jsonl').read_bytes()).hexdigest()
+    summary = Panel(root, repo=checkout).dataset_summary()
+    # A split without them (an older one): nothing to compare, nothing left out.
+    assert summary['sha256'] == sha and (summary['split']['dataset_sha256'], summary['split']['rejected']) == (None, 0)
+    (root / 'splits' / 'abc.json').write_text(json.dumps({'counts': {'train': 2}, 'warnings': [], 'dataset_sha256': sha,
+                                                          'excluded_rejected_ids': ['x']}))
+    split = Panel(root, repo=checkout).dataset_summary()['split']
+    assert (split['dataset_sha256'], split['rejected']) == (sha, 1)
+    # The dataset changes after the split: its sha256 is no longer the one the split recorded.
+    with (root / 'annotations' / 'objects.jsonl').open('a') as target:
+        target.write(json.dumps({'route_id': 'r3', 'image_path': 'f/3.png', 'sign_family': 'zone'}) + '\n')
+    summary = Panel(root, repo=checkout).dataset_summary()
+    assert summary['sha256'] != summary['split']['dataset_sha256'] and summary['objects'] == 4
 
 
 def test_training_starts_list_imagenet_random_stable_and_finished_runs(root, checkout):
@@ -161,11 +179,11 @@ def test_the_classifier_training_follows_the_rules_of_a_training_and_needs_a_cut
     assert panel._action_states(ready_payload(), [])['train_classifier'] == {'label': 'Train the classifier', 'allowed': True, 'reason': ''}
     assert panel._action_states(ready_payload(gpu_processes=1), [])['train_classifier']['reason'] == 'the GPU is busy with another process'
     few = {**ready_payload(), 'reviewed_routes': 2}
-    assert panel._action_states(few, [])['train_classifier']['reason'] == '3 reviewed routes are needed, now 2'
+    assert panel._action_states(few, [])['train_classifier']['reason'] == '3 reviewed drives are needed, now 2'
     none = {**ready_payload(), 'routes': [{'state': 'revisionare', 'confirmed': 0}]}
     assert panel._action_states(none, [])['train_classifier']['reason'] == 'no confirmed frame'
     busy = [{'group': 'train', 'label': 'classifier training', 'pid': 1}]
-    assert panel._action_states(ready_payload(), busy)['train_classifier']['reason'] == 'An import or a training is running'
+    assert panel._action_states(ready_payload(), busy)['train_classifier']['reason'] == 'A classifier training is running'
     (run / 'detector' / 'detector-best.pt').unlink()
     assert panel._action_states(ready_payload(), [])['train_classifier']['reason'] == (
         'the cutter in use is no longer on this server: choose another one on the Models tab')
@@ -285,7 +303,7 @@ def test_the_cutter_training_follows_the_rules_of_a_training(root, checkout):
     # No cutter in use is needed: it trains one.
     assert panel._action_states(ready_payload(), [])['train_cutter'] == {'label': 'Train the cutter', 'allowed': True, 'reason': ''}
     assert panel._action_states(ready_payload(gpu_processes=2), [])['train_cutter']['reason'] == 'the GPU is busy with another process'
-    assert panel._action_states({**ready_payload(), 'reviewed_routes': 1}, [])['train_cutter']['reason'] == '3 reviewed routes are needed, now 1'
+    assert panel._action_states({**ready_payload(), 'reviewed_routes': 1}, [])['train_cutter']['reason'] == '3 reviewed drives are needed, now 1'
     status = panel.status()
     assert status['cutter_options'] == {'sizes': ['640x360', '960x544', '1344x760'], 'size': '960x544',
                                         'families': ['all', 'speed'], 'family': 'all'}

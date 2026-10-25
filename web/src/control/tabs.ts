@@ -35,14 +35,6 @@ function markCurrent(tab: ControlTab): void {
   document.title = 'Speed limits · ' + TAB_TITLE[tab];
 }
 
-/** A dot on the tab links of the tabs with work running (data-busy, styled by control.html). */
-export function markBusy(busy: ReadonlySet<ControlTab>): void {
-  for (const [link, tab] of tabLinks()) {
-    if (busy.has(tab)) link.dataset['busy'] = 'true';
-    else delete link.dataset['busy'];
-  }
-}
-
 /** Shows a tab and puts its address in the history. */
 export function goTo(tab: ControlTab): void {
   if (tab === currentTab.value) return;

@@ -1,7 +1,10 @@
 // Moving between frames: arrows, the frame after a confirmation, the filters, the frame to start from.
 import {nextTick} from 'vue';
+import {thousands} from '../common/format';
 import {readLocal, writeLocal} from './dom';
-import {confirmedFilter, currentRow, frameStatus, isQualityFilter, matchesFilter, visibleRows, workOf} from './frames';
+import {
+  aiConfirmed, confirmedFilter, currentRow, frameStatus, isQualityFilter, matchesFilter, visibleRows, workOf,
+} from './frames';
 import {revealStage, scrollTimelineToCurrent} from './scroll';
 import {indexOf, report, rowOf, state} from './store';
 import type {Filter} from './types';
@@ -60,11 +63,29 @@ function nextAfterConfirm(key: string): string | null {
   return null;
 }
 
+/** Every frame of the drive is confirmed (on the server, or in this browser offline). */
+export function allConfirmed(): boolean {
+  return report.rows.length > 0 && report.rows.every((row) => frameStatus(row.frame_key) === 'done');
+}
+
+/** "All 780 frames are confirmed (780 by AI)." */
+export function allConfirmedText(): string {
+  const byAi = report.rows.filter((row) => aiConfirmed(row.frame_key)).length;
+  return 'All ' + thousands(report.rows.length) + ' frames are confirmed'
+    + (byAi > 0 ? ' (' + thousands(byAi) + ' by AI).' : '.');
+}
+
 /** Once the server has said what is confirmed: with the "To review" filter, a frame already confirmed (the last one
- * open here, or the first of the route) gives way to the next frame still to review. */
+ * open here, or the first of the route) gives way to the next frame still to review. A drive with nothing left
+ * opens on All (this time only: the filter kept in this browser stays To review). */
 export function startAtWork(): void {
   const key = state.currentKey;
   if (state.filter !== 'todo' || key === null || frameStatus(key) !== 'done') return;
+  if (allConfirmed()) {
+    state.filter = 'all';
+    state.notice = {key, text: allConfirmedText(), error: false};
+    return;
+  }
   const next = nextAfterConfirm(key)
     ?? report.rows.find((row) => frameStatus(row.frame_key) !== 'done' && matchesFilter(row, 'todo'))?.frame_key ?? null;
   if (next === null || next === key) return;
@@ -98,6 +119,7 @@ export function setFilter(filter: Filter): void {
     if (filter === 'suspicious') state.filterNote = 'No suspicious frame to review.';
     else if (isQualityFilter(filter)) state.filterNote = 'No confirmed frame with this doubt.';
     else if (filter === 'ai') state.filterNote = 'No frame confirmed by an AI.';
+    else if (filter === 'trial') state.filterNote = 'No frame of the AI trial left to review.';
     else state.filterNote = 'No frame matches this filter.';
     return;
   }

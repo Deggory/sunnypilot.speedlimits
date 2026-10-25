@@ -77,8 +77,8 @@ Base: `http://<server>:8765/api/v1`. Tutte le risposte sono JSON (tranne le imma
 | --- | --- |
 | `GET /api/v1` | Versione dell'API e se MCP è disponibile |
 | `GET /api/v1/schema` | Campi e valori ammessi per salvare, regole, codici di errore |
-| `GET /api/v1/routes` | Route con report: `run_id`, fotogrammi, confermati (umani/AI), mancanti, ritirati, sospetti, con proposte, con seconda lettura |
-| `GET /api/v1/routes/{route}` | Avanzamento: gli stessi conteggi, i sospetti con i motivi (`suspicious_limit`, default 100), i confermati con dubbi, il primo da rivedere |
+| `GET /api/v1/routes` | Route con report: `run_id`, fotogrammi, confermati (umani/AI), mancanti, ritirati, sospetti, con proposte, con seconda lettura, e `drive`: il viaggio come lo chiama il sito (`title` "Herznach → Zürich", `when` "Fri 23 Oct 2026 · 08:01", `minutes`, `start`, `from`, `to`; `null` quel che non si sa) |
+| `GET /api/v1/routes/{route}` | Avanzamento: gli stessi conteggi e `drive`, i sospetti con i motivi (`suspicious_limit`, default 100), i confermati con dubbi, il primo da rivedere |
 | `GET /api/v1/routes/{route}/frames?filter=&limit=&cursor=` | Fotogrammi in ordine (segmento, immagine), a pagine. `filter`: `unreviewed` (default), `reviewed`, `suspicious`, `with_proposals`, `all`; `limit` 1–200 (default 50); `cursor` = `next_cursor` della pagina prima |
 | `GET /api/v1/routes/{route}/next?filter=&after=` | Il prossimo fotogramma da fare, con tutto il dettaglio; `after` = chiave da cui proseguire (ricomincia dall'inizio una volta, `wrapped: true`) |
 | `GET /api/v1/routes/{route}/frames/{seg}/{img}` | Dettaglio di un fotogramma |
@@ -212,7 +212,7 @@ saved = call('POST', f"/routes/{route}/frames/{frame['frame_key']}/review", {
 
 | Strumento | Cosa fa | Scrive |
 | --- | --- | --- |
-| `list_routes` | Route e avanzamento | no |
+| `list_routes` | Route e avanzamento, con il viaggio (`drive`: titolo, data e ora, minuti) | no |
 | `list_frames` | Fotogrammi con filtri e cursore, senza immagini | no |
 | `next_frame` | Prossimo fotogramma da rivedere (ripresa dopo interruzione, `after`) | no |
 | `get_frame` | Metadati, dimensioni, proposte, seconda lettura, sospetti, revisione salvata, `run_id`, `revision` | no |
@@ -344,6 +344,7 @@ Un data root di prova si costruisce con le funzioni di `tests/review/review_help
 | Il database non si apre con un `nnslr` vecchio (`schema version 2`) | Il database è già migrato: aggiornare il codice (`helpers/update.sh`). |
 | 403 `session_required` | Un indirizzo del revisore AI chiamato con il solo token: si usa dal sito dopo l'accesso, o dal sito su 127.0.0.1 (sezione 8). |
 | 409 `no_ai_reviewer` | Nessun revisore AI scelto: Settings → AI reviewer, oppure `nnslr llm-provider use ID`. |
+| 409 `ai_not_tested` | Il provider non ha passato il suo ultimo **Test** (o non è mai stato provato, o ha cambiato indirizzo o modello): non può diventare il revisore, né rispondere ad **Ask AI**, né salvare con `save: "yes"`. Rifare **Test** in Settings (`nnslr llm-provider test ID`). |
 | 429 `ai_busy` | Due richieste all'AI sono già in corso: riprovare tra poco. |
 | 502 `ai_unreachable` / `ai_http_error` / `ai_bad_answer` / `ai_redirect`, 504 `ai_timeout` | Il server del provider non risponde, rifiuta (`HTTP <codice>` e il suo messaggio), risponde senza JSON, rimanda a un altro indirizzo (mai seguito) o non risponde in tempo: controllare con **Test** in Settings. |
 
@@ -354,7 +355,7 @@ Il sito può far revisionare i cartelli a un'AI che vede le immagini, attraverso
 Questi indirizzi sono del **sito**, non di `/api/v1` né di MCP:
 
 - cambiare i provider, provarli, elencarne i modelli, chiedere un suggerimento e avviare `ai_review` o `measure_ai_reviewer` richiede un **browser che ha fatto l'accesso**, o il sito su 127.0.0.1; con il solo token (`X-Review-Token`) la risposta è 403 `session_required`;
-- con il token si possono soltanto **leggere** `GET /api/settings/ai`, `GET /api/ai/state` e `GET /api/panel/ai-reviewers`, che non contengono segreti;
+- con il token si possono soltanto **leggere** `GET /api/settings/ai`, `GET /api/ai/state`, `GET /api/route/<route>/ai-trial` e `GET /api/panel/ai-reviewers`, che non contengono segreti;
 - ogni POST vuole la stessa origine (403 `cross_origin`) e JSON (415);
 - le chiavi stanno solo in `data/web/private/llm-providers.json` (permessi 600, cartella 700) o nel file indicato da `NNSLR_LLM_PROVIDERS`: nessuna risposta, log del sito, log del pannello o resoconto le contiene, e il browser vede solo `has_key`. Se il provider ripete la chiave in un suo messaggio d'errore, il sito la mostra come `***`.
 
@@ -368,6 +369,7 @@ Questi indirizzi sono del **sito**, non di `/api/v1` né di MCP:
 | POST `/api/settings/ai/test` | accesso o 127.0.0.1 | `{id}` | `{ok, result, provider}`, 200 anche quando `result.ok` è falso |
 | GET `/api/ai/state` | sito o token | — | `{available, can_ask, reason, provider}` |
 | POST `/api/route/<route>/frame/<s>/<i>/ai-suggest` | accesso o 127.0.0.1 | `{run_id, detections?}` | il suggerimento (sotto) |
+| GET `/api/route/<route>/ai-trial` | sito o token | — | `{ok, trial}`: l'ultima prova senza salvare sul report attuale, o `null` |
 | GET `/api/panel/ai-reviewers` | sito o token | — | `{providers, reviewer, reports}` |
 | POST `/api/panel/run/ai_review` | accesso o 127.0.0.1 | `{route, provider?, save?, limit?}` | `{ok, id, action, label}` |
 | POST `/api/panel/run/measure_ai_reviewer` | accesso o 127.0.0.1 | `{provider?, limit?}` | `{ok, id, action, label}` |
@@ -375,6 +377,7 @@ Questi indirizzi sono del **sito**, non di `/api/v1` né di MCP:
 - Un provider è `{id, name, base_url, model, has_key, is_reviewer, reviewer_name, updated_at, last_test}`. In `POST /providers` la `key` assente tiene quella salvata, `""` la toglie, un altro testo la imposta; `base_url` è http o https e finisce in `/v1`; l'`id` nasce dal nome e non cambia più.
 - `models` manda la chiave salvata di `id` solo all'indirizzo salvato: a un indirizzo appena scritto non manda mai una chiave salvata.
 - `test` manda al modello un fotogramma rivisto da una persona, senza le proposte, e dice se risponde in JSON e se legge il suo cartello di velocità (`sees_images`); se il server dichiara il modello solo testo, `sees_images` è `false` e il modello non viene interpellato.
+- **Solo un provider che ha passato il suo ultimo Test** (`last_test.ok` vero) diventa il revisore, risponde ad **Ask AI** e salva con `save: "yes"`: gli altri ricevono 409 `ai_not_tested`. Un nuovo indirizzo o modello cancella il Test. Se il revisore scelto non lo passa più, `GET /api/ai/state` dà `available: false` con il motivo e il provider.
 - **Il suggerimento non salva niente.** Restituisce i riquadri in pixel del fotogramma intero (`bbox_xyxy`), ognuno con `ai_action` `keep`, `correct`, `add` o `unjudged` (quelli tenuti o corretti mantengono il loro `detection_id`), più `deleted`, `no_sign`, `complete`, `warnings`, `comment`, `reviewer`, `seconds` e `message`. La pagina lo applica come modifiche non salvate, e il **Confirm** della persona lo salva come revisione umana. Il modello riceve l'immagine, i riquadri numerati e la seconda lettura come suggerimenti, con coordinate da 0 a 1000, mai i fotogrammi vicini. Al massimo due suggerimenti (o Test) alla volta: il terzo riceve 429 `ai_busy`. Un report rigenerato dà 409 `stale_report`.
 - Le opzioni delle azioni sono stringhe (un numero o un booleano dà 400 `bad_option`): `route` una route con un report, `provider` un id di Settings (di default il revisore), `save` `yes` o `no` (di default `no`), `limit` da 1 a 5000 fotogrammi. Il lavoro esegue `helpers/ai_review.sh ROUTE --provider=ID [--save] [--limit=N]` o `helpers/measure_ai_reviewer.sh --provider=ID [--limit=N]`: la chiave la legge il comando dal file, mai dagli argomenti o dall'ambiente.
-- **Le revisioni salvate da `ai_review` con `save: "yes"` sono definitive**: `reviewer` `ai/<provider>/<modello>`, `reviewer_kind` `ai`, canale `web`, `client` `ai-review`; il prossimo import le mette nel dataset come revisioni AI (`label_basis` `ai_review`). I fotogrammi confermati da una persona non vengono toccati. Senza `save` i suggerimenti vanno solo in `data/ai_reviews/<route>/`.
+- **Le revisioni salvate da `ai_review` con `save: "yes"` sono definitive**: `reviewer` `ai/<provider>/<modello>`, `reviewer_kind` `ai`, canale `web`, `client` `ai-review`; il prossimo import le mette nel dataset come revisioni AI (`label_basis` `ai_review`). I fotogrammi confermati da una persona non vengono toccati. Senza `save` i suggerimenti vanno solo in `data/ai_reviews/<route>/`, e la pagina di revisione li mostra: `GET /api/route/<route>/ai-trial` dà l'ultima prova sul report attuale, `{route_id, run_id, provider: {id, name, model}, reviewer, started_at, finished_at, frames}`, con un suggerimento (come sopra, senza `ok`) per ogni fotogramma che nessuno ha ancora confermato.

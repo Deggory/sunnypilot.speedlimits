@@ -4,7 +4,8 @@
 import {computed} from 'vue';
 import {position, selectedBox, status} from './current';
 import {removeSelected, toggleDrawing, toggleHints} from './edits';
-import {aiConfirmed, proposalsOf, reasonsOf, statusLabel} from './frames';
+import {thousands} from '../common/format';
+import {aiConfirmed, framePlace, proposalsOf, reasonsOf, statusLabel} from './frames';
 import {step} from './navigation';
 import {hintsOf, report, state} from './store';
 import ReviewFilters from './ReviewFilters.vue';
@@ -21,8 +22,7 @@ const pillClass = computed(() => {
 const frameData = computed(() => {
   const row = props.row;
   const proposals = proposalsOf(row).length;
-  let info = 'Segment ' + row.segment_index + ' · image ' + row.output_index + ' · ' + proposals
-    + (proposals === 1 ? ' proposal' : ' proposals');
+  let info = framePlace(row) + ' · ' + proposals + (proposals === 1 ? ' proposal' : ' proposals');
   if (report.routeHasHints) info += ' · ' + hintsOf(row.frame_key).length + ' in the second reading';
   return info;
 });
@@ -37,13 +37,13 @@ function hintsSwitched(event: Event): void {
     <div class="nav">
       <button type="button" class="btn icon" id="prev" aria-label="Previous frame" :disabled="position.index <= 0"
               @click="step(-1)">‹</button>
-      <span class="pos" id="pos">{{ position.index + 1 }} / {{ position.length }}</span>
+      <span class="pos" id="pos">{{ thousands(position.index + 1) }} / {{ thousands(position.length) }}</span>
       <button type="button" class="btn icon" id="next" aria-label="Next frame"
               :disabled="position.index >= position.length - 1" @click="step(1)">›</button>
     </div>
     <ReviewFilters/>
     <span id="statePill" :class="pillClass">{{ statusLabel(row.frame_key) }}</span>
-    <span class="data" id="frameData">{{ frameData }}</span>
+    <span class="data" id="frameData" :title="'Segment ' + row.segment_index + ', image ' + row.output_index">{{ frameData }}</span>
     <div class="stage-tools">
       <button type="button" class="btn" :class="{on: state.drawing}" id="draw" @click="toggleDrawing">{{ state.drawing ? 'Cancel' : '+ Box' }}</button>
       <button type="button" class="btn danger" id="remove" :disabled="selectedBox === null" @click="removeSelected">Delete</button>

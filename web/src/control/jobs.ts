@@ -22,10 +22,42 @@ export const ACTION_ICON: Record<ActionName, IconName> = {
   measure_ai_reviewer: 'ai',
 };
 
-/** The actions whose jobs the Prepare and Train tabs show. */
-export const PREPARE_ACTIONS: ActionName[] = ['fetch', 'prepare', 'prepare_again', 'setup_vlm'];
-export const TRAIN_ACTIONS: ActionName[] = ['measure_proposer', 'dataset', 'train', 'train_continue', 'train_resume', 'train_classifier', 'train_cutter',
-  'ai_review', 'measure_ai_reviewer'];
+/**
+ * The tab that shows the job of each action, by its address: its card, the dot on the tab's link while it runs (also
+ * in the phone menu), the link of "Running now" in the server's panel. The update has no tab: the page reloads.
+ */
+export const ACTION_TAB: Record<ActionName, string | null> = {
+  fetch: '/prepare', prepare: '/prepare', prepare_again: '/prepare', setup_vlm: '/prepare',
+  dataset: '/train', train: '/train', train_continue: '/train', train_resume: '/train', train_classifier: '/train',
+  train_cutter: '/train', ai_review: '/train',
+  measure_proposer: '/evaluate', measure_ai_reviewer: '/evaluate',
+  update: null,
+};
+const actionsOf = (tab: string): ActionName[] => (Object.keys(ACTION_TAB) as ActionName[]).filter((name) => ACTION_TAB[name] === tab);
+/** The actions whose jobs the Prepare, Train and Evaluate tabs show. */
+export const PREPARE_ACTIONS: ActionName[] = actionsOf('/prepare');
+export const TRAIN_ACTIONS: ActionName[] = actionsOf('/train');
+export const EVALUATE_ACTIONS: ActionName[] = actionsOf('/evaluate');
+
+/** The tab of work started from a terminal, by its group (nnslr_tools.panel.ACTIVITIES); a measure is Evaluate's. */
+export function activityTab(activity: Pick<Activity, 'group' | 'label'>): string | null {
+  if (activity.group === 'ai') return activity.label.includes('measure') ? '/evaluate' : '/train';
+  return activity.group === 'fetch' || activity.group === 'prepare' ? '/prepare' : activity.group === 'train' ? '/train' : null;
+}
+
+/** The addresses of the tabs with work running: the running jobs of the site, and the work started from a terminal. */
+export function busyTabs(jobs: readonly Pick<Job, 'action' | 'state'>[], activities: readonly Pick<Activity, 'group' | 'label'>[]): Set<string> {
+  const tabs = new Set<string>();
+  for (const job of jobs) {
+    const tab = job.state === 'running' ? ACTION_TAB[job.action] : null;
+    if (tab) tabs.add(tab);
+  }
+  for (const activity of activities) {
+    const tab = activityTab(activity);
+    if (tab) tabs.add(tab);
+  }
+  return tabs;
+}
 /** The trainings whose job shows its curves on the Train tab. */
 export const CHARTED_ACTIONS: ActionName[] = ['train', 'train_continue', 'train_classifier', 'train_cutter'];
 /** The trainings of the whole pipeline (helpers/3_train.sh): a stopped one can be resumed on its run. */
@@ -95,6 +127,29 @@ export function terminalActivities(status: PanelStatus | null, groups?: string[]
     pids.add(activity.pid);
     return !fromSite.has(activity.group) && (groups === undefined || groups.includes(activity.group));
   });
+}
+
+/** The actions whose job uses the GPU (the proposers of Prepare and their measure, Qwen3-VL's test, the trainings). */
+const GPU_ACTIONS: ActionName[] = ['prepare', 'prepare_again', 'measure_proposer', 'setup_vlm', 'train', 'train_continue',
+  'train_resume', 'train_classifier', 'train_cutter'];
+/** The same for work started from a terminal, by group ("other": the driving model of openpilot.distill). */
+const GPU_GROUPS = ['prepare', 'train', 'other'];
+
+/**
+ * The name of each process on the GPU (system.gpu.process_list). In this container nvidia-smi cannot name the host's
+ * processes ("[Not Found]"), the site's own jobs included: when one process has no name and one job of the site, or
+ * one work from a terminal, uses the GPU, the row is that one; otherwise "A program the server cannot name".
+ */
+export function gpuProcessNames(status: PanelStatus | null): string[] {
+  const list = status?.system.gpu?.process_list ?? [];
+  const unnamed = (name: string): boolean => !name || name.startsWith('[');
+  const known = [
+    ...(status?.jobs ?? []).filter((job) => job.state === 'running' && GPU_ACTIONS.includes(job.action)).map((job) => job.label),
+    ...terminalActivities(status, GPU_GROUPS).map((activity) => (activity.label.startsWith('openpilot') ? activity.label
+      : activity.label.charAt(0).toUpperCase() + activity.label.slice(1)) + ', from a terminal'),
+  ];
+  const guess = known.length === 1 && list.filter((process) => unnamed(process.name)).length === 1 ? known[0] : undefined;
+  return list.map((process) => (unnamed(process.name) ? guess ?? 'A program the server cannot name' : process.name));
 }
 
 /** The step a failed job stopped at, if the log said. */

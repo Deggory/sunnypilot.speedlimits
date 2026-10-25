@@ -52,6 +52,34 @@ def test_every_page_has_the_shared_look_the_account_menu_and_its_script(served, 
         assert f'aria-current="page">{tab}</a>' in tabs.group(0)
 
 
+@pytest.mark.parametrize('path, title', [('/', 'Overview'), ('/prepare', 'Prepare'), ('/routes', 'Review'),
+                                         ('/account', 'Settings'), (f'/route/{ROUTE}/', 'Review'),
+                                         ('/nonexistent', 'Page not found')])
+def test_every_page_title_names_the_page_as_the_bar_does(served, path, title):
+    page = served.request('GET', path)[2].decode()
+    assert f'<title>Speed limits · {title}</title>' in page
+    # The connection state is in the bar of every page, empty while the site answers.
+    assert '<span id="live-text"></span>' in page
+
+
+def test_error_pages_speak_plainly_and_lead_back(served):
+    status, response, data = served.request('GET', '/nonexistent')
+    page = data.decode()
+    assert status == 404 and '<h1>Page not found</h1>' in page and 'HTTP code' not in page
+    assert '<a class="btn back" href="/">← Overview</a>' in page
+    status, response, data = served.request('GET', '/route/foo/')
+    page = data.decode()
+    assert status == 404 and '<h1>Drive not found</h1>' in page
+    assert 'This drive is not on the server, or it is not prepared yet.' in page and 'pre-annotation' not in page
+    assert '<a class="btn back" href="/routes">← Review</a>' in page
+
+
+def test_the_empty_route_list_says_what_to_do_in_words(tmp_path):
+    from nnslr_tools.pages import render_index
+    page = render_index([], tmp_path / 'reviews.sqlite3', 'nonce')
+    assert 'No drives to review yet' in page and 'nnslr' not in page.split('<main')[1].split('Technical details')[0]
+
+
 def test_control_page_reads_the_panel_status(served):
     page = served.request('GET', '/')[2].decode()
     script = asset('js/control.js')

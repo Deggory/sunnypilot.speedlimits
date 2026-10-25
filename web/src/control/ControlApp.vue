@@ -4,25 +4,34 @@
 // details of a job. Evaluate reads the training runs itself (/api/panel/runs), Models the networks by role
 // (/api/panel/models).
 import {computed, provide, ref, watch} from 'vue';
-import type {ActionName, Job} from '../common/panel-types';
-import ToastHost from '../components/ToastHost.vue';
+import type {Job} from '../common/panel-types';
+import {markBusy} from '../composables/busy';
 import {usePanelStatus} from '../composables/panel-status';
-import {PREPARE_ACTIONS, TRAIN_ACTIONS} from './jobs';
+import {busyTabs} from './jobs';
 import LogSheet from './LogSheet.vue';
 import {recordMachine} from './machine-history';
 import EvaluateTab from './EvaluateTab.vue';
 import ModelsTab from './ModelsTab.vue';
 import OverviewTab from './OverviewTab.vue';
 import PrepareTab from './PrepareTab.vue';
-import {currentTab, markBusy, useTabRouting, type ControlTab} from './tabs';
+import {currentTab, tabOf, useTabRouting, type ControlTab} from './tabs';
 import TrainTab from './TrainTab.vue';
-import {RESUME_JOB, usePanelActions} from './use-actions';
+import {RESUME_JOB, RETRY_ACTIONS, RETRY_JOB, usePanelActions} from './use-actions';
 
 useTabRouting();
 const {status, refresh} = usePanelStatus((value) => recordMachine(value.system));
-const {run, stop, resume} = usePanelActions(refresh);
+const {run, stop, resume, retry} = usePanelActions(refresh);
 // "Resume" on the card of a stopped training, wherever the card is shown.
 provide(RESUME_JOB, resume);
+// "Try again" on the card of a failed job that needs no choice but its proposer, when its action can start now.
+provide(RETRY_JOB, {
+  can: (job) => RETRY_ACTIONS.includes(job.action) && (job.action !== 'measure_proposer' || Boolean(job.proposer))
+    && status.value?.actions[job.action]?.allowed === true,
+  run: (job) => {
+    const state = status.value?.actions[job.action];
+    if (state) void retry(job, state);
+  },
+});
 
 /** The job in the sheet, by id: the sheet shows its latest copy from the status. */
 const shownId = ref<string | null>(null);
@@ -31,27 +40,12 @@ function details(job: Job): void {
   shownId.value = job.id;
 }
 
-/** The measures shown on Evaluate. */
-const EVALUATE_ACTIONS: ActionName[] = ['measure_proposer', 'measure_ai_reviewer'];
-/** The tabs with work running: a dot on their link in the top bar and on the tiles of the Overview. */
-const busy = computed((): ReadonlySet<ControlTab> => {
-  const tabs = new Set<ControlTab>();
-  const value = status.value;
-  if (value === null) return tabs;
-  // A job lights the tab it belongs to (a measure is Evaluate's even if it uses the GPU as a training does); work
-  // started from a terminal is known only by its group.
-  for (const job of value.jobs.filter((item) => item.state === 'running')) {
-    if (EVALUATE_ACTIONS.includes(job.action)) tabs.add('evaluate');
-    else if (PREPARE_ACTIONS.includes(job.action)) tabs.add('prepare');
-    else if (TRAIN_ACTIONS.includes(job.action)) tabs.add('train');
-  }
-  for (const activity of value.activities) {
-    if (activity.group === 'fetch' || activity.group === 'prepare') tabs.add('prepare');
-    else if (activity.group === 'train') tabs.add('train');
-  }
-  return tabs;
-});
-watch(busy, markBusy);
+/** The tabs with work running, by address: a job lights the tab that shows it (jobs.ts ACTION_TAB: a measure is
+ * Evaluate's even if it uses the GPU as a training does); work started from a terminal is known by its group. */
+const busyPaths = computed((): ReadonlySet<string> => status.value ? busyTabs(status.value.jobs, status.value.activities) : new Set());
+/** The same as tabs: a dot on their link in the top bar and the phone menu (markBusy), and on the tiles of the Overview. */
+const busy = computed((): ReadonlySet<ControlTab> => new Set([...busyPaths.value].map(tabOf).filter((tab) => tab !== null)));
+watch(busyPaths, markBusy);
 </script>
 
 <template>
@@ -60,9 +54,8 @@ watch(busy, markBusy);
     <OverviewTab v-if="currentTab === 'overview'" :status="status" :busy="busy" @run="run" @stop="stop" @details="details"/>
     <PrepareTab v-else-if="currentTab === 'prepare'" :status="status" @run="run" @stop="stop" @details="details"/>
     <TrainTab v-else-if="currentTab === 'train'" :status="status" @run="run" @stop="stop" @details="details"/>
-    <EvaluateTab v-else-if="currentTab === 'evaluate'" :status="status" @run="run"/>
+    <EvaluateTab v-else-if="currentTab === 'evaluate'" :status="status" @run="run" @stop="stop" @details="details"/>
     <ModelsTab v-else :status="status"/>
   </main>
-  <LogSheet :job="shownJob" @close="shownId = null"/>
-  <ToastHost/>
+  <LogSheet :job="shownJob" @close="shownId = null" @stop="stop"/>
 </template>

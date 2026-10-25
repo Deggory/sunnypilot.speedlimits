@@ -2,8 +2,10 @@
 // "AI reviewer" in the inspector, between the boxes and the editor of the selected one: Ask AI (key I) asks the
 // model chosen in Settings about this frame; its answer box by box (Keep, Correct, Add, Delete, Not judged),
 // drawn on the photo in its own colour; Apply makes it the frame's edits (saved only by Confirm, as the
-// reviewer's own review), Dismiss drops it. Hidden offline.
+// reviewer's own review), Dismiss drops it. A frame of the route's "Try without saving" opens with that suggestion,
+// marked as such. Hidden offline.
 import {computed} from 'vue';
+import {isoWhen} from '../common/format';
 import Icon from '../components/Icon.vue';
 import {useNow} from '../composables/now';
 import {ai, aiBlocker, aiPhase, applyAi, askAi, dismissAi, VERDICT} from './ai';
@@ -18,6 +20,7 @@ const ask = computed(() => ai.asks[props.row.frame_key] ?? null);
 const phase = computed(() => aiPhase(props.row.frame_key));
 const blocker = computed(() => aiBlocker());
 const provider = computed(() => ai.state?.provider ?? null);
+const unset = computed(() => ai.state !== null && ai.state.provider === null && phase.value === 'none');
 const waited = computed(() => (ask.value?.phase === 'asking' ? Math.max(0, Math.floor((now.value - ask.value.since) / 1000)) : 0));
 const suggestion = computed(() => (ask.value?.phase === 'ready' ? ask.value.suggestion : null));
 
@@ -38,19 +41,32 @@ const items = computed((): Item[] => {
     const [label, kind] = VERDICT[d.ai_action];
     return {key: 'box-' + i, number: String(i + 1), label, kind, what: describe(d), notes: d.notes ?? ''};
   });
+  // A trial numbered the proposals in the report's order, not the page's: no box number then.
+  const numbered = !ask.value?.trial;
   const deleted = value.deleted.map((d): Item => {
     const [label, kind] = VERDICT.delete;
-    return {key: 'delete-' + d.number, number: '✕', label, kind,
-      what: 'Box ' + d.number + ': ' + describe({bbox_xyxy: d.bbox_xyxy, family: d.family, value_kph: d.value_kph}),
+    const what = describe({bbox_xyxy: d.bbox_xyxy, family: d.family, value_kph: d.value_kph});
+    return {key: 'delete-' + d.number, number: '✕', label, kind, what: numbered ? 'Box ' + d.number + ': ' + what : what,
       notes: d.notes};
   });
   return [...kept, ...deleted];
+});
+/** "From “Try without saving” · 25 Oct, 10:01" over a suggestion of the trial. */
+const trialText = computed(() => {
+  const trial = ask.value?.trial;
+  if (!trial) return '';
+  const when = isoWhen(trial.at);
+  return 'From “Try without saving”' + (when ? ' · ' + when : '');
 });
 const askLabel = computed(() => (phase.value === 'asking' ? 'Asking…' : phase.value === 'none' ? 'Ask AI' : 'Ask again'));
 </script>
 
 <template>
-  <section v-if="report.apiBase" class="ai-section" id="aiSection" :data-ai-phase="phase" aria-labelledby="aiTitle">
+  <!-- No AI reviewer chosen in Settings: one line to set it up, instead of a button that never works. -->
+  <section v-if="report.apiBase && unset" class="ai-section ai-unset" id="aiSection" data-ai-phase="none">
+    <p class="ai-note" id="aiReason">No AI reviewer yet. <a href="/account#ai-reviewer">Set up AI review ›</a></p>
+  </section>
+  <section v-else-if="report.apiBase" class="ai-section" id="aiSection" :data-ai-phase="phase" aria-labelledby="aiTitle">
     <div class="section-head">
       <h2 id="aiTitle">AI reviewer</h2>
       <span class="count ai-model" id="aiModel" :title="provider?.reviewer_name">{{ provider ? provider.name + ' · ' + provider.model : '' }}</span>
@@ -65,6 +81,7 @@ const askLabel = computed(() => (phase.value === 'asking' ? 'Asking…' : phase.
       <div class="ai-actions"><button type="button" class="btn small" id="aiDismiss" @click="dismissAi(); releaseFocus($event)">Dismiss</button></div>
     </template>
     <template v-else-if="suggestion">
+      <p v-if="trialText" class="ai-note" id="aiTrial">{{ trialText }}</p>
       <p class="ai-msg" id="aiMessage">{{ suggestion.message }}</p>
       <div class="ai-actions">
         <button type="button" class="btn small primary" id="aiApply" title="The suggestion becomes the boxes of this frame: check them, then Confirm"

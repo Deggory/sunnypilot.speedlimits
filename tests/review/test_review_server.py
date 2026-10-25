@@ -51,7 +51,7 @@ def test_loopback_needs_no_token_and_index_lists_routes_with_counts(loopback, tm
     routes = json_of(data)['routes']
     first = next(r for r in routes if r['route_id'] == ROUTE)
     assert first == {'route_id': ROUTE, 'run_id': RUN_ID, 'frame_count': 3, 'frames_with_proposals': 2,
-                     'confirmed_count': 0, 'suspicious_count': 0, 'hint_frames': 0,
+                     'confirmed_count': 0, 'confirmed_by_ai': 0, 'suspicious_count': 0, 'hint_frames': 0,
                      'url': '/route/' + ROUTE + '/',
                      # No videos or positions in the test: the drive has nothing to say.
                      'drive': {'when': None, 'minutes': None, 'start': None, 'from': None, 'to': None, 'title': None},

@@ -4,8 +4,8 @@
 import {computed, nextTick} from 'vue';
 import {thousands} from '../common/format';
 import {writeLocal} from './dom';
-import {routeCounts} from './current';
-import {aiConfirmed, doubtsOf, frameStatus, proposalsOf, reasonsOf, statusLabel} from './frames';
+import {DOUBT_LABELS, doubtCounts, routeCounts} from './current';
+import {aiConfirmed, doubtsOf, driveTime, framePlace, frameStatus, proposalsOf, reasonsOf, statusLabel} from './frames';
 import {openFrame, pickFilter} from './navigation';
 import {scrollTimelineToCurrent} from './scroll';
 import {hintsOf, report, state} from './store';
@@ -45,9 +45,11 @@ function tickClass(row: FrameRow): string {
   return cls;
 }
 
+// "2:06 into the drive (segment 2, image 6) · confirmed": the tooltip and the name of a tick.
 function tickLabel(row: FrameRow): string {
-  return 'Segment ' + row.segment_index + ' · image ' + row.output_index + ' · '
-    + statusLabel(row.frame_key).toLowerCase();
+  const place = driveTime(row) === null ? framePlace(row)
+    : framePlace(row) + ' (segment ' + row.segment_index + ', image ' + row.output_index + ')';
+  return place + ' · ' + statusLabel(row.frame_key).toLowerCase();
 }
 
 /** "120/720 confirmed · 3 AI · 2 suspicious": the title of the folded card on a phone. */
@@ -70,19 +72,11 @@ interface Chip {
 
 // Confirmed is not the same as certain: how many confirmed frames still carry a doubt. Each counter is a filter.
 const chips = computed<Chip[]>(() => {
-  let unknown = 0;
-  let unreadable = 0;
-  let road = 0;
-  for (const row of report.rows) {
-    const doubts = doubtsOf(row.frame_key);
-    if (doubts.unknown > 0) unknown += 1;
-    if (doubts.unreadable > 0) unreadable += 1;
-    if (doubts.road > 0) road += 1;
-  }
+  const counts = doubtCounts.value;
   return [
-    {id: 'qUnknown', filter: 'unknown', count: unknown, label: 'without a number', warn: true},
-    {id: 'qUnreadable', filter: 'unreadable', count: unreadable, label: 'with unreadable signs', warn: true},
-    {id: 'qRoad', filter: 'road', count: road, label: 'road not set', warn: false},
+    {id: 'qUnknown', filter: 'unknown', count: counts.unknown, label: DOUBT_LABELS.unknown, warn: true},
+    {id: 'qUnreadable', filter: 'unreadable', count: counts.unreadable, label: DOUBT_LABELS.unreadable, warn: true},
+    {id: 'qRoad', filter: 'road', count: counts.road, label: DOUBT_LABELS.road, warn: false},
   ];
 });
 
@@ -118,7 +112,7 @@ function tickClicked(event: MouseEvent): void {
       <span><i class="l-sus"></i>suspicious</span>
       <span><i class="l-has"></i>with proposals or 2nd reading</span>
       <span><i class="l-none"></i>nothing proposed</span>
-      <span><i class="l-dirty"></i>to confirm</span>
+      <span><i class="l-dirty"></i>unsaved changes</span>
       <span><i class="l-error"></i>not saved</span>
     </div>
     <div class="timeline" id="timeline" aria-label="All the frames of the route" :style="{'--tl-cols': columns}"

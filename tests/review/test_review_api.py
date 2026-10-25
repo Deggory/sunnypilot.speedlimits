@@ -116,14 +116,17 @@ def test_routes_and_progress(api):
     make_report(root, route=OTHER_ROUTE, count=2)
     routes = get_json(server, '/api/v1/routes')['routes']
     first = next(r for r in routes if r['route_id'] == ROUTE)
+    # The drive as the site names it; no videos or positions in the test: it has nothing to say.
     assert first == {'route_id': ROUTE, 'run_id': RUN_ID, 'frame_count': 6, 'confirmed_count': 0,
                      'confirmed_by_human': 0, 'confirmed_by_ai': 0, 'missing_count': 6, 'withdrawn_count': 0,
-                     'suspicious_count': 0, 'frames_with_proposals': 3, 'hint_frames': 0}
+                     'suspicious_count': 0, 'frames_with_proposals': 3, 'hint_frames': 0,
+                     'drive': {'when': None, 'minutes': None, 'start': None, 'from': None, 'to': None, 'title': None}}
     assert server.post_frame(ROUTE, '0/0', page_body(rows['0/0']))[0] == 200
     assert save(server, ROUTE, '1/3', ai_body())[0] == 200
     progress = get_json(server, f'/api/v1/routes/{ROUTE}')
     assert progress['confirmed_count'] == 2 and progress['confirmed_by_human'] == 1
     assert progress['confirmed_by_ai'] == 1 and progress['missing_count'] == 4
+    assert progress['drive']['title'] is None
     assert progress['first_unreviewed'] == '0/2'
     # 0/2 has nothing and its confirmed neighbour 0/0 a speed sign (rule d).
     assert [s['frame_key'] for s in progress['suspicious']] == ['0/2']
@@ -133,8 +136,9 @@ def test_routes_and_progress(api):
     # The page endpoints keep their exact form.
     legacy = json_of(server.request('GET', '/api/routes')[2])['routes']
     assert set(next(r for r in legacy if r['route_id'] == ROUTE)) == {
-        'route_id', 'run_id', 'frame_count', 'frames_with_proposals', 'confirmed_count', 'suspicious_count',
-        'hint_frames', 'url', 'drive', 'proposer'}
+        'route_id', 'run_id', 'frame_count', 'frames_with_proposals', 'confirmed_count', 'confirmed_by_ai',
+        'suspicious_count', 'hint_frames', 'url', 'drive', 'proposer'}
+    assert next(r for r in legacy if r['route_id'] == ROUTE)['confirmed_by_ai'] == 1
     assert get(server, '/api/v1/routes/00000009--abcdef1234')[0] == 404
     assert get(server, '/api/v1/routes/not-a-route')[0] == 404
 

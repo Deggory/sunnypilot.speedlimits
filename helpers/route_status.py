@@ -29,13 +29,14 @@ RUN_ID = re.compile(r"^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$")
 MIN_REVIEWED_ROUTES = 3
 
 # State of a route, in pipeline order, with the helper that moves it forward.
+# The keys stay as they are (the JSON of the site and of --json uses them); the words are English.
 STATES = {
-    "collegare": ("da collegare", "helpers/1_prepare.sh"),
-    "estrarre": ("da estrarre", "helpers/1_prepare.sh"),
-    "preannotare": ("da pre-annotare", "helpers/1_prepare.sh"),
-    "revisionare": ("da revisionare", "helpers/2_review.sh"),
-    "importare": ("revisioni nuove", "helpers/3_train.sh"),
-    "pronta": ("pronta", ""),
+    "collegare": ("videos to link", "helpers/1_prepare.sh"),
+    "estrarre": ("pictures to take out", "helpers/1_prepare.sh"),
+    "preannotare": ("signs to propose", "helpers/1_prepare.sh"),
+    "revisionare": ("to review", "helpers/2_review.sh"),
+    "importare": ("new reviews", "helpers/3_train.sh"),
+    "pronta": ("in the dataset", ""),
 }
 
 
@@ -193,29 +194,29 @@ def route_state(row: dict) -> str:
 def next_step(rows: list[dict]) -> str:
     states = {row["state"] for row in rows}
     if not rows:
-        return "nessuna route: scarica i video con helpers/fetch_comma_segments.sh"
+        return "no drives yet: download the videos with helpers/fetch_comma_segments.sh"
     for state in ("collegare", "estrarre", "preannotare", "revisionare"):
         if state in states:
             return STATES[state][1]
     reviewed = sum(1 for row in rows if row["confirmed"])
     if reviewed < MIN_REVIEWED_ROUTES:
-        return (f"per allenare servono almeno {MIN_REVIEWED_ROUTES} route revisionate (ora {reviewed}): "
-                "scarica altri giri con helpers/fetch_comma_segments.sh, poi helpers/1_prepare.sh")
+        return (f"training needs at least {MIN_REVIEWED_ROUTES} reviewed routes (now {reviewed}): "
+                "download more drives with helpers/fetch_comma_segments.sh, then helpers/1_prepare.sh")
     if "importare" in states:
         return STATES["importare"][1]
-    return "tutto pronto: helpers/3_train.sh per allenare con il dataset attuale"
+    return "all ready: helpers/3_train.sh to train on the current dataset"
 
 
 def print_table(rows: list[dict]) -> None:
-    print(f"{'route':22} {'segmenti':>9} {'frame':>6} {'revisionati':>12} {'oggetti':>8}  stato")
+    print(f"{'route':22} {'segments':>9} {'frames':>6} {'reviewed':>12} {'objects':>8}  state")
     for row in rows:
         segments = f"{row['extracted']}/{row['segments']}"
         reviewed = f"{row['confirmed']}/{row['report_frames']}" if row["run_id"] else "-"
         state = STATES[row["state"]][0]
         if row["state"] == "importare":
-            state += f" ({row['new_reviews']} da importare)"
+            state += f" ({row['new_reviews']} to import)"
         if row["run_id"] is not None and row["segments"] > row["extracted"]:
-            state += f", {row['segments'] - row['extracted']} segmenti arrivati dopo non usati"
+            state += f", {row['segments'] - row['extracted']} segments that came later, not used"
         print(f"{row['route']:22} {segments:>9} {row['frames']:>6} {reviewed:>12} {row['objects']:>8}  {state}")
 
 
@@ -241,7 +242,7 @@ def main() -> int:
     else:
         print_table(rows)
         print()
-        print(f"Prossimo passo: {next_step(rows)}")
+        print(f"Next step: {next_step(rows)}")
     return 0
 
 

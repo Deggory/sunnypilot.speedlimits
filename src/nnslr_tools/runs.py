@@ -93,6 +93,11 @@ SIZES_DIR = 'detector-sizes'
 SIZE_FOLDER = re.compile(r'[1-9][0-9]{0,4}x[1-9][0-9]{0,4}')
 # The score of the cutter the chain is judged at (the cutter's own, nnslr_tools.model_roles.CUTTER_SCORE).
 CHAIN_SCORE = 0.1
+# The weights a chain report names, <data root>/runs/<run>/<part>/<file>: the id of the Models tab, <role>:<run>/<part>.
+CHAIN_WEIGHTS = {
+    'cutter': re.compile(rf'/runs/({RUN_NAME.pattern})/(detector|{SIZES_DIR}/{SIZE_FOLDER.pattern})/detector-best\.pt$'),
+    'classifier': re.compile(rf'/runs/({RUN_NAME.pattern})/(reader|classifier)/reader-best\.pt$'),
+}
 NOT_A_SIGN = 'not_a_sign'
 # Where a "not a sign" crop comes from (nnslr_tools.training.NEGATIVE_SOURCES): a proposal a reviewer removed, a false
 # box of the cutter mined for the training, a box a reviewer kept and marked "not a sign".
@@ -513,7 +518,19 @@ def chain_headline(digest: dict) -> dict | None:
             'human_truth': human.get('truth'), 'human_recall': human.get('recall'),
             'boxes_per_frame': entry['boxes_per_frame'], 'false_per_frame': entry['false_per_frame'],
             'surviving_false_per_frame': entry['surviving_false_per_frame'],
-            'rejects': digest['classifier']['rejects'], 'images': digest['image_count']}
+            'rejects': digest['classifier']['rejects'], 'images': digest['image_count'],
+            # The two networks measured: chains measured with different cutters are not comparable.
+            'cutter_id': _chain_model_id('cutter', digest['cutter']), 'cutter_size': digest['cutter']['input_size'],
+            'classifier_id': _chain_model_id('classifier', digest['classifier'])}
+
+
+def _chain_model_id(role: str, model: dict) -> str | None:
+    """The id of the cutter or classifier of a chain report (cutter:<run>/<part>): the one it recorded, else read from
+    the path of its weights; None when neither says."""
+    if model.get('id'):
+        return model['id']
+    match = CHAIN_WEIGHTS[role].search(model.get('checkpoint') or '')
+    return f'{role}:{match.group(1)}/{match.group(2)}' if match else None
 
 
 # -- the detector's report -------------------------------------------------------------------------------

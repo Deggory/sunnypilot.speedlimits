@@ -33,9 +33,11 @@ def site(tmp_path):
 
 
 def fake_provider(root, fake, model='fake-vl', reviewer=True):
+    """A provider of the fake server; the reviewer has passed its Test (only such a one reviews or saves)."""
     saved = llm_providers.save_provider(root, {'name': 'fake', 'base_url': fake.base_url, 'model': model,
                                                'key': 'sk-fake-key-123456'})
     if reviewer:
+        llm_providers.record_test(root, saved['id'], {'ok': True, 'message': 'Sees images · 1.0 s'})
         llm_providers.set_reviewer(root, saved['id'])
     return llm_providers.provider(root, saved['id'])
 
@@ -390,6 +392,59 @@ def test_a_rebuilt_report_stops_the_run(site, tmp_path):
         summary = ai_review.review_route(service, ROUTE, fake_provider(tmp_path, fake), save=True,
                                          log=lambda text: None)
     assert summary['stopped'] == 'stale_report' and summary['saved'] == 0
+
+
+def test_saving_needs_a_provider_that_passed_its_test(site, tmp_path):
+    service, rows = site
+    with FakeLlm(keep_everything) as fake:
+        provider = fake_provider(tmp_path, fake, reviewer=False)
+        with pytest.raises(ReviewRejected) as error:
+            ai_review.review_route(service, ROUTE, provider, save=True, log=lambda text: None)
+        assert (error.value.status, error.value.reason) == (409, 'ai_not_tested')
+        assert fake.requests == [] and not (tmp_path / 'ai_reviews').exists()
+        llm_providers.record_test(tmp_path, 'fake', {'ok': False, 'message': 'It cannot see the frames.'})
+        with pytest.raises(ReviewRejected):
+            ai_review.review_route(service, ROUTE, llm_providers.provider(tmp_path, 'fake'), save=True,
+                                   log=lambda text: None)
+        # A trial saves nothing: any provider may try.
+        summary = ai_review.review_route(service, ROUTE, provider, save=False, limit=1, log=lambda text: None)
+    assert summary['suggested'] == 1 and service.store.reviews(ROUTE, RUN_ID) == []
+
+
+def test_the_review_page_reads_the_last_trial(site, tmp_path):
+    service, rows = site
+    assert ai_review.latest_trial(service, ROUTE) is None
+    with FakeLlm(keep_everything) as fake:
+        provider = fake_provider(tmp_path, fake)
+        first = ai_review.review_route(service, ROUTE, provider, save=False, limit=2, log=lambda text: None)
+        # A later trial wins (the file names start with the time).
+        older = tmp_path / first['path']
+        older.rename(older.with_name('20200101T000000Z-fake.json'))
+        last = ai_review.review_route(service, ROUTE, provider, save=False, limit=3, log=lambda text: None)
+    trial = ai_review.latest_trial(service, ROUTE)
+    assert trial['run_id'] == RUN_ID and trial['reviewer'] == 'ai/fake/fake-vl' and trial['finished_at']
+    assert trial['provider'] == {'id': 'fake', 'name': 'fake', 'model': 'fake-vl'}
+    assert [frame['frame_key'] for frame in trial['frames']] == ['0/0', '0/1', '0/2']
+    first_frame = trial['frames'][0]
+    assert first_frame['message'] == 'fake-vl: 1 sign (1 kept)' and first_frame['complete'] is True
+    assert first_frame['detections'][0]['ai_action'] == 'keep' and first_frame['deleted'] == []
+    assert trial['frames'][1]['no_sign'] is True and trial['frames'][1]['message'] == 'fake-vl: no sign'
+    assert 'sk-fake-key-123456' not in json.dumps(trial)
+    # A frame a person confirmed since drops out; a save run is not a trial.
+    human(service, rows['0/1'], drop_proposals=True)
+    assert [frame['frame_key'] for frame in ai_review.latest_trial(service, ROUTE)['frames']] == ['0/0', '0/2']
+    trial_start = json.loads((tmp_path / last['path']).read_text())['started_at']
+    saved_run = json.loads((tmp_path / last['path']).read_text())
+    saved_run.update(save=True, started_at='2999-01-01T00:00:00+00:00')
+    (tmp_path / 'ai_reviews' / ROUTE / '29990101T000000Z-fake.json').write_text(json.dumps(saved_run))
+    (tmp_path / 'ai_reviews' / ROUTE / '29990102T000000Z-fake.json').write_text('not json')
+    assert ai_review.latest_trial(service, ROUTE)['started_at'] == trial_start
+    # A trial of an older report of the route is not shown.
+    base = tmp_path / 'derived' / 'preannotations' / ROUTE
+    new_run = '20261022T100000Z-0123abcd'
+    (base / RUN_ID).rename(base / new_run)
+    (base / 'latest.json').write_text(json.dumps({'run_id': new_run}))
+    assert ai_review.latest_trial(service, ROUTE) is None
 
 
 # ---------- measure ----------

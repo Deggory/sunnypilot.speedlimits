@@ -2,14 +2,15 @@
 // A job, live: name and state, the big percent (or "running" with a moving bar when the server does not
 // know it), the steps, what it is doing, the time it has been running (ticking) and, when the percent is
 // known, about how long is left; Stop and Details (the log in the sheet); while it runs, the machine in small
-// under the buttons. A finished job shows how it ended.
+// under the buttons. A finished job shows how it ended; a failed one what went wrong in a sentence when the server
+// knows (the log, with its paths and exit code, is in Details) and Try again when it simply runs again.
 import {computed, inject} from 'vue';
 import type {Job} from '../common/panel-types';
 import Icon from '../components/Icon.vue';
 import {useNow} from '../composables/now';
 import JobSteps from './JobSteps.vue';
-import {elapsedText, failedStep, JOB_STATE, PIPELINE_ACTIONS, roughText, startedAt, startedWhen} from './jobs';
-import {RESUME_JOB} from './use-actions';
+import {durationText, elapsedText, failedStep, JOB_STATE, PIPELINE_ACTIONS, roughText, startedAt, startedWhen} from './jobs';
+import {RESUME_JOB, RETRY_JOB} from './use-actions';
 
 const props = defineProps<{job: Job; heading?: string | undefined}>();
 defineEmits<{details: [job: Job]; stop: [job: Job]}>();
@@ -21,6 +22,9 @@ const resumeJob = inject(RESUME_JOB, null);
 // (helpers/3_train.sh --resume; not the cutter's or the classifier's training, which are other scripts).
 const resumable = computed(() => resumeJob !== null && Boolean(props.job.run)
   && (props.job.state === 'failed' || props.job.state === 'interrupted') && PIPELINE_ACTIONS.includes(props.job.action));
+const retryJob = inject(RETRY_JOB, null);
+// A failed download, preparation, install, import or measure: the same action again, when it can start now.
+const retryable = computed(() => retryJob !== null && props.job.state === 'failed' && retryJob.can(props.job));
 const state = computed(() => JOB_STATE[props.job.state]);
 const percent = computed(() => {
   const value = props.job.state === 'ok' ? 100 : props.job.progress.percent;
@@ -32,18 +36,24 @@ const elapsed = computed(() => {
   const start = startedAt(props.job);
   return start === null ? null : now.value - start.getTime();
 });
-/** From the time so far and the percent: only when the percent is known and past 3%, and only "about". */
+/** The server's time left when it sends one (Propose again, from the pace of the drive at work: the only one shown);
+ * otherwise from the time so far and the percent, only when the percent is known and past 3%, and only "about". */
 const eta = computed(() => {
+  if (!running.value) return '';
+  const server = props.job.progress.seconds_left;
+  if (server !== undefined) return server === null ? '' : durationText(server) + ' left';
   const value = percent.value;
-  if (!running.value || value === null || value <= 3 || value >= 100 || elapsed.value === null || elapsed.value <= 0) return '';
+  if (value === null || value <= 3 || value >= 100 || elapsed.value === null || elapsed.value <= 0) return '';
   return 'about ' + roughText(elapsed.value * (100 - value) / value) + ' left';
 });
+/** When it started and, while it runs, for how long; the exit code of a failed job is in Details. */
 const when = computed(() => {
   const at = 'Started ' + startedWhen(props.job);
   if (running.value) return elapsed.value === null ? at : at + ' · for ' + elapsedText(elapsed.value);
-  if (props.job.state === 'failed' && props.job.code !== null) return at + ' · exit code ' + props.job.code;
   return at;
 });
+/** What went wrong, in one sentence, when the server knows (an out-of-memory GPU, a full disk, ...). */
+const failure = computed(() => props.job.state === 'failed' ? props.job.progress.failure ?? '' : '');
 const ended = computed((): string => {
   if (props.job.state === 'ok') return 'Done';
   if (props.job.state === 'failed') return 'Failed';
@@ -85,13 +95,15 @@ const barKind = computed(() => ({ok: 'ok', failed: 'bad', interrupted: 'warn', r
           :style="percent === null ? undefined : {width: percent + '%'}"></span></div>
         <p v-if="job.progress.detail" class="jp-detail">{{ job.progress.detail }}</p>
         <p v-if="stoppedAt" class="jp-stopped">It stopped at the step <strong>{{ stoppedAt }}</strong>.</p>
-        <p v-if="job.progress.last_line" class="jp-line" :class="{bad: job.state === 'failed'}"
+        <p v-if="failure" class="jp-failure">{{ failure }}</p>
+        <p v-else-if="job.progress.last_line" class="jp-line" :class="{bad: job.state === 'failed'}"
            :title="job.progress.last_line">{{ job.progress.last_line }}</p>
         <slot></slot>
         <div class="jp-actions">
           <button class="btn small" type="button" @click="$emit('details', job)"><Icon name="details"/>Details</button>
           <button v-if="running && job.stoppable" class="btn small danger" type="button" @click="$emit('stop', job)"><Icon name="stop"/>Stop</button>
           <button v-if="resumable" class="btn small primary" type="button" @click="resumeJob?.(job)"><Icon name="resume"/>Resume</button>
+          <button v-if="retryable" class="btn small primary" type="button" @click="retryJob?.run(job)"><Icon name="resume"/>Try again</button>
         </div>
       </div>
       <JobSteps v-if="steps.length" :steps="steps" :current="job.state === 'running' ? job.progress.step_progress : null"/>

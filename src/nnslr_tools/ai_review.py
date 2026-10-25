@@ -635,8 +635,11 @@ def _entry(key: str) -> dict:
 def review_route(service, route: str, provider: dict, *, save: bool, limit: int | None = None,
                  client: str = 'ai-review', log=_stderr) -> dict:
     """Every frame of a route nobody confirmed, in timeline order, up to ``limit``: suggested (dry run) or
-    saved as AI reviews. Writes the suggestions to ai_reviews/<route>/<time>-<provider>.json."""
+    saved as AI reviews. Writes the suggestions to ai_reviews/<route>/<time>-<provider>.json. Saving needs a
+    provider that passed its last Test (llm_providers.check_can_review): its saves are final."""
     from nnslr_tools.progress import report
+    if save:
+        llm_providers.check_can_review(provider)
     started_at = _now()
     started = time.monotonic()
     run_id, keys = _unreviewed(service, route, limit)
@@ -734,6 +737,56 @@ def review_route(service, route: str, provider: dict, *, save: bool, limit: int 
             'suggested': counts['suggested'], 'saved': counts['saved'], 'skipped': counts['skipped'],
             'failed': counts['failed'], 'no_sign': counts['no_sign'],
             'seconds': round(time.monotonic() - started, 1), 'path': relative, 'stopped': record['stopped']}
+
+
+def _list(value) -> list:
+    return value if isinstance(value, list) else []
+
+
+def latest_trial(service, route: str) -> dict | None:
+    """The newest "Try without saving" (a dry run of review_route) on the current report of a route, with the
+    suggestions of the frames nobody confirmed since, for the review page; None without one. A run still going
+    shows the frames written so far. Read only: nothing is saved."""
+    run_id, keys = _unreviewed(service, route, None)
+    still_open = set(keys)
+    folder = runs_dir(service.root, route)
+    try:
+        names = sorted((path.name for path in folder.glob('*.json')), reverse=True)
+    except OSError:
+        return None
+    for name in names:
+        try:
+            record = json.loads((folder / name).read_text(encoding='utf-8'))
+        except (OSError, ValueError, UnicodeDecodeError):
+            continue
+        if not isinstance(record, dict) or record.get('save') is not False or record.get('run_id') != run_id \
+                or not isinstance(record.get('frames'), list):
+            continue
+        provider_id, model = str(record.get('provider_id') or ''), str(record.get('model') or '')
+        try:
+            provider_name = llm_providers.provider(service.root, provider_id)['name']
+        except ReviewRejected:
+            provider_name = provider_id
+        frames = []
+        for entry in record['frames']:
+            if not isinstance(entry, dict) or entry.get('outcome') != 'dry_run' \
+                    or entry.get('frame_key') not in still_open or not isinstance(entry.get('detections'), list):
+                continue
+            suggestion = {'detections': [item for item in entry['detections']
+                                         if isinstance(item, dict) and isinstance(item.get('ai_action'), str)],
+                          'deleted': [item for item in _list(entry.get('deleted')) if isinstance(item, dict)]}
+            seconds = entry.get('seconds') if _number(entry.get('seconds')) else 0.0
+            frames.append({'frame_key': entry['frame_key'], 'seconds': seconds,
+                           'complete': entry.get('complete') is True, 'no_sign': entry.get('no_sign') is True,
+                           'detections': suggestion['detections'], 'deleted': suggestion['deleted'],
+                           'comment': _text(entry.get('comment'), MAX_COMMENT),
+                           'warnings': [item for item in _list(entry.get('warnings')) if isinstance(item, str)],
+                           'message': f'{model}: {_counts(suggestion)}'})
+        return {'route_id': route, 'run_id': run_id,
+                'provider': {'id': provider_id, 'name': provider_name, 'model': model},
+                'reviewer': str(record.get('reviewer') or ''), 'started_at': record.get('started_at'),
+                'finished_at': record.get('finished_at'), 'frames': frames}
+    return None
 
 
 # ---------- measurement ----------

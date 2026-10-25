@@ -1,6 +1,7 @@
 // The AI reviewer: the providers of Settings (GET /api/settings/ai, nnslr_tools.llm_providers), whether this
-// browser may ask one (GET /api/ai/state), a suggestion for one frame (POST …/ai-suggest, nnslr_tools.ai_review)
-// and the measures of Evaluate (GET /api/panel/ai-reviewers). No answer ever holds a key: only has_key.
+// browser may ask one (GET /api/ai/state), a suggestion for one frame (POST …/ai-suggest, nnslr_tools.ai_review),
+// the suggestions of a route's "Try without saving" (GET …/ai-trial) and the measures of Evaluate
+// (GET /api/panel/ai-reviewers). No answer ever holds a key: only has_key.
 import type {Box, Detection} from '../review/types';
 
 /** POST /api/settings/ai/test: one frame asked of the model. ok = answered in JSON and not blind. */
@@ -54,11 +55,13 @@ export interface AiModel {
 
 /** GET /api/ai/state */
 export interface AiState {
+  /** A reviewer is chosen and passed its last Test. */
   available: boolean;
   /** This browser may ask (signed in, or the site on 127.0.0.1). */
   can_ask?: boolean;
   /** Why it cannot be asked ('' when it can). */
   reason: string;
+  /** The reviewer chosen, also when it cannot review now (it did not pass its Test). */
   provider: {id: string; name: string; model: string; reviewer_name: string} | null;
 }
 
@@ -83,6 +86,19 @@ export interface AiSuggestion {
   comment: string;
   warnings: string[];
   message: string;
+}
+
+/** GET /api/route/<r>/ai-trial: the newest "Try without saving" of the route on its current report (null: none). */
+export interface AiTrial {
+  route_id: string;
+  run_id: string;
+  provider: {id: string; name: string; model: string};
+  reviewer: string;
+  started_at: string | null;
+  /** null while it still runs: the frames done so far. */
+  finished_at: string | null;
+  /** The frames nobody confirmed since, each with its suggestion; the boxes sent were the proposals. */
+  frames: Omit<AiSuggestion, 'ok' | 'route_id' | 'run_id' | 'provider' | 'reviewer'>[];
 }
 
 export interface AiCounts {

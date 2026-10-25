@@ -3,18 +3,26 @@
 // automatic), Settings (the password, the signed-in browsers, the AI reviewer) and sign out. A panel under the icon, a sheet
 // across the width on a phone. On a phone it is also the site's menu (the ☰ instead of the person, as shops do): the
 // pages of the tab row first (read from nav.tabs, hidden there), the account at the bottom.
-import {nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef} from 'vue';
+import {computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import type {AuthState} from '../common/auth-types';
 import {onThemeChange, setTheme, storedTheme, type Theme} from '../common/theme';
+import {busyPaths} from '../composables/busy';
 import {askConfirm} from '../composables/confirm';
 
 const props = defineProps<{current?: boolean}>();
 const THEMES: [Theme, string][] = [['dark', 'Dark'], ['light', 'Light'], ['auto', 'Automatic']];
 
-/** The pages of the tab row of this page (pages.SITE_TABS), for the phone menu; none on the review page. */
-const pages = [...document.querySelectorAll<HTMLAnchorElement>('nav.tabs a')].map((link) => ({href: link.getAttribute('href') ?? '/',
-  label: link.textContent ?? '', current: link.getAttribute('aria-current') === 'page'}));
+/** The links of the tab row of this page (pages.SITE_TABS), for the phone menu. */
+const links = [...document.querySelectorAll<HTMLAnchorElement>('nav.tabs a')];
+/** The page marked as current, read again at every opening: the control pages switch tabs without a reload (tabs.ts). */
+const currentHref = ref('');
+/** The pages of the phone menu: the current one marked, a dot on those with work running (composables/busy.ts). */
+const pages = computed(() => links.map((link) => ({href: link.getAttribute('href') ?? '/', label: link.textContent ?? '',
+  current: link.getAttribute('href') === currentHref.value, busy: busyPaths.value.has(link.pathname)})));
+function readCurrent(): void {
+  currentHref.value = links.find((link) => link.getAttribute('aria-current') === 'page')?.getAttribute('href') ?? '';
+}
 const open = ref(false);
 /** A phone: the menu is the drawer (shared.css, max-width 560px). */
 const narrow = window.matchMedia('(max-width: 560px)');
@@ -28,6 +36,7 @@ const pop = useTemplateRef<HTMLDivElement>('pop');
 onThemeChange(() => { theme.value = storedTheme(); });
 
 async function show(): Promise<void> {
+  readCurrent();
   open.value = true;
   await nextTick();
   pop.value?.querySelector<HTMLElement>('[aria-checked="true"]')?.focus();
@@ -79,6 +88,21 @@ onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKey, true);
 });
 
+// The arrows move the Appearance choice, as in any group of radio buttons; they never reach the page behind.
+const THEME_STEPS: Record<string, number> = {ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1};
+function themeKey(event: KeyboardEvent): void {
+  const step = THEME_STEPS[event.key];
+  if (step === undefined) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const index = THEMES.findIndex(([value]) => value === theme.value);
+  const next = THEMES[(index + step + THEMES.length) % THEMES.length];
+  if (next === undefined) return;
+  setTheme(next[0]);
+  theme.value = next[0];
+  void nextTick(() => pop.value?.querySelector<HTMLElement>('[aria-checked="true"]')?.focus());
+}
+
 const sessionsText = (value: AuthState): string =>
   (value.sessions ?? 1) > 1 ? 'Signed in on ' + value.sessions + ' browsers' : 'Signed in on this browser';
 </script>
@@ -104,7 +128,9 @@ const sessionsText = (value: AuthState): string =>
       <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15" fill="none" stroke="currentColor" stroke-width="1.8"
         stroke-linecap="round"/></svg></button>
     <nav v-if="pages.length" class="pop-nav" aria-label="Pages">
-      <a v-for="page in pages" :key="page.href" class="pop-page" :href="page.href" :aria-current="page.current ? 'page' : undefined">
+      <!-- A tap on a page closes the menu: the control pages switch tabs without a reload (tabs.ts). -->
+      <a v-for="page in pages" :key="page.href" class="pop-page" :href="page.href" :aria-current="page.current ? 'page' : undefined"
+         :data-busy="page.busy ? 'true' : undefined" @click="close(false)">
         {{ page.label }}<span aria-hidden="true">›</span></a>
     </nav>
     <div class="pop-head">
@@ -123,8 +149,8 @@ const sessionsText = (value: AuthState): string =>
     </div>
     <div class="pop-section">
       <div class="pop-label">Appearance</div>
-      <div class="segmented" role="radiogroup" aria-label="Appearance">
-        <button v-for="[value, label] in THEMES" :key="value" type="button" role="radio"
+      <div class="segmented" role="radiogroup" aria-label="Appearance" @keydown="themeKey">
+        <button v-for="[value, label] in THEMES" :key="value" type="button" role="radio" :tabindex="theme === value ? 0 : -1"
                 :aria-checked="theme === value" @click="setTheme(value)">{{ label }}</button>
       </div>
     </div>

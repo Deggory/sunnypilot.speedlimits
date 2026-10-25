@@ -408,12 +408,16 @@ class ReviewStore:
             result.append(_review_from_row(row))
         return result
 
-    def confirmed_count(self, route_id: str, run_id: str) -> int:
+    def confirmed_count(self, route_id: str, run_id: str, *, reviewer_kind: str | None = None) -> int:
+        """Confirmed frames of a run; with reviewer_kind ('human' or 'ai'), only those of that kind of reviewer."""
+        query = 'SELECT COUNT(*) FROM frame_reviews WHERE route_id = ? AND run_id = ? AND confirmed = 1'
+        values: tuple = (route_id, run_id)
+        if reviewer_kind is not None:
+            query += ' AND reviewer_kind = ?'
+            values = values + (reviewer_kind,)
         connection = self._connect()
         try:
-            return connection.execute(
-                'SELECT COUNT(*) FROM frame_reviews WHERE route_id = ? AND run_id = ? AND confirmed = 1',
-                (route_id, run_id)).fetchone()[0]
+            return connection.execute(query, values).fetchone()[0]
         finally:
             connection.close()
 
