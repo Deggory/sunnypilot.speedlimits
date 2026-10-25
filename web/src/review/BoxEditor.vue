@@ -52,8 +52,9 @@ const hasValueField = computed(() => props.detection !== null && familyHasValue(
 const noValue = computed(() => hasValueField.value
   && (props.detection?.value_kph === null || props.detection?.value_kph === undefined));
 const road = computed(() => props.detection?.applicability || 'unresolved');
-// O X U on a keyboard (use-keyboard.ts).
+// O X U, G P on a keyboard (use-keyboard.ts).
 const ROAD_KEYS: Record<string, string> = {own_road: 'O', other_road: 'X', unresolved: 'U'};
+const KIND_KEYS: Record<string, string> = {give_way: 'G', stop: 'P'};
 const canFit = computed(() => props.detection !== null && aiBlocker() === '');
 const fittingThis = computed(() => fitting.key === props.row.frame_key && fitting.index === state.selected);
 // Where the box comes from: the model's proposal, else who added it (the reviewer by hand, or an AI reviewer).
@@ -181,7 +182,7 @@ function booleanChanged(key: BooleanField, event: Event): void {
         <span class="kind-group-label">{{ group.label }}</span>
         <button v-for="kind in group.kinds" :key="kind.id" type="button" class="chip kind"
                 :aria-pressed="detection?.family === 'other_sign' && detection?.sign_type === kind.id"
-                :data-kind="kind.id" @click="setKind(kind.id); releaseFocus($event)">{{ kind.chip }}<kbd v-if="kind.id === 'give_way'" class="key-hint">G</kbd></button>
+                :data-kind="kind.id" @click="setKind(kind.id); releaseFocus($event)">{{ kind.chip }}<kbd v-if="KIND_KEYS[kind.id]" class="key-hint">{{ KIND_KEYS[kind.id] }}</kbd></button>
       </div>
     </div>
     <details>

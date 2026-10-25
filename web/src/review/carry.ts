@@ -38,7 +38,7 @@ export function carryState(row: FrameRow): CarryState {
   return {
     shown: true,
     enabled: true,
-    title: 'The signs confirmed on ' + before.frame_key + ', carried onto this frame (P)',
+    title: 'The signs confirmed on ' + before.frame_key + ', carried onto this frame (A)',
   };
 }
 
