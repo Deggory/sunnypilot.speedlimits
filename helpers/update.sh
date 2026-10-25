@@ -60,7 +60,7 @@ fi
 
 cd "$ROOT"
 [ -z "$(git status --porcelain --untracked-files=no)" ] \
-  || die "ci sono modifiche locali ai file del repo (git status): sistemale prima, non le sovrascrivo"
+  || die "files of the site are being changed here on the server (git status), so the update would overwrite them: nothing was changed. Try again when that work is committed."
 
 before="$(git rev-parse HEAD)"
 echo "== a. git pull ($(git branch --show-current))"

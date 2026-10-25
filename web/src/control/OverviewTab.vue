@@ -1,10 +1,10 @@
 <script setup lang="ts">
 // Overview, the home page (the server is the pill of the top bar, TopMachine.vue): the next step, the three phases
 // (the review with Resume review and the route list), what is running now (live, with Stop) or a last job that
-// failed; the latest jobs (all of them on a click), updating the site, the processes on the GPU when there are.
+// failed; the latest jobs (all of them on a click), the processes on the GPU when there are. Update the site is in
+// the server's panel of the top bar.
 import {computed, ref} from 'vue';
 import type {ActionName, ActionState, Job, PanelStatus} from '../common/panel-types';
-import ActionList from './ActionList.vue';
 import FlowTiles from './FlowTiles.vue';
 import JobItem from './JobItem.vue';
 import JobProgress from './JobProgress.vue';
@@ -19,9 +19,6 @@ import TerminalActivity from './TerminalActivity.vue';
 const props = defineProps<{status: PanelStatus | null; busy: ReadonlySet<ControlTab>}>();
 defineEmits<{run: [name: ActionName, state: ActionState]; stop: [job: Job]; details: [job: Job]}>();
 
-const SITE_ACTIONS: [ActionName, string][] = [
-  ['update', 'Gets the latest version of the site and restarts it, when nothing else is running.'],
-];
 /** Jobs shown before "Show all". */
 const FEW = 4;
 const showAll = ref(false);
@@ -54,7 +51,7 @@ const gpuProcesses = computed(() => props.status?.system.gpu?.process_list ?? []
     </div>
   </section>
 
-  <div class="grid2">
+  <div :class="{grid2: gpuProcesses.length}">
     <div class="card">
       <h2>Latest jobs</h2>
       <ul class="list">
@@ -64,20 +61,14 @@ const gpuProcesses = computed(() => props.status?.system.gpu?.process_list ?? []
         {{ showAll ? 'Show fewer' : 'Show all ' + jobs.length }}</button>
       <p v-if="status && jobs.length === 0" class="empty">No jobs yet: the buttons of Prepare and Train start them.</p>
     </div>
-    <div class="side">
-      <div class="card">
-        <h2>Site</h2>
-        <ActionList :items="SITE_ACTIONS" :actions="status?.actions ?? null" @run="(name, state) => $emit('run', name, state)"/>
-      </div>
-      <div v-if="gpuProcesses.length" class="card">
-        <h2>On the GPU</h2>
-        <ul class="gpu-procs">
-          <li v-for="(process, index) in gpuProcesses" :key="index">
-            <span class="mono">{{ process.pid ?? '?' }}</span><span class="grow">{{ process.name }}</span>
-            <span class="num">{{ process.memory_mb === null ? '–' : Math.round(process.memory_mb) + ' MiB' }}</span>
-          </li>
-        </ul>
-      </div>
+    <div v-if="gpuProcesses.length" class="card">
+      <h2>On the GPU</h2>
+      <ul class="gpu-procs">
+        <li v-for="(process, index) in gpuProcesses" :key="index">
+          <span class="grow">{{ !process.name || process.name.startsWith('[') ? 'A program outside this container' : process.name }}</span>
+          <span class="num">{{ process.memory_mb === null ? '–' : Math.round(process.memory_mb) + ' MiB' }}</span>
+        </li>
+      </ul>
     </div>
   </div>
 </template>

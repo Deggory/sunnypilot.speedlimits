@@ -127,6 +127,8 @@ background:var(--surface);border:.5px solid var(--line-strong);box-shadow:var(--
 .tm-meter{grid-column:1/-1;height:4px;border-radius:2px;background:var(--surface-3);overflow:hidden}
 .tm-meter span{display:block;height:100%;border-radius:2px;background:var(--ok);transition:width .6s}
 .tm-meter.warm span{background:var(--todo)}.tm-meter.hot span{background:var(--bad)}
+.tm-update{display:flex;align-items:center;gap:10px;padding:12px 0 4px;border-top:.5px solid var(--line)}
+.tm-update .tm-sub{margin:0}
 @media (max-width:560px){
   .tabs a{flex:1 1 auto;padding:5px 5px;font-size:12.5px;letter-spacing:-.02em}
   .tm-pill .tm-word{display:none}
