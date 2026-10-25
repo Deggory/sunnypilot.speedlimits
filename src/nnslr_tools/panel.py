@@ -733,12 +733,11 @@ class Panel:
         reports = latest_reports(self.root)
         unavailable = {'qwen': vlm_missing(self.root), 'ours': ours_missing(self.root)}
         best = _best_proposer(reports, {key for key, why in unavailable.items() if why})
-        kept = self._kept_proposer()
         return {'proposers': [{'key': key, 'label': label, 'unavailable': unavailable.get(key)}
                               for key, label in PROPOSERS.items()], 'reports': reports,
-                # The choice of Prepare: kept on the server once made (while it can run), else the best measured.
-                'chosen': (kept if kept and not unavailable.get(kept) else None) or best or DEFAULT_PROPOSER,
-                'best': best}
+                # The choice of Prepare: kept on the server once made (one that cannot run stays chosen, and Prepare
+                # says why with its buttons off), else the best measured that can run.
+                'chosen': self._kept_proposer() or best or DEFAULT_PROPOSER, 'best': best}
 
     def _kept_proposer(self) -> str | None:
         """The proposer chosen on the Prepare tab (PROPOSER_FILE), or None before a choice."""

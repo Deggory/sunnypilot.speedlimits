@@ -114,9 +114,9 @@ def test_our_networks_propose_only_whole(root, checkout):
     assert 'decider is not applied' in preannotate.ours_missing(root)
     with pytest.raises(preannotate.PreannotationError):
         preannotate.our_networks(root)
-    # A choice kept before stays out while it cannot run: the best that can is chosen.
-    panel.set_proposer({'proposer': 'ours'})
-    assert panel.proposers()['chosen'] != 'ours'
+    # Chosen all the same, it stays chosen (Prepare says why, its buttons off), and is never the best.
+    assert panel.set_proposer({'proposer': 'ours'})['chosen'] == 'ours'
+    assert panel.proposers()['best'] != 'ours'
 
 
 def test_qwen_is_refused_and_said_so_when_the_gpu_is_taken(root, checkout, monkeypatch):
