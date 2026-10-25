@@ -60,9 +60,11 @@ MINE_SIGN_SCORE = 0.3
 # The order in which the frames give their negatives when a partition has more than it takes.
 TIER_PREFERENCE = ("human", "ai_after_rule", "ai_before_rule", "other")
 # A model in use (models/active.json): "<role>:<run>/<part>"; the weights file of each role inside that part.
-MODEL_REFERENCE = re.compile(r'(cutter|classifier):([A-Za-z0-9][A-Za-z0-9._-]{0,99})/'
-                             r'(detector|detector-sizes/[1-9][0-9]{0,4}x[1-9][0-9]{0,4}|reader|classifier)')
-WEIGHTS_FILE = {"cutter": "detector-best.pt", "classifier": "reader-best.pt"}
+MODEL_REFERENCE = re.compile(r'(cutter|classifier|decider):([A-Za-z0-9][A-Za-z0-9._-]{0,99})/'
+                             r'(detector|detector-sizes/[1-9][0-9]{0,4}x[1-9][0-9]{0,4}|reader|classifier'
+                             r'|experiment-b/(crop|crop_geom|full))')
+# The decider's weights are named after its variant: experiment-b/full/full-best.pt.
+WEIGHTS_FILE = {"cutter": "detector-best.pt", "classifier": "reader-best.pt", "decider": "{variant}-best.pt"}
 # Frames per batch of the cutter, crops per batch of the classifier.
 CUTTER_BATCH = 8
 CLASSIFIER_BATCH = 256
@@ -77,8 +79,8 @@ def _sha256(path: Path) -> str:
 
 
 def resolve_model(spec: str, role: str, data_root: Path) -> dict[str, Any]:
-    """{"path", "id"} of a cutter or classifier given as a checkpoint path or as "active" (the model in use of the
-    role in <data root>/models/active.json; its weights must be inside <data root>/runs)."""
+    """{"path", "id"} of a cutter, classifier or decider given as a checkpoint path or as "active" (the model in use
+    of the role in <data root>/models/active.json; its weights must be inside <data root>/runs)."""
     if role not in WEIGHTS_FILE:
         raise ValueError(f"unknown role {role!r}")
     if spec != "active":
@@ -96,7 +98,7 @@ def resolve_model(spec: str, role: str, data_root: Path) -> dict[str, Any]:
     if match is None or match.group(1) != role:
         raise ValueError(f"no_{role}_in_use: choose one on the Models tab of the site (models/active.json)")
     runs = (root / "runs").resolve()
-    path = (runs / match.group(2) / match.group(3) / WEIGHTS_FILE[role]).resolve()
+    path = (runs / match.group(2) / match.group(3) / WEIGHTS_FILE[role].format(variant=match.group(4))).resolve()
     if not path.is_relative_to(runs) or not path.is_file():
         raise ValueError(f"{role}_in_use_missing: {model_id} has no {WEIGHTS_FILE[role]} on this server")
     return {"path": path, "id": model_id}

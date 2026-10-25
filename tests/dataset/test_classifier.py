@@ -346,6 +346,15 @@ def test_the_model_in_use_resolves_to_its_weights(tmp_path):
     assert resolve_model(str(weights), "cutter", root)["id"] is None
     with pytest.raises(ValueError, match="checkpoint_missing"):
         resolve_model(str(root / "nothing.pt"), "classifier", root)
+    # The decider's weights are named after its variant.
+    decider = root / "runs" / "r3" / "experiment-b" / "crop_geom" / "crop_geom-best.pt"
+    decider.parent.mkdir(parents=True)
+    decider.write_bytes(b"x")
+    active.write_text(json.dumps({"decider": {"id": "decider:r3/experiment-b/crop_geom"}}))
+    assert resolve_model("active", "decider", root) == {"path": decider.resolve(), "id": "decider:r3/experiment-b/crop_geom"}
+    active.write_text(json.dumps({"decider": {"id": "decider:r3/experiment-b/other"}}))
+    with pytest.raises(ValueError, match="no_decider_in_use"):
+        resolve_model("active", "decider", root)
 
 
 def test_reader_config_and_resume_flags_of_the_classifier():

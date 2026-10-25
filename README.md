@@ -53,7 +53,7 @@ crops [N, 3, 160, 160]                            stacked into one tensor
 classes [N]                                       50, end of 80, give way, …, not a sign
   │
   ▼  drop "not a sign"; the rest with position and size, the car's speed and steering
-  ▼  decider (small, still to build)             1 call for all the signs of the frame
+  ▼  decider (MobileNetV3-Small, a prototype)    1 call for all the signs of the frame
 road [M]                                          ours / another / abstain
   │
   ▼  rules over time, with the country from the GPS
@@ -68,7 +68,7 @@ All training happens on a server with one GPU (a Tesla V100). The networks train
 |---|---|
 | Cutter | Trained and measured. One version is chosen in the portal. |
 | Classifier | A first version with "not a sign" is trained and measured. None is chosen yet. |
-| Decider | Prototypes only (experiment B). |
+| Decider | Prototypes (experiment B). The one chosen sets the road of Our networks' proposals. |
 | Following over time | Computed on the reviewed frames, not yet on the networks' output. |
 | Limit state and country rules | Planned. A small core with no dependencies ([`src/speed_vision_core`](src/speed_vision_core)) already has the types, the validation and the temporal checks. |
 | sunnypilot | No working integration. [`integrations/sunnypilot`](integrations/sunnypilot/README.md) keeps an old, frozen advisory snapshot that only ever reports "unavailable". |
@@ -121,7 +121,7 @@ The Train tab has one card per network:
 
 - **Cutter.** Pick the input size (640 × 360, 960 × 544 or the full 1344 × 760) and whether it boxes every sign or only speed signs, then press **Train the cutter**.
 - **Classifier.** **Train the classifier** collects the cutter's false boxes, trains the classifier with "not a sign", and measures it on its own and together with the cutter.
-- **Decider.** **Train the decider** trains experiment B's three variants (the crop alone, with position and speed, with the scene) in about 15 minutes, and compares them. It is a prototype: Our networks do not apply it yet.
+- **Decider.** **Train the decider** trains experiment B's three variants (the crop alone, with position and speed, with the scene) in about 15 minutes, and compares them. It is a prototype; the one in use (Models) sets OURS or another on the speed signs Our networks propose.
 
 Two more buttons cover the dataset and the older pipeline. **Import reviews** turns the confirmed frames into the dataset. **Whole pipeline** runs the older detector-and-reader baseline, from the import to a packaged model.
 

@@ -24,8 +24,8 @@ Each artifact has a stable id ``<role>:<run>/<part>``: ``cutter:2026-10-24_1452/
 
 The model in use for each role is <data root>/models/active.json, ``{"cutter": {"id", "who", "via", "at"} or null,
 "classifier": ..., "decider": ...}``: null until someone picks one, never a default here. Prepare's "ours" proposer
-reads the cutter and the classifier in use (nnslr_tools.preannotate.our_networks; without a classifier in use it takes
-the newest classifier with "not a sign"), scripts/run_classifier.sh the cutter in use; nothing reads the decider yet.
+reads the three in use, only when all three are (nnslr_tools.preannotate.our_networks); scripts/run_classifier.sh the
+cutter in use.
 Choosing copies, exports or deploys nothing. Only ModelIndex.set_active writes, only that file, atomically; the id
 must be one of the index, and nothing else of a request reaches the file system.
 

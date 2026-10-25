@@ -16,6 +16,7 @@ import pytest
 
 from nnslr_tools.annotations import load_jsonl, validate_dataset
 from nnslr_tools.context_experiment import (
+    OWNERSHIP_CLASSES,
     VARIANTS,
     comparison_table,
     expected_calibration_error,
@@ -224,4 +225,13 @@ def test_tiny_cpu_run_of_each_variant(tmp_path, capsys, variant):
     assert saved["metrics"]["validation"]["human_reviewed"]["box_count"] == 2
     assert saved["metrics"]["test"]["ownership"]["sample_count"] == 3
     assert len((output / "samples.jsonl").read_text().splitlines()) == 6
+    # Prepare's "ours" proposer loads these weights as the decider: one answer for each box of a frame.
+    script = ("import sys, torch; from PIL import Image; from nnslr_tools.context_experiment import Decider; "
+              "decider = Decider(sys.argv[1], torch.device('cpu')); "
+              "print(json.dumps(decider.decide(Image.new('RGB', (320, 180)), [[10, 10, 40, 40], [200, 50, 260, 120]], 25.0)))")
+    decided = subprocess.run([sys.executable, "-c", "import json; " + script, str(output / f"{variant}-best.pt")],
+                             capture_output=True, text=True, env=environment, timeout=300)
+    assert decided.returncode == 0, decided.stderr[-3000:]
+    answers = json.loads(decided.stdout)
+    assert len(answers) == 2 and all(road in OWNERSHIP_CLASSES and 0 < share <= 1 for road, share in answers)
     assert "torch" not in sys.modules

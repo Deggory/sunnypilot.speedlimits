@@ -109,12 +109,13 @@ def test_our_networks_propose_only_whole(root, checkout):
     (root / 'models').mkdir(parents=True, exist_ok=True)
     (root / 'models' / 'active.json').write_text(json.dumps({'cutter': {'id': 'c'}, 'classifier': {'id': 'k'}, 'decider': None}))
     assert preannotate.ours_missing(root).endswith('decider is not in use yet')
-    # All three in use: whole only once the proposer applies the decider.
+    # All three in use: whole; their weights must still be on this server.
     (root / 'models' / 'active.json').write_text(json.dumps({'cutter': {'id': 'c'}, 'classifier': {'id': 'k'}, 'decider': {'id': 'd'}}))
-    assert 'decider is not applied' in preannotate.ours_missing(root)
-    with pytest.raises(preannotate.PreannotationError):
+    assert preannotate.ours_missing(root) is None
+    with pytest.raises(preannotate.PreannotationError, match='cannot load a part'):
         preannotate.our_networks(root)
-    # Chosen all the same, it stays chosen (Prepare says why, its buttons off), and is never the best.
+    # Not whole but chosen all the same, it stays chosen (Prepare says why, its buttons off), and is never the best.
+    (root / 'models' / 'active.json').write_text(json.dumps({'cutter': {'id': 'c'}, 'classifier': {'id': 'k'}, 'decider': None}))
     assert panel.set_proposer({'proposer': 'ours'})['chosen'] == 'ours'
     assert panel.proposers()['best'] != 'ours'
 

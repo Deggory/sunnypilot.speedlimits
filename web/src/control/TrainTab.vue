@@ -226,7 +226,7 @@ const numbers = computed(() => {
                   @run="(name, state) => emit('run', name, state)"/>
       <template v-else-if="section === 'decider'">
         <ActionList :items="DECIDER_ACTIONS" :actions="status?.actions ?? null" @run="(name, state) => emit('run', name, state)"/>
-        <p class="latest-none" id="train-decider-note">A prototype: Our networks do not apply it to the proposals yet.</p>
+        <p class="latest-none" id="train-decider-note">The one in use (Models) sets OURS or another on the speed signs Our networks propose.</p>
       </template>
       <TrainStart v-else :starts="status ? status.training_starts ?? [] : null" :state="status?.actions.train ?? null"
                   @start="(start) => status && emit('run', 'train', status.actions.train, start)"/>

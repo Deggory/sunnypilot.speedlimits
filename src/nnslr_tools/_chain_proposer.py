@@ -1,7 +1,9 @@
 """The proposals of a route made by our own networks (nnslr preannotate --proposer ours): the cutter in use finds the
 boxes on the full-resolution frame, the classifier reads each box cut from it, and every box it does not call
-"not a sign" becomes a proposal, in the same rows as _preannotate_worker writes. Run with the GPU environment
-(.venv-gpu: torch, torchvision) on the request.json written by preannotate.run_preannotation."""
+"not a sign" becomes a proposal, in the same rows as _preannotate_worker writes; the decider in use then says whom
+each speed sign applies to (its applicability: own_road, other_road, or unresolved when it abstains), with the car's
+speed from the route's positions (nnslr gps) when they exist. Run with the GPU environment (.venv-gpu: torch,
+torchvision) on the request.json written by preannotate.run_preannotation."""
 from __future__ import annotations
 
 import json
@@ -19,11 +21,27 @@ def proposal_of(label: str) -> tuple[str, int | None] | None:
     return family, int(value) if value.isdigit() else None
 
 
+def car_speed(root: Path, positions: dict, frame: dict, route: str) -> float | None:
+    """The speed (m/s) of the car at a frame from its route's positions (nnslr gps), None without them. positions
+    keeps each route's, read once; the frames of a measure of the proposers come from several routes."""
+    from nnslr_tools.gps import load_positions
+    from nnslr_tools.manifest import NnslerManifestError
+    route = frame.get('route_id') or route
+    if route not in positions:
+        try:
+            positions[route] = load_positions(root, route)
+        except NnslerManifestError:
+            positions[route] = {}
+    speed = (positions[route].get(frame['frame_key']) or {}).get('speed_mps')
+    return float(speed) if type(speed) in (int, float) and speed >= 0 else None
+
+
 def run(request: dict) -> None:
     import torch
     import torchvision.transforms.functional as TF
     from nnslr_tools import chain
     from nnslr_tools.chain import (CLASSIFIER_BATCH, _device, _load_classifier, _load_cutter, cutter_boxes)
+    from nnslr_tools.context_experiment import Decider
     from nnslr_tools.preannotate import suppress_overlaps
     from nnslr_tools.training import crop_rectangle
 
@@ -35,8 +53,12 @@ def run(request: dict) -> None:
     cutter, _, _ = _load_cutter({'path': Path(proposer['cutter_path']), 'id': proposer['cutter']}, device)
     classifier, _, classes, transform = _load_classifier({'path': Path(proposer['classifier_path']),
                                                           'id': proposer['classifier']}, device)
-    print(f"Proposals with our networks on {device}: cutter {proposer['cutter']}, classifier {proposer['classifier']}",
-          file=sys.stderr, flush=True)
+    decider = Decider(Path(proposer['decider_path']), device)
+    # The speed of the car at each frame, when nnslr gps has run for its route (Propose again); else the decider is
+    # told it is missing, as for the training rows without one.
+    positions: dict[str, dict] = {}
+    print(f"Proposals with our networks on {device}: cutter {proposer['cutter']}, classifier {proposer['classifier']}, "
+          f"decider {proposer['decider']}", file=sys.stderr, flush=True)
     output = Path(request['output'])
     (output / 'images').mkdir()
     frames = request['frames']
@@ -45,6 +67,7 @@ def run(request: dict) -> None:
                                                                       min_score=request['confidence'],
                                                                       batch_size=4, num_workers=2, task='prepare')):
             height, width = int(pixels.shape[1]), int(pixels.shape[2])
+            image = TF.to_pil_image(pixels)
             detections = []
             for start in range(0, len(boxes), CLASSIFIER_BATCH):
                 chunk = boxes[start:start + CLASSIFIER_BATCH]
@@ -67,10 +90,19 @@ def run(request: dict) -> None:
                                        'review_state': 'pending', 'applicability': 'unresolved',
                                        'supplementary_panel': 'unknown'})
             detections = suppress_overlaps(detections)
+            # Whom each speed sign applies to: all the boxes of the frame in one call. The other families keep
+            # unresolved: the decider learnt ownership only on the speed families.
+            ruled = [item for item in detections if item['family'] in decider.families]
+            if ruled:
+                speed = car_speed(root, positions, frame, request['route_id'])
+                for item, (applicability, probability) in zip(ruled, decider.decide(
+                        image, [item['bbox_xyxy'] for item in ruled], speed)):
+                    item['applicability'] = applicability
+                    item['applicability_score'] = round(probability, 4)
             for i, item in enumerate(detections):
                 item['detection_id'] = f"{frame['frame_key']}/{i}"
             preview = f'images/{ordinal:08}.jpg'
-            TF.to_pil_image(pixels).save(output / preview, quality=92)
+            image.save(output / preview, quality=92)
             row = {**frame, 'schema_version': 1, 'kind': 'preannotated_frame', 'run_id': request['run_id'],
                    'width': width, 'height': height, 'preview_path': preview, 'detections': detections,
                    'review_state': 'pending', 'ground_truth': False, 'model': proposer, 'road_model': None, 'ocr': None,

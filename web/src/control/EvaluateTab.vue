@@ -152,7 +152,7 @@ const rows = computed((): Row[] => {
       list.push({id: 'proposer:' + item.key, name: item.label, when: report ? isoWhen(report.measured_at) + (report.limited ? ' · a few frames only' : '') : '',
         main: speed ? share(speed.read_right, speed.truth) : null,
         mainText: speed ? ofText(speed.read_right, speed.truth, 'speed signs proposed with the right number')
-          : item.unavailable ? (item.key === 'ours' ? 'not whole yet: needs the decider' : 'not installed') : notMeasured.value,
+          : item.unavailable ? (item.key === 'ours' ? 'not whole yet: a part is not in use' : 'not installed') : notMeasured.value,
         second: report ? 'found ' + speed!.found + ' of ' + speed!.truth + ' · ' + perFrame(report.false_per_frame)
           + ' false proposals per frame · ' + report.seconds_per_frame.toFixed(1) + ' s per frame' : '',
         inUse: false, run: '', watch: null});

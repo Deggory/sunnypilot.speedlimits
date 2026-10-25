@@ -626,6 +626,66 @@ def _build_model(torch, mobilenet_v3_small, weights, roi_align, variant: str, nu
     return ContextModel()
 
 
+class Decider:
+    """A trained variant of experiment B (<variant>-best.pt) used as the decider: whom each box of a frame applies to,
+    own_road, other_road or unresolved (it abstains), with the probability of that answer. Prepare's "ours" proposer
+    runs it on the boxes the classifier kept (nnslr_tools._chain_proposer). The inputs are made as in the training:
+    the same crop and margin, geometry, speed and scene, resized with PIL from the full frame."""
+
+    def __init__(self, path: Path, device):
+        (torch, _, Image, _, _, _, mobilenet_v3_small, roi_align, TF) = _require_experiment_stack()
+        checkpoint = torch_load(Path(path))
+        if checkpoint.get("task") != TASK or checkpoint.get("variant") not in VARIANTS:
+            raise ValueError(f"not_a_decider: {path} is not a checkpoint of experiment B")
+        self.torch, self.TF, self.bilinear, self.device = torch, TF, Image.BILINEAR, device
+        self.variant = checkpoint["variant"]
+        self.families = tuple(checkpoint.get("ownership_families") or OWNERSHIP_FAMILIES)
+        self.ownership_classes = list(checkpoint.get("ownership_classes") or OWNERSHIP_CLASSES)
+        self.crop_size = int(checkpoint.get("crop_size", 96))
+        self.crop_margin = float(checkpoint.get("crop_margin", CROP_MARGIN))
+        self.scene_width, self.scene_height = (int(v) for v in checkpoint.get("scene_size", (384, 216)))
+        self.speed_scale = float(checkpoint.get("speed_scale_mps", SPEED_SCALE_MPS))
+        self.mean = torch.tensor(checkpoint.get("normalize_mean", READER_NORMALIZE_MEAN)).view(3, 1, 1)
+        self.std = torch.tensor(checkpoint.get("normalize_std", READER_NORMALIZE_STD)).view(3, 1, 1)
+        self.model = _build_model(torch, mobilenet_v3_small, None, roi_align, self.variant, len(checkpoint["classes"]))
+        self.model.load_state_dict(model_weights(checkpoint), strict=True)
+        self.model.to(device).eval()
+
+    def decide(self, image, boxes: list[list[float]], speed_mps: float | None) -> list[tuple[str, float]]:
+        """(applicability, probability) of each box (x1, y1, x2, y2 in the pixels of ``image``, a PIL RGB frame):
+        all the boxes of the frame in one call."""
+        if not boxes:
+            return []
+        torch, TF = self.torch, self.TF
+        width, height = image.size
+        crops, geometry, rois = [], [], []
+        scale_x, scale_y = self.scene_width / width, self.scene_height / height
+        for raw in boxes:
+            box = clip_box(raw, width, height)
+            region = crop_box(box, width, height, self.crop_margin)
+            crop = image.resize((self.crop_size, self.crop_size), self.bilinear, box=tuple(region))
+            crops.append(TF.pil_to_tensor(crop))
+            features = geometry_features(box, width, height, speed_mps)
+            if speed_mps is not None:
+                features[-2] = speed_mps / self.speed_scale
+            geometry.append(features)
+            rois.append([0.0, box[0] * scale_x, box[1] * scale_y, box[2] * scale_x, box[3] * scale_y])
+        crop_tensor = (torch.stack(crops).float().div_(255.0) - self.mean) / self.std
+        scenes = roi_tensor = None
+        if self.variant == "full":
+            scene = TF.pil_to_tensor(image.resize((self.scene_width, self.scene_height), self.bilinear))
+            scene = scene.float().div_(255.0)
+            scenes = ((scene - self.mean) / self.std).unsqueeze(0).to(self.device)
+            roi_tensor = torch.tensor(rois, dtype=torch.float32).to(self.device)
+        with torch.no_grad():
+            _, ownership_logits = self.model(crop_tensor.to(self.device),
+                                             torch.tensor(geometry, dtype=torch.float32).to(self.device),
+                                             scenes, roi_tensor)
+            probabilities = torch.softmax(ownership_logits.float(), 1).cpu()
+        confidence, index = probabilities.max(1)
+        return [(self.ownership_classes[int(i)], float(c)) for i, c in zip(index.tolist(), confidence.tolist())]
+
+
 def _frames_of(records: list[dict[str, Any]], partition: str) -> list[dict[str, Any]]:
     """The frames of a partition, each with the indices (into records) of its boxes."""
     grouped: dict[str, list[int]] = {}

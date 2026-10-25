@@ -199,7 +199,7 @@ def suppress_overlaps(detections: list[dict], threshold: float = .5) -> list[dic
 
 # Who proposes the signs of a route (nnslr preannotate --proposer, the choice of the Prepare tab).
 PROPOSERS = {'vietnam': 'Vietnamese traffic-sign YOLO (Hugging Face)',
-             'ours': 'Our cutter and classifier',
+             'ours': 'Our cutter, classifier and decider',
              'qwen': 'Qwen3-VL-8B, a model that sees images'}
 # Short names of the proposers, as the site shows them.
 PROPOSER_NAMES = {'vietnam': 'Vietnamese YOLO', 'ours': 'Our networks', 'qwen': 'Qwen3-VL'}
@@ -249,14 +249,12 @@ GPU_PYTHON = Path(__file__).resolve().parents[2] / '.venv-gpu' / 'bin' / 'python
 
 
 # Our networks propose only whole (Cristian, 25 October 2026): the cutter finds the boxes, the classifier says what they
-# are, the decider whom they apply to. Each must be in use (Models tab), and the proposer must apply the decider:
-# _chain_proposer does not yet, so until then Our networks waits.
+# are, the decider whom they apply to (_chain_proposer). Each must be in use (Models tab).
 OUR_PARTS = ('cutter', 'classifier', 'decider')
-CHAIN_APPLIES_DECIDER = False
 
 
 def ours_missing(root: Path) -> str | None:
-    """Why Our networks cannot propose on this server, or None: the parts not in use, or the decider not applied."""
+    """Why Our networks cannot propose on this server, or None: the parts not in use."""
     try:
         active = json.loads((Path(root) / 'models' / 'active.json').read_text(encoding='utf-8'))
     except (OSError, ValueError):
@@ -265,14 +263,12 @@ def ours_missing(root: Path) -> str | None:
     if missing:
         return ('Our networks propose only with all three parts in use (Models tab): ' + ', '.join(missing)
                 + (' is' if len(missing) == 1 else ' are') + ' not in use yet')
-    if not CHAIN_APPLIES_DECIDER:
-        return 'Our networks propose only with all three parts: the decider is not applied to the proposals yet'
     return None
 
 
 def our_networks(root: Path) -> dict:
-    """The cutter and the classifier that propose with --proposer ours: those in use (Models tab), only when Our
-    networks are whole (ours_missing)."""
+    """The cutter, the classifier and the decider that propose with --proposer ours: those in use (Models tab), only
+    when Our networks are whole (ours_missing)."""
     from nnslr_tools.chain import resolve_model
     missing = ours_missing(root)
     if missing:
@@ -280,12 +276,14 @@ def our_networks(root: Path) -> dict:
     try:
         cutter = resolve_model('active', 'cutter', root)
         classifier = resolve_model('active', 'classifier', root)
+        decider = resolve_model('active', 'decider', root)
     except ValueError as exc:
         raise PreannotationError(f'Our networks cannot load a part in use: {exc}') from exc
     return {'repository': 'ours', 'proposer': 'ours', 'training_domain': 'our reviewed Swiss drives',
             'cutter': cutter['id'] or str(cutter['path']), 'cutter_path': str(cutter['path']),
             'classifier': classifier['id'] or str(classifier['path']), 'classifier_path': str(classifier['path']),
-            'classifier_chosen': 'in use'}
+            'classifier_chosen': 'in use',
+            'decider': decider['id'] or str(decider['path']), 'decider_path': str(decider['path'])}
 
 
 def proposer_setup(proposer: str, root: Path, *, confidence: float | None = None,
