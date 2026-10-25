@@ -8,6 +8,7 @@ import BoxList from './BoxList.vue';
 import {boxCountText} from './boxes';
 import {applyPrevious, carryState} from './carry';
 import ConfirmArea from './ConfirmArea.vue';
+import RoutePick from './RoutePick.vue';
 import {releaseFocus} from './dom';
 import Icon from '../components/Icon.vue';
 import {selectedBox} from './current';
@@ -41,6 +42,7 @@ const countryText = computed(() => {
 <template>
   <aside class="panel" :class="{editing: selectedBox !== null}" aria-label="Review of the frame">
     <section>
+      <RoutePick/>
       <div class="section-head"><h2>Signs</h2><span class="count" id="boxCount">{{ boxCountText(count) }}</span>
         <button v-if="carry.shown" type="button" class="btn small carry" id="applyPrevious" :disabled="!carry.enabled"
                 :title="carry.title" @click="applyPrevious(); releaseFocus($event)"><Icon name="previous"/>Apply previous</button></div>

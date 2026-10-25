@@ -291,8 +291,9 @@ class Panel:
                 state = 'running'
             elif code is not None:
                 state = 'ok' if code == 0 else 'failed'
-            elif process is None and ACTIONS[action]['group'] in busy:
-                # Started before a restart of this server and still going.
+            elif process is None and (ACTIONS[action]['group'] in busy or self._group(job_id) is not None):
+                # Started before a restart of this server and still going: seen from a terminal, or its wrapper
+                # is still alive (the pid the panel wrote when it started it).
                 state = 'running'
             else:
                 state = 'interrupted'

@@ -1,12 +1,10 @@
 <script setup lang="ts">
-// The one-row bar on top: brand, route picker, filters, route progress, reviewer name and the Account menu
-// (none in the offline report, which has no account).
+// The row of the review under the site's top bar (pages.top_bar, the same on every page): filters, route progress
+// and reviewer name (the drive is chosen at the top of the inspector, RoutePick.vue). On a computer it stays under the top bar while the page scrolls.
 import {computed, onMounted, ref, useTemplateRef, watch} from 'vue';
 import {api} from '../common/api';
 import type {AuthState} from '../common/auth-types';
 import {thousands} from '../common/format';
-import AccountMenu from '../components/AccountMenu.vue';
-import BrandMark from '../components/BrandMark.vue';
 import {writeLocal} from './dom';
 import {routeCounts} from './current';
 import {pickFilter} from './navigation';
@@ -28,30 +26,17 @@ const FILTERS: readonly FilterButton[] = [
 
 const header = useTemplateRef<HTMLElement>('header');
 const reviewerInput = useTemplateRef<HTMLInputElement>('reviewerInput');
-useHeightVar(header, '--topbar-h');
+/** The site's top bar, rendered by pages.py above the app: the photo and the inspector are sized under both. */
+const siteBar = ref<Element | null>(document.querySelector('body > header.topbar'));
+useHeightVar(siteBar, '--sitebar-h');
+useHeightVar(header, '--reviewbar-h');
 const online = report.apiBase !== null;
-
-/** The routes of the server, this one chosen; offline only this report. */
-const options = computed(() => {
-  const list = report.routes.map((route) => ({
-    value: String(route.url || ''), text: String(route.name || route.route_id || ''), selected: route.route_id === report.routeId,
-  }));
-  if (!list.some((option) => option.selected)) {
-    list.unshift({value: '', text: report.routeId ? report.routeId : 'Local report', selected: true});
-  }
-  return list;
-});
 
 const counts = routeCounts;
 const barWidth = computed(() => {
   const {done, total} = counts.value;
   return total === 0 ? '0' : Math.round(done * 100 / total) + '%';
 });
-
-function changeRoute(event: Event): void {
-  const value = (event.target as HTMLSelectElement).value;
-  if (value.startsWith('/route/')) window.location.assign(value);
-}
 
 function typed(event: Event): void {
   state.reviewer = (event.target as HTMLInputElement).value;
@@ -76,16 +61,8 @@ watch(() => state.reviewerFocus, () => reviewerInput.value?.focus(), {flush: 'sy
 </script>
 
 <template>
-  <header ref="header" class="topbar">
-    <div class="topbar-inner">
-      <a class="brand" id="brand" :href="online ? '/' : undefined" :title="online ? 'Overview' : undefined"><BrandMark/><span class="brand-name">Speed limits</span></a>
-      <div class="route-pick">
-        <label for="route" class="sr-only">Route</label>
-        <select id="route" :disabled="report.routes.length <= 1" @change="changeRoute">
-          <option v-for="option in options" :key="option.value + option.text" :value="option.value"
-                  :selected="option.selected">{{ option.text }}</option>
-        </select>
-      </div>
+  <div ref="header" class="review-bar">
+    <div class="review-bar-inner">
       <div class="filters" role="group" aria-label="Which frames to show">
         <button v-for="item in FILTERS" :key="item.filter" type="button" :data-filter="item.filter"
                 :aria-pressed="state.filter === item.filter" :title="item.title"
@@ -111,7 +88,6 @@ watch(() => state.reviewerFocus, () => reviewerInput.value?.focus(), {flush: 'sy
         <input ref="reviewerInput" type="text" id="reviewer" :class="{need: state.reviewerNeeded}" maxlength="100"
                placeholder="Reviewer" autocomplete="name" spellcheck="false" :value="state.reviewer" @input="typed">
       </div>
-      <div class="account-menu" id="account-menu" data-current="false" :hidden="!online"><AccountMenu v-if="online"/></div>
     </div>
-  </header>
+  </div>
 </template>

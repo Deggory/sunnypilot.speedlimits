@@ -1,8 +1,11 @@
 """The proposals of a route made by Qwen3-VL-8B-Instruct, a model that sees images (nnslr preannotate --proposer
-qwen; installed by scripts/setup_vlm.sh). Each frame is shown whole with one question: every traffic sign, as JSON,
-with its box, its kind and the number on it. The answer becomes proposals in the same rows as
+qwen; installed by scripts/setup_vlm.sh). Each frame is shown whole with one question: every traffic sign, one line
+each with its box, its kind and the number on it. The answer becomes proposals in the same rows as
 _preannotate_worker writes. Run with the GPU environment (.venv-gpu) on the request.json written by
-preannotate.run_preannotation. The model gives no score: the proposals carry none."""
+preannotate.run_preannotation. The model gives no score: the proposals carry none.
+
+Speed: the model writes its answer a token at a time, so the answer is short (one line per sign, not JSON) and
+BATCH frames are asked together (NNSLR_QWEN_BATCH, default 4; halved when the GPU runs out of memory)."""
 from __future__ import annotations
 
 import json
@@ -12,19 +15,31 @@ import sys
 
 PROMPT = ('This is a frame of a dashcam in a car driving in Switzerland. Find every traffic sign in it: speed '
           'limits, end of a limit, zone signs, electronic signs over the road, and any other road sign, also small '
-          'and far ones. Answer only with JSON, a list of objects {"bbox_2d": [x1, y1, x2, y2], "kind": one of '
-          '"speed_limit", "end_of_limit", "zone", "variable_display", "other_sign", "speed": the number on the '
-          'sign, or null}. Coordinates are relative, from 0 to 1000. With no sign, answer [].')
-# The kinds of the answer, as the families of the review page.
-KINDS = {'speed_limit': 'maximum_speed', 'end_of_limit': 'cancellation', 'zone': 'zone',
+          'and far ones. Answer with one line per sign and nothing else: x1 y1 x2 y2 kind speed. Coordinates are '
+          'relative, from 0 to 1000. kind is one of limit, end, zone, display, other. speed is the number on the '
+          'sign, or - when it has none. Example: 512 431 530 462 limit 80. With no sign, answer none.')
+# The kinds of the answer (the short ones of the prompt, and the long ones of earlier answers), as the families of
+# the review page.
+KINDS = {'limit': 'maximum_speed', 'end': 'cancellation', 'zone': 'zone', 'display': 'variable_display',
+         'other': 'other_sign', 'speed_limit': 'maximum_speed', 'end_of_limit': 'cancellation',
          'variable_display': 'variable_display', 'other_sign': 'other_sign'}
+LINE = re.compile(r'^\W*(\d+(?:\.\d+)?)[ ,]+(\d+(?:\.\d+)?)[ ,]+(\d+(?:\.\d+)?)[ ,]+(\d+(?:\.\d+)?)[ ,]+([a-z_]+)'
+                  r'(?:[ ,]+(\d+|-|null|none))?', re.I)
 # Qwen3-VL gives boxes relative to the image, from 0 to 1000.
 SCALE = 1000.0
 
 
-def parse_answer(text: str, width: int, height: int) -> list[dict]:
-    """The proposals of an answer: the JSON list in it (inside ``` fences or not), boxes in frame pixels; items
-    without a usable box are dropped, an unknown kind is another sign, a speed only when plausible."""
+def _items(text: str) -> list:
+    """The signs of an answer: its lines "x1 y1 x2 y2 kind speed", or else a JSON list (inside ``` fences or not)."""
+    lines = []
+    for line in text.splitlines():
+        match = LINE.match(line.strip())
+        if match:
+            speed = match.group(6)
+            lines.append({'bbox_2d': [float(match.group(i)) for i in range(1, 5)], 'kind': match.group(5).lower(),
+                          'speed': int(speed) if speed and speed.isdigit() else None})
+    if lines:
+        return lines
     match = re.search(r'\[.*\]', text, re.S)
     if match is None:
         return []
@@ -32,8 +47,15 @@ def parse_answer(text: str, width: int, height: int) -> list[dict]:
         items = json.loads(match.group(0))
     except ValueError:
         return []
+    return items if isinstance(items, list) else []
+
+
+def parse_answer(text: str, width: int, height: int) -> list[dict]:
+    """The proposals of an answer (_items), boxes in frame pixels; items without a usable box are dropped, an unknown
+    kind is another sign, a speed only when plausible."""
+    items = _items(text)
     found = []
-    for item in items if isinstance(items, list) else []:
+    for item in items:
         if not isinstance(item, dict):
             continue
         box = item.get('bbox_2d') or item.get('bbox')
@@ -58,6 +80,7 @@ def parse_answer(text: str, width: int, height: int) -> list[dict]:
 
 
 def run(request: dict) -> None:
+    import os
     import torch
     from PIL import Image
     from transformers import AutoModelForImageTextToText, AutoProcessor
@@ -68,35 +91,54 @@ def run(request: dict) -> None:
     model = AutoModelForImageTextToText.from_pretrained(model_dir, dtype=torch.float16, device_map='cuda',
                                                         attn_implementation='sdpa')
     processor = AutoProcessor.from_pretrained(model_dir)
-    print(f"Proposals with {request['model']['repository']} on the GPU", file=sys.stderr, flush=True)
+    # Several frames in one generate: the shorter prompts are padded on the left, where generation does not look.
+    processor.tokenizer.padding_side = 'left'
+    batch = max(1, int(os.environ.get('NNSLR_QWEN_BATCH', '4')))
+    print(f"Proposals with {request['model']['repository']} on the GPU, {batch} frames at a time", file=sys.stderr, flush=True)
     output = Path(request['output'])
     (output / 'images').mkdir()
     frames = request['frames']
+    done = 0
     with (output / 'preannotations.jsonl').open('w') as manifest:
-        for ordinal, frame in enumerate(frames):
-            with Image.open(root / frame['image_path']) as raw:
-                image = raw.convert('RGB')
-            width, height = image.size
-            messages = [{'role': 'user', 'content': [{'type': 'image', 'image': image}, {'type': 'text', 'text': PROMPT}]}]
-            inputs = processor.apply_chat_template(messages, tokenize=True, add_generation_prompt=True,
-                                                   return_dict=True, return_tensors='pt').to(model.device)
-            with torch.no_grad():
-                generated = model.generate(**inputs, max_new_tokens=600, do_sample=False)
-            answer = processor.batch_decode(generated[:, inputs['input_ids'].shape[1]:], skip_special_tokens=True)[0]
-            detections = parse_answer(answer, width, height)
-            for i, item in enumerate(detections):
-                item['detection_id'] = f"{frame['frame_key']}/{i}"
-            preview = f'images/{ordinal:08}.jpg'
-            image.save(output / preview, quality=92)
-            row = {**frame, 'schema_version': 1, 'kind': 'preannotated_frame', 'run_id': request['run_id'],
-                   'width': width, 'height': height, 'preview_path': preview, 'detections': detections,
-                   'review_state': 'pending', 'ground_truth': False, 'model': request['model'], 'road_model': None,
-                   'ocr': None, 'vlm_answer': answer[:4000],
-                   'inference': {'provider': 'CUDAExecutionProvider', 'confidence': None, 'nms_iou': None, 'tiles': 1}}
-            manifest.write(json.dumps(row, allow_nan=False) + '\n')
+        while done < len(frames):
+            group = frames[done:done + batch]
+            images = []
+            for frame in group:
+                with Image.open(root / frame['image_path']) as raw:
+                    images.append(raw.convert('RGB'))
+            conversations = [[{'role': 'user', 'content': [{'type': 'image', 'image': image}, {'type': 'text', 'text': PROMPT}]}]
+                             for image in images]
+            try:
+                inputs = processor.apply_chat_template(conversations, tokenize=True, add_generation_prompt=True,
+                                                       return_dict=True, return_tensors='pt', padding=True).to(model.device)
+                with torch.no_grad():
+                    generated = model.generate(**inputs, max_new_tokens=400, do_sample=False)
+            except torch.cuda.OutOfMemoryError:
+                if batch == 1:
+                    raise
+                batch = batch // 2
+                torch.cuda.empty_cache()
+                print(f"Out of GPU memory: {batch} frames at a time from now", file=sys.stderr, flush=True)
+                continue
+            answers = processor.batch_decode(generated[:, inputs['input_ids'].shape[1]:], skip_special_tokens=True)
+            for frame, image, answer in zip(group, images, answers):
+                ordinal = done
+                width, height = image.size
+                detections = parse_answer(answer, width, height)
+                for i, item in enumerate(detections):
+                    item['detection_id'] = f"{frame['frame_key']}/{i}"
+                preview = f'images/{ordinal:08}.jpg'
+                image.save(output / preview, quality=92)
+                row = {**frame, 'schema_version': 1, 'kind': 'preannotated_frame', 'run_id': request['run_id'],
+                       'width': width, 'height': height, 'preview_path': preview, 'detections': detections,
+                       'review_state': 'pending', 'ground_truth': False, 'model': request['model'], 'road_model': None,
+                       'ocr': None, 'vlm_answer': answer[:4000],
+                       'inference': {'provider': 'CUDAExecutionProvider', 'confidence': None, 'nms_iou': None, 'tiles': 1}}
+                manifest.write(json.dumps(row, allow_nan=False) + '\n')
+                done += 1
+                print(f"Preannotating {done}/{len(frames)}: segment {frame['segment_index']}, frame "
+                      f"{frame['output_index']}, {len(detections)} proposals", file=sys.stderr, flush=True)
             manifest.flush()
-            print(f"Preannotating {ordinal + 1}/{len(frames)}: segment {frame['segment_index']}, frame "
-                  f"{frame['output_index']}, {len(detections)} proposals", file=sys.stderr, flush=True)
 
 
 if __name__ == '__main__':

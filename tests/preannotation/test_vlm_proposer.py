@@ -20,3 +20,18 @@ def test_no_list_or_bad_json_gives_no_proposals():
     assert parse_answer("I see no traffic sign.", 1344, 760) == []
     assert parse_answer("[{bbox_2d: oops}]", 1344, 760) == []
     assert parse_answer("[]", 1344, 760) == []
+
+
+def test_one_line_per_sign_becomes_proposals():
+    answer = "512 431 530 462 limit 80\n100 200 110 220 other -\n300 300 320 330 end -\nnoise line"
+    found = parse_answer(answer, 1000, 1000)
+    assert [(item['family'], item['value_kph']) for item in found] == [
+        ('maximum_speed', 80), ('other_sign', None), ('cancellation', None)]
+    assert found[0]['bbox_xyxy'] == [512.0, 431.0, 530.0, 462.0]
+
+
+def test_none_gives_no_proposals_and_an_unknown_kind_is_another_sign():
+    assert parse_answer("none", 1344, 760) == []
+    assert parse_answer("10 10 20 20 triangle 30", 1000, 1000)[0]['family'] == 'other_sign'
+    # A speed on another sign is not proposed: only limits, zones and displays carry one.
+    assert parse_answer("10 10 20 20 other 30", 1000, 1000)[0]['value_kph'] is None

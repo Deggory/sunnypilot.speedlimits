@@ -145,7 +145,8 @@ def render_review(rows: list[dict], run_id: str, *, route_id: str = '', server: 
             'countries': country_names()}
     payload = json.dumps(data, ensure_ascii=True, allow_nan=False)
     payload = payload.replace('<', '\\u003c').replace('>', '\\u003e').replace('&', '\\u0026')
-    return fill(asset('review.html'), nonce, 'review', 'route', data=payload)
+    # The same top bar as every page (the Review tab marked); the offline report has no site: only the brand.
+    return fill(asset('review.html'), nonce, 'review', 'review', signed_in=server, data=payload)
 
 
 # [control-panel] - START

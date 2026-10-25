@@ -15,6 +15,10 @@ interface CommaState {
   /** What is tried: the address set here, or "comma (192.168.200.208)", the ssh host of the server. */
   address: string;
   configured: boolean;
+  /** This server's key accepted by the comma (None while it is away). */
+  login: boolean | null;
+  /** This server's public ssh key, for the GitHub user whose keys the comma takes. */
+  server_key: string | null;
 }
 
 const INTERVAL_MS = 10000;
@@ -36,8 +40,21 @@ async function saveAddress(): Promise<void> {
   }
 }
 
-const dot = computed(() => comma.value?.downloading ? 'busy' : comma.value?.online ? 'on' : 'off');
-const word = computed(() => comma.value?.downloading ? 'Downloading' : comma.value?.online ? 'Connected'
+const dot = computed(() => comma.value?.downloading ? 'busy' : comma.value?.online && comma.value.login === false ? 'warm'
+  : comma.value?.online ? 'on' : 'off');
+const copied = ref(false);
+async function copyKey(): Promise<void> {
+  if (!comma.value?.server_key) return;
+  try {
+    await navigator.clipboard.writeText(comma.value.server_key);
+    copied.value = true;
+    window.setTimeout(() => { copied.value = false; }, 2000);
+  } catch {
+    copied.value = false;
+  }
+}
+const word = computed(() => comma.value?.downloading ? 'Downloading' : comma.value?.online && comma.value.login === false ? 'Refuses this server'
+  : comma.value?.online ? 'Connected'
   : comma.value?.online === false ? 'Not reachable' : 'Checking…');
 
 async function ask(): Promise<void> {
@@ -106,8 +123,16 @@ onBeforeUnmount(() => {
             <button type="submit" class="btn small primary">Save</button></span>
         </form>
       </div>
+      <p v-if="comma.online && comma.login === false" class="tm-sub tm-warn">The comma refuses this server's key. On the comma,
+        Settings → Network → SSH Keys takes the keys of a GitHub user: add this server's key to that user on GitHub
+        (Settings → SSH keys).</p>
+      <p v-else-if="comma.online && comma.login" class="tm-sub">This server can log in to it.</p>
+      <div v-if="comma.server_key" class="tm-row tm-address">
+        <span class="tm-name">This server's key<small class="tm-key">{{ comma.server_key }}</small></span>
+        <button type="button" class="link-button" @click="copyKey">{{ copied ? 'Copied' : 'Copy' }}</button>
+      </div>
       <div class="tm-update">
-        <button type="button" class="btn small primary" :disabled="!comma.online || comma.downloading" @click="download">
+        <button type="button" class="btn small primary" :disabled="!comma.online || comma.login === false || comma.downloading" @click="download">
           Download new drives</button>
         <span v-if="message" class="tm-sub" role="status">{{ message }}</span>
       </div>

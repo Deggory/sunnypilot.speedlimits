@@ -129,11 +129,19 @@ background:var(--surface);border:.5px solid var(--line-strong);box-shadow:var(--
 .tm-meter{grid-column:1/-1;height:4px;border-radius:2px;background:var(--surface-3);overflow:hidden}
 .tm-meter span{display:block;height:100%;border-radius:2px;background:var(--ok);transition:width .6s}
 .tm-meter.warm span{background:var(--todo)}.tm-meter.hot span{background:var(--bad)}
+.tm-running{padding:10px 0 8px;border-top:.5px solid var(--line)}
+.tm-running h3{margin:0 0 4px;font-size:13px;font-weight:600;color:var(--muted)}
+.tm-running .tm-sub{margin:0}
+.tm-job{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;padding:6px 0;color:inherit;text-decoration:none}
+.tm-job .tm-name small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tm-job:hover .tm-name{color:var(--accent)}
 .tm-update{display:flex;align-items:center;gap:10px;padding:12px 0 4px;border-top:.5px solid var(--line)}
 /* A button that reads as a link (Details, Change, Show all). */
 .link-button{appearance:none;border:0;background:none;padding:0;font:inherit;color:var(--accent);font-weight:500;cursor:pointer}
 .tm-address{align-items:center}
 .tm-address .link-button{font-size:14px}
+.tm-key{font-family:var(--font-data);font-size:11px!important;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:210px}
+.tm-warn{color:var(--todo)!important}
 .tm-edit{grid-column:1/-1;display:flex;flex-direction:column;gap:8px}
 .tm-edit input{font:inherit;font-size:16px;padding:8px 12px;border-radius:10px;border:0;background:var(--surface-2);color:var(--fg);width:100%}
 .tm-edit-actions{display:flex;justify-content:flex-end;gap:8px}

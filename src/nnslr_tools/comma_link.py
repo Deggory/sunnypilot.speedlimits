@@ -3,8 +3,10 @@
 The comma is the address set in the comma panel of the site (``<data root>/web/comma.json``, set_address), else the
 ssh host of helpers/fetch_comma_segments.sh: COMMA_HOST (default "comma", the Host of ~/.ssh/config), resolved once
 with ``ssh -G`` to its address and port. The panel's download gets the same address (--host). The check only opens a
-TCP connection to that port and closes it: no login, nothing runs on the comma. A thread repeats it every
-CHECK_SECONDS while the site asks, so a page never waits for a comma that is away (the car off, or not on the Wi-Fi).
+TCP connection to that port and closes it. When the comma answers, a login is tried too, every LOGIN_SECONDS: ssh with
+this server's key in batch mode, running ``true`` (nothing changes on the comma). The comma takes the public keys of
+the GitHub user set in its Settings → Network → SSH Keys, so a refused key is fixed on GitHub (server_key). A thread
+repeats the checks while the site asks, so a page never waits for a comma that is away (car off, not on the Wi-Fi).
 """
 from __future__ import annotations
 
@@ -19,12 +21,14 @@ import threading
 import time
 
 CHECK_SECONDS = 15
+LOGIN_SECONDS = 300
 TIMEOUT_SECONDS = 2.0
 # The thread stops when nobody asked for this long; the next question starts it again.
 IDLE_SECONDS = 120
 
 _lock = threading.Lock()
-_state: dict = {'online': None, 'checked': None}
+_state: dict = {'online': None, 'checked': None, 'login': None}
+_login_at = 0.0
 _asked = 0.0
 _thread: threading.Thread | None = None
 _address: tuple[str, int] | None = None
@@ -63,7 +67,7 @@ def set_address(root: Path, address: str) -> str | None:
     os.replace(temporary, path)
     with _lock:
         _address = None
-        _state.update(online=None, checked=None)
+        _state.update(online=None, checked=None, login=None)
     return address or None
 
 
@@ -98,12 +102,46 @@ def _check() -> bool:
         return False
 
 
+def _ssh_target() -> str:
+    """Who ssh logs in as: the address set in the panel ("comma@" added, as helpers/fetch_comma_segments.sh does), else
+    COMMA_HOST (the Host of ~/.ssh/config, with its user)."""
+    address = configured(_root) if _root is not None else None
+    if address:
+        return address if '@' in address else 'comma@' + address
+    return os.environ.get('COMMA_HOST', 'comma')
+
+
+def _login() -> bool:
+    """Can this server log in to the comma with its key? (true is the only command run.)"""
+    try:
+        result = subprocess.run(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', '-o', 'StrictHostKeyChecking=accept-new',
+                                 _ssh_target(), 'true'], capture_output=True, timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0
+
+
+def server_key() -> str | None:
+    """This server's public ssh key, to add to the GitHub user of the comma (public: it is no secret)."""
+    for name in ('id_ed25519.pub', 'id_ecdsa.pub', 'id_rsa.pub'):
+        try:
+            return (Path.home() / '.ssh' / name).read_text(encoding='utf-8').strip()
+        except OSError:
+            continue
+    return None
+
+
 def _loop() -> None:
-    global _thread
+    global _thread, _login_at
     while True:
         online = _check()
+        login = _state.get('login')
+        if not online:
+            login = None
+        elif login is None or time.monotonic() - _login_at > LOGIN_SECONDS:
+            login, _login_at = _login(), time.monotonic()
         with _lock:
-            _state.update(online=online, checked=datetime.now(timezone.utc).isoformat(timespec='seconds'))
+            _state.update(online=online, login=login, checked=datetime.now(timezone.utc).isoformat(timespec='seconds'))
             if time.monotonic() - _asked > IDLE_SECONDS:
                 _thread = None
                 return
@@ -111,8 +149,9 @@ def _loop() -> None:
 
 
 def state(root: Path) -> dict:
-    """{'online': True / False / None (not checked yet), 'checked': ISO time of the last check, 'address': what is
-    tried, 'configured': whether it was set in the panel}."""
+    """{'online': True / False / None (not checked yet), 'login': whether this server's key is accepted (None while
+    the comma is away), 'checked': ISO time of the last check, 'address': what is tried, 'configured': whether it was
+    set in the panel, 'server_key': this server's public key}."""
     global _asked, _thread, _root
     with _lock:
         _root = Path(root)
@@ -125,4 +164,4 @@ def state(root: Path) -> dict:
     if address is None:
         resolved = _address
         address = os.environ.get('COMMA_HOST', 'comma') + (' (' + resolved[0] + ')' if resolved else '')
-    return {**tried, 'address': address, 'configured': configured(root) is not None}
+    return {**tried, 'address': address, 'configured': configured(root) is not None, 'server_key': server_key()}
