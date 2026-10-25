@@ -5,7 +5,8 @@ _preannotate_worker writes. Run with the GPU environment (.venv-gpu) on the requ
 preannotate.run_preannotation. The model gives no score: the proposals carry none.
 
 Speed: the model writes its answer a token at a time, so the answer is short (one line per sign, not JSON) and
-BATCH frames are asked together (NNSLR_QWEN_BATCH, default 4; halved when the GPU runs out of memory)."""
+BATCH frames are asked together (NNSLR_QWEN_BATCH, default 8; halved when the GPU runs out of memory). A group
+takes as long as its longest answer: an answer stops at MAX_TOKENS."""
 from __future__ import annotations
 
 import json
@@ -27,6 +28,10 @@ LINE = re.compile(r'^\W*(\d+(?:\.\d+)?)[ ,]+(\d+(?:\.\d+)?)[ ,]+(\d+(?:\.\d+)?)[
                   r'(?:[ ,]+(\d+|-|null|none))?', re.I)
 # Qwen3-VL gives boxes relative to the image, from 0 to 1000.
 SCALE = 1000.0
+# About 12 lines of signs (a line is some 17 tokens). On Basel → Mumpf a real answer had at most 13 lines; 4 answers in
+# 10 went on in a loop to the 400 tokens of before, and a group of frames waits for its longest answer.
+MAX_TOKENS = 200
+BATCH = 8
 # An answer in a loop (_in_a_loop): this many boxes stacked in one column, edges within NEAR of each other (0-1000).
 STACKED = 3
 NEAR = 6
@@ -133,7 +138,7 @@ def run(request: dict) -> None:
     processor = AutoProcessor.from_pretrained(model_dir)
     # Several frames in one generate: the shorter prompts are padded on the left, where generation does not look.
     processor.tokenizer.padding_side = 'left'
-    batch = max(1, int(os.environ.get('NNSLR_QWEN_BATCH', '4')))
+    batch = max(1, int(os.environ.get('NNSLR_QWEN_BATCH', str(BATCH))))
     print(f"Proposals with {request['model']['repository']} on the GPU, {batch} frames at a time", file=sys.stderr, flush=True)
     output = Path(request['output'])
     (output / 'images').mkdir()
@@ -152,7 +157,7 @@ def run(request: dict) -> None:
                 inputs = processor.apply_chat_template(conversations, tokenize=True, add_generation_prompt=True,
                                                        return_dict=True, return_tensors='pt', padding=True).to(model.device)
                 with torch.no_grad():
-                    generated = model.generate(**inputs, max_new_tokens=400, do_sample=False)
+                    generated = model.generate(**inputs, max_new_tokens=MAX_TOKENS, do_sample=False)
             except torch.cuda.OutOfMemoryError:
                 if batch == 1:
                     raise
