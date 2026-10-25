@@ -32,6 +32,11 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
       text: 'Trains a detector at ' + (options?.size ?? 'the default size').replace('x', ' × ') + ' that finds ' + what
         + ' on the GPU, then measures it on test and validation: it takes hours. Its run is a new one, named by the time it starts.'};
   }
+  if (name === 'train_decider') {
+    return {title: 'Train the decider?', action: 'Start training',
+      text: 'Trains three deciders on the GPU (the crop alone; with position and speed; with the scene) and compares them: '
+        + 'about 15 minutes. Its run is a new one, named by the time it starts.'};
+  }
   if (name === 'train_classifier') {
     return {title: 'Train the classifier?', action: 'Start training',
       text: 'Mines the false boxes of the cutter in use, trains the classifier with “not a sign” on the GPU, then measures it '
@@ -93,6 +98,7 @@ const STOP_TEXT: Partial<Record<ActionName, string>> = {
   train_resume: 'The steps already done stay: Resume runs the missing ones on the same run.',
   train_classifier: 'This training is lost: training again starts a new run from the beginning.',
   train_cutter: 'This training is lost: training again starts a new run from the beginning.',
+  train_decider: 'The deciders already trained stay; training again starts a new run.',
   ai_review: 'The frames already saved stay saved; the others are left to review.',
 };
 

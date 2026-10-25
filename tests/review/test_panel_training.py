@@ -330,6 +330,26 @@ def test_the_cutter_training_runs_one_size_on_a_new_run(root, checkout, monkeypa
     assert _run_of(other, 'train_cutter') == '2026-10-24_1800-cutter-2'
 
 
+def test_the_decider_is_trained_from_the_train_tab_on_a_new_run(root, checkout, monkeypatch):
+    from nnslr_tools.panel import _run_of
+    panel = Panel(root, repo=checkout)
+    assert panel._action_states(ready_payload(), [])['train_decider'] == {
+        'label': 'Train the decider', 'allowed': False, 'reason': 'scripts/run_experiment_b.sh is missing in this installation'}
+    script = checkout / 'scripts' / 'run_experiment_b.sh'
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text('#!/usr/bin/env bash\necho "== Experiment B =="\necho "run:          $1"\necho "== 3/5 Train variant crop =="\n'
+                      'echo "experiment_b_crop epoch 2/20 train_loss 1.0 val_loss 2.0 6s"\n')
+    script.chmod(0o755)
+    assert panel._action_states(ready_payload(), [])['train_decider']['allowed'] is True
+    monkeypatch.setattr(panel, 'activities', lambda: [])
+    job = panel.start('train_decider', None)
+    done = finished(panel, job['id'])
+    first = full_log(panel, job['id']).splitlines()[0].split()
+    assert first[:2] == ['==', 'scripts/run_experiment_b.sh'] and re.fullmatch(r'\d{4}-\d{2}-\d{2}_\d{4}-decider', first[2])
+    assert (done['state'], done['run'], done['label']) == ('ok', first[2], 'Train the decider')
+    assert _run_of(panel.logs / (job['id'] + '.log'), 'train_decider') == first[2]
+
+
 @pytest.mark.parametrize('action, options, status', [
     ('train_cutter', {'size': '320x320'}, 400), ('train_cutter', {'size': '960x544 ; rm -rf /'}, 400),
     ('train_cutter', {'families': 'other'}, 400), ('train_cutter', {'start': 'random'}, 400),

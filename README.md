@@ -121,7 +121,7 @@ The Train tab has one card per network:
 
 - **Cutter.** Pick the input size (640 × 360, 960 × 544 or the full 1344 × 760) and whether it boxes every sign or only speed signs, then press **Train the cutter**.
 - **Classifier.** **Train the classifier** collects the cutter's false boxes, trains the classifier with "not a sign", and measures it on its own and together with the cutter.
-- **Decider.** Still in preparation. Experiment B is its prototype.
+- **Decider.** **Train the decider** trains experiment B's three variants (the crop alone, with position and speed, with the scene) in about 15 minutes, and compares them. It is a prototype: Our networks do not apply it yet.
 
 Two more buttons cover the dataset and the older pipeline. **Import reviews** turns the confirmed frames into the dataset. **Whole pipeline** runs the older detector-and-reader baseline, from the import to a packaged model.
 

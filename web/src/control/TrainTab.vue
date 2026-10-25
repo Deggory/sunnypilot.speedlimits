@@ -34,6 +34,7 @@ const SECTIONS: {key: Section; label: string}[] = [{key: 'cutter', label: 'Cutte
 function sectionOf(action: ActionName): Section | null {
   if (action === 'train_cutter') return 'cutter';
   if (action === 'train_classifier') return 'classifier';
+  if (action === 'train_decider') return 'decider';
   return PIPELINE_ACTIONS.includes(action) ? 'pipeline' : null;
 }
 /** The newest job of a section (running or the last one). */
@@ -121,6 +122,10 @@ const CUTTER_ACTIONS = computed((): [ActionName, string][] => [
     + (cutterFamilies.value === 'all' ? 'every sign' : 'speed signs only') + '. Takes a few hours on the GPU.'],
 ]);
 /** The classifier's training, in its card. */
+/** The decider's training, in its card: experiment B, its three variants. */
+const DECIDER_ACTIONS: [ActionName, string][] = [
+  ['train_decider', 'Three deciders: the crop alone, with position and speed, with the scene. About 15 minutes on the GPU.'],
+];
 const CLASSIFIER_ACTIONS: [ActionName, string][] = [
   ['train_classifier', 'A new classifier, taught on the signs and on the cutter’s mistakes. Takes a few hours on the GPU.'],
 ];
@@ -219,8 +224,10 @@ const numbers = computed(() => {
       </template>
       <ActionList v-else-if="section === 'classifier'" :items="CLASSIFIER_ACTIONS" :actions="status?.actions ?? null"
                   @run="(name, state) => emit('run', name, state)"/>
-      <div v-else-if="section === 'decider'" class="role-empty" id="train-decider-note"><strong>In preparation: experiment B is the prototype.</strong>
-        <span>No training from here yet: its variants are trained by scripts/run_experiment_b.sh.</span></div>
+      <template v-else-if="section === 'decider'">
+        <ActionList :items="DECIDER_ACTIONS" :actions="status?.actions ?? null" @run="(name, state) => emit('run', name, state)"/>
+        <p class="latest-none" id="train-decider-note">A prototype: Our networks do not apply it to the proposals yet.</p>
+      </template>
       <TrainStart v-else :starts="status ? status.training_starts ?? [] : null" :state="status?.actions.train ?? null"
                   @start="(start) => status && emit('run', 'train', status.actions.train, start)"/>
       <p v-if="job && !bigJob && !sectionActivities.length" class="last-line">Last: {{ job.label }}, {{ startedWhen(job) }} ·

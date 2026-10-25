@@ -39,6 +39,13 @@ CUTTER_STEPS = (
     ('detector', 'Train the cutter', 80),
     ('evaluate', 'Evaluate on test and validation', 15),
 )
+# scripts/run_experiment_b.sh: the decider's three variants, one after the other (their epoch lines name them).
+DECIDER_STEPS = (
+    ('checks', 'Checks and GPU smoke test', 4),
+    ('experiment_b_crop', 'The crop alone', 32),
+    ('experiment_b_crop_geom', 'Crop, position and speed', 32),
+    ('experiment_b_full', 'Crop, position and the scene', 32),
+)
 PREPARE_STEPS = (('link', 'Link the videos', 5), ('frames', 'Extract the frames and propose the signs', 95))
 FETCH_STEPS = (('fetch', 'Download the drives from the comma', 100),)
 UPDATE_STEPS = (('update', 'Update the code and restart the site', 100),)
@@ -49,10 +56,10 @@ AI_MEASURE_STEPS = (('measure', 'Measure the AI reviewer', 100),)
 # [ai-reviewer] - END
 STEPS = {'fetch': FETCH_STEPS, 'prepare': PREPARE_STEPS, 'dataset': DATASET_STEPS, 'train': TRAIN_STEPS,
          'train_continue': TRAIN_STEPS, 'train_resume': TRAIN_STEPS, 'train_classifier': CLASSIFIER_STEPS,
-         'train_cutter': CUTTER_STEPS, 'update': UPDATE_STEPS, 'ai_review': AI_REVIEW_STEPS,
+         'train_cutter': CUTTER_STEPS, 'train_decider': DECIDER_STEPS, 'update': UPDATE_STEPS, 'ai_review': AI_REVIEW_STEPS,
          'measure_ai_reviewer': AI_MEASURE_STEPS}
 # The actions whose percent is the weighted sum of their steps (the AI's: its frames done, from its reports).
-WEIGHTED = ('train', 'train_continue', 'train_resume', 'train_classifier', 'train_cutter', 'dataset', 'ai_review',
+WEIGHTED = ('train', 'train_continue', 'train_resume', 'train_classifier', 'train_cutter', 'train_decider', 'dataset', 'ai_review',
             'measure_ai_reviewer')
 
 # The sub-steps of scripts/run_v100_baseline.sh ("== 4/10 ...") and the step they belong to.
@@ -67,7 +74,10 @@ CUTTER_TITLES = ((re.compile(r'Validate the training'), 'checks'), (re.compile(r
                  (re.compile(r'Train the detector at '), 'detector'), (re.compile(r'Evaluate the detector at '), 'evaluate'))
 # Which numbered sub-steps an action's log has: (how many, their steps; None: known by their titles, TITLES). Every
 # other action: run_v100_baseline.sh.
-SUBSTEPS = {'train_classifier': (7, CLASSIFIER_PIPELINE), 'train_cutter': (None, CUTTER_PIPELINE)}
+# scripts/run_experiment_b.sh ("== 3/5 Train variant crop ==").
+DECIDER_PIPELINE = {1: 'checks', 2: 'checks', 3: 'experiment_b_crop', 4: 'experiment_b_crop_geom', 5: 'experiment_b_full'}
+SUBSTEPS = {'train_classifier': (7, CLASSIFIER_PIPELINE), 'train_cutter': (None, CUTTER_PIPELINE),
+            'train_decider': (5, DECIDER_PIPELINE)}
 TITLES = {'train_cutter': CUTTER_TITLES}
 MARKERS = (
     (re.compile(r'^== a\+b\. '), 'gpu_env', ('import', 'split')),
@@ -78,7 +88,7 @@ MARKERS = (
     (re.compile(r'^== b\+c\. '), 'frames', ()),
 )
 SUBSTEP = re.compile(r'^== (\d+)/(\d+) ')
-EPOCH = re.compile(r'^(detector|reader|classifier) epoch (\d+)/(\d+)\b')
+EPOCH = re.compile(r'^(detector|reader|classifier|experiment_b_crop_geom|experiment_b_crop|experiment_b_full) epoch (\d+)/(\d+)\b')
 # "classifier stops early after epoch 12: ...": the training ends before its planned epochs.
 EARLY = re.compile(r'^(detector|reader|classifier) stops early after epoch (\d+)\b')
 # The values of an epoch line: "train_loss 0.5000 val_loss 0.6000 ... 40s" (the detector also writes
@@ -262,7 +272,10 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
     if epoch is not None and epoch[0] == current and state == 'running' and epoch[0] in stopped:
         detail = epoch[0] + ' · stopped early after epoch ' + str(stopped[epoch[0]])
     elif epoch is not None and epoch[0] == current and state == 'running':
-        detail = epoch[0] + ' · epoch ' + str(epoch[1]) + ' of ' + str(epoch[2])
+        # A variant of the decider by its step's label ("Crop, position and speed"), a network by its name.
+        name = dict((key, label) for key, label, _ in steps).get(epoch[0], epoch[0]) if epoch[0].startswith('experiment_b') \
+            else epoch[0]
+        detail = name + ' · epoch ' + str(epoch[1]) + ' of ' + str(epoch[2])
     elif action == 'prepare_again' and preparation is not None and preparation.get('again'):
         detail = again_detail(preparation)
     elif action == 'prepare' and preparation is not None and preparation.get('routes_total'):

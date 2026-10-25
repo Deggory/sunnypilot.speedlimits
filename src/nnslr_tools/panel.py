@@ -61,10 +61,14 @@ RUN_LINE = re.compile(r'^== d\. training (\S+) \(', re.M)
 # its top ("run:          <run>").
 CLASSIFIER_SCRIPT = 'scripts/run_classifier.sh'
 CUTTER_SCRIPT = 'scripts/run_detector_sizes.sh'
+# The decider: experiment B, its three variants (the crop alone; with position and speed; with the scene), on a run of
+# its own (start() adds <time>-decider).
+DECIDER_SCRIPT = 'scripts/run_experiment_b.sh'
 RUN_ARGUMENT_LINE = re.compile(r'^run:\s+(\S+)\s*$', re.M)
 RUN_LINES = {
     'train_classifier': (re.compile(r'^== scripts/run_classifier\.sh (\S+)\s*$', re.M), RUN_ARGUMENT_LINE),
     'train_cutter': (re.compile(r'^== scripts/run_detector_sizes\.sh (\S+)(?: \S+)*\s*$', re.M), RUN_ARGUMENT_LINE),
+    'train_decider': (re.compile(r'^== scripts/run_experiment_b\.sh (\S+)\s*$', re.M), RUN_ARGUMENT_LINE),
 }
 # The cutter's training: one input size of the detector (scripts/run_detector_sizes.sh NAME SIZE), and the boxes it
 # learns to find (NNSLR_CUTTER_FAMILIES): every sign (the speed signs and the other signs) or the speed signs only.
@@ -135,6 +139,7 @@ ACTIONS = {
     # The cutter: one detector of the size chosen, trained and measured on test and validation, on a run of its own
     # (start() adds <time>-cutter and the size; {'size', 'families'}).
     'train_cutter': {'label': 'Train the cutter', 'group': 'train', 'command': [CUTTER_SCRIPT]},
+    'train_decider': {'label': 'Train the decider', 'group': 'train', 'command': [DECIDER_SCRIPT]},
     # A proposer of Prepare measured on the test frames (the Proposers view of Evaluate); in the train group: the GPU.
     'measure_proposer': {'label': 'Measure a proposer', 'group': 'train', 'command': ['helpers/measure_proposer.sh']},
     # Qwen3-VL as the third proposer of Prepare: its packages, its weights (17.5 GB, what is already there is kept after
@@ -182,7 +187,8 @@ RUNNING_NAMES = {'fetch': 'a download from the comma', 'prepare': 'a preparation
                  'measure_proposer': 'a proposer measurement', 'setup_vlm': 'the install of Qwen3-VL',
                  'dataset': 'an import of the reviews', 'train': 'a training', 'train_continue': 'a training',
                  'train_resume': 'a training', 'train_classifier': 'a classifier training',
-                 'train_cutter': 'a cutter training', 'update': 'a code update', 'ai_review': 'an AI review',
+                 'train_cutter': 'a cutter training', 'train_decider': 'a decider training', 'update': 'a code update',
+                 'ai_review': 'an AI review',
                  'measure_ai_reviewer': 'an AI reviewer measurement'}
 ACTIVITY_NAMES = {'download from the comma': 'a download from the comma', 'preparation': 'a preparation',
                   'frame extraction': 'a preparation', 'pre-annotation': 'a preparation',
@@ -606,6 +612,8 @@ class Panel:
                 reason = CLASSIFIER_SCRIPT + ' is missing in this installation'
             elif name == 'train_cutter' and not (self.repo / CUTTER_SCRIPT).is_file():
                 reason = CUTTER_SCRIPT + ' is missing in this installation'
+            elif name == 'train_decider' and not (self.repo / DECIDER_SCRIPT).is_file():
+                reason = DECIDER_SCRIPT + ' is missing in this installation'
             # [ai-reviewer] - START
             elif name in AI_ACTIONS and not (self.repo / action['command'][0]).is_file():
                 reason = action['command'][0] + ' is missing in this installation'
@@ -1094,6 +1102,8 @@ class Panel:
                 raise PanelError(403, 'actions_disabled', 'The reader of the comma logs is missing (see docs/GUIDA.md).')
         if action == 'train_cutter' and not (self.repo / CUTTER_SCRIPT).is_file():
             raise PanelError(403, 'actions_disabled', CUTTER_SCRIPT + ' is missing in this installation.')
+        if action == 'train_decider' and not (self.repo / DECIDER_SCRIPT).is_file():
+            raise PanelError(403, 'actions_disabled', DECIDER_SCRIPT + ' is missing in this installation.')
         # [ai-reviewer] - START
         if action in AI_ACTIONS and not (self.repo / ACTIONS[action]['command'][0]).is_file():
             raise PanelError(403, 'actions_disabled', ACTIONS[action]['command'][0] + ' is missing in this installation.')
@@ -1119,6 +1129,8 @@ class Panel:
                 command.append('--jobs=' + os.environ.get(PREPARE_JOBS_ENV, '2'))
             if action == 'train_classifier':
                 command.append(self.new_run_name('classifier'))
+            if action == 'train_decider':
+                command.append(self.new_run_name('decider'))
             if action == 'train_cutter':
                 # NAME SIZE: one size, so the run holds one cutter.
                 command += [self.new_run_name('cutter'), size]
