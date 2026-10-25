@@ -4,10 +4,14 @@
 .group-title{display:flex;align-items:baseline;gap:8px;margin:10px 2px 0;font-size:20px;font-weight:600;letter-spacing:-.018em;
 color:var(--fg)}
 .group-title .n{color:var(--muted);font-weight:500;letter-spacing:0}
-/* Route list: one card per group, one row per route; the whole row is the link. */
+/* Route list: one card per group, one row per route; the whole row is the link. A route with frames left to
+   review has "Review with AI" beside it (AiRouteSheet.vue): at the right on a computer, under the row on a phone. */
 .cards{list-style:none;margin:0;padding:0;background:var(--surface);border:0;border-radius:18px;box-shadow:var(--shadow);overflow:hidden}
-.cards > li + li{border-top:.5px solid var(--line-strong);margin-left:56px}
-.cards > li + li .card-row{margin-left:-56px}
+.cards > li{position:relative;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;transition:background .15s}
+.cards > li + li::before{content:"";position:absolute;top:0;left:56px;right:0;border-top:.5px solid var(--line-strong)}
+.cards > li:has(> .card-row:hover),.cards > li:has(> .ai-route:hover){background:var(--surface-2)}
+.ai-route{margin-right:20px;background:var(--accent-soft);color:var(--accent)}
+.ai-route:hover:not(:disabled){background:color-mix(in srgb,var(--accent) 26%,transparent)}
 .card-row{display:grid;grid-template-columns:16px minmax(220px,1.25fr) minmax(120px,1fr) 176px 120px;
 grid-template-areas:"icon route bar count open" "icon stats bar count open";column-gap:22px;row-gap:3px;align-items:center;
 padding:14px 20px;color:inherit;text-decoration:none;transition:background .15s}
@@ -35,7 +39,8 @@ font-variant-numeric:tabular-nums}
 font-variant-numeric:tabular-nums}
 .count .unit{font-weight:400;color:var(--muted)}
 .card-row.done .route,.card-row.done .count{color:var(--muted)}
-.open{grid-area:open;justify-self:end;min-width:96px}
+/* Scoped: .open is also the shown state of a sheet and its backdrop. */
+.card-row .open{grid-area:open;justify-self:end;min-width:96px}
 .card-row:hover .open:not(.primary){background:var(--btn-2-hover)}
 .card-row:hover .open.primary{background:var(--accent-hover)}
 
@@ -83,6 +88,93 @@ padding:6px 16px;border-radius:8px;cursor:pointer;min-height:32px;opacity:.85}
 .segmented button[aria-checked="true"]{opacity:1;font-weight:600;background:var(--seg-on);box-shadow:var(--seg-on-shadow)}
 /* [site-login] - END */
 
+/* -- the AI reviewer: Settings (account/AiProviders.vue, ProviderSheet.vue) and "Review with AI" of the route list
+   (components/AiRouteSheet.vue). iOS grouped lists: rows on a grey inset card, separators that start after the
+   margin, fields with the label at the left (above it on a phone), a checkmark on the model chosen. */
+#ai-reviewer{scroll-margin-top:84px}
+.ai-loading{color:var(--muted)}
+.ios-list{list-style:none;margin:0;padding:0;border-radius:14px;background:var(--surface-2);overflow:hidden}
+.ai-prov{position:relative;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;column-gap:12px}
+.ai-prov + .ai-prov::before{content:"";position:absolute;top:0;left:16px;right:0;border-top:.5px solid var(--line-strong)}
+.ai-prov-main{appearance:none;border:0;background:none;font:inherit;color:inherit;text-align:left;display:flex;flex-direction:column;
+justify-content:center;gap:2px;width:100%;min-width:0;min-height:56px;padding:11px 16px}
+button.ai-prov-main{cursor:pointer;transition:background .15s}
+button.ai-prov-main:hover{background:var(--surface-3)}
+.ai-prov-name{display:flex;align-items:center;flex-wrap:wrap;gap:4px 10px;font-size:16px;font-weight:600;letter-spacing:-.01em;color:var(--fg);overflow-wrap:anywhere}
+.ai-key{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:500;color:var(--muted);letter-spacing:0}
+.ai-key-dot{width:8px;height:8px;border-radius:50%;border:1.5px solid var(--muted);flex:none}
+.ai-key.on .ai-key-dot{background:var(--ok);border-color:var(--ok)}
+.state-box .ai-prov-sub,.ai-prov-sub{font-size:13px;color:var(--muted);overflow-wrap:anywhere}
+.state-box .ai-prov-test,.ai-prov-test{font-size:13px;color:var(--muted);overflow-wrap:anywhere}
+.ai-prov-test.ok{color:var(--ok)}.ai-prov-test.bad{color:var(--bad)}
+.ai-prov-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding-right:16px}
+.ai-prov-actions:empty{display:none}
+.btn.ai-reviews[aria-pressed="true"]{background:var(--ok-soft);color:var(--ok)}
+.ai-add .ai-prov-main{flex-direction:row;align-items:center;gap:12px;color:var(--accent);font-size:15.5px;font-weight:500}
+.ai-plus{width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;display:grid;place-items:center;font-size:18px;line-height:1;flex:none}
+/* The sheets: fields and lists on the grey of a grouped list. */
+.ai-form{display:flex;flex-direction:column;gap:10px}
+/* The form scrolls in the sheet: its parts keep their height, never squeezed to fit. */
+.ai-form > *,.ai-fields > *,.ai-sheet .sheet-body > *{flex:none}
+.ai-fields{display:flex;flex-direction:column;border-radius:14px;background:var(--surface-2);overflow:hidden}
+.ai-field{position:relative;display:grid;grid-template-columns:112px minmax(0,1fr);align-items:center;column-gap:12px;min-height:48px;
+padding-left:16px;font-size:15px;color:var(--fg);margin:0}
+.ai-field + .ai-field::before{content:"";position:absolute;top:0;left:16px;right:0;border-top:.5px solid var(--line-strong)}
+.ai-field:focus-within{box-shadow:inset 3px 0 0 var(--accent)}
+.ai-field input{font:inherit;font-size:16px;color:var(--fg);background:transparent;border:0;outline:none;padding:12px 16px 12px 0;width:100%;min-width:0}
+.ai-field input::placeholder{color:var(--placeholder)}
+.ai-field input:disabled{opacity:.6}
+.ai-key-line{display:flex;align-items:center;min-width:0}
+.ai-link{appearance:none;border:0;background:none;font:inherit;font-size:14.5px;font-weight:500;color:var(--accent);padding:10px 16px 10px 6px;
+cursor:pointer;white-space:nowrap;flex:none;min-height:44px}
+.ai-link.danger{color:var(--bad)}
+.ai-link:disabled{opacity:.5;cursor:default}
+.ai-help,.state-box .ai-help{margin:0 4px;font-size:13px;color:var(--muted)}
+.ai-help code{word-break:normal;white-space:nowrap}
+.state-box .ai-warn-text,.ai-warn-text{color:var(--warn)}
+.ai-models{display:flex;flex-direction:column;border-radius:14px;background:var(--surface-2);max-height:232px;overflow:auto;-webkit-overflow-scrolling:touch}
+.ai-model-row{position:relative;appearance:none;border:0;background:none;font:inherit;color:var(--fg);text-align:left;display:flex;align-items:center;gap:10px;
+padding:10px 16px;min-height:44px;cursor:pointer;flex:none}
+.ai-model-row + .ai-model-row::before{content:"";position:absolute;top:0;left:44px;right:0;border-top:.5px solid var(--line-strong)}
+.ai-model-row:hover{background:var(--surface-3)}
+.ai-check{width:18px;flex:none;color:var(--accent);font-weight:700;text-align:center}
+.ai-model-row[aria-checked="true"] .ai-check::before{content:"✓"}
+.ai-model-id{flex:1;min-width:0;font-size:14.5px;overflow-wrap:anywhere}
+.ai-tag{font-size:12px;font-weight:600;padding:2px 9px;border-radius:999px;background:var(--ok-soft);color:var(--ok);white-space:nowrap;flex:none}
+.ai-tag.text{background:var(--bad-soft);color:var(--bad)}
+.ai-sheet-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:6px}
+.ai-sheet-actions .grow{flex:1}
+.ai-sheet .auth-error{margin:0 4px}
+/* "Review with AI": who reviews, then the two ways, as the action cards of the control pages. */
+.ai-who{margin:4px 0 12px}
+.ai-choices{display:grid;gap:10px}
+.ai-choice{appearance:none;border:0;font:inherit;color:inherit;text-align:left;width:100%;display:flex;align-items:center;gap:14px;padding:14px 16px;
+border-radius:14px;background:var(--surface-2);cursor:pointer;transition:background .2s,transform .1s}
+.ai-choice:hover:not(:disabled){background:var(--surface-3)}
+.ai-choice:active:not(:disabled){transform:scale(.99)}
+.ai-choice:disabled{opacity:.5;cursor:default}
+.ai-choice-icon{width:38px;height:38px;border-radius:10px;flex:none;display:grid;place-items:center;background:var(--accent);color:#fff}
+.ai-choice-icon .icon{width:20px;height:20px}
+.ai-choice.save .ai-choice-icon{background:var(--todo)}
+.ai-choice-body{display:flex;flex-direction:column;gap:2px;min-width:0}
+.ai-choice-body strong{font-size:15.5px;font-weight:600;letter-spacing:-.012em}
+.ai-choice-body span{font-size:13.5px;color:var(--muted);line-height:1.4}
+.ai-started{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin:4px 0 10px}
+.ai-sheet .sheet-body > .btn.primary{margin-top:10px}
+@media (max-width:560px){
+  .ai-prov{grid-template-columns:minmax(0,1fr)}
+  .ai-prov-actions{padding:0 16px 12px}
+  .ai-field{grid-template-columns:minmax(0,1fr);row-gap:0;padding-top:8px}
+  .ai-field > span,.ai-field > label{font-size:12.5px;font-weight:500;color:var(--muted)}
+  .ai-field input{padding-top:2px}
+  /* "Remove key" and "List models" under their field: the placeholder keeps the whole width. */
+  .ai-key-line{display:grid;grid-template-columns:minmax(0,1fr);justify-items:start}
+  .ai-key-line .ai-link{padding:0 16px 10px 0;min-height:32px}
+  .ai-sheet-actions .btn{flex:1}
+  .ai-sheet-actions .grow{display:none}
+}
+@media (prefers-reduced-motion:reduce){.ai-choice,button.ai-prov-main,.cards > li{transition:none}}
+
 /* Technical details, out of the way */
 .foot{font-size:13px;color:var(--muted)}
 .foot summary{display:inline-flex;align-items:center;gap:6px;padding:4px 0;cursor:pointer;list-style:none}
@@ -92,11 +184,13 @@ padding:6px 16px;border-radius:8px;cursor:pointer;min-height:32px;opacity:.85}
 .foot summary:hover{color:var(--fg)}
 .foot p{margin:8px 0 0}
 
-@media (max-width:900px){
+@media (max-width:980px){
   .card-row{grid-template-columns:16px minmax(0,1fr) auto;grid-template-areas:"icon route open" ". count count" ". bar bar" ". stats stats";
     column-gap:12px;row-gap:6px;padding:14px 16px}
   .count{justify-self:start;text-align:left;font-size:13.5px}
-  .open{min-width:0}
+  .card-row .open{min-width:0}
+  .cards > li{grid-template-columns:minmax(0,1fr)}
+  .ai-route{justify-self:start;margin:-4px 16px 14px 44px}
 }
 @media (max-width:480px){
   .brand-name{font-size:17px}

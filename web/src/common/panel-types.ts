@@ -1,7 +1,8 @@
 // GET /api/panel/status (nnslr_tools.panel.Panel.status): the control pages (Overview, Prepare, Train).
+import type {AiState} from './ai-types';
 
-export type ActionName = 'fetch' | 'prepare' | 'prepare_again' | 'measure_proposer' | 'dataset' | 'train' | 'train_continue' | 'train_resume' | 'train_classifier'
-  | 'train_cutter' | 'update';
+export type ActionName = 'fetch' | 'prepare' | 'prepare_again' | 'measure_proposer' | 'setup_vlm' | 'dataset' | 'train' | 'train_continue' | 'train_resume' | 'train_classifier'
+  | 'train_cutter' | 'update' | 'ai_review' | 'measure_ai_reviewer';
 /** What a cutter learns to find: every sign (the speed signs and the other signs) or the speed signs only. */
 export type CutterFamilies = 'all' | 'speed';
 /** The options of “Train the cutter” (POST /api/panel/run/train_cutter {"size", "families"}). */
@@ -38,11 +39,16 @@ export interface ProposersPayload {
   proposers: {key: Proposer; label: string; unavailable: string | null}[];
   reports: ProposerReport[];
 }
-/** The options of an action: the cutter's size and signs, or the proposer of a preparation. */
+/** The options of an action: the cutter's size and signs, the proposer of a preparation, or what an AI review
+ * reviews (the route, the provider, save yes or no, how many frames at most, as text). */
 export interface ActionOptions {
   size?: string;
   families?: CutterFamilies;
   proposer?: Proposer;
+  route?: string;
+  provider?: string;
+  save?: 'yes' | 'no';
+  limit?: string;
 }
 export type JobState = 'running' | 'ok' | 'failed' | 'interrupted';
 export type RouteState = 'collegare' | 'estrarre' | 'preannotare' | 'revisionare' | 'importare' | 'pronta';
@@ -279,6 +285,8 @@ export interface PanelStatus {
   cutter_options?: {sizes: string[]; size: string; families: CutterFamilies[]; family: CutterFamilies};
   /** Why a proposer cannot run on this server (null: it can). */
   proposers?: {qwen: string | null};
+  /** The AI reviewer chosen in Settings (llm_providers.ai_state: a file read, no network). */
+  ai_reviewer: AiState;
 }
 
 /** POST /api/panel/run/<action> */

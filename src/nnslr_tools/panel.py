@@ -2,7 +2,8 @@
 """Control panel of the review site: the state of every route, the machine, and buttons that run
 the easy helpers (helpers/fetch_comma_segments.sh, helpers/1_prepare.sh, helpers/3_train.sh,
 helpers/update.sh; scripts/run_detector_sizes.sh for the cutter and scripts/run_classifier.sh for the
-classifier with "not a sign") in the background with a live log.
+classifier with "not a sign"; helpers/ai_review.sh and helpers/measure_ai_reviewer.sh for the AI reviewer of
+Settings) in the background with a live log.
 
 Only the fixed actions of ACTIONS can run, never a command taken from a request. They are the
 helpers of the checkout this package runs from (editable install); without them (wheel
@@ -69,7 +70,16 @@ CUTTER_FAMILIES = ('all', 'speed')
 CUTTER_FAMILY = 'all'
 # The options an action takes, besides a training's start and the run to resume (checked by Panel.start).
 ACTION_OPTIONS = {'train_cutter': ('size', 'families'), 'prepare': ('proposer',), 'prepare_again': ('proposer',),
-                  'measure_proposer': ('proposer',)}
+                  'measure_proposer': ('proposer',),
+                  'ai_review': ('route', 'provider', 'save', 'limit'), 'measure_ai_reviewer': ('provider', 'limit')}
+# [ai-reviewer] - START
+# The AI actions and their options (strings; checked by Panel._ai_arguments). The provider is an id of Settings
+# (nnslr_tools.llm_providers): its key never goes into a command line, an environment or a log, the job reads it.
+AI_ACTIONS = ('ai_review', 'measure_ai_reviewer')
+AI_OPTIONS = ('route', 'provider', 'save', 'limit')
+PROVIDER_ID = re.compile(r'[a-z][a-z0-9-]{0,31}')
+MAX_AI_LIMIT = 5000
+# [ai-reviewer] - END
 # Who proposes the signs of a route (nnslr preannotate --proposer): the choice of the Prepare tab.
 PROPOSERS = ('vietnam', 'ours', 'qwen')
 
@@ -110,9 +120,21 @@ ACTIONS = {
     'train_cutter': {'label': 'Train the cutter', 'group': 'train', 'command': [CUTTER_SCRIPT]},
     # A proposer of Prepare measured on the test frames (the Proposers view of Evaluate); in the train group: the GPU.
     'measure_proposer': {'label': 'Measure a proposer', 'group': 'train', 'command': ['helpers/measure_proposer.sh']},
+    # Qwen3-VL as the third proposer of Prepare: its packages, its weights (17.5 GB, what is already there is kept after
+    # its sha256 is checked) and a test on the GPU; in the train group: the GPU.
+    'setup_vlm': {'label': 'Install Qwen3-VL', 'group': 'train', 'command': ['scripts/setup_vlm.sh']},
     # git pull + restart of this server (KillMode=process: the action itself survives the restart).
     # --no-link: the link with the token must not land in the log.
     'update': {'label': 'Update the site', 'group': 'update', 'command': ['helpers/update.sh', '--no-link']},
+    # [ai-reviewer] - START
+    # The frames of a route nobody confirmed, reviewed by an AI provider of Settings: a trial ({'save': 'no'}, the
+    # suggestions go to data/ai_reviews/<route>/) or saved as AI reviews ({'save': 'yes'}: final, the next import
+    # trains on them). Frames a person confirmed are never touched.
+    'ai_review': {'label': 'Review a route with AI', 'group': 'ai', 'command': ['helpers/ai_review.sh']},
+    # An AI provider measured on the frames people reviewed (the AI reviewers view of Evaluate); nothing is saved.
+    'measure_ai_reviewer': {'label': 'Measure an AI reviewer', 'group': 'ai',
+                            'command': ['helpers/measure_ai_reviewer.sh']},
+    # [ai-reviewer] - END
 }
 # The same work started from a terminal: (group, label, fragment of the command line).
 ACTIVITIES = (
@@ -126,18 +148,22 @@ ACTIVITIES = (
     ('train', 'classifier training', 'run_classifier.sh'),
     ('train', 'cutter training', 'run_detector_sizes.sh'),
     ('update', 'code update', 'helpers/update.sh'),
+    # [ai-reviewer] - START
+    ('ai', 'AI review', 'nnslr ai-review'),
+    ('ai', 'AI reviewer measure', 'nnslr measure-ai-reviewer'),
+    # [ai-reviewer] - END
     # Shown only: the driving model of openpilot.distill shares the GPU (the training refuses a busy GPU).
     ('other', 'openpilot.distill training', 'supervised.train'),
 )
 # The groups of this checkout's own helpers (see Panel._ours).
-OWN_GROUPS = ('prepare', 'train', 'update')
+OWN_GROUPS = ('prepare', 'train', 'update', 'ai')
 GROUP_NAMES = {'fetch': 'a download from the comma', 'prepare': 'a preparation',
-               'train': 'an import or a training', 'update': 'a code update'}
+               'train': 'an import or a training', 'update': 'a code update', 'ai': 'an AI review'}
 # Groups that never run together with a group, besides itself. The download and the preparation
 # both write the links of data/raw/routes; the update rewrites the helpers under a running bash
-# and restarts this server.
-CONFLICTS = {'fetch': ('prepare', 'update'), 'prepare': ('fetch', 'update'), 'train': ('update',),
-             'update': ('fetch', 'prepare', 'train')}
+# and restarts this server; a preparation replaces the report an AI review is working on.
+CONFLICTS = {'fetch': ('prepare', 'update'), 'prepare': ('fetch', 'update', 'ai'), 'train': ('update',),
+             'update': ('fetch', 'prepare', 'train', 'ai'), 'ai': ('prepare', 'update')}
 # The fetch reads the comma logs (trip length, reverse gear) with openpilot's LogReader; the
 # .venv of this repository has it only with the [log-reader] extra and the schema checkouts.
 FETCH_PYTHON_ENV = 'COMMA_FETCH_PYTHON'
@@ -333,7 +359,11 @@ class Panel:
             payload['min_routes'] = module.MIN_REVIEWED_ROUTES
             payload['reviewed_routes'] = sum(1 for row in rows if row['confirmed'])
             payload['next_action'] = _next_action(payload['next_step'])
-        payload['actions'] = self._action_states(payload, activities)
+        # [ai-reviewer] - START
+        # The AI reviewer of Settings (a read of its file, no network): whether a route can be reviewed with AI.
+        payload['ai_reviewer'], ai_providers = self._ai_settings()
+        payload['actions'] = self._action_states(payload, activities, ai_providers=ai_providers)
+        # [ai-reviewer] - END
         # Who can propose the signs on this server (the choice of the Prepare tab), and why not.
         from nnslr_tools.preannotate import vlm_missing
         payload['proposers'] = {'qwen': vlm_missing(self.root)}
@@ -450,7 +480,7 @@ class Panel:
                 continue
         return {'name': name.split('-')[0], 'written': written, 'total': total}
 
-    def _action_states(self, payload: dict, activities: list[dict]) -> dict:
+    def _action_states(self, payload: dict, activities: list[dict], *, ai_providers: int = 0) -> dict:
         running = self._running_groups(activities)
         rows = payload['routes']
         gpu = payload['system']['gpu']
@@ -480,6 +510,19 @@ class Panel:
                 reason = CLASSIFIER_SCRIPT + ' is missing in this installation'
             elif name == 'train_cutter' and not (self.repo / CUTTER_SCRIPT).is_file():
                 reason = CUTTER_SCRIPT + ' is missing in this installation'
+            # [ai-reviewer] - START
+            elif name in AI_ACTIONS and not (self.repo / action['command'][0]).is_file():
+                reason = action['command'][0] + ' is missing in this installation'
+            elif name == 'ai_review' and not payload.get('ai_reviewer', {}).get('available'):
+                reason = 'no AI reviewer: choose one in Settings'
+            elif name == 'ai_review' and not any(row.get('run_id') for row in rows):
+                reason = 'no prepared route'
+            elif name == 'ai_review':
+                # It reviews the frames nobody confirmed: it needs no confirmed frame.
+                pass
+            elif name == 'measure_ai_reviewer' and not ai_providers:
+                reason = 'no AI provider: add one in Settings'
+            # [ai-reviewer] - END
             elif name != 'prepare' and not confirmed:
                 reason = 'no confirmed frame'
             elif name.startswith('train') and payload['reviewed_routes'] < payload['min_routes']:
@@ -587,6 +630,63 @@ class Panel:
         from nnslr_tools.proposer_eval import latest_reports
         return {'proposers': [{'key': key, 'label': label, 'unavailable': vlm_missing(self.root) if key == 'qwen' else None}
                               for key, label in PROPOSERS.items()], 'reports': latest_reports(self.root)}
+
+    # [ai-reviewer] - START
+    def ai_reviewers(self) -> dict:
+        """The AI providers of Settings (never a key) with the latest measure of each (helpers/measure_ai_reviewer.sh),
+        for the AI reviewers view of the Evaluate tab."""
+        from nnslr_tools import ai_review, llm_providers
+        return {**llm_providers.public_settings(self.root), 'reports': ai_review.latest_reports(self.root)}
+
+    def _ai_settings(self) -> tuple[dict, int]:
+        """The state of the AI reviewer (llm_providers.ai_state) and how many providers there are. A providers file
+        that cannot be read makes the AI unavailable, never the whole panel."""
+        from nnslr_tools import llm_providers
+        from nnslr_tools.review_db import ReviewRejected
+        try:
+            return llm_providers.ai_state(self.root), len(llm_providers.public_settings(self.root)['providers'])
+        except ReviewRejected as exc:
+            return {'available': False, 'reason': exc.message, 'provider': None}, 0
+
+    def _ai_arguments(self, action: str, options: dict) -> list[str]:
+        """The arguments of an AI action from its options, all strings: the route (ai_review only, one with a
+        prepared report), --provider=<id of Settings> (the reviewer when none is given), --save (ai_review with
+        save 'yes'; 'no' is the default) and --limit=<frames, 1 to MAX_AI_LIMIT>. Never a key: the job reads the
+        providers file itself."""
+        from nnslr_tools import llm_providers
+        arguments = []
+        if action == 'ai_review':
+            route = options.get('route')
+            if not route:
+                raise PanelError(400, 'bad_option', 'Choose the route to review.')
+            from nnslr_tools.preannotate import PreannotationError
+            from nnslr_tools.review import latest_report
+            try:
+                latest_report(self.root, route)
+            except (PreannotationError, ValueError, OSError):
+                raise PanelError(400, 'bad_option', 'Unknown route, or a route without a prepared report.') from None
+            arguments.append(route)
+        settings = llm_providers.public_settings(self.root)
+        provider = options.get('provider')
+        if provider is None:
+            provider = settings['reviewer']
+            if provider is None:
+                raise PanelError(409, 'no_ai_reviewer', 'Choose an AI reviewer in Settings.')
+        elif not PROVIDER_ID.fullmatch(provider) or provider not in {item['id'] for item in settings['providers']}:
+            raise PanelError(400, 'bad_option', 'Unknown AI provider: add it in Settings.')
+        arguments.append('--provider=' + provider)
+        save = options.get('save', 'no')
+        if save not in ('yes', 'no'):
+            raise PanelError(400, 'bad_option', 'Save is yes or no.')
+        if save == 'yes':
+            arguments.append('--save')
+        limit = options.get('limit')
+        if limit is not None:
+            if not re.fullmatch(r'[0-9]{1,4}', limit) or not 1 <= int(limit) <= MAX_AI_LIMIT:
+                raise PanelError(400, 'bad_option', f'The limit is a number of frames from 1 to {MAX_AI_LIMIT}.')
+            arguments.append('--limit=' + str(int(limit)))
+        return arguments
+    # [ai-reviewer] - END
 
     def models(self) -> dict:
         """Every trained cutter, classifier and decider with its numbers, newest first, and the one in use."""
@@ -713,8 +813,9 @@ class Panel:
     def start(self, action: str, options: dict | None = None) -> dict:
         """Starts an action. The only options are the starting point of a training ({'start': key} of
         training_starts()), turned into a flag or the environment of helpers/3_train.sh, the run to resume, and the
-        cutter's size and families (one of CUTTER_SIZES, CUTTER_FAMILIES): never a command. The classifier's and the
-        cutter's trainings run on a new run named here (new_run_name)."""
+        cutter's size and families (one of CUTTER_SIZES, CUTTER_FAMILIES), and the route, provider, save and limit of
+        an AI action (_ai_arguments): never a command. The classifier's and the cutter's trainings run on a new run
+        named here (new_run_name)."""
         if action not in ACTIONS:
             raise PanelError(404, 'unknown_action', 'Unknown action.')
         start_env = {}
@@ -722,6 +823,16 @@ class Panel:
         for key in ('size', 'families'):
             if (options or {}).get(key) is not None and key not in ACTION_OPTIONS.get(action, ()):
                 raise PanelError(400, 'bad_option', 'Only "Train the cutter" takes a ' + ('size' if key == 'size' else 'choice of signs') + '.')
+        # [ai-reviewer] - START
+        for key in AI_OPTIONS:
+            value = (options or {}).get(key)
+            if value is not None and key not in ACTION_OPTIONS.get(action, ()):
+                raise PanelError(400, 'bad_option', '"' + ACTIONS[action]['label'] + '" does not take a ' + key + '.')
+            if value is not None and not isinstance(value, str):
+                raise PanelError(400, 'bad_option', 'The ' + key + ' is a string.')
+        if action in AI_ACTIONS:
+            start_args += self._ai_arguments(action, options or {})
+        # [ai-reviewer] - END
         proposer = (options or {}).get('proposer')
         if proposer is not None:
             if action not in ('prepare', 'prepare_again', 'measure_proposer'):
@@ -778,6 +889,10 @@ class Panel:
                 raise PanelError(403, 'actions_disabled', 'The reader of the comma logs is missing (see docs/GUIDA.md).')
         if action == 'train_cutter' and not (self.repo / CUTTER_SCRIPT).is_file():
             raise PanelError(403, 'actions_disabled', CUTTER_SCRIPT + ' is missing in this installation.')
+        # [ai-reviewer] - START
+        if action in AI_ACTIONS and not (self.repo / ACTIONS[action]['command'][0]).is_file():
+            raise PanelError(403, 'actions_disabled', ACTIONS[action]['command'][0] + ' is missing in this installation.')
+        # [ai-reviewer] - END
         if action == 'train_classifier':
             if not (self.repo / CLASSIFIER_SCRIPT).is_file():
                 raise PanelError(403, 'actions_disabled', CLASSIFIER_SCRIPT + ' is missing in this installation.')

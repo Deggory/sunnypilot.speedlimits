@@ -1,6 +1,7 @@
 // The data of the review page: the payload pages.render_review embeds in the page, the answers of the review
 // API (nnslr_tools.review: GET /api/route/<id>/reviews, POST /api/route/<id>/frame/<segment>/<image>) and
 // the page's own working copy of each frame, kept in localStorage.
+import type {AiAction} from '../common/ai-types';
 
 /** x1, y1, x2, y2 in pixels of the full image. */
 export type Box = [number, number, number, number];
@@ -31,6 +32,9 @@ export interface Detection {
   /** "Apply previous": the box is where the sign should be, a guess. No save accepts it until the reviewer has
    * looked (moved the box onto the sign, or pressed "Here") and the flag is gone. */
   check_position?: boolean;
+  /** An AI suggestion applied (review/ai.ts): what the AI did with the box. The page shows it; the server keeps
+   * only the labels when saving, so the frame is saved as the reviewer's own review. */
+  ai_action?: AiAction;
 }
 
 /** One frame of the pre-annotation report. The rows carry more fields (hashes, models...): the JSONL export

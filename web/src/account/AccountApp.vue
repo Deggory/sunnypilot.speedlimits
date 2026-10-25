@@ -1,10 +1,14 @@
 <script setup lang="ts">
-// Account: who is signed in, sign out, change the password (the appearance is in the Account menu).
+// Account and settings: who is signed in, sign out, change the password (the appearance is in the Account menu),
+// and the AI reviewer (AiProviders.vue). The site on 127.0.0.1 has no sign-in: there only the AI reviewer.
 import {onMounted, ref} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import type {AuthAnswer, AuthState} from '../common/auth-types';
 import {askConfirm} from '../composables/confirm';
+import AiProviders from './AiProviders.vue';
 
+/** null until /api/auth/state answers. */
+const auth = ref<AuthState | null>(null);
 const who = ref('Loading…');
 const current = ref('');
 const fresh = ref('');
@@ -14,6 +18,7 @@ const done = ref('');
 const busy = ref(false);
 
 function show(state: AuthState): void {
+  auth.value = state;
   const many = state.sessions !== undefined && state.sessions > 1;
   who.value = 'Signed in as ' + (state.user ?? '') + (many ? ', on ' + state.sessions + ' browsers.' : '.');
 }
@@ -55,8 +60,8 @@ onMounted(() => {
 
 <template>
   <main class="page settings">
-    <h1 class="sr-only">Account</h1>
-    <section class="card state-box">
+    <h1 class="sr-only">Account and settings</h1>
+    <section v-if="!auth?.local" class="card state-box">
       <h2>Administrator</h2>
       <p id="admin-sub">{{ who }}</p>
       <div class="buttons">
@@ -64,7 +69,7 @@ onMounted(() => {
         <button id="btn-signout-all" class="btn danger" type="button" @click="signOut(true)">Sign out everywhere</button>
       </div>
     </section>
-    <section class="card state-box">
+    <section v-if="!auth?.local" class="card state-box">
       <h2>Change the password</h2>
       <form id="password-form" class="auth-form" novalidate @submit.prevent="changePassword">
         <input type="text" name="username" autocomplete="username" hidden>
@@ -77,5 +82,6 @@ onMounted(() => {
       </form>
       <p class="note">After the change every other browser has to sign in again. Forgotten password: someone with access to the server stops the site, moves <code>web/auth/admin.json</code> out of the data folder and starts it again; the next visit asks for the setup code again.</p>
     </section>
+    <AiProviders/>
   </main>
 </template>

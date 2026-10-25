@@ -50,11 +50,11 @@ Il sito è in inglese e ha l'aspetto di `distill-web` e `perception-web` (scuro;
 
 I vecchi indirizzi (`/pannello`, `/stato`, `/panoramica`, `/prepara`, `/allena`) portano alle nuove schede. Le conferme (avvio di un training, Stop, Update the code, uscita da tutti i browser) sono finestre del sito, non del browser.
 
-Ogni lavoro in corso ha una scheda dal vivo: percentuale (solo quando si sa davvero: dai passi fatti, dalle epoche e dai batch, dalle immagini controllate, dalle route pronte; altrimenti una barra che scorre), i passi spuntati con quello attuale e la sua barra, il dettaglio ("detector · epoch 5 of 20"), il tempo trascorso e, con la percentuale, il tempo che manca (circa), l'ultima riga del log, piccoli indicatori di GPU, memoria GPU, CPU e RAM, **Stop** e **Details** (il log). Il progresso lo calcola il server dal log del lavoro (`nnslr_tools/job_progress.py`) e da `data/logs/progress.json`, dove i comandi lunghi (controllo del dataset, split, training) scrivono a che punto sono (`nnslr_tools/progress.py`). **Stop** funziona anche dopo un riavvio del sito: il numero del processo è in `data/logs/panel/<lavoro>.pid`. Un training lanciato da terminale si vede con passi e grafici (dal suo `data/logs/train-<run>.log`) ma si ferma dal terminale. Un'azione spenta ha sotto il motivo. **Update the code** lancia `helpers/update.sh --no-link` (sezione 3), cioè `git pull` e riavvio del sito; parte solo se non ci sono preparazioni o training in corso.
+Ogni lavoro in corso ha una scheda dal vivo: percentuale (solo quando si sa davvero: dai passi fatti, dalle epoche e dai batch, dalle immagini controllate, dalle route pronte; altrimenti una barra che scorre), i passi spuntati con quello attuale e la sua barra, il dettaglio ("detector · epoch 5 of 20"), il tempo trascorso e, con la percentuale, il tempo che manca (circa), l'ultima riga del log, piccoli indicatori di GPU, memoria GPU, CPU e RAM, **Stop** e **Details** (il log). Il progresso lo calcola il server dal log del lavoro (`nnslr_tools/job_progress.py`) e da `data/logs/progress.json`, dove i comandi lunghi (controllo del dataset, split, training) scrivono a che punto sono (`nnslr_tools/progress.py`). **Stop** funziona anche dopo un riavvio del sito: il numero del processo è in `data/logs/panel/<lavoro>.pid`. Un training lanciato da terminale si vede con passi e grafici (dal suo `data/logs/train-<run>.log`) ma si ferma dal terminale. Un'azione spenta ha sotto il motivo. **Update the code** lancia `helpers/update.sh --no-link` (sezione 3), cioè `git pull` e riavvio del sito; parte solo se non ci sono preparazioni, training o revisioni AI in corso.
 
 **Download from the comma** lancia `helpers/fetch_comma_segments.sh` senza argomenti (passo 0): tutti i giri ancora sul comma, via ssh con la chiave di questa macchina (`Host comma` in `~/.ssh/config`), senza bisogno di `ssh -A`. Per leggere i log del comma (durata del giro, retromarcia) usa `COMMA_FETCH_PYTHON` se è impostata, altrimenti il Python di `../openpilot.distill/.venv`, che ha il `LogReader` di openpilot; senza nessuno dei due il pulsante resta spento con il motivo. Non parte insieme a una preparazione: tutti e due scrivono i collegamenti in `data/raw/routes`. Dopo il download il prossimo passo è **Prepare new routes**.
 
-Il pannello lancia solo queste sei azioni fisse, mai un comando qualsiasi, e una sola per tipo alla volta (download, preparazione, import/training), contando anche quelle partite da terminale, compreso il download di `openpilot.distill`. È protetto come il resto del sito: token sulla LAN, e i pulsanti accettano solo richieste dalla pagina stessa. I log delle azioni sono in `data/logs/panel/`; l'ultima riga di ognuno è il codice di uscita.
+Il pannello lancia solo le sue azioni fisse, mai un comando qualsiasi, e una sola per tipo alla volta (download, preparazione, import/training, revisione AI), contando anche quelle partite da terminale, compreso il download di `openpilot.distill`. È protetto come il resto del sito: token sulla LAN, e i pulsanti accettano solo richieste dalla pagina stessa. I log delle azioni sono in `data/logs/panel/`; l'ultima riga di ognuno è il codice di uscita.
 
 `NNSLR_PANEL_ACTIONS=0` (nell'ambiente del server, per il servizio in `/etc/speedlimits-web.env`) lascia il pannello in sola lettura, per esempio se il sito lo usano altre persone per revisionare.
 
@@ -152,6 +152,27 @@ Revisioni fatte da un'AI dalla pagina (con un nome come `Codex` o `ChatGPT`) ris
 
 Il database delle revisioni si aggiorna da solo alla versione 2 al primo avvio del codice nuovo (aggiunge tipo di revisore e canale; le revisioni già fatte restano "umane, dalla pagina"). Dopo, un `nnslr` vecchio non lo apre più.
 
+### Il revisore AI (Settings)
+
+Una revisione si può fare a mano o con un'AI che vede le immagini, attraverso un qualsiasi server compatibile con l'API OpenAI (`/v1/models` e `/v1/chat/completions`): strata, il proprio `llama-server` di llama.cpp su un'altra macchina con un modello visivo e il suo file `--mmproj` (per esempio Qwen3-VL-32B-Instruct), o un altro servizio.
+
+- **Collegare un provider**: menu **Account → Settings**, riquadro **AI reviewer**: nome, indirizzo che finisce in `/v1`, chiave API (se il server la vuole) e modello (la lista viene dal server; se non risponde, si scrive a mano). **Test** manda un fotogramma rivisto da una persona, senza le proposte, e dice se il modello risponde in JSON e legge il cartello di velocità; se il server dichiara il modello solo testo, lo dice senza chiedergli niente. **Reviews** sceglie il provider che revisiona.
+- **Da terminale**, per esempio strata:
+
+  ```sh
+  .venv/bin/nnslr llm-provider add --name strata --base-url https://strata.farm.14bodhi.com/v1 --key-file /root/.config/strata-api-key
+  .venv/bin/nnslr llm-provider test strata
+  .venv/bin/nnslr llm-provider use strata
+  ```
+
+  `nnslr llm-provider list` elenca i provider (mai le chiavi); poi `models ID`, `remove ID`, `use none`. Senza `--model` prende il primo modello che il server elenca.
+- **Dove sta la chiave**: in `data/web/private/llm-providers.json` (permessi 600, cartella 700, fuori da git); `NNSLR_LLM_PROVIDERS=/percorso/completo.json` sposta il file. La chiave non esce mai dal server: nessuna pagina, risposta, log o resoconto la contiene, e il browser sa solo che c'è. Lasciare vuoto il campo della chiave tiene quella salvata; **Remove key** la toglie.
+- **Sulla pagina di revisione**: **Ask AI** (tasto **I**) mostra il suggerimento dell'AI per il fotogramma, con Keep, Correct, Add, Delete o Not judged per ogni riquadro. Non salva niente: **Apply** lo trasforma in modifiche da controllare, e il tuo **Confirm** le salva come tua revisione, come sempre; **Dismiss** lo scarta. Al massimo due richieste all'AI alla volta.
+- **Una route intera**: nell'elenco delle route, **Review with AI** sulle route non finite. **Try without saving** prova 20 fotogrammi senza salvare (i suggerimenti finiscono in `data/ai_reviews/<route>/`); **Review and save** salva le revisioni dell'AI. Parte come lavoro del pannello (`helpers/ai_review.sh`, si segue nella Overview), mai insieme a una preparazione o a un aggiornamento. I fotogrammi confermati da una persona non vengono mai toccati.
+- **Le revisioni salvate dall'AI sono definitive**: nessuno le riapprova, e il prossimo import (`helpers/3_train.sh`, **Import reviews**) le mette nel training come revisioni AI: `reviewer` `ai/<provider>/<modello>`, tipo `ai`, canale `web`, `label_basis` `ai_review`. Salvare non importa e non allena.
+- **Misurare un provider**: Evaluate → **AI reviewers**, **Measure** (`helpers/measure_ai_reviewer.sh`): fino a 60 fotogrammi rivisti da persone, sempre gli stessi per tutti i provider; cartelli di velocità trovati e letti giusti, accordo sui fotogrammi senza cartelli, riquadri falsi e secondi per fotogramma. Non salva niente; il risultato va in `data/evaluations/ai_reviewers/`.
+- **Chi può**: solo un browser che ha fatto l'accesso, o il sito su 127.0.0.1, cambia i provider e usa l'AI. Il token (API, MCP, agenti) può solo leggere le impostazioni, lo stato dell'AI e le misure ([API_MCP.md](API_MCP.md), sezione 8).
+
 ## 4. Dove stanno le cose
 
 | Cosa | Dove |
@@ -166,6 +187,9 @@ Il database delle revisioni si aggiorna da solo alla versione 2 al primo avvio d
 | Training, valutazione, bundle | `data/runs/<run>/` |
 | Log degli helper | `data/logs/` (`prepare/<route>.log`, `train-<run>.log`, `review.log`) |
 | Log delle azioni del pannello | `data/logs/panel/` |
+| Provider AI di Settings e le loro chiavi | `data/web/private/llm-providers.json` (permessi 600; `NNSLR_LLM_PROVIDERS` lo sposta) |
+| Suggerimenti delle revisioni AI di una route | `data/ai_reviews/<route>/` |
+| Misure dei revisori AI | `data/evaluations/ai_reviewers/` |
 | Token di accesso al sito (il posto dove cercarlo) | `.env` del repository, riga `NNSLR_REVIEW_TOKEN=` |
 | Copia del token letta dal servizio | `/etc/speedlimits-web.env` |
 | Definizione del servizio | `deploy/speedlimits-web.service` → installato in `/etc/systemd/system/speedlimits-web.service` |
@@ -201,6 +225,8 @@ Per cambiare una pagina: modifica `web/src` (o il template), lancia `helpers/bui
 | `scripts/setup_vlm.sh [--no-test]` | installa Qwen3-VL-8B-Instruct (vede le immagini, Apache-2.0, ~17.5 GB) in `data/models/vlm/` e `transformers`, `accelerate`, `qwen-vl-utils` in `.venv-gpu` (nessun pacchetto già presente cambia versione), poi lo prova sulla GPU su un fotogramma; per ora nessuno lo usa ([INSTALL.md](INSTALL.md)) | installa pacchetti, scarica 17.5 GB, GPU |
 | `uv run --no-project --with osmium python scripts/osm_places.py` | estrae dalla mappa OpenStreetMap locale (`data/raw/osm/`) i nomi di città, paesi e quartieri svizzeri in `data/derived/osm/places.jsonl`: la lista Review chiama ogni giro con il giorno, l'ora e da dove a dove ("Herznach → Zürich") | scrive dati, senza rete |
 | `helpers/measure_proposer.sh [vietnam\|ours\|qwen]` | misura un proponente sui fotogrammi di test rivisti, come lo userebbe Prepare (`nnslr evaluate-proposer`): cartelli di velocità trovati e letti giusti, tutti i cartelli trovati, proposte false per fotogramma, secondi per fotogramma; è il pulsante **Measure** della vista Proposers di Evaluate | scrive solo `data/evaluations/proposers/`; `ours` e `qwen` usano la GPU |
+| `helpers/ai_review.sh <route> [--provider=ID] [--save] [--limit=N]` | revisiona con l'AI di Settings i fotogrammi non confermati di una route (`nnslr ai-review`); senza `--save` è una prova e salva solo i suggerimenti in `data/ai_reviews/<route>/`; è il pulsante **Review with AI** dell'elenco delle route | rete (il server del provider); con `--save` salva nel database revisioni AI definitive |
+| `helpers/measure_ai_reviewer.sh [--provider=ID] [--limit=N]` | misura un provider AI sui fotogrammi rivisti da persone (`nnslr measure-ai-reviewer`); è il pulsante **Measure** di Evaluate → AI reviewers | rete, scrive solo `data/evaluations/ai_reviewers/` |
 | `helpers/1_prepare.sh --again` | ripropone i cartelli delle route di cui nessuno ha ancora rivisto un fotogramma, con il proponente scelto (`NNSLR_PROPOSER=vietnam`, `ours` o `qwen`, la scelta **Find the signs → Found by** della scheda Prepare) | scrive le proposte in `data/derived/preannotations/`; `ours` e `qwen` usano la GPU |
 | `scripts/run_v100_baseline.sh` | training completo (lo lancia `helpers/3_train.sh`) | GPU |
 | `scripts/run_experiment_b.sh <nome>` | esperimento B ([NEURAL_NETWORK.md](NEURAL_NETWORK.md), passo 2): allena una dopo l'altra le varianti `crop`, `crop_geom` e `full` di `nnslr experiment-b` sui box revisionati e stampa il confronto (lettura, other_road, macro-F1, astensioni) su test e sulle righe umane; prima `nnslr experiment-b --variant full --dry-run` (solo CPU) | GPU, scrive in `data/runs/<nome>/experiment-b/` |
@@ -217,6 +243,11 @@ Per cambiare una pagina: modifica `web/src` (o il template), lancia `helpers/bui
 | `la porta 8765 e' gia' occupata` | C'è già un sito acceso (il servizio o un altro `nnslr review`): `helpers/2_review.sh` ristampa il link, `helpers/2_review.sh --stop` spegne quello acceso a mano. |
 | `Sign-in required: reload the page and sign in` | La sessione è finita (7 giorni senza uso, uscita, password cambiata): ricarica e accedi con nome e password (sezione 3). |
 | API o MCP: `401 unauthorized`, `501 mcp_unavailable`, `409 ...` | Vedi [API_MCP.md](API_MCP.md), sezione 7. |
+| `Sign in on the site to use the AI reviewer.` (403 `session_required`) | Il revisore AI si usa solo da un browser che ha fatto l'accesso, o dal sito su 127.0.0.1: il token può solo leggere. |
+| `Choose an AI reviewer in Settings.` (409 `no_ai_reviewer`) | Account → Settings → AI reviewer: aggiungi un provider e scegli **Reviews**, oppure `nnslr llm-provider use ID`. |
+| 429 `ai_busy` | Due richieste all'AI sono già in corso: riprova tra poco. |
+| 502 `ai_unreachable`, `ai_http_error`, 504 `ai_timeout` | Il server del provider non risponde, rifiuta (chiave sbagliata, modello che non c'è: il messaggio dice `HTTP <codice>`) o non risponde entro 2 minuti: controlla con **Test**. |
+| Test: `... takes text only: it cannot see the frames.` | Il modello non vede le immagini: scegline uno visivo (con llama.cpp serve anche il suo file `--mmproj`). |
 | `su ... non ci sono ancora pesi stable` | `--continue` vuole un modello già pubblicato come stable: allena prima da zero. |
 | Una route resta "da collegare" | `link-videos` ha trovato un conflitto: vedi `data/logs/prepare/link-videos.json`. I segmenti con solo il log e senza `fcamera.hevc` (il fetch scarica solo il log dei primi e ultimi due) non sono un errore: non vengono collegati e sono elencati in `log_only`. |
 | Estrazione o pre-annotazione fallita | Il motivo è in `data/logs/prepare/<route>.log`. |

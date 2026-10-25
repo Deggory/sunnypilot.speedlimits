@@ -1693,6 +1693,51 @@ def build_parser() -> argparse.ArgumentParser:
     p_core.set_defaults(func=_cmd_export_core)
     # [core-export] - END
 
+    # [ai-reviewer] - START
+    p_llm = sub.add_parser("llm-provider", help="the LLM providers that can review signs (OpenAI-compatible /v1 "
+                                                "servers) and the one that reviews; the keys stay in "
+                                                "<data-root>/web/private/llm-providers.json")
+    llm_sub = p_llm.add_subparsers(dest="llm_command", required=True)
+    p_llm_list = llm_sub.add_parser("list", help="list the providers (never their keys)")
+    p_llm_add = llm_sub.add_parser("add", help="add a provider, or update the one with the id of that name")
+    p_llm_add.add_argument("--name", required=True, help="a name of 1-40 characters; the id is made from it")
+    p_llm_add.add_argument("--base-url", required=True, help="the OpenAI-compatible API, ending in /v1")
+    p_llm_add.add_argument("--model", help="the model; default: the first one the server lists")
+    p_llm_add.add_argument("--key-file", help="a file holding the API key (read, never printed); without it a "
+                                              "new provider has no key and an update keeps its key")
+    p_llm_add.add_argument("--reviewer", action="store_true", help="also make it the AI reviewer")
+    p_llm_remove = llm_sub.add_parser("remove", help="remove a provider and its key")
+    p_llm_remove.add_argument("id")
+    p_llm_use = llm_sub.add_parser("use", help="choose the AI reviewer ('none' for none)")
+    p_llm_use.add_argument("id", help="a provider id, or none")
+    p_llm_models = llm_sub.add_parser("models", help="the models the provider's server lists")
+    p_llm_models.add_argument("id")
+    p_llm_test = llm_sub.add_parser("test", help="ask the provider about a reviewed frame: does it answer in "
+                                                 "JSON and see images? (nothing is saved but the result)")
+    p_llm_test.add_argument("id")
+    for p_item in (p_llm_list, p_llm_add, p_llm_remove, p_llm_use, p_llm_models, p_llm_test):
+        p_item.add_argument("--data-root", help="NNSLR_DATA_ROOT or <repo>/data by default")
+    p_llm.set_defaults(func=_cmd_llm_provider)
+
+    p_ai = sub.add_parser("ai-review", help="review the frames of a route nobody confirmed with the AI reviewer; "
+                                            "a dry run unless --save")
+    p_ai.add_argument("route")
+    p_ai.add_argument("--provider", help="a provider id; default: the AI reviewer")
+    p_ai.add_argument("--save", action="store_true",
+                      help="save the complete suggestions as AI reviews: final, the next import puts them into "
+                           "training; frames a person confirmed are never touched")
+    p_ai.add_argument("--limit", type=int, help="at most this many frames")
+    p_ai.add_argument("--data-root", help="NNSLR_DATA_ROOT or <repo>/data by default")
+    p_ai.set_defaults(func=_cmd_ai_review)
+
+    p_ai_measure = sub.add_parser("measure-ai-reviewer", help="measure an AI provider on frames a person "
+                                                              "reviewed (nothing is saved)")
+    p_ai_measure.add_argument("--provider", help="a provider id; default: the AI reviewer")
+    p_ai_measure.add_argument("--limit", type=int, default=60, help="frames in the sample (default 60)")
+    p_ai_measure.add_argument("--data-root", help="NNSLR_DATA_ROOT or <repo>/data by default")
+    p_ai_measure.set_defaults(func=_cmd_measure_ai_reviewer)
+    # [ai-reviewer] - END
+
     return parser
 
 
@@ -1844,6 +1889,145 @@ def _cmd_mcp(args: argparse.Namespace) -> int:
     run_stdio(resolve_data_root(Path(args.data_root) if args.data_root else None), read_only=read_only)
     return 0
 # [preannotation] - END
+
+
+# [ai-reviewer] - START
+def _ai_root(args: argparse.Namespace) -> Path:
+    from nnslr_tools.preannotate import resolve_data_root
+    return resolve_data_root(Path(args.data_root) if args.data_root else None)
+
+
+def _ai_service(root: Path):
+    from nnslr_tools.review_db import ReviewStore, db_path
+    from nnslr_tools.review_service import ReviewService
+    return ReviewService(root, ReviewStore(db_path(root)), log=lambda text: print(text, file=sys.stderr, flush=True))
+
+
+def _ai_provider(root: Path, wanted: str | None) -> dict | None:
+    """The private record of --provider, else of the AI reviewer; None (with the error printed) without one."""
+    from nnslr_tools import llm_providers
+    if wanted:
+        return llm_providers.provider(root, wanted)
+    record = llm_providers.reviewer_provider(root)
+    if record is None:
+        print("error: no AI reviewer: nnslr llm-provider use ID", file=sys.stderr)
+    return record
+
+
+def _llm_line(item: dict) -> str:
+    line = "  ".join((item["id"], item["name"], item["base_url"], item["model"],
+                      "key: set" if item["has_key"] else "key: none"))
+    return line + ("  [reviewer]" if item["is_reviewer"] else "")
+
+
+def _llm_add(root: Path, args: argparse.Namespace) -> int:
+    from nnslr_tools import llm_providers
+    key = None
+    if args.key_file:
+        path = Path(args.key_file).expanduser()
+        try:
+            mode = path.stat().st_mode
+            key = path.read_text(encoding="utf-8").strip()
+        except (OSError, UnicodeDecodeError) as exc:
+            print(f"error: cannot read the key file {path} ({type(exc).__name__})", file=sys.stderr)
+            return 2
+        if mode & 0o077:
+            print(f"warning: other users can read the key file: chmod 600 {path}", file=sys.stderr)
+        if not key:
+            print(f"error: the key file {path} is empty", file=sys.stderr)
+            return 2
+    provider_id = llm_providers.id_from_name(args.name)
+    existing = None
+    for item in llm_providers.public_settings(root)["providers"]:
+        if item["id"] == provider_id:
+            existing = item
+    model = args.model
+    if not model:
+        body = {"base_url": args.base_url}
+        if key is not None:
+            body["key"] = key
+        elif existing is not None:
+            # The stored key goes only to the stored address (list_models checks it).
+            body["id"] = provider_id
+        models = llm_providers.list_models(root, body)
+        if not models:
+            print("error: the server lists no model: give --model", file=sys.stderr)
+            return 2
+        model = models[0]["id"]
+        print(f"model: {model} (the first the server lists)", file=sys.stderr)
+    body = {"name": args.name, "base_url": args.base_url, "model": model}
+    if existing is not None:
+        body["id"] = provider_id
+    if key is not None:
+        body["key"] = key
+    saved = llm_providers.save_provider(root, body)
+    if args.reviewer:
+        llm_providers.set_reviewer(root, saved["id"])
+        saved["is_reviewer"] = True
+    print(("updated  " if existing is not None else "added  ") + _llm_line(saved))
+    return 0
+
+
+def _cmd_llm_provider(args: argparse.Namespace) -> int:
+    from nnslr_tools import llm_providers
+    root = _ai_root(args)
+    command = args.llm_command
+    if command == "add":
+        return _llm_add(root, args)
+    if command == "list":
+        providers = llm_providers.public_settings(root)["providers"]
+        if not providers:
+            print("no AI provider: nnslr llm-provider add --name N --base-url URL [--key-file F]", file=sys.stderr)
+        for item in providers:
+            print(_llm_line(item))
+        return 0
+    if command == "remove":
+        llm_providers.delete_provider(root, args.id)
+        print(f"removed {args.id}")
+        return 0
+    if command == "use":
+        wanted = None if args.id == "none" else args.id
+        llm_providers.set_reviewer(root, wanted)
+        print(f"AI reviewer: {wanted or 'none'}")
+        return 0
+    if command == "models":
+        for model in llm_providers.list_models(root, {"id": args.id}):
+            sees = {True: "yes", False: "no", None: "unknown"}[model["sees_images"]]
+            print(f"{model['id']}  sees images: {sees}")
+        return 0
+    from nnslr_tools import ai_review
+    result = ai_review.test_provider(_ai_service(root), args.id)
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+    return 0 if result["ok"] else 1
+
+
+def _cmd_ai_review(args: argparse.Namespace) -> int:
+    from nnslr_tools.ai_review import review_route
+    if args.limit is not None and args.limit < 1:
+        print("error: --limit must be 1 or more", file=sys.stderr)
+        return 2
+    root = _ai_root(args)
+    record = _ai_provider(root, args.provider)
+    if record is None:
+        return 2
+    summary = review_route(_ai_service(root), args.route, record, save=args.save, limit=args.limit)
+    print(json.dumps(summary, indent=2, ensure_ascii=False))
+    return 1 if summary["stopped"] else 0
+
+
+def _cmd_measure_ai_reviewer(args: argparse.Namespace) -> int:
+    from nnslr_tools.ai_review import measure_reviewer
+    if args.limit < 1:
+        print("error: --limit must be 1 or more", file=sys.stderr)
+        return 2
+    root = _ai_root(args)
+    record = _ai_provider(root, args.provider)
+    if record is None:
+        return 2
+    report = measure_reviewer(_ai_service(root), record, limit=args.limit)
+    print(json.dumps(report, indent=2, ensure_ascii=False))
+    return 0
+# [ai-reviewer] - END
 
 
 def _cmd_version(args: argparse.Namespace) -> int:

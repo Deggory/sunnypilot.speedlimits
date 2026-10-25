@@ -208,6 +208,10 @@ VLM_SHARDS = {'model-00001-of-00004.safetensors': 4902275944, 'model-00002-of-00
               'model-00003-of-00004.safetensors': 4999831048, 'model-00004-of-00004.safetensors': 2716270024}
 
 
+# The mark scripts/setup_vlm.sh leaves in vlm_dir after a successful try on the GPU.
+VLM_INSTALLED = '.installed'
+
+
 def vlm_dir(root: Path) -> Path:
     return Path(root) / 'models' / 'vlm' / 'Qwen3-VL-8B-Instruct'
 
@@ -223,6 +227,9 @@ def vlm_missing(root: Path) -> str | None:
                     'Qwen3-VL-8B-Instruct; copy its four weight files there, then run scripts/setup_vlm.sh')
     if not any((GPU_PYTHON.parent.parent / 'lib').glob('python*/site-packages/transformers')):
         return 'Qwen3-VL needs transformers in .venv-gpu (scripts/setup_vlm.sh)'
+    # Written by scripts/setup_vlm.sh once the sha256 of the weights are right and the model answered on the GPU.
+    if not (folder / VLM_INSTALLED).is_file():
+        return 'Qwen3-VL is copied here but not checked yet: Install checks its files and tries it on the GPU'
     return None
 
 

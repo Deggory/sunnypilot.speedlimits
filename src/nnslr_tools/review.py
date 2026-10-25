@@ -12,6 +12,11 @@ SDK is installed, the MCP Streamable HTTP endpoint ``/mcp``
 (:mod:`nnslr_tools.review_mcp`). Both use the operations of
 :mod:`nnslr_tools.review_service`, as the page does, and always need the token
 in a header (``Authorization: Bearer`` or ``X-Review-Token``), also on 127.0.0.1.
+
+The AI reviewer of Settings (:mod:`nnslr_tools.llm_providers`, :mod:`nnslr_tools.ai_review`)
+belongs to the site, not to /api/v1: only a signed-in browser, or the site on 127.0.0.1,
+changes its providers, tests them, asks for a frame's suggestion or starts an AI job; the
+token only reads. No answer or log line ever holds a provider's key.
 """
 from __future__ import annotations
 
@@ -54,6 +59,17 @@ PAGE_RE = re.compile(r'/(index\.html|routes|prepare|train|evaluate|models|panora
 API_TOKEN_MESSAGE = ('Missing or wrong token: send it in the header "Authorization: Bearer <token>" '
                      '(or "X-Review-Token"), never in the address.')
 DEFAULT_CSP = "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+# [ai-reviewer] - START
+# The AI reviewer (nnslr_tools.llm_providers, nnslr_tools.ai_review): only a signed-in browser, or the site on
+# 127.0.0.1, changes the providers, tests them or asks the AI; the access token (an agent) only reads the settings,
+# the AI state and the measures, none of which holds a key.
+SESSION_REQUIRED_MESSAGE = 'Sign in on the site to use the AI reviewer.'
+# At most this many suggestions (and Tests) wait for the model at once: each holds a request thread for minutes.
+MAX_AI_SUGGESTIONS = 2
+AI_SETTINGS_POSTS = ('/api/settings/ai/providers', '/api/settings/ai/reviewer', '/api/settings/ai/models',
+                     '/api/settings/ai/test')
+AI_DELETE_RE = re.compile(r'/api/settings/ai/providers/([a-z][a-z0-9-]{0,31})/delete')
+# [ai-reviewer] - END
 
 
 def write_review(directory: Path, rows: list[dict], run_id: str) -> None:
@@ -210,6 +226,9 @@ class ReviewApp(ReviewService):
         # [control-panel] - START
         self.panel = Panel(root)
         # [control-panel] - END
+        # [ai-reviewer] - START
+        self.ai_slots = threading.BoundedSemaphore(MAX_AI_SUGGESTIONS)
+        # [ai-reviewer] - END
 
     def token_matches(self, supplied) -> bool:
         if self.token is None or not isinstance(supplied, str):
@@ -498,8 +517,7 @@ def make_handler(app: ReviewApp):
                 nonce = secrets.token_urlsafe(18)
                 csp = ("default-src 'none'; script-src 'nonce-" + nonce + "'; style-src 'unsafe-inline'; "
                        "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
-                self._send(200, 'text/html; charset=utf-8',
-                           render_account(nonce, app.auth is not None).encode('utf-8'), csp)
+                self._send(200, 'text/html; charset=utf-8', render_account(nonce).encode('utf-8'), csp)
                 return
             if path in AUTH_ROUTES:
                 self._problem(405, 'method_not_allowed', 'Use POST.', True)
@@ -567,6 +585,24 @@ def make_handler(app: ReviewApp):
                 self._json(200, app.panel.log(match.group(1), int(offset) if offset.isdigit() else 0))
                 return
             # [control-panel] - END
+            # [ai-reviewer] - START
+            # The AI providers of Settings (never a key: has_key only) and who may change them.
+            if path == '/api/settings/ai':
+                self._json(200, self._ai_settings())
+                return
+            # Whether the review page can ask the AI, and why not.
+            if path == '/api/ai/state':
+                self._json(200, self._ai_state())
+                return
+            # The providers with the latest measure of each, for the AI reviewers view of the Evaluate tab.
+            if path == '/api/panel/ai-reviewers':
+                self._json(200, app.panel.ai_reviewers())
+                return
+            if (path in AI_SETTINGS_POSTS or AI_DELETE_RE.fullmatch(path)
+                    or re.fullmatch(r'/api/route/[^/]+/frame/[^/]+/[^/]+/ai-suggest', path)):
+                self._problem(405, 'method_not_allowed', 'Use POST.', True)
+                return
+            # [ai-reviewer] - END
             match = re.fullmatch(r'/api/route/([^/]+)/reviews', path)
             if match:
                 self._send_reviews(match.group(1))
@@ -813,6 +849,13 @@ def make_handler(app: ReviewApp):
                 self._auth_post(path, self._read_json())
                 return
             # [site-login] - END
+            # [ai-reviewer] - START
+            if path in AI_SETTINGS_POSTS or AI_DELETE_RE.fullmatch(path):
+                if self._ai_post_refused():
+                    return
+                self._ai_settings_post(path, self._read_json())
+                return
+            # [ai-reviewer] - END
             # [control-panel] - START
             run = re.fullmatch(r'/api/panel/run/([a-z_]+)', path)
             stop = re.fullmatch(r'/api/panel/job/([0-9a-z_-]+)/stop', path)
@@ -826,12 +869,25 @@ def make_handler(app: ReviewApp):
                 if content_type.split(';')[0].strip().lower() != 'application/json':
                     self._problem(415, 'unsupported_media_type', 'Only JSON data is accepted.', True)
                     return
+                # [ai-reviewer] - START
+                # An AI review saves final reviews and both AI actions spend the provider's time: a session only.
+                if run and run.group(1) in ('ai_review', 'measure_ai_reviewer'):
+                    self._require_ai_session()
+                # [ai-reviewer] - END
                 body = self._read_json()
                 if run:
                     # The options: where a training starts ({"start": key}), the run to resume ({"run": name}), the
-                    # cutter's size and signs ({"size", "families"}), all checked by Panel.start.
+                    # cutter's size and signs ({"size", "families"}), the route, provider, save and limit of an AI
+                    # action, all checked by Panel.start.
                     options = {key: body[key] for key in ('start', 'run', 'size', 'families', 'proposer')
-                               if isinstance(body, dict) and isinstance(body.get(key), str)} or None
+                               if isinstance(body, dict) and isinstance(body.get(key), str)}
+                    # [ai-reviewer] - START
+                    # Passed as they are, also when not strings: Panel.start refuses them, never drops them (a limit
+                    # sent as a number must not become a whole route).
+                    options.update((key, body[key]) for key in ('route', 'provider', 'save', 'limit')
+                                   if isinstance(body, dict) and body.get(key) is not None)
+                    options = options or None
+                    # [ai-reviewer] - END
                     job = app.panel.start(run.group(1), options)
                     print(f'Pannello: avviata {job["label"]} ({job["id"]})', flush=True)
                     self._json(200, {'ok': True, **job})
@@ -846,7 +902,8 @@ def make_handler(app: ReviewApp):
                     self._json(200, {'ok': True, **app.panel.stop(stop.group(1))})
                 return
             # [control-panel] - END
-            match = re.fullmatch(r'/api/route/([^/]+)/frame/([0-9]{1,9})/([0-9]{1,9})(/apply-previous)?', path)
+            match = re.fullmatch(r'/api/route/([^/]+)/frame/([0-9]{1,9})/([0-9]{1,9})(/apply-previous|/ai-suggest)?',
+                                 path)
             if match is None:
                 self._problem(404, 'not_found', 'Invalid save address.', True)
                 return
@@ -857,9 +914,19 @@ def make_handler(app: ReviewApp):
             if content_type.split(';')[0].strip().lower() != 'application/json':
                 self._problem(415, 'unsupported_media_type', 'Only JSON data is accepted.', True)
                 return
+            # [ai-reviewer] - START
+            if match.group(4) == '/ai-suggest':
+                self._require_ai_session()
+            # [ai-reviewer] - END
             body = self._read_json()
             route = match.group(1)
             frame_key = str(int(match.group(2))) + '/' + str(int(match.group(3)))
+            # [ai-reviewer] - START
+            if match.group(4) == '/ai-suggest':
+                # The AI's suggestion for this frame: nothing is saved, the page shows it to apply and confirm.
+                self._ai_suggest(route, frame_key, body)
+                return
+            # [ai-reviewer] - END
             if match.group(4):
                 # "Apply previous" of the page: nothing is saved, the page shows the boxes to check.
                 self._json(200, app.apply_previous(route, frame_key, body))
@@ -887,6 +954,141 @@ def make_handler(app: ReviewApp):
             self._json(200, {'ok': True, 'review': public_review(review),
                              'confirmed_count': app.store.confirmed_count(route, directory.name),
                              'suspicious': suspicious})
+
+        # [ai-reviewer] - START
+        def _can_use_ai(self):
+            """A browser signed in as the administrator, or the site on 127.0.0.1 (nobody signs in there); never the
+            access token alone."""
+            return self._who()[1] in ('sign-in', 'local')
+
+        def _require_ai_session(self):
+            if not self._can_use_ai():
+                raise ReviewRejected(403, 'session_required', SESSION_REQUIRED_MESSAGE)
+
+        def _ai_post_refused(self):
+            """The protections of every AI POST: same origin, JSON only, a session. True when refused (answered)."""
+            if not self._same_origin():
+                self._problem(403, 'cross_origin', 'Request from another origin refused.', True)
+                return True
+            content_type = self.headers.get('Content-Type', '')
+            if content_type.split(';')[0].strip().lower() != 'application/json':
+                self._problem(415, 'unsupported_media_type', 'Only JSON data is accepted.', True)
+                return True
+            self._require_ai_session()
+            return False
+
+        def _ai_settings(self):
+            from nnslr_tools import llm_providers
+            return {**llm_providers.public_settings(app.root), 'can_edit': self._can_use_ai()}
+
+        def _ai_state(self):
+            """llm_providers.ai_state with can_ask; reason is the first thing that stops the page asking, or ''."""
+            from nnslr_tools import llm_providers
+            state = dict(llm_providers.ai_state(app.root))
+            state['can_ask'] = self._can_use_ai()
+            if not state.get('available'):
+                state['reason'] = state.get('reason') or 'Choose an AI reviewer in Settings.'
+            elif not state['can_ask']:
+                state['reason'] = SESSION_REQUIRED_MESSAGE
+            else:
+                state['reason'] = ''
+            return state
+
+        @staticmethod
+        def _stored_key(provider_id):
+            """The key saved for a provider, only to mask it in an error message; None when there is none."""
+            from nnslr_tools import llm_providers
+            if not isinstance(provider_id, str):
+                return None
+            try:
+                return llm_providers.provider(app.root, provider_id).get('key')
+            except ReviewRejected:
+                return None
+
+        @staticmethod
+        def _masked(exc, *secrets):
+            """The same refusal with every copy of a key replaced by ***: a key never goes back to the browser."""
+            message = str(exc.message)
+            for secret in secrets:
+                if isinstance(secret, str) and secret:
+                    message = message.replace(secret, '***')
+            return ReviewRejected(exc.status, exc.reason, message)
+
+        def _ai_settings_post(self, path, body):
+            """Settings > AI reviewer: save or delete a provider, choose the reviewer, list a server's models, Test."""
+            from nnslr_tools import ai_review, llm_providers
+            if not isinstance(body, dict):
+                raise ReviewRejected(400, 'invalid_json', 'A JSON object is required.')
+            who = terminal_text(self._who()[0] or self._who()[1])
+            typed = body.get('key')
+            deleted = AI_DELETE_RE.fullmatch(path)
+            try:
+                if deleted:
+                    llm_providers.delete_provider(app.root, deleted.group(1))
+                    print(f'AI settings: provider {deleted.group(1)} removed ({who})', flush=True)
+                    self._json(200, {'ok': True, **self._ai_settings()})
+                elif path == '/api/settings/ai/providers':
+                    provider = llm_providers.save_provider(app.root, body)
+                    print(f'AI settings: provider {terminal_text(provider["id"])} saved ({who})', flush=True)
+                    self._json(200, {'ok': True, 'provider': provider, **self._ai_settings()})
+                elif path == '/api/settings/ai/reviewer':
+                    chosen = body.get('id')
+                    if chosen is not None and not isinstance(chosen, str):
+                        raise ReviewRejected(400, 'invalid_provider', 'id is the id of a provider, or null.')
+                    llm_providers.set_reviewer(app.root, chosen)
+                    print(f'AI settings: reviewer {terminal_text(chosen or "none")} ({who})', flush=True)
+                    self._json(200, {'ok': True, **self._ai_settings()})
+                elif path == '/api/settings/ai/models':
+                    models = llm_providers.list_models(app.root, body)
+                    self._json(200, {'ok': True, 'models': models})
+                else:
+                    chosen = body.get('id')
+                    if not isinstance(chosen, str):
+                        raise ReviewRejected(400, 'invalid_provider', 'id is the id of a provider.')
+                    llm_providers.provider(app.root, chosen)
+                    if not app.ai_slots.acquire(blocking=False):
+                        raise ReviewRejected(429, 'ai_busy', 'The AI is already answering two frames: '
+                                                             'try again in a moment.')
+                    try:
+                        result = ai_review.test_provider(app, chosen)
+                    finally:
+                        app.ai_slots.release()
+                    print(f'AI settings: test of {terminal_text(chosen)}: {terminal_text(result.get("message", ""))}',
+                          flush=True)
+                    provider = next(item for item in llm_providers.public_settings(app.root)['providers']
+                                    if item['id'] == chosen)
+                    self._json(200, {'ok': True, 'result': result, 'provider': provider})
+            except ReviewRejected as exc:
+                raise self._masked(exc, typed, self._stored_key(body.get('id'))) from None
+
+        def _ai_suggest(self, route, frame_key, body):
+            """One frame reviewed by the AI reviewer of Settings, in pixels of the full frame; nothing is saved."""
+            from nnslr_tools import ai_review, llm_providers
+            if not isinstance(body, dict):
+                raise ReviewRejected(400, 'invalid_json', 'A JSON object is required.')
+            detections = body.get('detections')
+            if detections is not None and not isinstance(detections, list):
+                raise ReviewRejected(400, 'invalid_detections', 'detections is a list of boxes.')
+            run_id = body.get('run_id')
+            if run_id is not None and not isinstance(run_id, str):
+                raise ReviewRejected(400, 'invalid_json', 'run_id is the run of the report, a string.')
+            provider = llm_providers.reviewer_provider(app.root)
+            if provider is None:
+                raise ReviewRejected(409, 'no_ai_reviewer', 'Choose an AI reviewer in Settings.')
+            if not app.ai_slots.acquire(blocking=False):
+                raise ReviewRejected(429, 'ai_busy', 'The AI is already answering two frames: try again in a moment.')
+            try:
+                suggestion = ai_review.suggest_frame(app, route, frame_key, provider, detections=detections,
+                                                     run_id=run_id)
+            except ReviewRejected as exc:
+                print(f'AI: {terminal_text(route)} {frame_key} failed: {terminal_text(exc.reason)}', flush=True)
+                raise self._masked(exc, provider.get('key')) from None
+            finally:
+                app.ai_slots.release()
+            print(f'AI: {terminal_text(route)} {frame_key} ({terminal_text(suggestion.get("reviewer", ""))}) '
+                  f'{float(suggestion.get("seconds") or 0):.1f} s', flush=True)
+            self._json(200, {**suggestion, 'ok': True})
+        # [ai-reviewer] - END
 
         def _same_origin(self):
             fetch_site = self.headers.get('Sec-Fetch-Site')

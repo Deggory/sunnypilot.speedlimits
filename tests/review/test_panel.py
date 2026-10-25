@@ -27,7 +27,7 @@ def only_this_checkout(monkeypatch):
     """A download or a training really running on this machine must not make these tests busy: here every
     group counts only from the test checkout."""
     import nnslr_tools.panel as panel_module
-    monkeypatch.setattr(panel_module, 'OWN_GROUPS', ('fetch', 'prepare', 'train', 'update', 'other'))
+    monkeypatch.setattr(panel_module, 'OWN_GROUPS', ('fetch', 'prepare', 'train', 'update', 'ai', 'other'))
 
 
 @pytest.fixture

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // The inspector, docked on the right on a computer and under the photo on a phone: the boxes of the frame,
-// the editor of the selected one, the second reading, "More", the confirm block.
+// the AI reviewer, the editor of the selected one, the second reading, "More", the confirm block.
 import {computed} from 'vue';
+import AiSection from './AiSection.vue';
 import BoxEditor from './BoxEditor.vue';
 import BoxList from './BoxList.vue';
 import {boxCountText} from './boxes';
@@ -50,6 +51,7 @@ const countryText = computed(() => {
       <p class="pick-hint" id="pickHint" :hidden="count === 0 || state.selected >= 0">Select a box to correct its value, type and road.</p>
       <p class="empty-note" id="noBoxes" :hidden="count > 0"><svg viewBox="0 0 34 34" aria-hidden="true"><circle cx="17" cy="17" r="14" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="4 3.3"/><path d="M12 17h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span>No boxes. If there is no speed sign, confirm “no sign”: this example is needed too.</span></p>
     </section>
+    <AiSection :row="row"/>
     <BoxEditor :row="row" :detection="selectedBox"/>
     <SecondReading :row="row" :work="work"/>
     <OtherFields :row="row" :work="work"/>

@@ -160,15 +160,10 @@ def render_login(nonce: str) -> str:
     return fill(asset('login.html'), nonce, 'login', signed_in=False)
 
 
-def render_account(nonce: str, signed_in_browser: bool) -> str:
-    """The account page: who is signed in, sign out, change the password, the appearance."""
-    if signed_in_browser:
-        return fill(asset('account.html'), nonce, 'account', 'account')
-    return simple_page('Account', 'account', nonce,
-                       '<main class="page"><div class="card state-box center"><h1>Account</h1><p>This site was '
-                       'started for this computer only (127.0.0.1): it does not ask you to sign in. On the home '
-                       'network (service <code>speedlimits-web</code>) you sign in with a name and a password.</p>'
-                       '</div></main>')
+def render_account(nonce: str) -> str:
+    """The Account & Settings page (web/src/account): who is signed in, sign out, change the password, the
+    appearance, the AI reviewer. On 127.0.0.1, where nobody signs in, the app shows the settings alone."""
+    return fill(asset('account.html'), nonce, 'account', 'account')
 # [site-login] - END
 
 
@@ -224,6 +219,15 @@ def _route_row(summary: dict) -> str:
     when = [part for part in (drive.get('when'), _plural(drive['minutes'], 'min', 'min') if drive.get('minutes') else None) if part]
     name = html.escape(drive.get('title') or summary['route_id'])
     detail = html.escape(' · '.join(when))
+    # [ai-reviewer] - START
+    # The frames still to confirm can be reviewed by the AI of Settings: the button opens its sheet (site.ts,
+    # AiRouteSheet), which names the drive and how many frames are left.
+    ai = ''
+    if confirmed < total:
+        drive_name = ' · '.join(part for part in (drive.get('title'), drive.get('when')) if part) or summary['route_id']
+        ai = ('<button type="button" class="btn small ai-route" data-ai-route="' + route + '" data-ai-name="'
+              + html.escape(drive_name) + '" data-ai-left="' + str(total - confirmed) + '">Review with AI</button>')
+    # [ai-reviewer] - END
     return ('<li><a class="card-row ' + state + '" href="' + html.escape(summary['url']) + '">'
             + '<span class="state-icon" aria-hidden="true">' + ('✓' if state == 'done' else '') + '</span>'
             + '<span class="route" title="' + route + '"><span class="drive">' + name + '</span>'
@@ -232,7 +236,7 @@ def _route_row(summary: dict) -> str:
             + ' <span class="unit">confirmed</span></span>'
             + '<span class="bar" aria-hidden="true"><span style="width:' + str(percent) + '%"></span></span>'
             + '<span class="stats">' + ''.join(stats) + '</span>'
-            + '<span class="' + action_class + '">' + action + '</span></a></li>')
+            + '<span class="' + action_class + '">' + action + '</span></a>' + ai + '</li>')
 
 
 def render_index(summaries: list[dict], database: Path, nonce: str = '') -> str:

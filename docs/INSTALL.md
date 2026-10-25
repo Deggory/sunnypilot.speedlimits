@@ -84,7 +84,21 @@ Adds `transformers`, `accelerate` and `qwen-vl-utils` to `.venv-gpu` (no install
 
 On a slow line, download the four weight files elsewhere (`model-00001-of-00004.safetensors` … `model-00004-of-00004.safetensors` of that revision, 17.5 GB together) and copy them into `data/models/vlm/Qwen3-VL-8B-Instruct/`; then run the script: it checks the sha256 of each file, keeps the right ones and downloads only what is missing or wrong.
 
-Once installed, it is the third choice of **Find the signs → Found by** on the Prepare tab (`nnslr preannotate --proposer qwen`); until then that choice says what is missing.
+The same is the button **Install Qwen3-VL** under **Found by** on the Prepare tab, shown until the model has been checked and tried on the GPU (the script leaves `.installed` in the model's folder). Once installed, it is the third choice of **Find the signs → Found by** on the Prepare tab (`nnslr preannotate --proposer qwen`); until then that choice says what is missing.
+
+### An AI reviewer: any OpenAI-compatible server (optional)
+
+Nothing to install: the portal talks to the server with the Python standard library. A review can then be done by an AI that sees images, frame by frame on the review page (**Ask AI**) or a whole route at a time (**Review with AI** on the route list). Any server with the OpenAI API works (`/v1/models` and `/v1/chat/completions`): a hosted provider, or a llama.cpp `llama-server` on another machine, started with a vision model and its `--mmproj` file (for example Qwen3-VL-32B-Instruct), so that it sees the frames.
+
+Add it in the portal, under **Account → Settings → AI reviewer**: a name, the address ending in `/v1`, the API key if the server wants one, and the model. Then press **Test** and choose it as the reviewer. The same from a terminal, for example for strata:
+
+```sh
+.venv/bin/nnslr llm-provider add --name strata --base-url https://strata.farm.14bodhi.com/v1 --key-file /root/.config/strata-api-key
+.venv/bin/nnslr llm-provider test strata
+.venv/bin/nnslr llm-provider use strata
+```
+
+The providers and their keys are kept in `data/web/private/llm-providers.json`, with mode 600 in a folder with mode 700, outside git. `NNSLR_LLM_PROVIDERS=/full/path.json` puts the file elsewhere. The key is read from `--key-file` and never printed. No page, API answer, log or report shows it: the browser only learns that a key is set. **Test** says whether the model answers in JSON and reads the speed sign of a frame that a person reviewed. A model that the server lists as text only cannot see the frames, and Test says so. An AI review saved from **Review and save** is final: nobody approves it again, and the next import puts it into training as an AI review (`ai/<provider>/<model>`). The commands are in [COMMANDS.md](COMMANDS.md).
 
 ### Publishing a model on Hugging Face
 

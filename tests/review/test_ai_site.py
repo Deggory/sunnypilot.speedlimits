@@ -1,0 +1,290 @@
+"""The AI reviewer on the site: Settings (the providers, the reviewer, their models, Test), the AI state, one frame's
+suggestion, the "Review with AI" button of the route list, and who may use them: a signed-in browser or the site on
+127.0.0.1, never the access token alone. No answer, page or log ever holds a key.
+
+Only fake OpenAI-compatible servers on 127.0.0.1 (fake_llm.FakeLlm) are called; the data roots are temporary.
+"""
+from __future__ import annotations
+
+import copy
+import stat
+
+import pytest
+
+from fake_llm import FakeLlm, answer_json
+from nnslr_tools import llm_providers, review_auth
+from nnslr_tools.pages import _route_row
+from review_helpers import (HEIGHT, ROUTE, RUN_ID, TOKEN, WIDTH, RunningServer, json_of, make_report, page_body,
+                            sign_in)
+
+KEY = 'sk-site-test-SECRET-0d1e2f3a4b'
+SESSION_ONLY = (
+    ('/api/settings/ai/providers', {'name': 'other', 'base_url': 'http://127.0.0.1:9/v1', 'model': 'm'}),
+    ('/api/settings/ai/providers/fake/delete', {}),
+    ('/api/settings/ai/reviewer', {'id': None}),
+    ('/api/settings/ai/models', {'id': 'fake'}),
+    ('/api/settings/ai/test', {'id': 'fake'}),
+    (f'/api/route/{ROUTE}/frame/0/0/ai-suggest', {'run_id': RUN_ID}),
+    ('/api/panel/run/ai_review', {'route': ROUTE}),
+    ('/api/panel/run/measure_ai_reviewer', {}),
+)
+READ_ONLY = ('/api/settings/ai', '/api/ai/state', '/api/panel/ai-reviewers')
+# Frame 0/0 of make_report: one proposal 0/0/0 at [1, 2, 15, 20] on a 32 x 24 frame. The AI corrects it to an 80 and
+# adds a give-way sign, in its 0-1000 coordinates.
+ANSWER = answer_json(
+    boxes=[{'n': 1, 'verdict': 'correct', 'box': [100, 100, 500, 900], 'family': 'maximum_speed', 'value_kph': 80,
+            'applicability': 'own_road', 'visibility': 'clear', 'notes': ''}],
+    added=[{'box': [600, 100, 900, 500], 'family': 'other_sign', 'sign_type': 'give_way', 'value_kph': None,
+            'applicability': 'own_road', 'visibility': 'clear', 'notes': ''}])
+
+
+@pytest.fixture(autouse=True)
+def private_providers(monkeypatch):
+    """The providers file of the temporary data root, never the one of NNSLR_LLM_PROVIDERS; a fast password hash."""
+    monkeypatch.delenv(llm_providers.PROVIDERS_ENV, raising=False)
+    monkeypatch.setattr(review_auth, 'SCRYPT_N', 2 ** 10)
+
+
+@pytest.fixture
+def fake():
+    with FakeLlm(ANSWER, require_key=KEY) as llm:
+        yield llm
+
+
+def add_provider(root, base_url: str, *, reviewer: bool = True) -> dict:
+    provider = llm_providers.save_provider(root, {'name': 'fake', 'base_url': base_url, 'model': 'fake-vl',
+                                                  'key': KEY})
+    if reviewer:
+        llm_providers.set_reviewer(root, provider['id'])
+    return provider
+
+
+@pytest.fixture
+def lan(tmp_path):
+    make_report(tmp_path)
+    server = RunningServer(tmp_path, token=TOKEN, require_token=True)
+    yield server, tmp_path
+    server.close()
+
+
+@pytest.fixture
+def local(tmp_path):
+    make_report(tmp_path)
+    server = RunningServer(tmp_path)
+    yield server, tmp_path
+    server.close()
+
+
+def test_the_token_reads_but_never_changes_or_asks(lan, fake):
+    server, root = lan
+    add_provider(root, fake.base_url)
+    before = llm_providers.providers_path(root).read_bytes()
+    token = {'X-Review-Token': TOKEN}
+    for path in READ_ONLY:
+        status, response, data = server.request('GET', path, headers=token)
+        assert status == 200 and KEY.encode() not in data and b'"key"' not in data, path
+    assert json_of(server.request('GET', '/api/settings/ai', headers=token)[2])['can_edit'] is False
+    state = json_of(server.request('GET', '/api/ai/state', headers=token)[2])
+    assert state['available'] is True and state['can_ask'] is False
+    assert state['reason'] == 'Sign in on the site to use the AI reviewer.'
+    for path, body in SESSION_ONLY:
+        status, response, data = server.request('POST', path, body=body, headers=token)
+        assert status == 403 and json_of(data)['error'] == 'session_required', (path, data)
+    # Nothing changed, nothing was asked, nothing started.
+    assert llm_providers.providers_path(root).read_bytes() == before
+    assert fake.paths == [] and server.app.panel.jobs() == []
+    # Without a session or the token: the sign-in, as for the rest of the site.
+    assert server.request('GET', '/api/settings/ai')[0] == 401
+
+
+def test_a_session_manages_the_providers_and_never_sees_a_key(lan, fake):
+    server, root = lan
+    session = sign_in(server)
+    status, response, data = server.request('GET', '/api/settings/ai', headers=session)
+    assert status == 200 and json_of(data) == {'providers': [], 'reviewer': None, 'can_edit': True}
+    status, response, data = server.request('POST', '/api/settings/ai/providers', headers=session, body={
+        'name': 'Fake', 'base_url': fake.base_url + '/', 'model': 'fake-vl', 'key': KEY})
+    assert status == 200 and KEY.encode() not in data, data
+    answer = json_of(data)
+    assert answer['ok'] is True and answer['can_edit'] is True and answer['reviewer'] is None
+    assert answer['provider']['id'] == 'fake' and answer['provider']['has_key'] is True
+    assert answer['provider']['base_url'] == fake.base_url and 'key' not in answer['provider']
+    # The file: the owner's only, in a folder of its own, under the data root.
+    path = llm_providers.providers_path(root)
+    assert path == root / 'web/private/llm-providers.json'
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600 and stat.S_IMODE(path.parent.stat().st_mode) == 0o700
+
+    # An edit without a key keeps it; a refused edit never repeats the key it was sent.
+    status, response, data = server.request('POST', '/api/settings/ai/providers', headers=session, body={
+        'id': 'fake', 'name': 'Fake', 'base_url': fake.base_url, 'model': 'fake-vl-2'})
+    assert status == 200 and json_of(data)['provider']['has_key'] is True
+    assert llm_providers.provider(root, 'fake')['key'] == KEY
+    status, response, data = server.request('POST', '/api/settings/ai/providers', headers=session, body={
+        'id': 'fake', 'name': 'Fake', 'base_url': 'ftp://' + KEY, 'model': 'fake-vl', 'key': KEY})
+    assert status == 400 and json_of(data)['error'] == 'invalid_provider' and KEY.encode() not in data
+
+    status, response, data = server.request('POST', '/api/settings/ai/reviewer', headers=session, body={'id': 'fake'})
+    assert status == 200 and json_of(data)['reviewer'] == 'fake'
+    assert json_of(data)['providers'][0]['is_reviewer'] is True
+    status, response, data = server.request('POST', '/api/settings/ai/reviewer', headers=session, body={'id': 3})
+    assert status == 400
+    state = json_of(server.request('GET', '/api/ai/state', headers=session)[2])
+    assert state == {'available': True, 'can_ask': True, 'reason': '',
+                     'provider': {'id': 'fake', 'name': 'Fake', 'model': 'fake-vl-2',
+                                  'reviewer_name': 'ai/fake/fake-vl-2'}}
+    for read in READ_ONLY:
+        assert KEY.encode() not in server.request('GET', read, headers=session)[2]
+
+    # "" removes the key; deleting the reviewer leaves no reviewer.
+    status, response, data = server.request('POST', '/api/settings/ai/providers', headers=session, body={
+        'id': 'fake', 'name': 'Fake', 'base_url': fake.base_url, 'model': 'fake-vl-2', 'key': ''})
+    assert status == 200 and json_of(data)['provider']['has_key'] is False
+    status, response, data = server.request('POST', '/api/settings/ai/providers/fake/delete', headers=session, body={})
+    assert status == 200 and json_of(data) == {'ok': True, 'providers': [], 'reviewer': None, 'can_edit': True}
+    status, response, data = server.request('POST', '/api/settings/ai/providers/fake/delete', headers=session, body={})
+    assert status == 404
+    state = json_of(server.request('GET', '/api/ai/state', headers=session)[2])
+    assert state['available'] is False and state['reason'] == 'Choose an AI reviewer in Settings.'
+
+
+def test_ai_posts_keep_the_protections_of_a_save(local, fake):
+    server, root = local
+    add_provider(root, fake.base_url)
+    for path, body in SESSION_ONLY[:6]:
+        status, response, data = server.request('POST', path, body=body, headers={'Origin': 'http://evil.example'})
+        assert status == 403 and json_of(data)['error'] == 'cross_origin', path
+        status, response, data = server.request('POST', path, body=b'{}', headers={'Content-Type': 'text/plain'})
+        assert status == 415, path
+        assert server.request('GET', path)[0] == 405, path
+    status, response, data = server.request('POST', '/api/settings/ai/reviewer', body=[1])
+    assert status == 400 and json_of(data)['error'] == 'invalid_json'
+    assert server.request('POST', '/api/settings/ai/providers/Not_An_Id/delete', body={})[0] == 404
+    assert fake.paths == []
+
+
+def test_a_suggestion_has_pixel_boxes_and_saves_nothing(local, fake):
+    server, root = local
+    add_provider(root, fake.base_url)
+    status, response, data = server.request('POST', f'/api/route/{ROUTE}/frame/0/0/ai-suggest',
+                                            body={'run_id': RUN_ID})
+    assert status == 200, data
+    assert KEY.encode() not in data
+    suggestion = json_of(data)
+    assert suggestion['ok'] is True and suggestion['route_id'] == ROUTE and suggestion['frame_key'] == '0/0'
+    assert suggestion['run_id'] == RUN_ID and suggestion['reviewer'] == 'ai/fake/fake-vl'
+    assert suggestion['provider'] == {'id': 'fake', 'name': 'fake', 'model': 'fake-vl'}
+    assert suggestion['complete'] is True and suggestion['no_sign'] is False and suggestion['deleted'] == []
+    corrected, added = suggestion['detections']
+    # The corrected proposal keeps its id; the boxes are pixels of the 32 x 24 frame, inside it.
+    assert corrected['detection_id'] == '0/0/0' and corrected['ai_action'] == 'correct'
+    assert corrected['bbox_xyxy'] == pytest.approx([3.2, 2.4, 16.0, 21.6])
+    assert corrected['family'] == 'maximum_speed' and corrected['value_kph'] == 80
+    assert added['ai_action'] == 'add' and added['detection_id'].startswith('ai-')
+    assert added['bbox_xyxy'] == pytest.approx([19.2, 2.4, 28.8, 12.0])
+    assert added['family'] == 'other_sign' and added['sign_type'] == 'give_way'
+    for box in (corrected['bbox_xyxy'], added['bbox_xyxy']):
+        assert 0 <= box[0] < box[2] <= WIDTH and 0 <= box[1] < box[3] <= HEIGHT
+    # The key went to the provider, in the header only; the model saw the proposal, in 0-1000.
+    assert fake.auth_headers == ['Bearer ' + KEY]
+    assert KEY not in repr(fake.requests)
+    # Nothing saved.
+    assert server.app.store.confirmed_count(ROUTE, RUN_ID) == 0
+
+    # Applied on the page, then confirmed by the person: a human review, as any save of the page.
+    row = server.app.report(ROUTE)[2]['0/0']
+    body = page_body(row, base_revision=0)
+    body['detections'] = [{key: value for key, value in item.items() if key != 'ai_action'}
+                          for item in copy.deepcopy(suggestion['detections'])]
+    status, response, data = server.post_frame(ROUTE, '0/0', body)
+    assert status == 200, data
+    review = json_of(data)['review']
+    assert review['reviewer'] == 'Cristian' and review.get('reviewer_kind', 'human') == 'human'
+
+
+def test_suggestion_refusals(local, fake):
+    server, root = local
+    path = f'/api/route/{ROUTE}/frame/0/0/ai-suggest'
+    # No reviewer chosen.
+    status, response, data = server.request('POST', path, body={'run_id': RUN_ID})
+    assert status == 409 and json_of(data)['error'] == 'no_ai_reviewer'
+    add_provider(root, fake.base_url)
+    status, response, data = server.request('POST', path, body={'run_id': '20200101T000000Z-00000000'})
+    assert status == 409 and json_of(data)['error'] == 'stale_report'
+    status, response, data = server.request('POST', path, body={'run_id': RUN_ID, 'detections': 'all'})
+    assert status == 400 and json_of(data)['error'] == 'invalid_detections'
+    status, response, data = server.request('POST', path, body={'run_id': 5})
+    assert status == 400
+    assert server.request('POST', f'/api/route/{ROUTE}/frame/0/99/ai-suggest', body={'run_id': RUN_ID})[0] == 404
+    assert fake.requests == []
+    # Two suggestions are already waiting for the model: the third is refused at once.
+    assert server.app.ai_slots.acquire(blocking=False) and server.app.ai_slots.acquire(blocking=False)
+    try:
+        status, response, data = server.request('POST', path, body={'run_id': RUN_ID})
+        assert status == 429 and json_of(data)['error'] == 'ai_busy'
+        status, response, data = server.request('POST', '/api/settings/ai/test', body={'id': 'fake'})
+        assert status == 429 and json_of(data)['error'] == 'ai_busy'
+    finally:
+        server.app.ai_slots.release()
+        server.app.ai_slots.release()
+    assert fake.requests == []
+    # The slots are free again.
+    assert server.request('POST', path, body={'run_id': RUN_ID})[0] == 200
+
+
+def test_a_provider_error_never_repeats_the_key(local):
+    server, root = local
+    with FakeLlm(status=401, error_message='Incorrect API key provided: ' + KEY) as broken:
+        add_provider(root, broken.base_url)
+        status, response, data = server.request('POST', f'/api/route/{ROUTE}/frame/0/0/ai-suggest',
+                                                body={'run_id': RUN_ID})
+        assert status == 502 and json_of(data)['error'] == 'ai_http_error', data
+        assert KEY.encode() not in data and b'HTTP 401' in data
+        status, response, data = server.request('POST', '/api/settings/ai/test', body={'id': 'fake'})
+        assert status == 200 and KEY.encode() not in data
+        assert json_of(data)['result']['ok'] is False
+    # The server is gone: unreachable, still without the key.
+    status, response, data = server.request('POST', f'/api/route/{ROUTE}/frame/0/0/ai-suggest',
+                                            body={'run_id': RUN_ID})
+    assert status == 502 and json_of(data)['error'] == 'ai_unreachable' and KEY.encode() not in data
+    status, response, data = server.request('POST', '/api/settings/ai/models', body={'id': 'fake'})
+    assert status == 502 and KEY.encode() not in data
+
+
+def test_models_and_test(local, fake):
+    server, root = local
+    add_provider(root, fake.base_url, reviewer=False)
+    status, response, data = server.request('POST', '/api/settings/ai/models', body={'id': 'fake'})
+    assert status == 200 and json_of(data) == {'ok': True, 'models': [{'id': 'fake-vl', 'sees_images': True}]}
+    assert fake.auth_headers == ['Bearer ' + KEY]
+    status, response, data = server.request('POST', '/api/settings/ai/test', body={})
+    assert status == 400 and json_of(data)['error'] == 'invalid_provider'
+    status, response, data = server.request('POST', '/api/settings/ai/test', body={'id': 'missing'})
+    assert status == 404
+    # A model that takes text only: Test says so without asking it anything.
+    with FakeLlm(models=('fake-vl',), text_only=True, require_key=KEY) as text_only:
+        llm_providers.save_provider(root, {'id': 'fake', 'name': 'fake', 'base_url': text_only.base_url,
+                                           'model': 'fake-vl'})
+        status, response, data = server.request('POST', '/api/settings/ai/test', body={'id': 'fake'})
+        assert status == 200 and KEY.encode() not in data
+        answer = json_of(data)
+        assert answer['ok'] is True and answer['result']['ok'] is False
+        assert answer['result']['sees_images'] is False and 'text only' in answer['result']['message']
+        assert answer['provider']['id'] == 'fake' and answer['provider']['last_test'] == answer['result']
+        assert text_only.requests == []
+
+
+def test_the_route_list_offers_the_ai_on_routes_not_done(local):
+    server, root = local
+    status, response, data = server.request('GET', '/routes')
+    assert status == 200
+    page = data.decode()
+    assert (f'<button type="button" class="btn small ai-route" data-ai-route="{ROUTE}" data-ai-name="{ROUTE}" '
+            f'data-ai-left="3">Review with AI</button></li>') in page
+    summary = {'route_id': ROUTE, 'url': f'/route/{ROUTE}/', 'frame_count': 1200, 'confirmed_count': 200,
+               'frames_with_proposals': 900, 'drive': {'title': 'Herznach → <Zürich>', 'when': 'Fri 23 Oct 2026 · 08:01',
+                                                       'minutes': 20}}
+    row = _route_row(summary)
+    assert row.startswith('<li><a class="card-row doing"') and row.endswith('Review with AI</button></li>')
+    assert 'data-ai-name="Herznach → &lt;Zürich&gt; · Fri 23 Oct 2026 · 08:01"' in row and 'data-ai-left="1000"' in row
+    # A route every frame of which is confirmed has nothing left for the AI.
+    assert 'ai-route' not in _route_row({**summary, 'confirmed_count': 1200})

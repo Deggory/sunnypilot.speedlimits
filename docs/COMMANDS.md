@@ -11,7 +11,7 @@ The **Effects** columns use these words:
 | CPU-heavy | keeps the CPU busy for minutes to hours |
 | GPU | trains or runs networks on the GPU |
 | installs | installs Python packages into a virtual environment |
-| network | talks to the comma over SSH, or downloads from the internet |
+| network | talks to the comma over SSH, to an AI provider's server, or downloads from the internet |
 | restarts | restarts the portal |
 | system | changes the system configuration (a systemd service) |
 | publishes | uploads to a public place |
@@ -24,6 +24,7 @@ The **Effects** columns use these words:
 | Comma recordings | `COMMA_VIDEOS_DIR`, by default `../comma-videos` next to the clone. Each file is stored once and linked into the data root, so other projects on the same machine can share them. |
 | Portal access token | `NNSLR_REVIEW_TOKEN` in the `.env` of the clone (mode 600, ignored by git). It is the setup code of the first sign-in and the key of the REST API and MCP. Never copy it into files, logs or reports. |
 | Python environments | `.venv` for the core and the portal, and `.venv-gpu` for training. Git ignores both. |
+| AI providers | `web/private/llm-providers.json` in the data root (mode 600, folder 700), or the file named by `NNSLR_LLM_PROVIDERS` (a full path). It holds the OpenAI-compatible servers of **Settings → AI reviewer**, their API keys and which one reviews. Only the portal's Settings and `nnslr llm-provider` write it. A key never leaves the server: no page, API answer, log or report shows it. |
 
 Inside the data root:
 
@@ -44,6 +45,8 @@ Inside the data root:
 | `models/active.json` | the version in use for each network (Models tab) |
 | `models/preannotation/<sha256>/` | the downloaded pre-annotation models |
 | `logs/` | logs of the helpers, the portal's jobs and the trainings |
+| `ai_reviews/<route>/` | what the AI suggested for each frame in every route review run (`nnslr ai-review`), with or without saving |
+| `evaluations/ai_reviewers/` | the latest measure of each AI provider (`nnslr measure-ai-reviewer`), and a timestamped copy of every measure |
 
 ## Install
 
@@ -80,6 +83,8 @@ These helpers are the daily flow, and the portal's buttons run them. Each one sk
 | `helpers/update.sh [--no-link]` | Runs `git pull --ff-only`, updates `.venv` when `pyproject.toml` changed, reinstalls the service unit if it changed, and restarts the portal. Jobs started from the portal keep running. Portal: **Update the code**. | network, installs, restarts |
 | `helpers/build_web.sh [--check]` | Type-checks the Vue 3 and TypeScript pages in `web/src` and builds them into `src/nnslr_tools/web/js`. The built files are committed, so the server never needs Node. Node comes from PyPI through uv, and nothing is installed system-wide. `--check` only verifies that the built files are current. | installs into `web/node_modules`, writes `src/nnslr_tools/web/js` |
 | `helpers/mcp.sh [--read-only]` | Runs the MCP server of the review over stdio (`nnslr mcp`), for Claude Code, Codex and other MCP clients, on this machine or through SSH. Its saves are AI reviews. `--read-only` offers no save tool. | writes reviews unless `--read-only` |
+| `helpers/ai_review.sh <route> [--provider=ID] [--save] [--limit=N]` | Reviews the frames of a route that nobody confirmed with an AI provider of Settings (`nnslr ai-review`; default: the reviewer). Without `--save` it is a trial: the suggestions go to `ai_reviews/<route>/` and nothing is saved. With `--save`, every frame the AI judged completely is saved as an AI review, `ai/<provider>/<model>`. That save is final, and the next import puts it into training. Frames a person confirmed are never touched. Portal: **Review with AI** on the route list. | network; writes reviews with `--save` |
+| `helpers/measure_ai_reviewer.sh [--provider=ID] [--limit=N]` | Measures an AI provider on up to 60 frames people reviewed (`nnslr measure-ai-reviewer`). Every provider gets the same sample, so their numbers compare. Nothing is saved; the report goes to `evaluations/ai_reviewers/`. Portal: **Measure** in Evaluate → AI reviewers. | network, writes data |
 | `helpers/setup_mcp.sh [--claude] [--effort=...] [--restart]` | Installs `.[mcp]`. `--claude` registers the MCP server in Claude Code for this folder and writes the git-ignored `.claude/settings.local.json`. `--restart` backs up the review database when it will be migrated, then restarts the portal. | installs; restarts with `--restart` |
 
 ## The `nnslr` command
@@ -115,6 +120,18 @@ These helpers are the daily flow, and the portal's buttons run them. Each one sk
 | `review [--host H] [--port P] [--route R]` | serves the portal. By default it listens on 127.0.0.1:8765 with no sign-in. `--host 0.0.0.0` opens it to the LAN and requires the token. | serves the portal, writes reviews |
 | `mcp [--read-only]` | the MCP server of the review, over stdio | writes reviews unless `--read-only` |
 | `review-reclassify-ai --reviewer NAME [--dry-run]` | marks the page reviews saved by an AI agent as AI reviews (`ai/<name>`) | writes reviews |
+
+**AI reviewer** (an OpenAI-compatible server that sees images; see below)
+
+| Subcommand | Purpose | Effects |
+|---|---|---|
+| `llm-provider list` | the providers, their address and model, `key: set\|none`, and which one reviews. Never a key. | read-only |
+| `llm-provider add --name N --base-url URL [--model M] [--key-file PATH] [--reviewer]` | adds a provider, or updates the one whose id comes from that name. The key is read from the file and never printed. Without `--key-file` a new provider has no key and an update keeps its key. Without `--model` it takes the first model the server lists. `--reviewer` also makes it the reviewer. | writes the providers file; network without `--model` |
+| `llm-provider remove ID`, `llm-provider use ID\|none` | removes a provider and its key; chooses the reviewer | writes the providers file |
+| `llm-provider models ID` | the models the provider's server lists, and whether each one sees images | network |
+| `llm-provider test ID` | asks the provider about one reviewed frame: does it answer in JSON, and does it see the image? Only the result is saved. | network, writes the providers file |
+| `ai-review ROUTE [--provider ID] [--save] [--limit N]` | the AI review of a route (above, `helpers/ai_review.sh`). Progress goes to stderr and the summary as JSON to stdout. | network; writes reviews with `--save` |
+| `measure-ai-reviewer [--provider ID] [--limit 60]` | the measure of an AI provider (above). The report goes to stdout as JSON. | network, writes data |
 
 **Dataset and splits**
 
@@ -163,6 +180,16 @@ The GPU environment comes from `bash scripts/setup_v100_training_env.sh`. It cre
 
 `helpers/measure_proposer.sh [vietnam|ours|qwen]` (the **Measure** button of the Proposers view of Evaluate, `nnslr evaluate-proposer`) runs a proposer on the reviewed test frames exactly as Prepare would and compares its proposals with the kept boxes: speed signs found and read right (overall, by width, on the frames a person reviewed), every sign found, false proposals per frame, seconds per frame. Painted road numbers are left out. Nothing is written into the reviews; the report goes to `data/evaluations/proposers/`.
 
+**The AI reviewer.** A review can be done by hand or by an AI that sees images, through any OpenAI-compatible server (`/v1/models` and `/v1/chat/completions`): a provider such as strata, a llama.cpp `llama-server` with a vision model and its `--mmproj` file (for example Qwen3-VL-32B-Instruct), or another service. Providers are added in the portal under **Account → Settings → AI reviewer**, or from a terminal:
+
+```sh
+.venv/bin/nnslr llm-provider add --name strata --base-url https://strata.farm.14bodhi.com/v1 --key-file /root/.config/strata-api-key
+.venv/bin/nnslr llm-provider test strata      # answers in JSON? sees the image?
+.venv/bin/nnslr llm-provider use strata       # the one that reviews
+```
+
+**Test** sends one frame that a person reviewed, without its proposals, and checks whether the model reads its speed sign. A server that lists the model as text only is reported as such, and the model is not asked anything. On the review page, **Ask AI** (key I) shows the AI's suggestion for the frame. It saves nothing: **Apply** turns it into edits that you check, and your **Confirm** saves them as your review. On the route list, **Review with AI** runs `helpers/ai_review.sh` as a job: **Try without saving** checks 20 frames, and **Review and save** saves AI reviews, which are final. The model gets the image, the numbered boxes and the second reading as hints, in coordinates from 0 to 1000. It never sees the neighbouring frames, and it is told to ignore any instruction written in the image. Only a browser signed in to the portal, or the portal on 127.0.0.1, can change the providers or use the AI. The access token can only read the settings, never a key.
+
 **Training modes** (`--mode`, or the second argument of `run_v100_baseline.sh`):
 
 - **fresh** (the default) is a new run, started from torchvision's ImageNet-pretrained MobileNetV3 weights.
@@ -176,7 +203,7 @@ The GPU environment comes from `bash scripts/setup_v100_training_env.sh`. It cre
 | `scripts/install_review_service.sh --dry-run` | shows what an install would change | read-only |
 | `sudo scripts/install_review_service.sh` | Installs or updates the portal as the systemd service `speedlimits-web`, using the token in `.env`. A restart stops only the web server, never a job started from it. `--uninstall` removes the service. | system |
 
-The portal also serves a REST API at `/api/v1`: routes, paged frames, the next frame to review, images, history, and saves with `run_id` and `base_revision`, which answer 409 on a conflict. With `.[mcp]` it also serves MCP at `/mcp`. Both need the token in an `Authorization: Bearer` header, never in the URL, even on 127.0.0.1. `NNSLR_PANEL_ACTIONS=0` makes the portal's buttons read-only. Keep the portal on a LAN or behind an SSH tunnel. Details are in [API_MCP.md](API_MCP.md) (in Italian).
+The portal also serves a REST API at `/api/v1`: routes, paged frames, the next frame to review, images, history, and saves with `run_id` and `base_revision`, which answer 409 on a conflict. With `.[mcp]` it also serves MCP at `/mcp`. Both need the token in an `Authorization: Bearer` header, never in the URL, even on 127.0.0.1. The AI reviewer's endpoints (`/api/settings/ai`, `/api/ai/state`, `/api/route/<route>/frame/<s>/<i>/ai-suggest`, `/api/panel/ai-reviewers`) belong to the portal, not to `/api/v1`: the token may only read them. `NNSLR_PANEL_ACTIONS=0` makes the portal's buttons read-only. Keep the portal on a LAN or behind an SSH tunnel. Details are in [API_MCP.md](API_MCP.md) (in Italian).
 
 ## Publishing (when there is something to publish)
 
@@ -203,7 +230,7 @@ Before publishing:
 ## Rules the tools follow
 
 - Only frames explicitly confirmed by a person or an AI reviewer become labels. Model proposals and unconfirmed frames are never imported. Proposals that reviewers removed are kept as records, and used as "not a sign" examples.
-- AI confirmations are final, and stay recognisable in the dataset (`ai/<name>`, `label_basis: ai_review`).
+- AI confirmations are final, and stay recognisable in the dataset (`ai/<name>`, `label_basis: ai_review`). The portal's AI reviewer saves as `ai/<provider>/<model>`, with channel `web`, only from **Review and save**. A suggestion on the review page saves nothing until a person confirms it, and then it is that person's review.
 - The dataset follows the latest review of each frame. Rows it replaces are archived in `annotations/replaced/`.
 - Splits are frozen and identified by a hash of their content. When most frames have a GPS position, the split is by place: areas of about 300 m, with a buffer of neighbouring areas around the test that is neither trained on nor measured. Otherwise the split is by route group. It needs at least three independent groups, and the test prefers frames confirmed by a person.
 - Confirming starts nothing. Import and training are separate, explicit steps.

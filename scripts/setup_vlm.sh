@@ -97,4 +97,5 @@ with torch.no_grad():
 answer = processor.batch_decode(output[:, inputs["input_ids"].shape[1]:], skip_special_tokens=True)[0]
 print(f"answer in {time.time() - started:.1f} s on {frame}:\n{answer}")
 PY
+date -u +%Y-%m-%dT%H:%M:%SZ > "$TARGET/.installed"   # read by nnslr_tools.preannotate.vlm_missing
 echo "Installed and tried: $TARGET"

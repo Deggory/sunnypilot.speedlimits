@@ -5,6 +5,7 @@
 // export). The state lives in store.ts; the plain modules of web/src/review change it (navigation, edits,
 // confirm, server, export) and the components below draw it.
 import {nextTick, onBeforeUnmount, onMounted, watchEffect} from 'vue';
+import {aiPhase, loadAiState} from './ai';
 import {ensureCurrentFrame, row, status, work} from './current';
 import {unsavedKeys, workOf} from './frames';
 import Inspector from './Inspector.vue';
@@ -47,6 +48,8 @@ watchEffect(() => {
   data['unsaved'] = String(unsavedKeys().length);
   data['saving'] = state.inFlight.size > 0 ? 'true' : 'false';
   data['saveCount'] = String(state.saveCount);
+  // The AI suggestion of the frame: none, asking, ready or failed.
+  data['ai'] = aiPhase(key);
   if (state.lastSave) {
     data['lastSaveKey'] = state.lastSave.key;
     data['lastSaveResult'] = state.lastSave.result;
@@ -59,6 +62,7 @@ let timer: number | undefined;
 onMounted(() => {
   void nextTick(scrollTimelineToCurrent);
   if (!report.apiBase) return;
+  void loadAiState();
   // A confirmed frame gets its boxes from the server: then its first box is selected too.
   void loadServer().then(() => {
     startAtWork();

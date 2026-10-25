@@ -375,8 +375,6 @@ border:1px solid color-mix(in srgb,var(--warn) 35%,transparent)}
 text-transform:none;letter-spacing:0;font-size:13.5px}
 
 /* The details of a job in the sheet: a summary line, the steps, the log as plain text. */
-.sheet-sub{margin:2px 0 0;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
-.sheet-section{margin:14px 0 8px;font-size:13px;font-weight:600;color:var(--muted);letter-spacing:0}
 .sheet .jp-steps{padding:10px 14px}
 
 /* Pills: 'to review' neutral and 'to import' green, both with a hollow dot (not done yet). */
@@ -736,6 +734,10 @@ border-top:1px solid var(--line)}
 .ev-widths{list-style:none;margin:0 0 12px;padding:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
 .ev-widths li{display:flex;flex-direction:column;padding:8px 10px;border-radius:10px;background:var(--surface-2);border:1px solid var(--line)}
 .ev-missing{color:var(--bad)}
+.ev-goal code{word-break:normal;white-space:nowrap}
+.ev-failures{margin:0 0 12px;font-size:13.5px;color:var(--muted)}
+.ev-failures summary{cursor:pointer;color:var(--fg);font-weight:600}
+.ev-failures ul{margin:8px 0 0;padding-left:18px;overflow-wrap:anywhere}
 @media (max-width:800px){.ev-widths{grid-template-columns:repeat(2,minmax(0,1fr))}.ev-row{grid-template-columns:1fr}.ev-main{font-size:17px}.ev-head .seg{display:grid;grid-template-columns:repeat(3,auto);width:100%}.ev-head .seg button{padding-left:6px;padding-right:6px}}
 .prep-step{display:flex;align-items:center;gap:8px;margin:18px 0 8px;font-size:15px}
 .prep-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 12px}

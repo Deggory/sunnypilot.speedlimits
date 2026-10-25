@@ -32,10 +32,30 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
       text: 'Mines the false boxes of the cutter in use, trains the classifier with “not a sign” on the GPU, then measures it '
         + 'alone and in the chain: it takes hours. Its run is a new one, named by the time it starts.'};
   }
+  if (name === 'setup_vlm') {
+    return {title: 'Install Qwen3-VL?', action: 'Install',
+      text: 'Downloads the model (17.5 GB, the files already copied here are kept), installs what it needs and tries it on the GPU. '
+        + 'It can take an hour on a slow line.'};
+  }
   if (name === 'measure_proposer') {
     return {title: 'Measure ' + proposerName(options?.proposer) + '?', action: 'Measure',
       text: 'It proposes the signs of the reviewed test frames, as Prepare would, and compares them with the boxes you kept. '
         + 'Nothing changes in the reviews or the routes. Our networks and Qwen3-VL use the GPU.'};
+  }
+  if (name === 'ai_review' && options?.save === 'yes') {
+    return {title: 'Review and save with the AI?', action: 'Review and save', danger: true,
+      text: 'AI saves are final: nobody approves them again, and the next import puts them into training. Frames a '
+        + 'person confirmed are never touched.'};
+  }
+  if (name === 'ai_review') {
+    return {title: 'Try the AI reviewer?', action: 'Try',
+      text: 'It suggests the boxes of ' + (options?.limit ? 'up to ' + options.limit + ' ' : 'the ')
+        + 'frames still to review and writes them to a file. Nothing is saved.'};
+  }
+  if (name === 'measure_ai_reviewer') {
+    return {title: 'Measure ' + (options?.provider ?? 'the AI reviewer') + '?', action: 'Measure',
+      text: 'It asks the AI about up to ' + (options?.limit ?? '60') + ' frames a person reviewed and compares its '
+        + 'answers with theirs. Nothing is saved; it takes minutes to an hour.'};
   }
   if (name === 'prepare_again') {
     return {title: 'Propose the signs again?', action: 'Propose again',

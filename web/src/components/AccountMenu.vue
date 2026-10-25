@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // The Account menu at the right of every top bar: who is signed in, the appearance (dark, light,
-// automatic), the account settings and sign out. A panel under the icon, a sheet across the width on a phone.
+// automatic), Settings (the password, the signed-in browsers, the AI reviewer) and sign out. A panel under the icon, a sheet
+// across the width on a phone.
 import {nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import type {AuthState} from '../common/auth-types';
@@ -107,7 +108,7 @@ const sessionsText = (value: AuthState): string =>
       </div>
     </div>
     <div class="pop-section pop-items">
-      <a class="pop-item" href="/account">Password and signed-in browsers</a>
+      <a class="pop-item" href="/account" id="account-settings">Settings</a>
       <template v-if="state !== null && !state.local">
         <button class="pop-item" type="button" @click="signOut(false)">Sign out</button>
         <button class="pop-item danger" type="button" @click="signOut(true)">Sign out everywhere</button>

@@ -42,11 +42,18 @@ CUTTER_STEPS = (
 PREPARE_STEPS = (('link', 'Link the videos', 5), ('frames', 'Extract the frames and propose the signs', 95))
 FETCH_STEPS = (('fetch', 'Download the drives from the comma', 100),)
 UPDATE_STEPS = (('update', 'Update the code and restart the site', 100),)
+# [ai-reviewer] - START
+# One step each: nnslr ai-review and nnslr measure-ai-reviewer report their frames (nnslr_tools.progress).
+AI_REVIEW_STEPS = (('review', 'Review the frames with the AI', 100),)
+AI_MEASURE_STEPS = (('measure', 'Measure the AI reviewer', 100),)
+# [ai-reviewer] - END
 STEPS = {'fetch': FETCH_STEPS, 'prepare': PREPARE_STEPS, 'dataset': DATASET_STEPS, 'train': TRAIN_STEPS,
          'train_continue': TRAIN_STEPS, 'train_resume': TRAIN_STEPS, 'train_classifier': CLASSIFIER_STEPS,
-         'train_cutter': CUTTER_STEPS, 'update': UPDATE_STEPS}
-# The actions whose percent is the weighted sum of their steps.
-WEIGHTED = ('train', 'train_continue', 'train_resume', 'train_classifier', 'train_cutter', 'dataset')
+         'train_cutter': CUTTER_STEPS, 'update': UPDATE_STEPS, 'ai_review': AI_REVIEW_STEPS,
+         'measure_ai_reviewer': AI_MEASURE_STEPS}
+# The actions whose percent is the weighted sum of their steps (the AI's: its frames done, from its reports).
+WEIGHTED = ('train', 'train_continue', 'train_resume', 'train_classifier', 'train_cutter', 'dataset', 'ai_review',
+            'measure_ai_reviewer')
 
 # The sub-steps of scripts/run_v100_baseline.sh ("== 4/10 ...") and the step they belong to.
 PIPELINE = {1: 'checks', 2: 'checks', 3: 'checks', 4: 'detector', 5: 'reader', 6: 'evaluate', 7: 'export',
@@ -85,8 +92,9 @@ FETCHED = re.compile(r'^== (\S+)--(\d+) -> ')
 ON_COMMA = re.compile(r'^(\S+) sul comma: ')
 FINISHED = re.compile(r'^== finito con codice ')
 # A line of JSON printed in the log (the report of the CUDA smoke test, ...): a brace, a bracket, a quoted key
-# or a bare value. Never the last line shown: a lone "}" says nothing.
-JSON_LINE = re.compile(r'^(?:[{}\[\]"]|(?:-?\d[\d.eE+-]*|true|false|null),?$)')
+# or a bare value. Never the last line shown: a lone "}" says nothing. A frame counter ("[12/60] 3/27: 2 signs ...",
+# nnslr ai-review) is no JSON.
+JSON_LINE = re.compile(r'^(?!\[\d+/\d+\] )(?:[{}\[\]"]|(?:-?\d[\d.eE+-]*|true|false|null),?$)')
 
 
 def last_line(text: str) -> str:
@@ -229,7 +237,11 @@ def _inside_step(current: str, epoch: tuple[str, int, int] | None, substep: tupl
 TASK_STEPS = {'import': 'import', 'validate': 'split', 'split': 'split', 'detector': 'detector',
               'reader': 'reader', 'evaluate': 'evaluate', 'hard_examples': 'export', 'export': 'export',
               # scripts/run_classifier.sh: the mining of the cutter's false boxes, the classifier, the chain.
-              'mine': 'mine', 'classifier': 'classifier', 'chain': 'chain'}
+              'mine': 'mine', 'classifier': 'classifier', 'chain': 'chain',
+              # [ai-reviewer] - START
+              # nnslr ai-review and nnslr measure-ai-reviewer: a frame at a time.
+              'ai_review': 'review', 'ai_measure': 'measure'}
+              # [ai-reviewer] - END
 
 
 def with_step_progress(result: dict, action: str, record: dict | None, setup_line: str = '',

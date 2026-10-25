@@ -135,8 +135,9 @@ def test_loopback_has_no_sign_in(tmp_path):
         assert server.app.auth is None
         assert server.request('GET', '/')[0] == 200
         assert json_of(server.request('GET', '/api/auth/state')[2])['local'] is True
+        # The Account & Settings app, as on the LAN: on 127.0.0.1 it shows the settings without the sign-in cards.
         status, response, data = server.request('GET', '/account')
-        assert status == 200 and b'127.0.0.1' in data
+        assert status == 200 and asset('js/account.js').encode() in data and b'id="app"' in data
         assert server.request('POST', '/api/auth/login', body={'user': ADMIN, 'password': PASSWORD})[0] == 404
     finally:
         server.close()

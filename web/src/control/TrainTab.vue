@@ -77,7 +77,7 @@ const IMPORT_ACTIONS: [ActionName, string][] = [
 const CLASSIFIER_ACTIONS: [ActionName, string][] = [
   ['train_classifier', 'A new classifier, taught on the signs and on the cutter’s mistakes. Takes a few hours on the GPU.'],
 ];
-const activities = computed(() => terminalActivities(props.status, ['train', 'other']));
+const activities = computed(() => terminalActivities(props.status, ['train', 'ai', 'other']));
 /** The curves of a training: while it runs (a placeholder before the first epoch), or of the last one if it has any. */
 const charted = computed((): {progress: Progress; running: boolean} | null => {
   // A training started from a terminal: the server reads its progress from data/logs/train-<run>.log.

@@ -11,19 +11,21 @@ export const JOB_STATE: Record<JobState, [label: string, kind: string]> = {
 
 /** The group of each action (nnslr_tools.panel.ACTIONS): a terminal activity of the same group is that work. */
 export const ACTION_GROUP: Record<ActionName, string> = {
-  fetch: 'fetch', prepare: 'prepare', prepare_again: 'prepare', measure_proposer: 'train', dataset: 'train', train: 'train', train_continue: 'train', train_resume: 'train',
-  train_classifier: 'train', train_cutter: 'train', update: 'update',
+  fetch: 'fetch', prepare: 'prepare', prepare_again: 'prepare', measure_proposer: 'train', setup_vlm: 'train', dataset: 'train', train: 'train', train_continue: 'train', train_resume: 'train',
+  train_classifier: 'train', train_cutter: 'train', update: 'update', ai_review: 'ai', measure_ai_reviewer: 'ai',
 };
 
 /** The icon of each action, on its button. */
 export const ACTION_ICON: Record<ActionName, IconName> = {
-  fetch: 'download', prepare: 'prepare', prepare_again: 'resume', measure_proposer: 'train', dataset: 'import', train: 'train', train_continue: 'train',
-  train_resume: 'resume', train_classifier: 'train', train_cutter: 'train', update: 'update',
+  fetch: 'download', prepare: 'prepare', prepare_again: 'resume', measure_proposer: 'train', setup_vlm: 'download', dataset: 'import', train: 'train', train_continue: 'train',
+  train_resume: 'resume', train_classifier: 'train', train_cutter: 'train', update: 'update', ai_review: 'ai',
+  measure_ai_reviewer: 'ai',
 };
 
 /** The actions whose jobs the Prepare and Train tabs show. */
-export const PREPARE_ACTIONS: ActionName[] = ['fetch', 'prepare', 'prepare_again'];
-export const TRAIN_ACTIONS: ActionName[] = ['measure_proposer', 'dataset', 'train', 'train_continue', 'train_resume', 'train_classifier', 'train_cutter'];
+export const PREPARE_ACTIONS: ActionName[] = ['fetch', 'prepare', 'prepare_again', 'setup_vlm'];
+export const TRAIN_ACTIONS: ActionName[] = ['measure_proposer', 'dataset', 'train', 'train_continue', 'train_resume', 'train_classifier', 'train_cutter',
+  'ai_review', 'measure_ai_reviewer'];
 /** The trainings whose job shows its curves on the Train tab. */
 export const CHARTED_ACTIONS: ActionName[] = ['train', 'train_continue', 'train_classifier', 'train_cutter'];
 /** The trainings of the whole pipeline (helpers/3_train.sh): a stopped one can be resumed on its run. */

@@ -5,7 +5,7 @@ Il sito di revisione (`nnslr review`, servizio `speedlimits-web`) si può usare 
 - **REST API** (`/api/v1/...`) per qualsiasi client HTTP: `curl`, uno script Python, un altro programma;
 - **server MCP** per Claude Code, Codex e gli altri client [Model Context Protocol](https://modelcontextprotocol.io), con due trasporti: **Streamable HTTP** su `/mcp` dello stesso servizio e **stdio** (`helpers/mcp.sh`, cioè `nnslr mcp`).
 
-Il server non contiene nessun modello e nessun agente: l'intelligenza artificiale gira sul computer del client. Il server dà soltanto strumenti per leggere fotogrammi e immagini, consultare proposte e revisioni e salvare conferme o correzioni.
+Con REST e MCP il server non contiene nessun modello e nessun agente: l'intelligenza artificiale gira sul computer del client, e il server dà soltanto strumenti per leggere fotogrammi e immagini, consultare proposte e revisioni e salvare conferme o correzioni. Il sito ha in più un revisore AI proprio, che chiama un server compatibile con l'API OpenAI scelto in Settings: si usa solo dal sito, non da REST o MCP (sezione 8).
 
 Le regole per **interpretare** i cartelli restano in [review_instructions.md](../review_instructions.md) (sezioni 4–5); qui c'è come si usano le interfacce.
 
@@ -29,7 +29,7 @@ Claude Code (stdio, anche via ssh) → helpers/mcp.sh → SDK MCP ────�
 - `review.py` (il sito) serve la pagina, la REST API e `/mcp`; `review_mcp.py` definisce gli strumenti MCP con l'SDK ufficiale `mcp` (2.x).
 - Pagina, REST e MCP passano tutti da `save_frame_review()`: stesse validazioni, stesso database, stesso controllo delle revisioni.
 - L'SDK MCP è una **dipendenza opzionale**: senza, il sito, la pagina e `/api/v1` funzionano; `/mcp` risponde 501 e `nnslr mcp` esce con un messaggio.
-- Il pannello (`/pannello`: prepara, importa, allena, aggiorna) **non** è esposto né in `/api/v1` né in MCP.
+- Il pannello (`/pannello`: prepara, importa, allena, aggiorna) **non** è esposto né in `/api/v1` né in MCP. Nemmeno il revisore AI del sito (sezione 8).
 
 ## 2. Autenticazione e sicurezza
 
@@ -56,6 +56,7 @@ Ogni revisione salvata registra:
 - **MCP salva sempre come `ai`**: il nome dato dal client diventa `ai/<nome>`, anche se fosse `cristianku`.
 - La **REST API** vuole `reviewer_kind` esplicito (`human` o `ai`). Un nome che inizia con `ai/` con `reviewer_kind: "human"` è rifiutato.
 - La pagina continua a salvare come `human` (canale `web`), come prima. Un agente che usa il browser resta riconoscibile solo dal nome che scrive nel campo Revisore: per le AI è meglio usare MCP o REST. Le revisioni salvate così da un'AI si riclassificano con `nnslr review-reclassify-ai --reviewer Codex --reviewer ChatGPT` (prima `--dry-run`): ogni fotogramma riceve una nuova revisione `ai/<nome>`, tipo `ai`, `label_basis` `ai_review`, con gli stessi riquadri e la stessa ora di revisione, e la cronologia lo registra. Così compaiono nel filtro **AI** della pagina ed entrano nel dataset come revisioni AI, non come umane.
+- Il **revisore AI del sito** (sezione 8) salva solo da **Review and save** (`ai_review` con `save: "yes"`), come `ai/<provider>/<modello>`, tipo `ai`, canale `web`. Un suggerimento chiesto dalla pagina non salva niente: se la persona lo applica e conferma, è la sua revisione (`human`, `web`).
 - Un revisore AI **non modifica e non ritira** un fotogramma confermato da una persona: 409 `human_review_exists`, a meno di `override_human_review: true`, da usare solo se Cristian lo chiede per quel fotogramma.
 - **Una conferma AI è definitiva**: nessuna persona deve riapprovarla. `nnslr import-annotations --from-db` (cioè `helpers/3_train.sh` o **Importa** nel pannello) importa i fotogrammi confermati da persone e da AI, anche quelli salvati prima di questa regola. Nel dataset le righe AI restano riconoscibili: `reviewer` `ai/<nome>`, `provenance.label_basis` `ai_review`, `provenance.reviewer_kind` `ai`, `provenance.review_channel` `rest`, `mcp` (o `web` per quelle riclassificate); un riquadro aggiunto dall'AI ha `proposal_source` `ai_review`. Il report dell'import conta i fotogrammi AI nuovi in `imported_ai_frame_count`. Le righe umane restano identiche a prima.
 - Non entrano mai nel dataset i fotogrammi mai confermati, le conferme ritirate (`confirmed: false`) e le proposte del modello. Le revisioni automatiche `model_review` restano solo `training-candidate`.
@@ -341,3 +342,39 @@ Un data root di prova si costruisce con le funzioni di `tests/review/review_help
 | Claude Code: `Failed to connect` (HTTP) | Controllare `curl -H "Authorization: Bearer ..." http://<server>:8765/api/v1` e che dica `"mcp": true`. |
 | Claude Code: `Failed to connect` (stdio via ssh) | `ssh -T <utente>@<server> sunnypilot.speedlimits/helpers/mcp.sh --help` deve funzionare senza password; niente nel profilo della shell deve scrivere su stdout. |
 | Il database non si apre con un `nnslr` vecchio (`schema version 2`) | Il database è già migrato: aggiornare il codice (`helpers/update.sh`). |
+| 403 `session_required` | Un indirizzo del revisore AI chiamato con il solo token: si usa dal sito dopo l'accesso, o dal sito su 127.0.0.1 (sezione 8). |
+| 409 `no_ai_reviewer` | Nessun revisore AI scelto: Settings → AI reviewer, oppure `nnslr llm-provider use ID`. |
+| 429 `ai_busy` | Due richieste all'AI sono già in corso: riprovare tra poco. |
+| 502 `ai_unreachable` / `ai_http_error` / `ai_bad_answer` / `ai_redirect`, 504 `ai_timeout` | Il server del provider non risponde, rifiuta (`HTTP <codice>` e il suo messaggio), risponde senza JSON, rimanda a un altro indirizzo (mai seguito) o non risponde in tempo: controllare con **Test** in Settings. |
+
+## 8. Il revisore AI del sito (Settings)
+
+Il sito può far revisionare i cartelli a un'AI che vede le immagini, attraverso un server compatibile con l'API OpenAI (`/v1/models`, `/v1/chat/completions`) scelto in **Account → Settings → AI reviewer**: strata, un `llama-server` di llama.cpp con un modello visivo e il suo `--mmproj`, o un altro servizio. Il server del sito chiama quel provider; l'uso quotidiano è in [GUIDA.md](GUIDA.md), sezione 3, i comandi `nnslr llm-provider`, `nnslr ai-review` e `nnslr measure-ai-reviewer` in [COMMANDS.md](COMMANDS.md).
+
+Questi indirizzi sono del **sito**, non di `/api/v1` né di MCP:
+
+- cambiare i provider, provarli, elencarne i modelli, chiedere un suggerimento e avviare `ai_review` o `measure_ai_reviewer` richiede un **browser che ha fatto l'accesso**, o il sito su 127.0.0.1; con il solo token (`X-Review-Token`) la risposta è 403 `session_required`;
+- con il token si possono soltanto **leggere** `GET /api/settings/ai`, `GET /api/ai/state` e `GET /api/panel/ai-reviewers`, che non contengono segreti;
+- ogni POST vuole la stessa origine (403 `cross_origin`) e JSON (415);
+- le chiavi stanno solo in `data/web/private/llm-providers.json` (permessi 600, cartella 700) o nel file indicato da `NNSLR_LLM_PROVIDERS`: nessuna risposta, log del sito, log del pannello o resoconto le contiene, e il browser vede solo `has_key`. Se il provider ripete la chiave in un suo messaggio d'errore, il sito la mostra come `***`.
+
+| Metodo e indirizzo | Chi | Corpo | Risposta |
+| --- | --- | --- | --- |
+| GET `/api/settings/ai` | sito o token | — | `{providers, reviewer, can_edit}` |
+| POST `/api/settings/ai/providers` | accesso o 127.0.0.1 | `{id?, name, base_url, model, key?}` | `{ok, provider, providers, reviewer, can_edit}` |
+| POST `/api/settings/ai/providers/<id>/delete` | accesso o 127.0.0.1 | `{}` | `{ok, providers, reviewer, can_edit}` |
+| POST `/api/settings/ai/reviewer` | accesso o 127.0.0.1 | `{id}` (o `null`) | `{ok, providers, reviewer, can_edit}` |
+| POST `/api/settings/ai/models` | accesso o 127.0.0.1 | `{id?, base_url?, key?}` | `{ok, models: [{id, sees_images}]}` |
+| POST `/api/settings/ai/test` | accesso o 127.0.0.1 | `{id}` | `{ok, result, provider}`, 200 anche quando `result.ok` è falso |
+| GET `/api/ai/state` | sito o token | — | `{available, can_ask, reason, provider}` |
+| POST `/api/route/<route>/frame/<s>/<i>/ai-suggest` | accesso o 127.0.0.1 | `{run_id, detections?}` | il suggerimento (sotto) |
+| GET `/api/panel/ai-reviewers` | sito o token | — | `{providers, reviewer, reports}` |
+| POST `/api/panel/run/ai_review` | accesso o 127.0.0.1 | `{route, provider?, save?, limit?}` | `{ok, id, action, label}` |
+| POST `/api/panel/run/measure_ai_reviewer` | accesso o 127.0.0.1 | `{provider?, limit?}` | `{ok, id, action, label}` |
+
+- Un provider è `{id, name, base_url, model, has_key, is_reviewer, reviewer_name, updated_at, last_test}`. In `POST /providers` la `key` assente tiene quella salvata, `""` la toglie, un altro testo la imposta; `base_url` è http o https e finisce in `/v1`; l'`id` nasce dal nome e non cambia più.
+- `models` manda la chiave salvata di `id` solo all'indirizzo salvato: a un indirizzo appena scritto non manda mai una chiave salvata.
+- `test` manda al modello un fotogramma rivisto da una persona, senza le proposte, e dice se risponde in JSON e se legge il suo cartello di velocità (`sees_images`); se il server dichiara il modello solo testo, `sees_images` è `false` e il modello non viene interpellato.
+- **Il suggerimento non salva niente.** Restituisce i riquadri in pixel del fotogramma intero (`bbox_xyxy`), ognuno con `ai_action` `keep`, `correct`, `add` o `unjudged` (quelli tenuti o corretti mantengono il loro `detection_id`), più `deleted`, `no_sign`, `complete`, `warnings`, `comment`, `reviewer`, `seconds` e `message`. La pagina lo applica come modifiche non salvate, e il **Confirm** della persona lo salva come revisione umana. Il modello riceve l'immagine, i riquadri numerati e la seconda lettura come suggerimenti, con coordinate da 0 a 1000, mai i fotogrammi vicini. Al massimo due suggerimenti (o Test) alla volta: il terzo riceve 429 `ai_busy`. Un report rigenerato dà 409 `stale_report`.
+- Le opzioni delle azioni sono stringhe (un numero o un booleano dà 400 `bad_option`): `route` una route con un report, `provider` un id di Settings (di default il revisore), `save` `yes` o `no` (di default `no`), `limit` da 1 a 5000 fotogrammi. Il lavoro esegue `helpers/ai_review.sh ROUTE --provider=ID [--save] [--limit=N]` o `helpers/measure_ai_reviewer.sh --provider=ID [--limit=N]`: la chiave la legge il comando dal file, mai dagli argomenti o dall'ambiente.
+- **Le revisioni salvate da `ai_review` con `save: "yes"` sono definitive**: `reviewer` `ai/<provider>/<modello>`, `reviewer_kind` `ai`, canale `web`, `client` `ai-review`; il prossimo import le mette nel dataset come revisioni AI (`label_basis` `ai_review`). I fotogrammi confermati da una persona non vengono toccati. Senza `save` i suggerimenti vanno solo in `data/ai_reviews/<route>/`.

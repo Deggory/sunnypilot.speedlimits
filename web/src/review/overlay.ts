@@ -1,6 +1,8 @@
 // What is drawn on the photo, as data for Stage.vue and BoxEditor.vue: the boxes with their dark under-stroke
-// and labels, the corner handles of the selected box, the boxes of the second reading, and the view of the
-// zoom of the selected box. Sizes are in image pixels: k is the on-screen size of one image pixel.
+// and labels, the corner handles of the selected box, the boxes of the second reading, the AI suggestion not
+// applied yet, and the view of the zoom of the selected box. Sizes are in image pixels: k is the on-screen size
+// of one image pixel.
+import type {AiAction, AiSuggestion} from '../common/ai-types';
 import {boxColor, hintLabel, shortName} from './catalog';
 import {boxArea, boxesOverlap, freeLabelY, labelWidth, rectOf, type PlacedLabel} from './geometry';
 import type {Box, Corner, Detection, Hint} from './types';
@@ -43,6 +45,13 @@ export interface Handle {
   /** The visible square and the larger area that takes the pointer. */
   mark: Rect;
   hit: Rect;
+}
+
+/** A box of the AI suggestion: one it keeps, corrects or adds, or one of the frame it would delete. */
+export interface DrawnAi {
+  kind: AiAction | 'delete';
+  rect: Rect;
+  label: Label;
 }
 
 export interface StageDrawing {
@@ -141,6 +150,28 @@ export function drawStage(detections: readonly Detection[], selected: number, hi
   const chosen = detections[selected];
   const handles = chosen === undefined ? [] : handlesOf(chosen.bbox_xyxy, handleSize, hitSize, true);
   return {boxes, hints: drawnHints, handles};
+}
+
+/**
+ * The AI suggestion on the photo, in its own colour: "AI n · 80" under each box it suggests (n: the box's number once
+ * applied), "✕ n" under each box of the frame it would delete. A box it did not judge is the frame's own, already drawn.
+ */
+export function drawAi(suggestion: Pick<AiSuggestion, 'detections' | 'deleted'>, imageHeight: number, k: number): DrawnAi[] {
+  const fontSize = 12 / k;
+  const placed: PlacedLabel[] = [];
+  const drawn: DrawnAi[] = [];
+  const add = (kind: DrawnAi['kind'], b: Box, text: string): void => {
+    const width = labelWidth(text, fontSize);
+    // Below the box, where the label of a box of the frame never is.
+    const y = Math.min(imageHeight, freeLabelY(placed, b[0], b[3] + fontSize * 1.05, width, fontSize, fontSize));
+    placed.push({x: b[0], y, w: width, h: fontSize, text});
+    drawn.push({kind, rect: rectOf(b), label: label(text, b[0], y, fontSize, k)});
+  };
+  suggestion.detections.forEach((d, i) => {
+    if (d.ai_action !== 'unjudged') add(d.ai_action, d.bbox_xyxy, 'AI ' + (i + 1) + ' · ' + shortName(d));
+  });
+  for (const d of suggestion.deleted) add('delete', d.bbox_xyxy, '✕ ' + d.number);
+  return drawn;
 }
 
 /** The part of the photo the zoom shows: the box with a margin, inside the image. */

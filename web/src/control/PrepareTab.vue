@@ -38,6 +38,10 @@ const PROPOSE_ACTIONS = computed((): [ActionName, string][] => unstarted.value ?
 const FETCH_ACTIONS: [ActionName, string][] = [
   ['fetch', 'Copies the new drives from the comma.'],
 ];
+/** Under the Qwen3-VL choice while it is missing (scripts/setup_vlm.sh). */
+const INSTALL_ACTIONS: [ActionName, string][] = [
+  ['setup_vlm', 'Checks the files you copied (or downloads the missing ones, 17.5 GB), installs what it needs and tries it on the GPU.'],
+];
 const PREPARE_ITEMS: [ActionName, string][] = [
   ['prepare', 'Takes the pictures out of the new drives and proposes the signs, ready to review.'],
 ];
@@ -77,7 +81,11 @@ const ready = computed(() => (props.status?.routes ?? []).filter((row) => !WAITI
       <span class="proposer-label">Found by</span>
       <Segmented v-model="proposer" :options="PROPOSERS" label="Who proposes the signs"/>
       <p class="figure-note">{{ PROPOSER_TEXT[proposer] }}</p>
-      <p v-if="unavailable" class="figure-note proposer-missing">{{ unavailable }}</p>
+      <template v-if="unavailable">
+        <p class="figure-note proposer-missing" :title="unavailable">{{ unavailable.includes('not checked yet')
+          ? 'Qwen3-VL is copied here but not checked yet.' : 'Qwen3-VL is not installed on this server yet.' }}</p>
+        <ActionList :items="INSTALL_ACTIONS" :actions="status?.actions ?? null" @run="(name, state) => emit('run', name, state)"/>
+      </template>
     </div>
     <ActionList :items="[...PREPARE_ITEMS, ...PROPOSE_ACTIONS]" :actions="status?.actions ?? null"
                 @run="(name, state) => emit('run', name, state, undefined, {proposer})"/>

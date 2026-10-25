@@ -1,5 +1,6 @@
 // The list of the boxes of the frame in the panel ("Signs"), as data for BoxList.vue: what each one is,
 // where it comes from, what the reviewer changed, the boxes that are the same sign twice.
+import type {AiAction} from '../common/ai-types';
 import {describe, shortName} from './catalog';
 import {proposalsOf} from './frames';
 import {overlap} from './geometry';
@@ -28,9 +29,16 @@ function originalOf(row: FrameRow, d: Detection): Detection | null {
   return proposalsOf(row).find((p) => p.detection_id === d.detection_id) ?? null;
 }
 
+/** A box of an AI suggestion applied: what the AI did with it. */
+const AI_SOURCE: Record<AiAction, string> = {
+  keep: 'AI suggestion · kept', correct: 'AI suggestion · corrected', add: 'AI suggestion · added',
+  unjudged: 'AI suggestion · not judged',
+};
+
 function sourceOf(row: FrameRow, d: Detection): Source {
   if (d.check_position) return {text: 'from ' + d.carried_from + ' · check it', changed: null};
   if (d.carried_from) return {text: 'as in ' + d.carried_from, changed: null};
+  if (d.ai_action) return {text: AI_SOURCE[d.ai_action] ?? 'AI suggestion', changed: null};
   const original = originalOf(row, d);
   if (original === null) return {text: 'added by hand', changed: null};
   if (original.family !== d.family || original.value_kph !== d.value_kph) {

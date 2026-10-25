@@ -118,6 +118,11 @@ input::placeholder { color: var(--placeholder); }
 .hint-tag { fill: var(--ov-hint); }
 .hint-box { fill: none; stroke: var(--ov-hint); stroke-width: 2; stroke-dasharray: 4 2; vector-effect: non-scaling-stroke; pointer-events: none; }
 .hint-box.low { opacity: 0.85; }
+/* The AI suggestion not applied yet (review/ai.ts): pink, long dashes, never in the way of the pointer. */
+#aiLayer { pointer-events: none; }
+.ai-box { fill: none; stroke: var(--ov-ai); stroke-width: 2.25; stroke-dasharray: 9 4; vector-effect: non-scaling-stroke; }
+.ai-box.delete { stroke-dasharray: 2 4; }
+.ai-tag { fill: var(--ov-ai); stroke: var(--ov-halo); stroke-opacity: 0.9; stroke-linejoin: round; paint-order: stroke; font-family: var(--font-ui); font-weight: 650; }
 #draft { fill: rgba(255, 214, 10, 0.18); stroke: var(--ov-selected); stroke-width: 2; vector-effect: non-scaling-stroke; pointer-events: none; }
 .stage-hint { position: absolute; left: 12px; bottom: 14px; right: 12px; display: flex; justify-content: center; pointer-events: none; }
 .stage-hint span {
@@ -275,6 +280,33 @@ details[open] summary::after, .tl-toggle[aria-expanded="true"]::after { transfor
 .box-row.check .src { color: var(--warn); font-weight: 600; }
 .box-here { margin-right: 2px; }
 .pick-hint { margin: -4px 2px 0; font-size: 13px; color: var(--muted); }
+/* AI reviewer (AiSection.vue): Ask AI in the head; its answer, Apply and Dismiss, then the list of verdicts. */
+.ai-section .section-head { align-items: center; }
+.ai-section .section-head h2 { flex: none; white-space: nowrap; }
+.ai-section .ai-model { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-section .btn.ai-ask { flex: none; min-height: 30px; padding: 4px 12px; font-size: 12.5px; gap: 6px; }
+.ai-section .btn.ai-ask .keycap { margin-left: 2px; }
+.ai-note { margin: 0; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.ai-note a { font-weight: 600; white-space: nowrap; }
+.ai-wait { display: flex; align-items: center; gap: 8px; color: var(--fg); font-variant-numeric: tabular-nums; }
+.ai-spin { width: 14px; height: 14px; flex: none; border-radius: 50%; border: 2px solid var(--line-strong); border-top-color: var(--ov-ai); animation: ai-turn 0.9s linear infinite; }
+@keyframes ai-turn { to { transform: rotate(360deg); } }
+.ai-error { color: var(--bad); background: var(--bad-soft); border-radius: 12px; padding: 9px 12px; }
+.ai-warn { color: var(--warn); }
+.ai-comment { color: var(--fg); font-style: italic; }
+.ai-msg { margin: 0; font-size: 13.5px; font-weight: 600; overflow-wrap: anywhere; }
+.ai-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line); }
+.ai-row { display: grid; grid-template-columns: 24px auto minmax(0, 1fr); column-gap: 8px; row-gap: 2px; align-items: center; padding: 8px 10px; }
+.ai-row + .ai-row { border-top: 1px solid var(--line); }
+.ai-row .n {
+  width: 22px; height: 22px; border-radius: 50%; background: color-mix(in srgb, var(--ov-ai) 22%, transparent); color: var(--fg);
+  display: grid; place-items: center; font-size: 11.5px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.ai-row .pill { padding: 1px 8px; font-size: 11.5px; }
+.ai-row .what { font-size: 13.5px; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-row .ai-notes { grid-column: 3; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.ai-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.ai-actions .btn { min-width: 96px; }
 /* No box: a quiet empty state, a dashed sign outline beside the sentence. */
 .empty-note {
   display: flex; flex-direction: column; align-items: center; gap: 10px; margin: 0; padding: 22px 18px; text-align: center;
@@ -480,7 +512,7 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
   :root { --control: 44px; }
   .chip, .chips.minor .chip { min-height: 44px; padding: 5px 14px; }
   .segmented button, .filters button { min-height: 40px; }
-  .btn.small, .stage-tools .btn { min-height: 44px; }
+  .btn.small, .stage-tools .btn, .ai-section .btn.ai-ask { min-height: 44px; }
   .qchip { min-height: 36px; padding: 4px 12px; }
   .box-main { min-height: 54px; }
   .box-del { width: 44px; height: 44px; margin-right: 2px; }

@@ -1,8 +1,9 @@
 // Keyboard shortcuts: ← → frame (with Shift: the frame before or after in the filter), ↑ ↓ box, the speed typed
 // as it reads ("5 0" = 50, "1 2 0" = 120, "0" alone = not readable), O A U the road, Enter confirm, N new box,
-// P apply previous, H second reading, Del removes a box the reviewer selected (never one the page opened on),
-// Esc cancel.
+// P apply previous, I ask the AI, H second reading, Del removes a box the reviewer selected (never one the page
+// opened on), Esc cancel.
 import {onBeforeUnmount, onMounted} from 'vue';
+import {askAi} from './ai';
 import {applyPrevious} from './carry';
 import {confirmFrame} from './confirm';
 import {cancelAll, removeSelected, selectBox, setField, setValue, toggleDrawing, toggleHints} from './edits';
@@ -126,6 +127,13 @@ export function useKeyboard(): void {
         if (report.apiBase) {
           event.preventDefault();
           void applyPrevious();
+        }
+        break;
+      case 'i':
+      case 'I':
+        if (report.apiBase) {
+          event.preventDefault();
+          void askAi();
         }
         break;
       case 'h':

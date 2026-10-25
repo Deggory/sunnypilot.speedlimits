@@ -51,6 +51,9 @@ export const ICONS = {
   previous: [{d: 'M13.5 8.5V5A1.5 1.5 0 0 0 12 3.5H5A1.5 1.5 0 0 0 3.5 5v7A1.5 1.5 0 0 0 5 13.5h3.5'},
     {d: 'M11 9.5h8a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5h-8A1.5 1.5 0 0 1 9.5 19v-8A1.5 1.5 0 0 1 11 9.5z'},
     {d: ring(15, 15, 2.5)}, {d: ring(8.5, 8.5, 1.6)}],
+  /** The AI reviewer: a large and a small sparkle. */
+  ai: [{d: 'M10 3.5c.6 3.7 2.3 5.4 6 6-3.7.6-5.4 2.3-6 6-.6-3.7-2.3-5.4-6-6 3.7-.6 5.4-2.3 6-6z'},
+    {d: 'M17.5 14c.3 1.9 1.1 2.7 3 3-1.9.3-2.7 1.1-3 3-.3-1.9-1.1-2.7-3-3 1.9-.3 2.7-1.1 3-3z'}],
   /** Starting point: an earlier run (a clock turning back). */
   history: [{d: 'M3.8 12a8.2 8.2 0 1 0 2.4-5.8L4 8.4'}, {d: 'M4 4.2v4.2h4.2'}, {d: 'M12 7.8V12l3 2'}],
 } satisfies Record<string, Shape[]>;
