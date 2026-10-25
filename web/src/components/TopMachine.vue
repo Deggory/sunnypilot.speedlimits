@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // The server at the right of the top bar, on every page with the tabs (#tabs-machine of pages.py): a small pill
-// with how busy it is ("Idle", "GPU 85%"), and under it, on a click, a panel with the GPU, its memory and
+// with the GPU and CPU load ("GPU 85% · CPU 12%"), and under it, on a click, a panel with the GPU, its memory and
 // temperature, the CPU, the RAM and the free disk, each its value and a thin bar, and Update the site at the bottom.
-// When a gauge is near full the pill names it ("VRAM 31.5 GB", red). The control pages feed it from their status
+// The dot: green idle, blue working, red when the GPU is hot. The control pages feed it from their status
 // (feed "status"); the others ask /api/panel/system every 4 s (feed "system").
 import {computed, onBeforeUnmount, onMounted, ref} from 'vue';
 import {api, messageOf, post} from '../common/api';
@@ -24,18 +24,14 @@ function heat(level: number, hot: boolean | undefined): string {
   if (hot || level >= 90) return 'hot';
   return level >= 75 ? 'warm' : '';
 }
-/** The pill: a gauge near full by name (red, or orange when warm); else the busiest of GPU and CPU when one works;
- * else "Server idle". */
+/** The pill: GPU and CPU load (the memory is in the panel); the dot blue when one works, red when the GPU is hot. */
 const summary = computed(() => {
   const byKey = new Map(cells.value.map((cell) => [cell.key, cell]));
-  const full = cells.value.find((cell) => heat(cell.level, cell.hot) === 'hot')
-    ?? cells.value.find((cell) => heat(cell.level, cell.hot) === 'warm');
-  if (full) return {dot: heat(full.level, full.hot), word: full.label, value: full.value};
   const gpu = byKey.get('gpu');
   const cpu = byKey.get('cpu');
-  if (gpu && gpu.level >= 15) return {dot: 'busy', word: 'GPU', value: gpu.value};
-  if (cpu && cpu.level >= 40) return {dot: 'busy', word: 'CPU', value: cpu.value};
-  return {dot: '', word: 'Server', value: 'idle'};
+  const hot = byKey.get('gpu-temp')?.hot === true;
+  const busy = (gpu?.level ?? 0) >= 15 || (cpu?.level ?? 0) >= 40;
+  return {dot: hot ? 'hot' : busy ? 'busy' : '', gpu: gpu?.value ?? null, cpu: cpu?.value ?? null};
 });
 
 /** Update the site (panel action "update"): asked first, then the site restarts and this page reloads. */
@@ -84,10 +80,11 @@ onBeforeUnmount(() => {
 
 <template>
   <div v-if="cells.length" ref="root" class="tm">
-    <button type="button" class="tm-pill" :aria-expanded="open" aria-controls="tm-pop" :title="'The server: ' + summary.word + ' ' + summary.value"
+    <button type="button" class="tm-pill" :aria-expanded="open" aria-controls="tm-pop" aria-label="The server: GPU and CPU load"
             @click="open = !open">
       <span class="dot" :class="summary.dot" aria-hidden="true"></span>
-      <span class="tm-word">{{ summary.word }}</span><span>{{ summary.value }}</span>
+      <span v-if="summary.gpu !== null"><small>GPU</small> {{ summary.gpu }}</span>
+      <span v-if="summary.cpu !== null"><small>CPU</small> {{ summary.cpu }}</span>
     </button>
     <div v-if="open" id="tm-pop" class="tm-pop" role="dialog" aria-label="The server now">
       <h2>Server</h2>
