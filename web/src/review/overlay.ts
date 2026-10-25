@@ -31,6 +31,8 @@ export interface DrawnBox {
   /** The family's colour; none on the selected box (the CSS colours it). */
   stroke: string | null;
   label: Label;
+  /** For our road: the path of the road drawn before the label (two lanes narrowing to the horizon); else null. */
+  road: string | null;
 }
 
 export interface DrawnHint {
@@ -68,6 +70,19 @@ export function sceneScale(size: {width: number; height: number}, width: number,
 
 function label(text: string, x: number, y: number, fontSize: number, k: number): Label {
   return {x, y, text, fontSize, strokeWidth: 3.5 / k};
+}
+
+/** The road icon of a box for our road, from x on the baseline y of a label of ``size``: two lane lines
+ * narrowing to the horizon and a dash of the centre line between them, ROAD_ICON times the size wide. */
+const ROAD_ICON = 1.25;
+function roadIcon(x: number, y: number, size: number): string {
+  const bottom = y + size * 0.12;
+  const top = y - size * 0.95;
+  const middle = x + size * ROAD_ICON / 2;
+  const at = (value: number): string => value.toFixed(2);
+  return 'M' + at(x) + ' ' + at(bottom) + 'L' + at(middle - size * 0.16) + ' ' + at(top)
+    + 'M' + at(x + size * ROAD_ICON) + ' ' + at(bottom) + 'L' + at(middle + size * 0.16) + ' ' + at(top)
+    + 'M' + at(middle) + ' ' + at(bottom - size * 0.05) + 'L' + at(middle) + ' ' + at(bottom - size * 0.42);
 }
 
 const CORNERS: readonly Corner[] = ['nw', 'ne', 'sw', 'se'];
@@ -125,10 +140,12 @@ export function drawStage(detections: readonly Detection[], selected: number, hi
     if (d.model_label) cls += ' proposal';
     if (d.check_position) cls += ' check';
     if (isSelected) cls += ' selected';
-    // The road too, when said: "2 · 50 · ours", "3 · give way · another".
-    const road = d.applicability === 'own_road' ? ' · ours' : d.applicability === 'other_road' ? ' · another' : '';
+    // The road too, when said: our road in capitals after a road icon ("⟋⟍ 2 · 50 · OURS"), another in words.
+    const ours = d.applicability === 'own_road';
+    const road = ours ? ' · OURS' : d.applicability === 'other_road' ? ' · another' : '';
     const text = (i + 1) + ' · ' + shortName(d) + road + (d.check_position ? ' · check' : '');
-    const width = labelWidth(text, fontSize);
+    const icon = ours ? fontSize * (ROAD_ICON + 0.4) : 0;
+    const width = labelWidth(text, fontSize) + icon;
     const x = labelX(b[0], width, imageWidth, k);
     // The selected box has its corners outside: its label goes above them.
     const top = isSelected ? b[1] - handleSize - fontSize * 0.2 : b[1] - fontSize * 0.35;
@@ -136,7 +153,7 @@ export function drawStage(detections: readonly Detection[], selected: number, hi
     placed.push({x, y, w: width, h: fontSize, text});
     boxes.push({
       index: i, cls, rect: rectOf(b), stroke: isSelected ? null : d.check_position ? 'var(--warn)' : boxColor(d),
-      label: label(text, x, y, fontSize, k),
+      label: label(text, x + icon, y, fontSize, k), road: ours ? roadIcon(x, y, fontSize) : null,
     });
   }
   const drawnHints: DrawnHint[] = [];

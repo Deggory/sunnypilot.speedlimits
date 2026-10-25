@@ -65,6 +65,10 @@ const resizing = computed(() => (state.drag?.kind === 'resize' || state.drag?.ki
                 :height="box.rect.height"/>
           <rect :class="box.cls" :data-index="box.index" :x="box.rect.x" :y="box.rect.y" :width="box.rect.width"
                 :height="box.rect.height" :style="box.stroke === null ? undefined : {stroke: box.stroke}"/>
+          <template v-if="box.road">
+            <path :d="box.road" class="road-mark-under" :stroke-width="box.label.strokeWidth * 1.3"/>
+            <path :d="box.road" class="road-mark" :stroke-width="box.label.strokeWidth * 0.55"/>
+          </template>
           <text :x="box.label.x" :y="box.label.y" class="tag" :font-size="box.label.fontSize"
                 :stroke-width="box.label.strokeWidth" paint-order="stroke">{{ box.label.text }}</text>
         </template>
