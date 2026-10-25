@@ -43,6 +43,25 @@ async function saveAddress(): Promise<void> {
 const dot = computed(() => comma.value?.downloading ? 'busy' : comma.value?.online && comma.value.login === false ? 'warm'
   : comma.value?.online ? 'on' : 'off');
 const copied = ref(false);
+/** The setup from zero, open until the comma answers and takes this server's key (or when asked). */
+const setupOpen = ref<boolean | null>(null);
+const ready = computed(() => comma.value?.online === true && comma.value.login === true);
+const showSetup = computed(() => setupOpen.value ?? !ready.value);
+const testing = ref(false);
+async function testNow(): Promise<void> {
+  testing.value = true;
+  message.value = '';
+  try {
+    comma.value = (await post<{comma: CommaState}>('/api/panel/comma/test', {})).comma;
+    if (!comma.value.online) message.value = 'It does not answer: is it on, and on the same network as this server?';
+    else if (comma.value.login === false) message.value = 'It answers but refuses this server\'s key: step 2.';
+    else message.value = 'Connected: this server can log in.';
+  } catch (error) {
+    message.value = messageOf(error);
+  } finally {
+    testing.value = false;
+  }
+}
 async function copyKey(): Promise<void> {
   if (!comma.value?.server_key) return;
   try {
@@ -123,14 +142,18 @@ onBeforeUnmount(() => {
             <button type="submit" class="btn small primary">Save</button></span>
         </form>
       </div>
-      <p v-if="comma.online && comma.login === false" class="tm-sub tm-warn">The comma refuses this server's key. On the comma,
-        Settings → Network → SSH Keys takes the keys of a GitHub user: add this server's key to that user on GitHub
-        (Settings → SSH keys).</p>
-      <p v-else-if="comma.online && comma.login" class="tm-sub">This server can log in to it.</p>
-      <div v-if="comma.server_key" class="tm-row tm-address">
-        <span class="tm-name">This server's key<small class="tm-key">{{ comma.server_key }}</small></span>
-        <button type="button" class="link-button" @click="copyKey">{{ copied ? 'Copied' : 'Copy' }}</button>
-      </div>
+      <p v-if="comma.online && comma.login" class="tm-sub">This server can log in to it.</p>
+      <button v-if="!showSetup" type="button" class="link-button tm-setup-open" @click="setupOpen = true">Set up a comma</button>
+      <ol v-else class="tm-setup">
+        <li><strong>On the comma</strong>: Settings → Network: turn on <em>Enable SSH</em>, and under <em>SSH Keys</em> enter
+          a GitHub username. The comma takes that user's public keys.</li>
+        <li><strong>On GitHub</strong>, signed in as that user: add this server's key
+          (<a href="https://github.com/settings/ssh/new" target="_blank" rel="noopener">Settings → SSH keys → New</a>).
+          <span v-if="comma.server_key" class="tm-keyline"><code class="tm-key">{{ comma.server_key }}</code>
+            <button type="button" class="link-button" @click="copyKey">{{ copied ? 'Copied' : 'Copy' }}</button></span></li>
+        <li><strong>Here</strong>: its address, the IP under Settings → Network → Advanced on the comma (above).</li>
+        <li><button type="button" class="btn small" :disabled="testing" @click="testNow">{{ testing ? 'Testing…' : 'Test now' }}</button></li>
+      </ol>
       <div class="tm-update">
         <button type="button" class="btn small primary" :disabled="!comma.online || comma.login === false || comma.downloading" @click="download">
           Download new drives</button>

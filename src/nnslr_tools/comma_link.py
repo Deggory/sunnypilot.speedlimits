@@ -148,6 +148,20 @@ def _loop() -> None:
         time.sleep(CHECK_SECONDS)
 
 
+def check_now(root: Path) -> dict:
+    """The checks done now, not at the next round of the thread (the Test button of the panel): answers the ssh port,
+    and if so, is this server's key accepted."""
+    global _root, _login_at
+    with _lock:
+        _root = Path(root)
+    online = _check()
+    login = _login() if online else None
+    with _lock:
+        _login_at = time.monotonic()
+        _state.update(online=online, login=login, checked=datetime.now(timezone.utc).isoformat(timespec='seconds'))
+    return state(root)
+
+
 def state(root: Path) -> dict:
     """{'online': True / False / None (not checked yet), 'login': whether this server's key is accepted (None while
     the comma is away), 'checked': ISO time of the last check, 'address': what is tried, 'configured': whether it was

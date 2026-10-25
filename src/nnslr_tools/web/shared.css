@@ -140,8 +140,14 @@ background:var(--surface);border:.5px solid var(--line-strong);box-shadow:var(--
 .link-button{appearance:none;border:0;background:none;padding:0;font:inherit;color:var(--accent);font-weight:500;cursor:pointer}
 .tm-address{align-items:center}
 .tm-address .link-button{font-size:14px}
-.tm-key{font-family:var(--font-data);font-size:11px!important;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:210px}
+.tm-key{font-family:var(--font-data);font-size:11px!important;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:210px;display:block}
 .tm-warn{color:var(--todo)!important}
+/* Setting up a comma from zero (TopComma.vue): numbered steps, the server's key to copy, Test now. */
+.tm-setup{margin:4px 0 8px;padding-left:20px;display:flex;flex-direction:column;gap:8px;font-size:13px;line-height:1.4;color:var(--fg)}
+.tm-setup a{color:var(--accent)}
+.tm-keyline{display:flex;align-items:center;gap:8px;margin-top:4px}
+.tm-keyline code{background:var(--surface-2);border:0;padding:3px 6px;max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;word-break:normal}
+.tm-setup-open{font-size:13.5px;margin:2px 0 8px}
 .tm-edit{grid-column:1/-1;display:flex;flex-direction:column;gap:8px}
 .tm-edit input{font:inherit;font-size:16px;padding:8px 12px;border-radius:10px;border:0;background:var(--surface-2);color:var(--fg);width:100%}
 .tm-edit-actions{display:flex;justify-content:flex-end;gap:8px}

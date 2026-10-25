@@ -117,6 +117,20 @@ uvx --from "huggingface_hub>=1,<3" hf auth login
 
 Both stay out of Git. Videos are stored once in the comma-videos folder and linked into the data root, so another project on the same machine (for example openpilot.distill) can use the same files.
 
+### The comma, from zero
+
+The site downloads the drives over ssh (`helpers/fetch_comma_segments.sh`, the **comma** pill at the top right of every
+page, which also guides these steps and has **Test now**):
+
+1. On the comma: Settings → Network: turn on **Enable SSH**, and under **SSH Keys** enter a GitHub username. The comma
+   takes the public keys of that user (`https://github.com/<user>.keys`).
+2. On GitHub, as that user: add this server's public key (`~/.ssh/id_ed25519.pub`; the comma panel shows it with
+   **Copy**) under Settings → SSH keys → New. Nothing to install on the comma.
+3. The comma's address: its IP (Settings → Network → Advanced on the comma), set in the comma panel (**Change**;
+   saved in `data/web/comma.json` and passed to the download as `--host`). Without it, the ssh host `comma` of
+   `~/.ssh/config` is used (`Host comma`, `HostName <ip>`, `User comma`).
+4. **Test now**: the server opens the ssh port and logs in running `true`; the pill turns green.
+
 ### Automated comma route filtering (shared fetch helper)
 
 To run `bash helpers/fetch_comma_segments.sh` (automatic route selection and download), install the optional log reader and set schema paths:

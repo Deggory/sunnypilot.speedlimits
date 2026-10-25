@@ -315,6 +315,11 @@ class Panel:
         from nnslr_tools import comma_link
         return {**comma_link.state(self.root), 'downloading': 'fetch' in self._running_groups(self.activities())}
 
+    def test_comma(self) -> dict:
+        """The comma checked now (its Test button)."""
+        from nnslr_tools import comma_link
+        return {**comma_link.check_now(self.root), 'downloading': 'fetch' in self._running_groups(self.activities())}
+
     def set_comma_address(self, body) -> dict:
         """The address of the comma from its panel ({'address': '192.168.1.20'}; '' for the ssh host "comma")."""
         from nnslr_tools import comma_link

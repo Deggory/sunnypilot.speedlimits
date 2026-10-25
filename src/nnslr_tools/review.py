@@ -862,6 +862,12 @@ def make_handler(app: ReviewApp):
                 self._auth_post(path, self._read_json())
                 return
             # [site-login] - END
+            if path == '/api/panel/comma/test':
+                # The comma checked now: a TCP connection and an ssh login running true; a session, as its address.
+                if self._ai_post_refused():
+                    return
+                self._json(200, {'comma': app.panel.test_comma()})
+                return
             if path == '/api/panel/comma':
                 # The address of the comma: same protections as the AI settings (same origin, JSON, a session).
                 if self._ai_post_refused():
