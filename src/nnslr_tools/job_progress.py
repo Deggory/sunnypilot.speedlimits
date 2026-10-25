@@ -274,6 +274,12 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
         detail = f'{proposed[0]:,} of {proposed[1]:,} frames'
     result = {'steps': rows, 'percent': percent, 'detail': detail, 'last_line': last_line(text),
               'step_progress': inside if state == 'running' and current in keys else None, 'curves': curves}
+    if action == 'train_classifier':
+        # The chain step runs evaluate-chain several times (test, validation, then test with the old reader), each
+        # counting its frames from 0: with_step_progress counts the runs done, not to go back from 100% to 0.
+        runs_done = len(CHAIN_RUN_DONE.findall(text))
+        runs_total = CHAIN_RUNS - (1 if 'no old reader' in text else 0)
+        result['chain_runs'] = {'done': min(runs_done, runs_total), 'total': runs_total}
     preparing = action in ('prepare', 'prepare_again') and preparation is not None and state == 'running'
     if preparing:
         # Its drives are listed with their phase under the card: the raw line of the helper says it again.
@@ -306,6 +312,11 @@ def _inside_step(current: str, epoch: tuple[str, int, int] | None, substep: tupl
             'text': substep[1] + ' · ' + str(done + 1) + ' of ' + str(len(parts))}
 
 
+# scripts/run_classifier.sh: the runs of nnslr evaluate-chain in its chain step (test and validation, then test with
+# the old reader), and the line each writes when it is done or skipped.
+CHAIN_RUNS = 3
+CHAIN_RUN_DONE = re.compile(r'^(?:evaluated the chain on |skip evaluated chain )', re.M)
+
 # The tasks that report their own progress (nnslr_tools.progress) and the step they belong to.
 TASK_STEPS = {'import': 'import', 'validate': 'split', 'split': 'split', 'detector': 'detector',
               'reader': 'reader', 'evaluate': 'evaluate', 'hard_examples': 'export', 'export': 'export',
@@ -329,13 +340,19 @@ def with_step_progress(result: dict, action: str, record: dict | None, setup_lin
     step_progress = result.get('step_progress')
     if record is not None and TASK_STEPS.get(record.get('task')) == current and record.get('total'):
         done, total = int(record['done']), int(record['total'])
-        step_progress = {'done': done, 'total': total, 'percent': round(min(done, total) * 100 / total, 1),
-                         'text': str(record.get('text') or '')}
+        share = min(done, total) / total
+        text = str(record.get('text') or '')
+        runs = result.get('chain_runs') if current == 'chain' else None
+        if runs and runs['total'] > 1:
+            # One run of several: the runs done count, then this one's frames.
+            share = min(runs['done'] + share, runs['total']) / runs['total']
+            text = text + ' · run ' + str(min(runs['done'] + 1, runs['total'])) + ' of ' + str(runs['total'])
+        step_progress = {'done': done, 'total': total, 'percent': round(share * 100, 1), 'text': text}
         steps = STEPS.get(action, ())
         if action in WEIGHTED and steps:
             weights = {key: weight for key, _, weight in steps}
             reached = sum(weights[step['key']] for step in result['steps'] if step['state'] == 'done')
-            result = {**result, 'percent': round((reached + weights[current] * min(done, total) / total) * 100
+            result = {**result, 'percent': round((reached + weights[current] * share) * 100
                                                  / sum(weights.values()), 1)}
     elif current == 'gpu_env' and download is not None and download['written']:
         # The file pip is downloading: the GPU environment has several, of sizes known only when they start.

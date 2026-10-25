@@ -183,7 +183,16 @@ def test_the_reports_of_the_mining_the_classifier_and_the_chain():
                                   {'task': 'classifier', 'done': 30, 'total': 100, 'text': 'epoch 3 of 20'})
     assert training['percent'] == 36.0
     chain = progress('train_classifier', 'running', CLASSIFIER_LOG + '== 5/7 x ==\n== 6/7 Evaluate the chain ==\n')
-    assert with_step_progress(chain, 'train_classifier', {'task': 'chain', 'done': 1, 'total': 4})['percent'] == 88.8
+    # The chain step runs three times (test, validation, the old reader on test), each counting from 0: the bar goes on.
+    first = with_step_progress(chain, 'train_classifier', {'task': 'chain', 'done': 1, 'total': 4, 'text': '1 of 4 frames'})
+    assert first['percent'] == 86.2 and first['step_progress']['text'] == '1 of 4 frames · run 1 of 3'
+    second = progress('train_classifier', 'running', CLASSIFIER_LOG + '== 5/7 x ==\n== 6/7 Evaluate the chain ==\n'
+                      'evaluated the chain on test: chain-test.json\n')
+    again = with_step_progress(second, 'train_classifier', {'task': 'chain', 'done': 0, 'total': 9, 'text': '0 of 9 frames'})
+    assert again['percent'] == 90.0 and again['step_progress']['percent'] == 33.3
+    last = progress('train_classifier', 'running', CLASSIFIER_LOG + '== 5/7 x ==\n== 6/7 Evaluate the chain ==\n'
+                    'evaluated the chain on test: a\nevaluated the chain on validation: b\n== 7/7 Compare with the old reader ==\n')
+    assert with_step_progress(last, 'train_classifier', {'task': 'chain', 'done': 2, 'total': 4})['percent'] == 97.5
     # The report of the mining is not the training's.
     assert with_step_progress(chain, 'train_classifier', {'task': 'mine', 'done': 1, 'total': 4})['percent'] == chain['percent']
 
