@@ -69,6 +69,8 @@ CUTTER_SIZE = '960x544'
 CUTTER_FAMILIES = ('all', 'speed')
 CUTTER_FAMILY = 'all'
 # The options an action takes, besides a training's start and the run to resume (checked by Panel.start).
+# The GPU memory Qwen3-VL-8B takes in float16 (scripts/setup_vlm.sh: 17.5 GB), with a margin for one frame.
+QWEN_GPU_MB = 18 * 1024
 ACTION_OPTIONS = {'train_cutter': ('size', 'families'), 'prepare': ('proposer',), 'prepare_again': ('proposer',),
                   'measure_proposer': ('proposer',),
                   'ai_review': ('route', 'provider', 'save', 'limit'), 'measure_ai_reviewer': ('provider', 'limit')}
@@ -871,6 +873,13 @@ class Panel:
                 missing = vlm_missing(self.root)
                 if missing:
                     raise PanelError(409, 'not_available', missing + '.')
+                # Qwen3-VL needs about 17.5 GB of the GPU: refused, not run out of memory, when they are taken
+                # (another Qwen job, a training, llama.cpp in another container).
+                gpu = self.system().get('gpu') or {}
+                used, total = gpu.get('memory_used_mb'), gpu.get('memory_total_mb')
+                if used is not None and total and total - used < QWEN_GPU_MB:
+                    raise PanelError(409, 'gpu_taken', f'Qwen3-VL needs about {QWEN_GPU_MB // 1024} GB of the GPU, and only '
+                                     f'{(total - used) / 1024:.1f} GB are free: another job or program uses it.')
             start_env['NNSLR_PROPOSER'] = proposer
         if action == 'train_cutter':
             size = (options or {}).get('size') or CUTTER_SIZE
