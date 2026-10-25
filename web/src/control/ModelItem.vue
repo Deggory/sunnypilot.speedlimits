@@ -9,7 +9,7 @@ import {computed} from 'vue';
 import {isoWhen, thousands} from '../common/format';
 import type {DeciderNumbers, ModelVersion} from '../common/panel-types';
 import {PARTITION_LABEL, pct} from './evaluate';
-import {epochText, initText, openRun, perFrame, sizeText} from './models';
+import {epochText, openRun, perFrame, sizeText} from './models';
 
 const props = defineProps<{version: ModelVersion; roleLabel: string; score: number; readOnly: boolean; busy: string | null}>();
 const emit = defineEmits<{use: [version: ModelVersion]}>();
@@ -57,9 +57,8 @@ const noOtherOnTest = computed(() => decider.value?.test?.other_road_support ===
   <li class="model" :class="{'in-use': version.in_use}" :data-model="version.id">
     <div class="model-head">
       <div class="model-title">
-        <span class="model-name" :title="version.id">{{ version.run }}</span>
-        <span class="model-sub">{{ version.label }} · {{ version.detail }}</span>
-        <span v-if="version.trained_at" class="model-sub">Weights of {{ isoWhen(version.trained_at) }}</span>
+        <span class="model-name" :title="version.id">{{ version.label }}</span>
+        <span class="model-sub">{{ version.trained_at ? isoWhen(version.trained_at) : version.run }} · {{ version.detail }}</span>
       </div>
       <span v-if="version.in_use" class="pill ok">In use</span>
       <span v-else-if="!version.finished" class="pill warn">Not finished</span>
@@ -74,6 +73,7 @@ const noOtherOnTest = computed(() => decider.value?.test?.other_road_support ===
         </div>
         <p v-if="speedSigns" class="note" :data-speed-recall="speedSigns.recall ?? undefined">Speed signs alone: <strong>{{ pct(speedSigns.recall) }}</strong>
           ({{ thousands(speedSigns.found) }} of {{ thousands(speedSigns.truth) }}), comparable with a cutter of the speed signs only.</p>
+        <details class="model-more"><summary>Details</summary>
         <ul v-if="cut.widths" class="model-widths" aria-label="Signs found by width in the frame">
           <li v-for="row in cut.widths" :key="row.key" :title="row.found + ' of ' + row.truth + ' signs ' + row.label + ' wide'">
             <span>{{ row.label }}</span><b>{{ row.truth ? pct(row.recall) : '–' }}</b><span>{{ row.found }} of {{ row.truth }}</span>
@@ -91,6 +91,7 @@ const noOtherOnTest = computed(() => decider.value?.test?.other_road_support ===
         </dl>
         <p v-if="!cut.at_cutter_score" class="note">At the report’s score {{ cut.score_threshold ?? '–' }}: it was evaluated before the cutter’s {{ score }} was measured.</p>
         <p v-if="cut.human" class="note">Frames a person confirmed: {{ pct(cut.human.recall) }} found ({{ cut.human.found ?? 0 }} of {{ cut.human.truth_boxes ?? 0 }}).</p>
+        </details>
       </template>
     </template>
 
@@ -100,6 +101,8 @@ const noOtherOnTest = computed(() => decider.value?.test?.other_road_support ===
           <strong>{{ pct(classifier.test.accuracy) }}</strong>
           <span>of the test signs read right<template v-if="classifier.test.samples !== null">: {{ thousands(classifier.test.samples) }} sign crops</template></span>
         </div>
+        <p v-if="chain" class="model-line">With the cutter: <strong>{{ pct(chain.recall) }}</strong> of the speed signs found and read right.</p>
+        <details class="model-more"><summary>Details</summary>
         <dl class="model-facts">
           <div v-if="classifier.test"><dt>Human-reviewed</dt><dd>{{ pct(classifier.test.human_accuracy) }}<span v-if="classifier.test.human_samples"
             class="muted"> of {{ thousands(classifier.test.human_samples) }}</span></dd></div>
@@ -123,6 +126,7 @@ const noOtherOnTest = computed(() => decider.value?.test?.other_road_support ===
           let through ({{ perFrame(oldChain.surviving_false_per_frame) }} per frame).</p>
         <p v-if="classifier.test?.family_accuracy != null" class="note">With the kinds of other signs folded, as the old reader reads them:
           {{ pct(classifier.test.family_accuracy) }} right.</p>
+        </details>
       </template>
     </template>
 
@@ -132,12 +136,14 @@ const noOtherOnTest = computed(() => decider.value?.test?.other_road_support ===
           <strong>{{ pct(classifier.test.accuracy) }}</strong>
           <span>right answers on {{ thousands(classifier.test.samples ?? 0) }} test crops</span>
         </div>
+        <details class="model-more"><summary>Details</summary>
         <dl class="model-facts">
           <div><dt>Human-reviewed</dt><dd>{{ pct(classifier.test.human_accuracy) }}<span v-if="classifier.test.human_samples" class="muted"> of {{ thousands(classifier.test.human_samples) }}</span></dd></div>
           <div><dt>Classes</dt><dd>{{ classifier.classes ?? '–' }}</dd></div>
           <div><dt>Best validation</dt><dd>{{ pct(classifier.best_validation_accuracy) }}</dd></div>
           <div><dt>Best epoch</dt><dd>{{ epoch }}</dd></div>
         </dl>
+        </details>
       </template>
     </template>
 
@@ -148,6 +154,7 @@ const noOtherOnTest = computed(() => decider.value?.test?.other_road_support ===
           <span>of the “Another” signs found on validation<template v-if="decider.validation?.other_road_support">:
             {{ decider.validation.other_road_found ?? 0 }} of {{ decider.validation.other_road_support }}</template></span>
         </div>
+        <details class="model-more"><summary>Details</summary>
         <div class="table-wrap"><table class="model-table">
           <thead><tr><th></th><th class="num">Validation</th><th class="num">Test</th></tr></thead>
           <tbody>
@@ -161,15 +168,15 @@ const noOtherOnTest = computed(() => decider.value?.test?.other_road_support ===
         <p v-if="decider.inputs" class="note">Reads: {{ decider.inputs.join(' + ') }} · best epoch {{ epoch }}.</p>
         <p v-if="noOtherOnTest" class="note">The test has no “Another” sign yet: whom a sign applies to is measured on validation only.</p>
         <p v-if="decider.smoke_limit !== null" class="note ds-note">A smoke run on {{ decider.smoke_limit }} frames per partition, not a measure.</p>
+        </details>
       </template>
     </template>
 
     <p v-if="!evaluated" class="model-wait">{{ version.finished ? 'Not evaluated: no numbers on the test yet.' : 'Still training, or stopped before its end.' }}</p>
     <p v-for="problem in version.problems" :key="problem" class="note ds-note">{{ problem }}.</p>
-    <p v-if="version.initialization" class="note">Started from {{ initText(version.initialization) }}.</p>
 
     <div class="model-actions">
-      <a class="flow-link" :href="'/evaluate?run=' + encodeURIComponent(version.run)" @click="openRun($event, version.run)">Open the run →</a>
+      <a class="flow-link" :href="'/evaluate?run=' + encodeURIComponent(version.run)" @click="openRun($event, version.run)">Open the run ›</a>
       <button v-if="!version.in_use" class="btn small" type="button" :disabled="blocked !== '' || busy !== null" :title="blocked"
               :aria-label="'Use ' + version.run + ' · ' + version.label + ' as the ' + roleLabel.toLowerCase()"
               @click="emit('use', version)">{{ busy === version.id ? 'Saving…' : 'Use this one' }}</button>

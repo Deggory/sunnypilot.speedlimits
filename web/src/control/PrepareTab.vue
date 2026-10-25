@@ -7,7 +7,7 @@ import type {ActionName, ActionOptions, ActionState, Job, PanelStatus, Proposer,
 import Segmented from './Segmented.vue';
 import ActionList from './ActionList.vue';
 import JobProgress from './JobProgress.vue';
-import {jobOf, PREPARE_ACTIONS, startedWhen, terminalActivities} from './jobs';
+import {JOB_STATE, jobOf, PREPARE_ACTIONS, startedWhen, terminalActivities} from './jobs';
 import PrepRoutes from './PrepRoutes.vue';
 import RouteTable from './RouteTable.vue';
 import TerminalActivity from './TerminalActivity.vue';
@@ -20,10 +20,9 @@ const emit = defineEmits<{run: [name: ActionName, state: ActionState, start?: un
 const PROPOSERS: {key: Proposer; label: string}[] = [{key: 'vietnam', label: 'Vietnamese YOLO'}, {key: 'ours', label: 'Our networks'},
   {key: 'qwen', label: 'Qwen3-VL'}];
 const PROPOSER_TEXT: Record<Proposer, string> = {
-  vietnam: 'A ready-made model from Hugging Face, trained on Vietnamese signs, on the CPU. It proposed about 31% of the signs reviewers kept.',
-  ours: 'Our cutter and classifier, trained on your reviews, on the GPU. On the test roads they find 81% of the speed signs; the signs they still miss stay missed in the proposals.',
-  qwen: 'Qwen3-VL-8B (Alibaba), a model that sees images and is asked for every sign of the frame, on the GPU: a few seconds per frame, '
-    + 'no score on its boxes, never measured on our signs yet.',
+  vietnam: 'A ready-made model trained on Vietnamese signs: it boxes and reads them by itself. It finds about a third of the speed signs.',
+  ours: 'Our cutter draws the boxes, our classifier reads them; both trained on your reviews. They find 3 speed signs out of 4.',
+  qwen: 'A model that looks at the whole picture, boxes every sign and reads it in one go. A few seconds per picture; not measured yet.',
 };
 const stored = localStorage.getItem('nnslr-proposer');
 const proposer = ref<Proposer>(stored === 'ours' || stored === 'qwen' ? stored : 'vietnam');
@@ -33,14 +32,14 @@ watch(proposer, (value) => localStorage.setItem('nnslr-proposer', value));
 /** Routes with proposals and nothing confirmed yet: those "Propose again" can redo. */
 const unstarted = computed(() => (props.status?.routes ?? []).filter((row) => row.state === 'revisionare' && row.confirmed === 0).length);
 const PROPOSE_ACTIONS = computed((): [ActionName, string][] => unstarted.value ? [['prepare_again',
-  'Gives new proposals to the ' + plural(unstarted.value, 'route') + ' nobody has started reviewing, with the proposer chosen above. Routes in review stay as they are.']] : []);
+  'New proposals for the ' + plural(unstarted.value, 'drive') + ' nobody has started to review.']] : []);
 
 /** Step 1, the drives from the comma; step 2, the frames and the proposals, with the proposer chosen above them. */
 const FETCH_ACTIONS: [ActionName, string][] = [
-  ['fetch', 'Copies the new drives from the comma into the video folder, segment by segment; the routes already prepared stay as they are.'],
+  ['fetch', 'Copies the new drives from the comma.'],
 ];
 const PREPARE_ITEMS: [ActionName, string][] = [
-  ['prepare', 'For every new route it links the videos, extracts the frames and has the proposer chosen above propose the signs: then the route is ready to review.'],
+  ['prepare', 'Takes the pictures out of the new drives and proposes the signs, ready to review.'],
 ];
 const COUNTS: [RouteState, string][] = [['collegare', 'to link'], ['estrarre', 'to extract'], ['preannotare', 'to pre-annotate']];
 
@@ -50,8 +49,8 @@ const counts = computed(() => COUNTS.map(([state, label]) => ({state, label,
   count: (props.status?.routes ?? []).filter((row) => row.state === state).length})));
 const total = computed(() => counts.value.reduce((sum, item) => sum + item.count, 0));
 const running = computed(() => job.value?.state === 'running' || activities.value.length > 0);
-/** The job shown as a card: running, or failed (its error must be read); a finished one is a line. */
-const bigJob = computed(() => job.value && job.value.state !== 'ok' ? job.value : null);
+/** The job shown as a card: running, or failed (its error must be read); one done or stopped by hand is a line. */
+const bigJob = computed(() => job.value && (job.value.state === 'running' || job.value.state === 'failed') ? job.value : null);
 const WAITING: RouteState[] = ['collegare', 'estrarre', 'preannotare'];
 const notReady = computed(() => (props.status?.routes ?? []).filter((row) => WAITING.includes(row.state)));
 const ready = computed(() => (props.status?.routes ?? []).filter((row) => !WAITING.includes(row.state)).length);
@@ -67,14 +66,15 @@ const ready = computed(() => (props.status?.routes ?? []).filter((row) => !WAITI
       <ActionList class="compact" :items="FETCH_ACTIONS" :actions="status?.actions ?? null" @run="(name, state) => emit('run', name, state)"/>
     </div>
     <p class="figure-note prep-state" id="prepare-big">{{ status === null ? '' : total
-      ? plural(total, 'route') + ' to prepare: the videos arrived from the comma, no frames yet.'
-      : 'All prepared: no video waiting. Download to get the new drives of the comma.' }}</p>
+      ? plural(total, 'drive') + ' copied from the comma, waiting to be prepared.'
+      : 'Every drive copied from the comma is prepared.' }}</p>
     <ul v-if="total" class="chips">
       <li v-for="item in counts.filter((entry) => entry.count)" :key="item.state"><strong>{{ item.count }}</strong> {{ item.label }}</li>
     </ul>
-    <h3 class="prep-step"><span>2</span> Propose the signs</h3>
+    <h3 class="prep-step"><span>2</span> Find the signs</h3>
+    <p class="figure-note prep-state">Draws a box around every sign in every picture and reads it, for you to confirm in Review.</p>
     <div class="proposer">
-      <span class="proposer-label">Signs proposed by</span>
+      <span class="proposer-label">Found by</span>
       <Segmented v-model="proposer" :options="PROPOSERS" label="Who proposes the signs"/>
       <p class="figure-note">{{ PROPOSER_TEXT[proposer] }}</p>
       <p v-if="unavailable" class="figure-note proposer-missing">{{ unavailable }}</p>
@@ -93,10 +93,10 @@ const ready = computed(() => (props.status?.routes ?? []).filter((row) => !WAITI
       <TerminalActivity v-for="activity in activities" :key="activity.pid + activity.label" :activity="activity" :preparation="status?.preparation ?? null"/>
     </div>
   </section>
-  <p v-else-if="job" class="last-line">Last: {{ job.label }}, {{ startedWhen(job) }} · done ·
+  <p v-else-if="job" class="last-line">Last: {{ job.label }}, {{ startedWhen(job) }} · {{ job.state === 'interrupted' ? 'stopped' : JOB_STATE[job.state][0] }} ·
     <button type="button" class="link-button" @click="$emit('details', job)">Details</button></p>
 
   <!-- The routes still on their way; the ready ones are on the Review tab, as drives. -->
   <RouteTable v-if="notReady.length" :routes="notReady"/>
-  <p v-if="ready" class="last-line"><a href="/routes">{{ plural(ready, 'route') }} ready to review, as drives with their day and places → Review</a></p>
+  <p v-if="ready" class="last-line"><a href="/routes">{{ plural(ready, 'drive') }} ready to review ›</a></p>
 </template>

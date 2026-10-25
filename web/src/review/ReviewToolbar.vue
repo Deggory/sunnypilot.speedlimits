@@ -34,7 +34,7 @@ const online = report.apiBase !== null;
 /** The routes of the server, this one chosen; offline only this report. */
 const options = computed(() => {
   const list = report.routes.map((route) => ({
-    value: String(route.url || ''), text: String(route.route_id || ''), selected: route.route_id === report.routeId,
+    value: String(route.url || ''), text: String(route.name || route.route_id || ''), selected: route.route_id === report.routeId,
   }));
   if (!list.some((option) => option.selected)) {
     list.unshift({value: '', text: report.routeId ? report.routeId : 'Local report', selected: true});

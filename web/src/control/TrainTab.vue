@@ -14,7 +14,7 @@ import type {ActionName, ActionState, CutterFamilies, CutterOptions, Job, JobPro
 import ActionList from './ActionList.vue';
 import DatasetSection from './DatasetSection.vue';
 import JobProgress from './JobProgress.vue';
-import {CHARTED_ACTIONS, jobOf, terminalActivities, TRAIN_ACTIONS} from './jobs';
+import {CHARTED_ACTIONS, JOB_STATE, jobOf, startedWhen, terminalActivities, TRAIN_ACTIONS} from './jobs';
 import ModelItem from './ModelItem.vue';
 import {putInUse, sizeText, useModels} from './models';
 import Segmented from './Segmented.vue';
@@ -27,6 +27,8 @@ const emit = defineEmits<{run: [name: ActionName, state: ActionState, start?: Tr
   details: [job: Job]}>();
 
 const job = computed(() => jobOf(props.status, TRAIN_ACTIONS));
+/** The job as a card: running or failed; one done or stopped by hand is a line. */
+const bigJob = computed(() => job.value && (job.value.state === 'running' || job.value.state === 'failed') ? job.value : null);
 
 /** The networks by role: every version trained here, newest first (the Models tab's data). */
 const {payload: models, refresh: refreshModels} = useModels();
@@ -64,19 +66,16 @@ const cutterFamilies = computed({
   set: (value: CutterFamilies) => { pickedFamilies.value = value; },
 });
 const CUTTER_ACTIONS = computed((): [ActionName, string][] => [
-  ['train_cutter', 'Trains a detector at ' + sizeText(cutterSize.value) + ' that finds '
-    + (cutterFamilies.value === 'all' ? 'the speed signs and the other signs' : 'the speed signs only')
-    + ' on the GPU, then measures it on test and validation by the size of the sign. A new run; it takes hours.'],
+  ['train_cutter', 'A new cutter at ' + sizeText(cutterSize.value) + ' for '
+    + (cutterFamilies.value === 'all' ? 'every sign' : 'speed signs only') + '. Takes a few hours on the GPU.'],
 ]);
 /** Reviews into the training data, under the count of frames not yet in it. */
 const IMPORT_ACTIONS: [ActionName, string][] = [
-  ['dataset', 'Adds the frames confirmed since the last import to the training data and splits it again by place. '
-    + 'No GPU, a few minutes.'],
+  ['dataset', 'Adds your latest reviews to what the networks learn from. A few minutes.'],
 ];
 /** The classifier's training, in its card. */
 const CLASSIFIER_ACTIONS: [ActionName, string][] = [
-  ['train_classifier', 'Mines the false boxes of the cutter in use, trains the classifier with “not a sign” and the kinds of '
-    + 'other signs on the GPU, then measures it alone and the whole chain (cutter, then classifier). A new run; it takes hours.'],
+  ['train_classifier', 'A new classifier, taught on the signs and on the cutter’s mistakes. Takes a few hours on the GPU.'],
 ];
 const activities = computed(() => terminalActivities(props.status, ['train', 'other']));
 /** The curves of a training: while it runs (a placeholder before the first epoch), or of the last one if it has any. */
@@ -114,25 +113,25 @@ const numbers = computed(() => {
 
   <section class="numbers" aria-label="The numbers">
     <div class="card number">
-      <h2>Routes with confirmed frames</h2>
+      <h2>Drives reviewed</h2>
       <div class="figure" id="train-big">{{ numbers ? (numbers.reviewed >= numbers.needed ? numbers.reviewed : numbers.reviewed + ' of ' + numbers.needed) : '–' }}</div>
       <div class="goal" aria-hidden="true"><span v-for="index in numbers?.needed ?? 0" :key="index" :class="{on: index <= (numbers?.reviewed ?? 0)}"></span></div>
-      <p class="figure-note">{{ numbers === null ? '' : numbers.reviewed >= numbers.needed ? 'Enough to train: whole routes are kept apart to check the model on roads it never saw (at least ' + numbers.needed + ').'
-        : 'Training needs at least ' + numbers.needed + ' routes: whole routes are kept apart to check the model on roads it never saw.' }}</p>
+      <p class="figure-note">{{ numbers === null ? '' : numbers.reviewed >= numbers.needed ? 'Enough to train.'
+        : 'Training needs at least ' + numbers.needed + ': some drives are kept apart to test on roads the network never saw.' }}</p>
     </div>
     <div class="card number">
-      <h2>Not yet in the training data</h2>
+      <h2>Waiting to be added</h2>
       <div class="figure" id="train-fresh">{{ numbers ? thousands(numbers.fresh) : '–' }}<span class="figure-unit">{{ numbers?.fresh === 1 ? 'frame' : 'frames' }}</span></div>
-      <p class="figure-note">{{ numbers === null ? '' : numbers.fresh ? 'Confirmed or corrected after the last import, in ' + plural(numbers.freshRoutes, 'route') + '. Only Import reviews and the whole pipeline add them: the cutter and the classifier train on the data of the last import.'
-        : 'Every confirmed frame is already in the training data.' }}</p>
+      <p class="figure-note">{{ numbers === null ? '' : numbers.fresh ? 'Reviewed since the last import, in ' + plural(numbers.freshRoutes, 'drive') + '.'
+        : 'Every reviewed frame is already in.' }}</p>
       <ActionList v-if="numbers?.fresh" :items="IMPORT_ACTIONS" :actions="status?.actions ?? null"
                   @run="(name, state) => emit('run', name, state)"/>
     </div>
     <div class="card number">
-      <h2>What the model learns from</h2>
+      <h2>Learning from</h2>
       <div class="figure" id="train-objects">{{ numbers ? thousands(numbers.objects) : '–' }}<span class="figure-unit">boxes</span></div>
-      <p class="figure-note">{{ numbers === null ? '' : 'Signs and “not a sign” boxes on ' + (numbers.frames === null ? '' : thousands(numbers.frames) + ' frames of ')
-        + plural(numbers.inDataset, 'route') + ', from the last import.' }} <a v-if="status?.dataset" class="figure-link" href="#dataset">Details ↓</a></p>
+      <p class="figure-note">{{ numbers === null ? '' : 'Signs and look-alikes on ' + (numbers.frames === null ? '' : thousands(numbers.frames) + ' frames of ')
+        + plural(numbers.inDataset, 'drive') + '.' }} <a v-if="status?.dataset" class="figure-link" href="#dataset">Details</a></p>
     </div>
   </section>
 
@@ -190,15 +189,16 @@ const numbers = computed(() => {
                 @start="(start) => status && emit('run', 'train', status.actions.train, start)"/>
   </section>
 
-  <section v-if="job || activities.length" class="live-section" :class="{now: job?.state === 'running' || activities.length > 0}" aria-labelledby="train-job-title">
-    <h2 class="section-title" id="train-job-title">{{ job?.state === 'running' || activities.length ? 'Running' : 'Last job' }}</h2>
+  <section v-if="bigJob || activities.length" class="live-section" :class="{now: bigJob?.state === 'running' || activities.length > 0}" aria-labelledby="train-job-title">
+    <h2 class="section-title" id="train-job-title">{{ bigJob?.state === 'running' || activities.length ? 'Running' : 'Last job failed' }}</h2>
     <div class="jp-list" aria-live="polite">
-      <JobProgress v-if="job" :job="job" :heading="job.state !== 'running' && activities.length ? 'Last job' : undefined"
-                   @details="emit('details', $event)" @stop="emit('stop', $event)"/>
+      <JobProgress v-if="bigJob" :job="bigJob" @details="emit('details', $event)" @stop="emit('stop', $event)"/>
       <TrainingCharts v-if="charted" :progress="charted.progress" :running="charted.running"/>
       <TerminalActivity v-for="activity in activities" :key="activity.pid + activity.label" :activity="activity" :preparation="null"/>
     </div>
   </section>
+  <p v-else-if="job" class="last-line">Last: {{ job.label }}, {{ startedWhen(job) }} · {{ job.state === 'interrupted' ? 'stopped' : JOB_STATE[job.state][0] }} ·
+    <button type="button" class="link-button" @click="emit('details', job)">Details</button></p>
 
   <DatasetSection :dataset="status?.dataset ?? null" :loading="status === null"/>
 </template>

@@ -127,7 +127,7 @@ def test_stop_works_after_a_restart_of_the_server(root, checkout, monkeypatch):
 
 def test_update_runs_without_printing_the_token_link(root, checkout):
     panel = Panel(root, repo=checkout)
-    assert panel.status()['actions']['update'] == {'label': 'Update the code', 'allowed': True, 'reason': ''}
+    assert panel.status()['actions']['update'] == {'label': 'Update the site', 'allowed': True, 'reason': ''}
     done = finished(panel, panel.start('update')['id'])
     assert (done['state'], done['code']) == ('ok', 0)
     assert 'update --no-link' in full_log(panel, done['id'])

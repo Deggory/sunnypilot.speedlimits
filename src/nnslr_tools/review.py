@@ -272,10 +272,13 @@ class ReviewApp(ReviewService):
             return {}
 
     def route_links(self) -> list[dict]:
-        """Every route with a report, for the route menu of the review page."""
+        """Every route with a report, for the route menu of the review page, named as the drive it was
+        ("Herznach → Zürich · Fri 23 Oct 2026 · 08:01", nnslr_tools.drives)."""
         links = []
         for route, directory in list_reports(self.root):
-            links.append({'route_id': route, 'url': '/route/' + route + '/'})
+            drive = drive_of(self.root, route)
+            name = ' · '.join(part for part in (drive['title'], drive['when']) if part) or None
+            links.append({'route_id': route, 'url': '/route/' + route + '/', 'name': name})
         return links
 
     def route_summaries(self) -> list[dict]:

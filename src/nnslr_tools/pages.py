@@ -37,9 +37,10 @@ BRAND_MARK = ('<span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 
               'transform="matrix(.88 0 0 .88 1.92 1.92)"><path d="M15.2 12.2H11.4l-.3 3.5c.6-.5 1.3-.7 2-.7 1.4 0 2.3 '
               '1 2.3 2.4 0 1.5-1 2.4-2.4 2.4-1 0-1.8-.5-2.2-1.2"/><rect x="17.2" y="12.2" width="3.9" height="7.6" '
               'rx="1.95"/></g></svg></span>')
-# The machine in small (GPU, its memory and temperature, CPU, RAM, disk) at the right of the tab row, on every
-# page with the tabs (web/src/components/TopMachine.vue, mounted here by the page script). data-feed: the
-# control pages have it from their status, the others ask /api/panel/system.
+# The server at the right of the top bar, on every page with the tabs: a pill with how busy it is, the gauges
+# (GPU, its memory and temperature, CPU, RAM, disk) in a panel under it (web/src/components/TopMachine.vue,
+# mounted here by the page script). data-feed: the control pages have it from their status, the others ask
+# /api/panel/system.
 TABS_MACHINE = '<div class="tabs-machine" id="tabs-machine" data-feed="{feed}"></div>'
 
 # The tabs of the site: (key of the current page, address, label). Account is the icon at the right.
@@ -94,18 +95,19 @@ def bar_end(current: str = '') -> str:
 
 
 def top_bar(current: str = '', *, live: bool = False, signed_in: bool = True) -> str:
-    """Brand, live state, Account menu and tabs. current: the key of the tab to mark, or 'account'.
-    The sign-in page (signed_in=False) shows only the brand."""
-    end = bar_end(current) if signed_in else ''
-    bar = ('<header class="topbar"><div class="topbar-inner">'
-           '<a class="brand" href="/" title="Overview">' + BRAND_MARK
-           + '<span class="brand-name">Speed limits</span></a>' + (LIVE if live else '') + end + '</div>')
-    if signed_in:
-        tabs = ''.join('<a href="' + href + '"' + (' aria-current="page"' if key == current else '') + '>'
-                       + label + '</a>' for key, href, label in SITE_TABS)
-        bar += ('<nav class="tabs" aria-label="Sections">' + tabs
-                + TABS_MACHINE.format(feed='status' if live else 'system') + '</nav>')
-    return bar + '</header>'
+    """Brand, tabs, then the server pill, the live state and the Account menu, in one row (the tabs in a second
+    one on a narrow screen). current: the key of the tab to mark, or 'account'. The sign-in page
+    (signed_in=False) shows only the brand."""
+    brand = ('<a class="brand" href="/" title="Overview">' + BRAND_MARK
+             + '<span class="brand-name">Speed limits</span></a>')
+    if not signed_in:
+        return '<header class="topbar"><div class="topbar-inner">' + brand + '</div></header>'
+    tabs = ''.join('<a href="' + href + '"' + (' aria-current="page"' if key == current else '') + '>'
+                   + label + '</a>' for key, href, label in SITE_TABS)
+    return ('<header class="topbar"><div class="topbar-inner site-bar">' + brand
+            + '<nav class="tabs" aria-label="Sections">' + tabs + '</nav>'
+            + '<div class="bar-end">' + (LIVE if live else '')
+            + TABS_MACHINE.format(feed='status' if live else 'system') + bar_end(current) + '</div></div></header>')
 
 
 def fill(template: str, nonce: str, page: str, current: str = '', *, live: bool = False,
@@ -207,30 +209,26 @@ def _route_row(summary: dict) -> str:
     percent = round(confirmed * 100 / total) if total else 0
     state = route_state(confirmed, total)
     # What opening the route means: carry on (the one obvious action), start, or look again at a finished one.
-    action_class, action = {'doing': ('btn small primary open', 'Resume →'),
-                            'todo': ('btn small open', 'Start →'),
-                            'done': ('btn small open again', 'Check again')}[state]
+    action_class, action = {'doing': ('btn small primary open', 'Resume'),
+                            'todo': ('btn small open', 'Start'),
+                            'done': ('btn small open again', 'Open')}[state]
     suspicious = summary.get('suspicious_count', 0)
-    hint_frames = summary.get('hint_frames', 0)
-    stats = ['<span>' + _plural(total, 'frame', 'frames') + '</span>',
-             '<span>' + str(summary['frames_with_proposals']) + ' with proposals</span>']
+    # Only what says something: how many frames, how many with signs proposed, the suspicious ones when there are.
+    stats = ['<span>' + _plural(total, 'frame', 'frames').replace(str(total), f'{total:,}', 1) + '</span>',
+             '<span>' + f"{summary['frames_with_proposals']:,}" + ' with signs</span>']
     if suspicious:
         stats.append('<span class="sus">' + _plural(suspicious, 'suspicious', 'suspicious') + '</span>')
-    else:
-        stats.append('<span>0 suspicious</span>')
-    if hint_frames:
-        stats.append('<span>' + str(hint_frames) + ' with second reading</span>')
     route = html.escape(summary['route_id'])
-    # The drive first (when, how long, from where to where), the route's code small after it.
+    # The drive (when, how long, from where to where); the route's code only in the tooltip.
     drive = summary.get('drive') or {}
     when = [part for part in (drive.get('when'), _plural(drive['minutes'], 'min', 'min') if drive.get('minutes') else None) if part]
     name = html.escape(drive.get('title') or summary['route_id'])
-    detail = html.escape(' · '.join(when)) + (' · ' if when else '') + '<code>' + html.escape(summary['route_id'].lstrip('0')) + '</code>'
+    detail = html.escape(' · '.join(when))
     return ('<li><a class="card-row ' + state + '" href="' + html.escape(summary['url']) + '">'
             + '<span class="state-icon" aria-hidden="true">' + ('✓' if state == 'done' else '') + '</span>'
             + '<span class="route" title="' + route + '"><span class="drive">' + name + '</span>'
             + '<span class="drive-when">' + detail + '</span></span>'
-            + '<span class="count">' + str(confirmed) + ' of ' + str(total)
+            + '<span class="count">' + f'{confirmed:,}' + ' of ' + f'{total:,}'
             + ' <span class="unit">confirmed</span></span>'
             + '<span class="bar" aria-hidden="true"><span style="width:' + str(percent) + '%"></span></span>'
             + '<span class="stats">' + ''.join(stats) + '</span>'

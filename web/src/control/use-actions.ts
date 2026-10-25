@@ -47,7 +47,7 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
       text: 'Copies the new drives from the comma into the video folder, segment by segment.'};
   }
   if (name === 'update') {
-    return {title: 'Update the code?', action: 'Update',
+    return {title: 'Update the site?', action: 'Update',
       text: 'git pull, the libraries, then the site restarts: it is away for a few seconds.'};
   }
   return null;

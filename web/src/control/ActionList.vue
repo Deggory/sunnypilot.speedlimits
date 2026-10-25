@@ -33,7 +33,7 @@ const rows = computed(() => {
           <span class="act-text" :id="'act-text-' + row.name">{{ row.text }}</span>
           <span v-if="row.reason" class="act-reason" :id="'act-reason-' + row.name">{{ row.reason }}</span>
         </span>
-        <span class="act-go" aria-hidden="true">→</span>
+        <span class="act-go" aria-hidden="true"></span>
       </button>
     </li>
   </ul>

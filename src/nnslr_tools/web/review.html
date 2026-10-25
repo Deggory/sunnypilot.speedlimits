@@ -39,8 +39,8 @@ kbd {
 /* The bar of shared.css, but one row of full width without tabs, and under the safe area of the notch. */
 .topbar { top: env(safe-area-inset-top, 0px); padding-top: 0; padding-bottom: 0; }
 .topbar-inner { gap: 14px; min-height: var(--topbar-row); max-width: none; margin: 0; }
-.route-pick { display: flex; align-items: center; min-width: 0; flex: 0 1 236px; }
-.route-pick select { font-family: var(--font-data); font-size: 12.5px; cursor: pointer; }
+.route-pick { display: flex; align-items: center; min-width: 0; flex: 0 1 300px; }
+.route-pick select { width: 100%; font-size: 13.5px; font-weight: 500; text-overflow: ellipsis; cursor: pointer; }
 select, input[type="text"], input[type="number"] {
   width: 100%; min-width: 0; min-height: 44px; padding: 10px 12px; font-size: 16px; color: var(--fg);
   background: var(--surface-2); border: 1px solid var(--line-strong); border-radius: 12px; transition: border-color 0.2s, box-shadow 0.2s;
@@ -50,19 +50,19 @@ input[type="text"]:focus, input[type="number"]:focus, select:focus { outline: no
 input::placeholder { color: var(--placeholder); }
 /* Dense controls of the toolbar. */
 .topbar select, .topbar input[type="text"] { min-height: var(--control); padding: 5px 10px; font-size: 13px; border-radius: 10px; }
-/* Segmented controls: distill's pill container, the chosen one tinted with the accent. */
+/* Segmented controls as on iOS: a grey track, the chosen one a raised white (dark: grey) segment. */
 .filters, .segmented {
-  display: inline-flex; gap: 2px; padding: 3px; flex: none; max-width: 100%;
-  background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px;
+  display: inline-flex; gap: 2px; padding: 2px; flex: none; max-width: 100%;
+  background: var(--seg-bg); border-radius: 10px;
 }
 .filters button, .segmented button {
-  border: 0; background: none; color: var(--muted); font-weight: 600; font-size: 13px; white-space: nowrap;
-  padding: 4px 11px; min-height: 28px; border-radius: 9px; transition: background 0.2s, color 0.2s;
+  border: 0; background: none; color: var(--fg); opacity: 0.85; font-weight: 500; font-size: 13px; white-space: nowrap;
+  padding: 4px 11px; min-height: 28px; border-radius: 8px; transition: background 0.2s, box-shadow 0.2s;
 }
-.filters button:hover, .segmented button:hover { color: var(--fg); }
+.filters button:hover, .segmented button:hover { opacity: 1; }
 .filters button:focus-visible, .segmented button:focus-visible { outline-offset: -3px; }
 .filters button[aria-pressed="true"], .segmented button[aria-pressed="true"] {
-  color: var(--tab-on-fg); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--tab-on-ring);
+  opacity: 1; font-weight: 600; background: var(--seg-on); box-shadow: var(--seg-on-shadow);
 }
 /* Route progress: a large tabular count, then the bar. */
 .progress { display: flex; align-items: center; gap: 12px; flex: 1 1 180px; min-width: 0; }
@@ -185,8 +185,8 @@ details summary::after, .tl-toggle::after {
 }
 details[open] summary::after, .tl-toggle[aria-expanded="true"]::after { transform: rotate(45deg); }
 
-/* Card headings: the small uppercase label of the other pages. */
-.tl-heading, .section-head h2 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+/* Card headings: the small quiet label of the other pages. */
+.tl-heading, .section-head h2 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0; color: var(--muted); }
 
 /* ---------- timeline card: title, legend, one row per segment, doubt counters ---------- */
 .tl-card {
@@ -281,7 +281,7 @@ details[open] summary::after, .tl-toggle[aria-expanded="true"]::after { transfor
   border: 1px dashed var(--line-strong); border-radius: 14px; background: var(--surface-2); font-size: 13px; color: var(--muted);
 }
 .empty-note svg { flex: none; width: 34px; height: 34px; color: var(--disabled); }
-.field-label { margin: 4px 0 -4px; font-size: 12px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+.field-label { margin: 4px 0 -4px; font-size: 12px; font-weight: 600; letter-spacing: 0; color: var(--muted); }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip {
   border: 1px solid var(--line-strong); background: var(--surface-2); color: var(--fg); border-radius: 999px;
@@ -311,7 +311,7 @@ details[open] summary::after, .tl-toggle[aria-expanded="true"]::after { transfor
 .country-line .flag { font-size: 18px; line-height: 1; }
 .kinds { display: flex; flex-direction: column; gap: 6px; margin-top: -4px; }
 .kind-group { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
-.kind-group-label { flex: 0 0 100%; font-size: 11.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); margin-top: 2px; }
+.kind-group-label { flex: 0 0 100%; font-size: 11.5px; font-weight: 600; letter-spacing: 0; color: var(--muted); margin-top: 2px; }
 .chip.kind { padding: 2px 10px; min-height: 28px; font-size: 12.5px; }
 .value-line .typing { color: var(--rev); font-weight: 650; font-variant-numeric: tabular-nums; }
 .effect-note { margin: -2px 0 2px; font-size: 12px; color: var(--muted); }
@@ -447,7 +447,7 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
     display: flex; align-items: center; gap: 10px; width: 100%; min-height: 52px; padding: 10px 16px;
     border: 0; background: transparent; color: var(--fg); text-align: left;
   }
-  .tl-toggle .tl-title { flex: none; font-size: 13px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+  .tl-toggle .tl-title { flex: none; font-size: 13px; font-weight: 600; letter-spacing: 0; color: var(--muted); }
   .tl-toggle .tl-sub { flex: 1 1 auto; min-width: 0; text-align: right; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .workspace.tl-open .tl-toggle { border-bottom: 1px solid var(--line); }
   .workspace:not(.tl-open) .legend, .workspace:not(.tl-open) .timeline, .workspace:not(.tl-open) .quality { display: none; }

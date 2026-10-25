@@ -112,7 +112,7 @@ ACTIONS = {
     'measure_proposer': {'label': 'Measure a proposer', 'group': 'train', 'command': ['helpers/measure_proposer.sh']},
     # git pull + restart of this server (KillMode=process: the action itself survives the restart).
     # --no-link: the link with the token must not land in the log.
-    'update': {'label': 'Update the code', 'group': 'update', 'command': ['helpers/update.sh', '--no-link']},
+    'update': {'label': 'Update the site', 'group': 'update', 'command': ['helpers/update.sh', '--no-link']},
 }
 # The same work started from a terminal: (group, label, fragment of the command line).
 ACTIVITIES = (

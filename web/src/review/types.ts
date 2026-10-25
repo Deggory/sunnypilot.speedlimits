@@ -89,6 +89,8 @@ export type Suspicious = Record<string, SuspiciousReason[]>;
 export interface RouteLink {
   route_id: string;
   url: string;
+  /** The drive: "Herznach → Zürich · Fri 23 Oct 2026 · 08:01"; null when nothing is known of it. */
+  name?: string | null;
 }
 
 /** The JSON in <script id="payload">. server is false in the static index.html of write_review (offline). */

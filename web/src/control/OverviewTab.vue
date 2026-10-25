@@ -1,8 +1,8 @@
 <script setup lang="ts">
-// Overview, the home page (the machine is in the tab row, TopMachine.vue): the next step, the three phases (the
-// review with Resume review and the route list), what is running now (live, with Stop), or how the last job ended;
-// the recent jobs, the site, the processes on the GPU.
-import {computed} from 'vue';
+// Overview, the home page (the server is the pill of the top bar, TopMachine.vue): the next step, the three phases
+// (the review with Resume review and the route list), what is running now (live, with Stop) or a last job that
+// failed; the latest jobs (all of them on a click), updating the site, the processes on the GPU when there are.
+import {computed, ref} from 'vue';
 import type {ActionName, ActionState, Job, PanelStatus} from '../common/panel-types';
 import ActionList from './ActionList.vue';
 import FlowTiles from './FlowTiles.vue';
@@ -20,14 +20,19 @@ const props = defineProps<{status: PanelStatus | null; busy: ReadonlySet<Control
 defineEmits<{run: [name: ActionName, state: ActionState]; stop: [job: Job]; details: [job: Job]}>();
 
 const SITE_ACTIONS: [ActionName, string][] = [
-  ['update', 'Downloads the latest code (git pull), updates the libraries and restarts the site; only when nothing else is running.'],
+  ['update', 'Gets the latest version of the site and restarts it, when nothing else is running.'],
 ];
+/** Jobs shown before "Show all". */
+const FEW = 4;
+const showAll = ref(false);
 const next = computed(() => props.status ? nextStep(props.status) : WAITING);
 const reviewHref = computed(() => reviewSummary(props.status).resume?.href ?? '/routes');
 const jobs = computed(() => props.status?.jobs ?? []);
 const running = computed(() => jobs.value.filter((job) => job.state === 'running'));
 const activities = computed(() => terminalActivities(props.status));
-const last = computed(() => jobs.value[0] ?? null);
+/** The last job, as a card only when it failed: one done or stopped by hand is in the list below. */
+const failed = computed(() => jobs.value[0]?.state === 'failed' ? jobs.value[0] : null);
+const shown = computed(() => showAll.value ? jobs.value : jobs.value.slice(0, FEW));
 const gpuProcesses = computed(() => props.status?.system.gpu?.process_list ?? []);
 </script>
 
@@ -36,50 +41,42 @@ const gpuProcesses = computed(() => props.status?.system.gpu?.process_list ?? []
   <NextStepCard :next="next" :actions="status?.actions ?? null" :review-href="reviewHref" @run="(name, state) => $emit('run', name, state)"/>
   <FlowTiles :status="status" :attention="next.attention" :busy="busy"/>
 
-  <section class="live-section" aria-labelledby="running-title">
-    <h2 class="section-title" id="running-title">Running<span v-if="running.length + activities.length" class="count-badge">{{ running.length + activities.length }}</span></h2>
-    <div v-if="running.length + activities.length" class="jp-list" aria-live="polite">
+  <section v-if="running.length + activities.length || failed" class="live-section" aria-labelledby="running-title">
+    <h2 class="section-title" id="running-title">{{ running.length + activities.length ? 'Running' : 'Last job failed' }}</h2>
+    <div class="jp-list" aria-live="polite">
       <JobProgress v-for="job in running" :key="job.id" :job="job" @details="$emit('details', $event)" @stop="$emit('stop', $event)">
         <PrepRoutes v-if="job.action === 'prepare' && status?.preparation" :routes="status.preparation.working"/>
       </JobProgress>
       <TerminalActivity v-for="activity in activities" :key="activity.pid + activity.label" :activity="activity"
                         :preparation="status?.preparation ?? null"/>
+      <JobProgress v-if="!running.length && !activities.length && failed" :job="failed" @details="$emit('details', $event)"
+                   @stop="$emit('stop', $event)"/>
     </div>
-    <div v-else class="card idle" :class="{waiting: status === null}">
-      <div class="idle-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor"
-        stroke-width="1.8"/><path d="M8.3 12.3l2.5 2.5 4.9-5.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
-        stroke-linejoin="round"/></svg></div>
-      <div class="idle-text">
-        <strong>{{ status === null ? 'Loading…' : 'Nothing running' }}</strong>
-        <span v-if="status">Neither from the site nor from a terminal. The buttons of Prepare and Train start jobs in the background.</span>
-      </div>
-    </div>
-    <JobProgress v-if="!running.length && last" :job="last" heading="Last job" @details="$emit('details', $event)" @stop="$emit('stop', $event)"/>
   </section>
 
   <div class="grid2">
     <div class="card">
-      <h2>Recent jobs</h2>
+      <h2>Latest jobs</h2>
       <ul class="list">
-        <JobItem v-for="job in jobs" :key="job.id" :job="job" @details="$emit('details', $event)" @stop="$emit('stop', $event)"/>
+        <JobItem v-for="job in shown" :key="job.id" :job="job" @details="$emit('details', $event)" @stop="$emit('stop', $event)"/>
       </ul>
-      <p v-if="status && jobs.length === 0" class="empty">No jobs yet: the buttons of Prepare and Train start them in the background.</p>
+      <button v-if="jobs.length > FEW" type="button" class="link-button more" @click="showAll = !showAll">
+        {{ showAll ? 'Show fewer' : 'Show all ' + jobs.length }}</button>
+      <p v-if="status && jobs.length === 0" class="empty">No jobs yet: the buttons of Prepare and Train start them.</p>
     </div>
     <div class="side">
       <div class="card">
         <h2>Site</h2>
         <ActionList :items="SITE_ACTIONS" :actions="status?.actions ?? null" @run="(name, state) => $emit('run', name, state)"/>
       </div>
-      <div class="card">
-        <h2>Processes on the GPU</h2>
-        <ul v-if="gpuProcesses.length" class="gpu-procs">
+      <div v-if="gpuProcesses.length" class="card">
+        <h2>On the GPU</h2>
+        <ul class="gpu-procs">
           <li v-for="(process, index) in gpuProcesses" :key="index">
             <span class="mono">{{ process.pid ?? '?' }}</span><span class="grow">{{ process.name }}</span>
             <span class="num">{{ process.memory_mb === null ? '–' : Math.round(process.memory_mb) + ' MiB' }}</span>
           </li>
         </ul>
-        <p v-else class="empty">No process on the GPU.</p>
-        <p class="note">Inside the LXC container nvidia-smi often cannot see the process names: the known jobs are under “Running”.</p>
       </div>
     </div>
   </div>
