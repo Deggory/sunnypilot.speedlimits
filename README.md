@@ -65,7 +65,7 @@ Daily work happens in a web portal served by this repository, by default on port
   <img src="docs/images/overview-light.png" alt="Overview tab: the next step is to review signs, 46% of 19,140 frames are confirmed, and a classifier training is 85% done, evaluating the whole chain.">
 </picture>
 
-Where things stand and what to do next. A banner names the next step. Three cards show how far preparing, reviewing and training have got: here, 46% of 19,140 frames are confirmed. Every running job lists its steps with live progress. On every page, the meters at the top show the server's GPU, memory, CPU and disk.
+Where things stand and what to do next. A banner names the next step. Three cards show how far preparing, reviewing and training have got: here, 46% of 19,140 frames are confirmed. Every running job lists its steps with live progress; a finished one is a row of the latest jobs. On every page, a pill at the top right says how busy the server is ("Server idle", "GPU 85%"); tap it for the GPU, its memory and temperature, the CPU, the memory and the free disk.
 
 ### Prepare
 
@@ -133,7 +133,7 @@ The chain card answers the question that matters: how many of the test's speed s
   <img src="docs/images/models-light.png" alt="Models tab: for the cutter, the classifier and the decider, the version in use and every trained version with its test numbers and a button to pick it.">
 </picture>
 
-For each network (cutter, classifier and decider), this tab lists every version trained here, with its test numbers, and the one in use. **Use this one** records the choice, with who made it and when. Other steps then use that version: for example, the classifier training learns from the false boxes of the cutter in use. Choosing copies, exports or installs nothing.
+For each network (cutter, classifier and decider), this tab lists every version trained here, each with its main test number and the rest under **Details**, and the one in use. **Use this one** records the choice, with who made it and when. Other steps then use that version: for example, the classifier training learns from the false boxes of the cutter in use. Choosing copies, exports or installs nothing.
 
 ## Results so far
 
