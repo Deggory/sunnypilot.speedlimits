@@ -129,7 +129,13 @@ def _require():
 def _device(torch, name: str):
     if name == "cuda" and not torch.cuda.is_available():
         raise ValueError("cuda_unavailable")
-    return torch.device(name)
+    device = torch.device(name)
+    # On the GPU the networks need no CPU threads, and cutting the boxes out of a frame is hundreds of tiny tensor
+    # operations on the CPU: with PyTorch's threads (one per core) they spend their time waking each other, 19 s for
+    # the 200 boxes of a frame on the server's 32 cores against 0.17 s on one thread.
+    if device.type == "cuda":
+        torch.set_num_threads(1)
+    return device
 
 
 def cutter_boxes(model, device, frames: list[dict[str, Any]], data_root: Path, *, min_score: float,
