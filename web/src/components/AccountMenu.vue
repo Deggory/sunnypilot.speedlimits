@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // The Account menu at the right of every top bar: who is signed in, the appearance (dark, light,
 // automatic), Settings (the password, the signed-in browsers, the AI reviewer) and sign out. A panel under the icon, a sheet
-// across the width on a phone.
+// across the width on a phone. On a phone it is also the site's menu (the ☰ instead of the person, as shops do): the
+// pages of the tab row first (read from nav.tabs, hidden there), the account at the bottom.
 import {nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import type {AuthState} from '../common/auth-types';
@@ -11,7 +12,14 @@ import {askConfirm} from '../composables/confirm';
 const props = defineProps<{current?: boolean}>();
 const THEMES: [Theme, string][] = [['dark', 'Dark'], ['light', 'Light'], ['auto', 'Automatic']];
 
+/** The pages of the tab row of this page (pages.SITE_TABS), for the phone menu; none on the review page. */
+const pages = [...document.querySelectorAll<HTMLAnchorElement>('nav.tabs a')].map((link) => ({href: link.getAttribute('href') ?? '/',
+  label: link.textContent ?? '', current: link.getAttribute('aria-current') === 'page'}));
 const open = ref(false);
+/** A phone: the menu is the drawer (shared.css, max-width 560px). */
+const narrow = window.matchMedia('(max-width: 560px)');
+const phone = ref(narrow.matches);
+narrow.addEventListener('change', () => { phone.value = narrow.matches; });
 const state = ref<AuthState | null>(null);
 const error = ref('');
 const theme = ref<Theme>(storedTheme());
@@ -77,15 +85,28 @@ const sessionsText = (value: AuthState): string =>
 
 <template>
   <button ref="button" class="icon-btn account-btn" :class="{current: props.current}" type="button" id="account-btn"
-          aria-haspopup="dialog" :aria-expanded="open" aria-controls="account-pop" aria-label="Account and settings"
+          aria-haspopup="dialog" :aria-expanded="open" aria-controls="account-pop" aria-label="Menu, account and settings"
           title="Account" @click="open ? close(false) : show()">
-    <svg viewBox="0 0 20 20" aria-hidden="true">
+    <svg v-if="pages.length" class="i-menu" viewBox="0 0 20 20" aria-hidden="true">
+      <path d="M3.5 6h13M3.5 10h13M3.5 14h13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+    </svg>
+    <svg class="i-person" :class="{alone: !pages.length}" viewBox="0 0 20 20" aria-hidden="true">
       <circle cx="10" cy="7" r="3.4" fill="none" stroke="currentColor" stroke-width="1.8"/>
       <path d="M3.6 17.2c.9-3.1 3.4-4.8 6.4-4.8s5.5 1.7 6.4 4.8" fill="none" stroke="currentColor" stroke-width="1.8"
             stroke-linecap="round"/>
     </svg>
   </button>
+  <!-- On a phone the drawer leaves the top bar (its blur would hold a fixed panel inside the bar). -->
+  <Teleport to="body" :disabled="!phone">
+  <div v-if="open" class="pop-backdrop" aria-hidden="true" @click="close(false)"></div>
   <div v-show="open" ref="pop" class="account-pop" id="account-pop" role="dialog" aria-label="Account and settings">
+    <button class="pop-close" type="button" aria-label="Close the menu" @click="close(true)">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15" fill="none" stroke="currentColor" stroke-width="1.8"
+        stroke-linecap="round"/></svg></button>
+    <nav v-if="pages.length" class="pop-nav" aria-label="Pages">
+      <a v-for="page in pages" :key="page.href" class="pop-page" :href="page.href" :aria-current="page.current ? 'page' : undefined">
+        {{ page.label }}<span aria-hidden="true">›</span></a>
+    </nav>
     <div class="pop-head">
       <span class="pop-avatar" aria-hidden="true">{{ (state?.user ?? '?').slice(0, 1).toUpperCase() }}</span>
       <div class="pop-who">
@@ -115,4 +136,5 @@ const sessionsText = (value: AuthState): string =>
       </template>
     </div>
   </div>
+  </Teleport>
 </template>

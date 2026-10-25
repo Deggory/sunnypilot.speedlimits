@@ -264,9 +264,33 @@ font-size:13.5px;padding:5px 6px;border-radius:8px;cursor:pointer;min-height:30p
 text-align:left;text-decoration:none;padding:10px;border-radius:10px;cursor:pointer;min-height:42px;display:flex;align-items:center}
 .pop-item:hover{background:var(--surface-2)}
 .pop-item.danger{color:var(--bad)}
-@media (max-width:480px){
-  .account-pop{position:fixed;left:12px;right:12px;top:calc(env(safe-area-inset-top,0px) + 58px);width:auto}
+/* The phone menu (AccountMenu.vue), as a shop's: ☰ instead of the person, a drawer from the right over the dimmed page,
+   × at the top, the pages of the tab row as big rows (the tab row is hidden), the account at the bottom. */
+.pop-nav,.pop-close,.pop-backdrop{display:none}
+.pop-nav{flex-direction:column}
+.pop-page{display:flex;align-items:center;justify-content:space-between;min-height:56px;padding:0 20px;
+color:var(--fg);text-decoration:none;font-size:18px;font-weight:500;letter-spacing:-.015em;border-bottom:.5px solid var(--line-strong)}
+.pop-page span{color:var(--muted);font-size:22px;opacity:.5}
+.pop-page[aria-current="page"]{color:var(--accent);font-weight:600}
+.pop-page:active{background:var(--surface-2)}
+.account-btn .i-menu{display:none}
+@media (max-width:560px){
+  .site-bar .tabs{display:none}
+  .account-btn .i-menu{display:block}
+  .account-btn .i-person:not(.alone){display:none}
+  .pop-backdrop{display:block;position:fixed;inset:0;z-index:29;background:var(--backdrop);animation:dialog-fade .2s ease-out}
+  .account-pop{position:fixed;top:0;right:0;bottom:0;left:auto;width:min(88vw,380px);max-height:none;border-radius:0;
+    border:0;padding:calc(env(safe-area-inset-top,0px) + 56px) 0 calc(env(safe-area-inset-bottom,0px) + 16px);
+    overflow-y:auto;overscroll-behavior:contain;animation:drawer-in .26s cubic-bezier(.2,.8,.2,1)}
+  .pop-close{display:grid;place-items:center;position:absolute;top:calc(env(safe-area-inset-top,0px) + 8px);right:10px;
+    width:40px;height:40px;border:0;border-radius:50%;background:var(--seg-bg);color:var(--fg);cursor:pointer}
+  .pop-close svg{width:18px;height:18px}
+  .pop-nav{display:flex;border-top:.5px solid var(--line-strong)}
+  .pop-nav~.pop-head,.pop-nav~.pop-section{padding-left:20px;padding-right:20px}
+  .pop-nav+.pop-head{margin-top:24px;padding-top:14px}
 }
+@keyframes drawer-in{from{transform:translateX(100%)}}
+@media (prefers-reduced-motion:reduce){.account-pop,.pop-backdrop{animation:none}}
 @media (pointer:coarse){.icon-btn{width:40px;height:40px}}
 
 /* Icons (web/src/components/Icon.vue): hand-made line drawings in currentColor, one stroke width, sized by
