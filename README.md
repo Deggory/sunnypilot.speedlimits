@@ -36,7 +36,33 @@ The job is split into small steps. Each network is trained, measured and replace
 4. **Follow over time.** The same sign is followed from frame to frame as the car gets closer, so the reading steadies and the system knows when the sign has been passed. In the car only past frames exist, so this step never looks ahead.
 5. **The limit now.** The current limit is kept by plain rules, not by a network, so the reason for every limit stays visible: which sign set it, and how sure that reading was. The country, from the GPS, decides how a sign is interpreted, because a town-entry sign implies a different limit in different countries.
 
-All training happens on a server with one GPU (a Tesla V100). Later, bigger "teacher" networks on the server, which can see a whole drive at once, are meant to label new drives and help train the small "student" networks for the car.
+### One frame, step by step
+
+Three separate networks, joined by a little code ([`chain.py`](src/nnslr_tools/chain.py) on the server). Each network is called **once per frame**: the classifier gets all the boxes of the frame together, as one batch, not one call per box.
+
+```
+frame [3, 760, 1344]
+  │
+  ▼  cutter (SSDlite, MobileNetV3-Large)          1 call
+boxes [N, 4] + scores                             N ≈ 40, false ones included
+  │
+  ▼  cut each box from the full-resolution frame, resize to 160 × 160
+crops [N, 3, 160, 160]                            stacked into one tensor
+  │
+  ▼  classifier (MobileNetV3-Small)               1 call for all N
+classes [N]                                       50, end of 80, give way, …, not a sign
+  │
+  ▼  drop "not a sign"; the rest with position and size, the car's speed and steering
+  ▼  decider (small, still to build)             1 call for all the signs of the frame
+road [M]                                          ours / another / abstain
+  │
+  ▼  rules over time, with the country from the GPS
+the limit now
+```
+
+Why one call for all the boxes: a network is mostly matrix multiplications. N crops stacked as N rows go through every layer in the same single pass, the weights are read once, and the GPU fills its cores. 40 crops take about as long as 1; 40 calls would take 40 times longer. On the server the cutting is still a Python loop on the CPU; in the car it becomes one GPU operation (`torchvision.ops.roi_align`), so frame → cutter → crops → classifier never leaves the GPU and can be exported as a single model.
+
+All training happens on a server with one GPU (a Tesla V100). The networks trained there are the ones for the car (see [Chestnut](#where-it-would-run-chestnut)) and the ones that propose the signs of new drives (Prepare, "Our networks"). On the server a drive can also be looked at with its later frames, its GPS and the map, which the car cannot do: that is the "teacher" step, meant to make better proposals and help training.
 
 | Step | Where it stands (24 October 2026) |
 |---|---|
