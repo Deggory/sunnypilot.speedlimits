@@ -26,6 +26,12 @@ const PROPOSER_TEXT: Record<Proposer, string> = {
 };
 const stored = localStorage.getItem('nnslr-proposer');
 const proposer = ref<Proposer>(stored === 'ours' || stored === 'qwen' ? stored : 'vietnam');
+/** The GPU memory in use ("31.5 of 32 GB") when more than half is taken: Qwen3-VL needs about 17 GB to load. */
+const gpuTaken = computed(() => {
+  const gpu = props.status?.system.gpu;
+  if (!gpu || gpu.memory_used_mb === null || !gpu.memory_total_mb || gpu.memory_used_mb < gpu.memory_total_mb / 2) return '';
+  return (gpu.memory_used_mb / 1024).toFixed(1) + ' of ' + Math.round(gpu.memory_total_mb / 1024) + ' GB';
+});
 /** Why the chosen proposer cannot run here, if it cannot. */
 const unavailable = computed(() => proposer.value === 'qwen' ? props.status?.proposers?.qwen ?? null : null);
 watch(proposer, (value) => localStorage.setItem('nnslr-proposer', value));
@@ -84,6 +90,8 @@ const ready = computed(() => (props.status?.routes ?? []).filter((row) => !WAITI
       <template v-if="unavailable">
         <p class="figure-note proposer-missing" :title="unavailable">{{ unavailable.includes('not checked yet')
           ? 'Qwen3-VL is copied here but not checked yet.' : 'Qwen3-VL is not installed on this server yet.' }}</p>
+        <p v-if="gpuTaken" class="figure-note proposer-missing">The GPU is taken now: {{ gpuTaken }} of its memory are in use by
+          another program (llama.cpp?). Install tries Qwen3-VL on the GPU: free it first.</p>
         <ActionList :items="INSTALL_ACTIONS" :actions="status?.actions ?? null" @run="(name, state) => emit('run', name, state)"/>
       </template>
     </div>
