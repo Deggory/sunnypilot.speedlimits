@@ -454,9 +454,10 @@
         "direction_straight",
         "direction_several",
         "other",
+        "on_vehicle",
         null
       ],
-      "description": "kind of an other_sign box; optional"
+      "description": "kind of an other_sign box, or on_vehicle for a not_a_sign box; optional"
     }
   },
   "required": [

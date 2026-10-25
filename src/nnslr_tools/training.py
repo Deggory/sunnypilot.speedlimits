@@ -40,7 +40,10 @@ from nnslr_tools.checkpoints import (DEFAULT_DETECTOR_ANCHOR_MIN_RATIO, DEFAULT_
                                      build_detector, detector_is_wide, model_weights, stable_weights, torch_load)
 from nnslr_tools.progress import report as report_progress
 from nnslr_tools.annotations import load_jsonl, validate_dataset
-from nnslr_tools.sign_types import SIGN_TYPES
+from nnslr_tools.sign_types import NOT_A_SIGN_TYPES, SIGN_TYPES
+
+# The kind of a "not a sign" box on a vehicle.
+ON_VEHICLE = NOT_A_SIGN_TYPES[0]
 from nnslr_tools.splits import validate_splits
 
 TRAINING_SCHEMA_VERSION = 1
@@ -111,7 +114,8 @@ def _reader_label(row: dict[str, Any]) -> str | None:
 
 def _classifier_label(row: dict[str, Any]) -> str | None:
     """The v2 label of a reviewed box: the v1 label, the kind of an other sign (``other_sign:<kind>`` when the
-    review gives one, else ``other_sign``), and ``not_a_sign`` for a kept box a reviewer marked so."""
+    review gives one, else ``other_sign``), and ``not_a_sign`` for a kept box a reviewer marked so (none for one on
+    a vehicle)."""
     if row.get("review_state") not in ELIGIBLE_REVIEW_STATES:
         return None
     bbox = row.get("bbox_xyxy")
@@ -119,7 +123,10 @@ def _classifier_label(row: dict[str, Any]) -> str | None:
         return None
     family = row.get("sign_family")
     if family == NOT_A_SIGN:
-        return NOT_A_SIGN
+        # A sign-like disc on a vehicle (a truck's top-speed sticker) is, cut to its box, the same pixels as a
+        # sign: taught as not_a_sign it would teach the classifier to reject signs. The decider learns it, from
+        # the scene (nnslr_tools.context_experiment).
+        return None if row.get("sign_type") == ON_VEHICLE else NOT_A_SIGN
     if family == OTHER_SIGN:
         kind = row.get("sign_type")
         return f"{OTHER_SIGN}:{kind}" if isinstance(kind, str) and kind in SIGN_TYPES else OTHER_SIGN

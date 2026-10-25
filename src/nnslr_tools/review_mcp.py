@@ -30,7 +30,7 @@ from pathlib import Path
 
 from nnslr_tools.review_db import ReviewRejected
 from nnslr_tools.review_service import DETECTION_FAMILIES, review_schema
-from nnslr_tools.sign_types import SIGN_TYPES
+from nnslr_tools.sign_types import NOT_A_SIGN_TYPES, SIGN_TYPES
 
 SERVER_NAME = 'nnslr-review'
 # Neighbour images that get_frame_context attaches at most, to keep answers small.
@@ -259,7 +259,7 @@ def build_server(service, *, client: str, read_only: bool = False):
         supplementary_panel: Literal['unknown', 'none', 'present', 'unresolved']
         temporary: bool | None
         variable_display: bool | None
-        sign_type: Literal[SIGN_TYPES] | None
+        sign_type: Literal[SIGN_TYPES + NOT_A_SIGN_TYPES] | None
         notes: str
         # From apply_previous_frame: a save refuses check_position true (look, fix the box, drop the flag).
         check_position: bool

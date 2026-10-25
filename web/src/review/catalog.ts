@@ -23,6 +23,9 @@ export const FAMILIES: readonly Family[] = [
   {id: 'not_a_sign', label: 'Not a sign', hasValue: false, minor: true},
 ];
 export const QUICK_VALUES: readonly number[] = [20, 30, 40, 50, 60, 70, 80, 100, 120];
+/** The one kind of a "Not a sign" box (nnslr_tools.sign_types.NOT_A_SIGN_TYPES): a sign-like disc or panel on a
+ * vehicle, such as the top-speed sticker on the back of a truck. */
+export const ON_VEHICLE = 'on_vehicle';
 
 export interface SignKind {
   id: string;
@@ -139,6 +142,7 @@ export function hasValue(d: {value_kph?: number | null | undefined}): boolean {
 export function describe(d: Detection): string {
   const kind = d.family === 'other_sign' ? signKindOf(d.sign_type) : null;
   if (kind !== null) return kind.label;
+  if (d.family === 'not_a_sign' && d.sign_type === ON_VEHICLE) return 'Not a sign: on a vehicle';
   const family = familyOf(d.family);
   let text = family ? family.label : String(d.family || 'No type');
   if (hasValue(d)) text += ' · ' + d.value_kph + ' km/h';
@@ -156,7 +160,7 @@ export function shortName(d: Detection): string {
     case 'road_marking_candidate': return known ? 'road ' + v : 'road';
     case 'cancellation': return known ? 'end ' + v : 'end';
     case 'other_sign': return signKindOf(d.sign_type)?.short ?? 'other';
-    case 'not_a_sign': return 'no';
+    case 'not_a_sign': return d.sign_type === ON_VEHICLE ? 'on a vehicle' : 'no';
     default: return '?';
   }
 }

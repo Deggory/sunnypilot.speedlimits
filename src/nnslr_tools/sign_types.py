@@ -5,6 +5,10 @@ Some give a limit without a number (town entry, motorway, expressway), some carr
 speed (weight, height, width, minimum speed): the model has to know them apart from the speed signs.
 Direction signs say where they point. Only a box of family ``other_sign`` has a kind; ``None`` means not
 said (older reviews, or not chosen).
+
+A box of family ``not_a_sign`` may say what it is instead (NOT_A_SIGN_TYPES): ``on_vehicle``, a sign-like
+disc or panel on a vehicle, such as the top-speed sticker on the back of a truck. It stays "not a sign" for
+the training; the kind keeps these cases countable apart.
 """
 from __future__ import annotations
 
@@ -23,6 +27,8 @@ SIGN_TYPES = (
     'direction_left', 'direction_right', 'direction_straight', 'direction_several',
     'other',
 )
+# What a "not a sign" box is, when said.
+NOT_A_SIGN_TYPES = ('on_vehicle',)
 
 
 def sign_type_problem(detection: dict) -> str | None:
@@ -30,8 +36,10 @@ def sign_type_problem(detection: dict) -> str | None:
     value = detection.get('sign_type')
     if value is None:
         return None
+    if value in NOT_A_SIGN_TYPES:
+        return None if detection.get('family') == 'not_a_sign' else f'sign_type {value} is only for family not_a_sign'
     if value not in SIGN_TYPES:
-        return 'sign_type must be one of: ' + ', '.join(SIGN_TYPES) + ', or null'
+        return 'sign_type must be one of: ' + ', '.join(SIGN_TYPES + NOT_A_SIGN_TYPES) + ', or null'
     if detection.get('family') != 'other_sign':
-        return 'sign_type is only for boxes of family other_sign'
+        return 'sign_type is only for boxes of family other_sign (or on_vehicle for not_a_sign)'
     return None

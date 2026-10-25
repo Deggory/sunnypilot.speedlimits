@@ -1,6 +1,6 @@
 // Keyboard shortcuts: ← → frame (with Shift: the frame before or after in the filter), ↑ ↓ box, the speed typed
 // as it reads ("5 0" = 50, "1 2 0" = 120, "0" alone = not readable), O X U the road (ours, another, unclear), S other
-// sign for our road, G give way, P stop, R roundabout, Enter confirm, B or N new box, C fit (centre) the box picked with the AI
+// sign for our road, V on a vehicle (not a sign), G give way, P stop, R roundabout, Enter confirm, B or N new box, C fit (centre) the box picked with the AI
 // (every box of the frame when none was picked), A apply previous, I ask the AI, H second reading, D removes every
 // box of the frame, Del removes a box the reviewer selected (on the one the page opened on it says to click it
 // first), Esc cancel. While a menu or panel of the site's top bar is open, the keys are its own.
@@ -8,7 +8,8 @@ import {onBeforeUnmount, onMounted} from 'vue';
 import {askAi, fitBox} from './ai';
 import {applyPrevious} from './carry';
 import {confirmFrame} from './confirm';
-import {cancelAll, removeAllBoxes, removeSelected, selectBox, setField, setKind, setOtherOurs, setValue, toggleDrawing, toggleHints} from './edits';
+import {cancelAll, removeAllBoxes, removeSelected, selectBox, setField, setKind, setOnVehicle, setOtherOurs, setValue, toggleDrawing,
+  toggleHints} from './edits';
 import {currentRow, workOf} from './frames';
 import {go, step} from './navigation';
 import {report, state} from './store';
@@ -122,6 +123,11 @@ export function useKeyboard(): void {
       if (event.key === 's' || event.key === 'S') {
         event.preventDefault();
         setOtherOurs();
+        return;
+      }
+      if (event.key === 'v' || event.key === 'V') {
+        event.preventDefault();
+        setOnVehicle();
         return;
       }
       // G give way, P stop, R roundabout: pressed again the kind stays (the button toggles it, the key does not).

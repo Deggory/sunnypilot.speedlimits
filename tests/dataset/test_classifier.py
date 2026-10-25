@@ -724,3 +724,23 @@ def test_recall_by_family_keeps_the_speed_signs_comparable():
     # Frames scored without their families (older code paths): no such measure.
     assert recall_by_family([{k: v for k, v in scored.items() if k != "truth_families"}]) is None
     assert "recall_by_family" not in threshold_metrics([{k: v for k, v in scored.items() if k != "truth_families"}])
+
+
+def test_a_box_on_a_vehicle_is_imported_as_not_a_sign_with_its_kind(tmp_path, capsys):
+    root = tmp_path / "data"
+    row = reviewed(root, "000000aa--abcdef1234", index=0)
+    frame_png(root / row["image_path"], 0)
+    sticker = _box("v", [4, 6, 20, 26], "not_a_sign", sign_type="on_vehicle")
+    # A kind left over from an other sign is not the kind of a "not a sign" box: it is dropped on import.
+    stale = _box("n", [30, 4, 40, 14], "not_a_sign", sign_type="give_way")
+    row.update(width=WIDTH, height=HEIGHT, frame_sha256=hashlib.sha256((root / row["image_path"]).read_bytes()).hexdigest(),
+               detections=[sticker, stale], source_proposals=[dict(sticker), dict(stale)])
+    code, out = invoke(capsys, "import-annotations", str(write(root, [row])), "--data-root", str(root))
+    assert code == 0, out.err + out.out
+    canonical = load_jsonl(root / "annotations" / "objects.jsonl")
+    assert validate_dataset(canonical, root)["valid"]
+    kinds = sorted(str(r["sign_type"]) for r in canonical if r["sign_family"] == "not_a_sign")
+    assert kinds == ["None", "on_vehicle"]
+    # The classifier keeps the plain "not a sign" box only: cut to its box, the sticker is a sign.
+    from nnslr_tools.training import _classifier_label
+    assert sorted(str(_classifier_label(r)) for r in canonical) == ["None", "not_a_sign"]

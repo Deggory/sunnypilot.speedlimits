@@ -7,7 +7,7 @@ import {BOOLEAN_FIELDS, FAMILIES, QUICK_VALUES, ROADS, SELECT_FIELDS, SIGN_KIND_
 import {aiBlocker, fitBox, fitting} from './ai';
 import {addedBy, originalOf} from './boxes';
 import {coarsePointer, releaseFocus} from './dom';
-import {setFamily, setField, setKind, setOtherOurs, setValue} from './edits';
+import {setFamily, setField, setKind, setOnVehicle, setOtherOurs, setValue} from './edits';
 import {workOf} from './frames';
 import {vFill} from './fill';
 import {handlesOf, sceneScale, zoomView, type Rect} from './overlay';
@@ -142,10 +142,12 @@ function booleanChanged(key: BooleanField, event: Event): void {
       <button v-for="item in ROADS" :key="item.id" type="button" :aria-pressed="road === item.id"
               :data-applicability="item.id" @click="setField('applicability', item.id); releaseFocus($event)">{{ item.label }}<kbd class="key-hint">{{ ROAD_KEYS[item.id] }}</kbd></button>
     </div>
-    <!-- Most boxes: an other sign for our road, in one tap (S). -->
+    <!-- Most boxes: an other sign for our road, in one tap (S); a truck's sticker, not a sign (V). -->
     <div class="quick-row">
       <!-- An action, never lit: Road and Type above and below say what the box is. -->
       <button type="button" class="chip quick" id="otherOurs" @click="setOtherOurs(); releaseFocus($event)">Other sign · our road<kbd>S</kbd></button>
+      <button type="button" class="chip quick" id="onVehicle" title="A sign-like disc or panel on a vehicle, such as a truck's top-speed sticker: not a sign"
+              @click="setOnVehicle(); releaseFocus($event)">On a vehicle<kbd>V</kbd></button>
     </div>
     <!-- The signs are always there: a number makes the box a speed limit, "?" means the number cannot be read. -->
     <div class="signs" id="quickValues" role="group" aria-label="Speed">

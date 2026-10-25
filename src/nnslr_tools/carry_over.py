@@ -219,8 +219,9 @@ def carry_over(previous: list, current: list, *, width: float, height: float, so
     estimated = 0
     dropped = 0
     for i, old in enumerate(olds):
-        # A box the reviewer marked "not a sign" is only carried onto a box of this frame.
-        if i in taken_old or old.get('family') == 'not_a_sign':
+        # A box the reviewer marked "not a sign" is only carried onto a box of this frame; one on a vehicle (a
+        # truck's sticker) is placed like a sign: the truck ahead is still there.
+        if i in taken_old or (old.get('family') == 'not_a_sign' and old.get('sign_type') != 'on_vehicle'):
             continue
         box = _box(old)
         if taken_old:

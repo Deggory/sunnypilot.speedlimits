@@ -1,7 +1,7 @@
 // Changes to the frame on screen: type, value, road and details of the selected box, boxes added (drawn or
 // taken from the second reading) and removed, drawing mode and second reading on or off.
 import {nextTick} from 'vue';
-import {familyForHint, familyHasValue} from './catalog';
+import {ON_VEHICLE, familyForHint, familyHasValue} from './catalog';
 import {writeLocal} from './dom';
 import {currentRow, selectedDetection, workOf} from './frames';
 import {isBox} from './geometry';
@@ -50,6 +50,19 @@ export function setOtherOurs(): void {
     d.value_kph = null;
     d.value_state = 'unknown';
     d.applicability = 'own_road';
+    state.valueError = false;
+  });
+}
+
+/** Not a sign but a sign-like disc or panel on a vehicle, such as a truck's top-speed sticker (V): a negative example
+ * for the classifier, and for the decider not ours (another road), counted apart. */
+export function setOnVehicle(): void {
+  editSelected((d) => {
+    d.family = 'not_a_sign';
+    d.sign_type = ON_VEHICLE;
+    d.applicability = 'other_road';
+    d.value_kph = null;
+    d.value_state = 'unknown';
     state.valueError = false;
   });
 }

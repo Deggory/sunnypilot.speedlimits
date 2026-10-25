@@ -19,10 +19,12 @@ from nnslr_tools.context_experiment import (
     OWNERSHIP_CLASSES,
     VARIANTS,
     comparison_table,
+    decider_label,
     expected_calibration_error,
     geometry_features,
     ownership_class_weights,
     ownership_metrics,
+    ownership_target,
 )
 from test_annotations import invoke, reviewed, write
 
@@ -167,6 +169,19 @@ def test_calibration_class_weights_and_geometry():
     features = geometry_features([134.4, 76, 268.8, 152], 1344, 760, None)
     assert features == pytest.approx([.1, .1, .2, .2, .1, .1, .15, .15, 0.0, 1.0])
     assert geometry_features([0, 0, 1344, 760], 1344, 760, 20.0)[-2:] == [.5, 0.0]
+
+
+def test_a_box_on_a_vehicle_teaches_the_decider_not_ours():
+    sticker = {"sign_family": "not_a_sign", "sign_type": "on_vehicle", "review_state": "corrected",
+               "bbox_xyxy": [10, 10, 30, 30]}
+    assert decider_label(sticker) == "not_a_sign" and ownership_target(sticker) == "other_road"
+    # A plain "not a sign" stays out of the decider; a speed sign keeps its own road.
+    assert decider_label({**sticker, "sign_type": None}) is None
+    assert ownership_target({**sticker, "sign_type": None}) is None
+    assert ownership_target({**sticker, "review_state": "rejected"}) is None
+    speed = {"sign_family": "maximum_speed", "value_state": "read", "value_kph": 80, "applicability": "own_road",
+             "review_state": "accepted", "bbox_xyxy": [10, 10, 30, 30]}
+    assert decider_label(speed) == "maximum_speed:80" and ownership_target(speed) == "own_road"
 
 
 def test_comparison_table_reads_the_variants(tmp_path):

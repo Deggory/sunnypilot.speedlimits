@@ -17,6 +17,9 @@ Every variant has the same small fusion MLP with two heads on it:
   only on the rows of the speed families; other rows have no ownership loss. other_road is rare, so
   the ownership loss weighs the classes by inverse frequency (capped).
 
+A box a person marked "not a sign, on a vehicle" (a truck's top-speed sticker) is read as not_a_sign and
+taught as other_road: it is no sign for our road, and the scene shows the vehicle it is on.
+
 The best epoch is chosen on validation; validation and test are then measured, and again on the rows
 a person confirmed (provenance.label_basis human_review). Train, validation and test are the only
 partitions read: buffer and the partitions of older split policies are ignored.
@@ -43,6 +46,7 @@ from nnslr_tools.evaluation import human_reviewed_metrics, label_basis_counts, r
 from nnslr_tools.progress import report as report_progress
 from nnslr_tools.splits import validate_splits
 from nnslr_tools.training import (
+    ELIGIBLE_REVIEW_STATES,
     READER_NORMALIZE_MEAN,
     READER_NORMALIZE_STD,
     TRAIN_SPLIT,
@@ -73,6 +77,10 @@ OWNERSHIP_CLASSES = ("own_road", "other_road", "unresolved")
 ABSTAIN = "unresolved"
 # Ownership is learned and measured only on these families; other rows have no ownership loss.
 OWNERSHIP_FAMILIES = ("cancellation", "maximum_speed", "variable_display", "zone")
+# A "not a sign" box on a vehicle (nnslr_tools.sign_types.NOT_A_SIGN_TYPES): read as not_a_sign, not ours.
+ON_VEHICLE = "on_vehicle"
+VEHICLE_READING = "not_a_sign"
+VEHICLE_OWNERSHIP = "other_road"
 # The inverse-frequency weights of the ownership classes are capped here.
 OWNERSHIP_WEIGHT_CAP = 10.0
 # The crop: the box plus this share of its width and height on each side, clipped to the frame.
@@ -111,8 +119,23 @@ COMPARISON_SCOPES = (
 
 # ---------------------------------------------------------------- labels and geometry (stdlib only)
 
+def on_vehicle(row: dict[str, Any]) -> bool:
+    """A reviewed box a person marked not a sign, on a vehicle."""
+    box = row.get("bbox_xyxy")
+    return (row.get("sign_family") == "not_a_sign" and row.get("sign_type") == ON_VEHICLE
+            and row.get("review_state") in ELIGIBLE_REVIEW_STATES and isinstance(box, list) and len(box) == 4)
+
+
+def decider_label(row: dict[str, Any]) -> str | None:
+    """The reading label of a row: the reader's, and not_a_sign for a box on a vehicle."""
+    return VEHICLE_READING if on_vehicle(row) else _reader_label(row)
+
+
 def ownership_target(row: dict[str, Any]) -> str | None:
-    """The ownership class of a row of a speed family, None (no ownership loss) for any other row."""
+    """The ownership class of a row of a speed family (other_road for a box on a vehicle), None (no ownership
+    loss) for any other row."""
+    if on_vehicle(row):
+        return VEHICLE_OWNERSHIP
     if row.get("sign_family") not in OWNERSHIP_FAMILIES:
         return None
     value = row.get("applicability")
@@ -266,7 +289,7 @@ def prepare_experiment_b(
     ignored_partitions = Counter()
     missing_images: list[str] = []
     for row in rows:
-        label = _reader_label(row)
+        label = decider_label(row)
         if label is None:
             skipped["not_reader_eligible"] += 1
             continue

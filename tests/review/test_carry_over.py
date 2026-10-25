@@ -85,6 +85,13 @@ def test_without_any_sign_found_the_old_position_is_kept_and_gone_signs_are_drop
     # A "not a sign" box is carried only onto a box of this frame.
     assert len(result['detections']) == 1
     assert result['detections'][0]['bbox_xyxy'] == [round(v, 1) for v in stays]
+    # Unless it is on a vehicle (a truck's sticker): the truck ahead is still there.
+    sticker = confirmed(box_at(300, 300, 30), family='not_a_sign', value=None, sign_type='on_vehicle',
+                        applicability='other_road')
+    result = carry_over([confirmed(stays), sticker], [], width=W, height=H, source_key='0/1')
+    carried = result['detections'][1]
+    assert carried['family'] == 'not_a_sign' and carried['sign_type'] == 'on_vehicle'
+    assert carried['applicability'] == 'other_road' and carried['check_position'] is True
 
 
 def test_boxes_the_reviewer_changed_keep_their_labels():

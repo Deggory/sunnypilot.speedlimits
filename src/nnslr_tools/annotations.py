@@ -183,8 +183,9 @@ def validate_annotation(row: dict, root: Path, *, dataset_kind: str = 'gold',
                 and -90 <= gps['latitude'] <= 90 and -180 <= gps['longitude'] <= 180, "invalid_schema", "gps")
     sign_type = row.get('sign_type')
     if sign_type is not None:
-        from nnslr_tools.sign_types import SIGN_TYPES
-        require(sign_type in SIGN_TYPES and row['sign_family'] == 'other_sign', "invalid_schema", "sign_type")
+        from nnslr_tools.sign_types import NOT_A_SIGN_TYPES, SIGN_TYPES
+        require((sign_type in SIGN_TYPES and row['sign_family'] == 'other_sign')
+                or (sign_type in NOT_A_SIGN_TYPES and row['sign_family'] == 'not_a_sign'), "invalid_schema", "sign_type")
     require(_hash(row['image_sha256']), "missing_provenance", "image_sha256")
     for field in ('source_video_sha256', 'source_log_sha256'):
         require(row[field] is None or _hash(row[field]), "missing_provenance", field)
@@ -382,7 +383,8 @@ def _canonical(frame: dict, detection: dict | None, original: dict | None, sourc
         'review_state': 'rejected' if rejected else 'accepted' if negative or unchanged else 'corrected',
         'notes': d.get('notes', frame.get('notes', '')),
         'country': frame.get('country'), 'gps': frame.get('gps'),
-        'sign_type': d.get('sign_type') if family == 'other_sign' else None,
+        'sign_type': d.get('sign_type') if family == 'other_sign'
+                     or (family == 'not_a_sign' and d.get('sign_type') == 'on_vehicle') else None,
         'alignment_status': frame.get('alignment_status', 'unresolved'),
         'capture_time_provenance': frame.get('capture_time_provenance', 'unknown'),
         'provenance': provenance,
