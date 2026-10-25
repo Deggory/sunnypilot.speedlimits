@@ -2,6 +2,7 @@
 // (review_service.apply_previous). A box of this frame that is the same sign takes the previous labels; a sign
 // not found here gets a box where it should be, marked "check": Confirm refuses the frame until the reviewer
 // has looked at each one (moved it onto the sign, pressed "Here", or deleted it).
+import {refuseChange} from './busy';
 import {nextTick} from 'vue';
 import {messageOf} from '../common/api';
 import {changed} from './edits';
@@ -53,7 +54,7 @@ export function uncheckedIndices(work: FrameEdit): number[] {
 export async function applyPrevious(): Promise<void> {
   const row = currentRow();
   const apiBase = report.apiBase;
-  if (!row || !apiBase) return;
+  if (!row || !apiBase || refuseChange()) return;
   const carry = carryState(row);
   if (!carry.enabled) {
     // Why not, said where it is seen (a tooltip never shows on a touch screen).
@@ -83,7 +84,7 @@ export async function applyPrevious(): Promise<void> {
 /** "Here": the reviewer has looked, the carried box is on its sign. */
 export function positionChecked(index: number): void {
   const row = currentRow();
-  if (!row) return;
+  if (!row || refuseChange()) return;
   const d = workOf(row).detections[index];
   if (!d || !d.check_position) return;
   delete d.check_position;

@@ -5,6 +5,7 @@ import {familyForHint, familyHasValue} from './catalog';
 import {writeLocal} from './dom';
 import {currentRow, selectedDetection, workOf} from './frames';
 import {isBox} from './geometry';
+import {refuseChange} from './busy';
 import {revealEditor} from './scroll';
 import {hintsOf, state, store} from './store';
 import type {Box, Detection, FrameEdit, FrameRow} from './types';
@@ -25,7 +26,7 @@ export function changed(row: FrameRow): void {
 function editSelected(change: (d: Detection) => void): void {
   const d = selectedDetection();
   const row = currentRow();
-  if (!d || !row) return;
+  if (!d || !row || refuseChange()) return;
   change(d);
   changed(row);
 }
@@ -71,7 +72,7 @@ export function setField<K extends keyof Detection>(key: K, value: Detection[K])
 
 export function removeBox(index: number): void {
   const row = currentRow();
-  if (!row) return;
+  if (!row || refuseChange()) return;
   const work = workOf(row);
   if (index < 0 || index >= work.detections.length) return;
   work.detections.splice(index, 1);
@@ -94,6 +95,7 @@ function manualId(work: FrameEdit): string {
 
 // A box added by the reviewer: drawn by hand or taken from the second reading. Same fields either way.
 export function addManualBox(row: FrameRow, box: Box, family: string, value: number | null): void {
+  if (refuseChange()) return;
   const work = workOf(row);
   work.detections.push({
     bbox_xyxy: box,
@@ -127,6 +129,7 @@ export function useHint(index: number): void {
 
 /** Physical site or encounter of the frame (under "More"); empty: none. */
 export function setFrameField(row: FrameRow, key: 'site_group' | 'encounter_id', value: string): void {
+  if (refuseChange()) return;
   const trimmed = value.trim();
   workOf(row)[key] = trimmed === '' ? null : trimmed;
   changed(row);
@@ -141,6 +144,7 @@ export function selectBox(index: number): void {
 }
 
 export function toggleDrawing(): void {
+  if (!state.drawing && refuseChange()) return;
   state.drawing = !state.drawing;
   state.selected = -1;
 }

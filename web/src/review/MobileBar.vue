@@ -6,6 +6,7 @@ import {position, status} from './current';
 import {confirmFrame} from './confirm';
 import {confirmLabels, statusLine} from './messages';
 import {step} from './navigation';
+import {report} from './store';
 import type {FrameEdit, FrameRow} from './types';
 import {useHeightVar} from './use-layout';
 
@@ -25,7 +26,7 @@ const message = computed(() => (props.row ? statusLine(props.row.frame_key, stat
       <button type="button" class="btn" id="mPrev" aria-label="Previous frame" :disabled="position.index <= 0"
               @click="step(-1)">‹</button>
       <button type="button" class="btn primary confirm" :class="{already: labels.already}" id="mConfirm" data-action="confirm"
-              :disabled="status === 'saving'" :data-save-state="status" @click="confirmFrame"><span class="btn-label" id="mConfirmLabel">{{ labels.mobileLabel }}</span><kbd class="keycap" aria-hidden="true">↵</kbd></button>
+              :disabled="status === 'saving' || report.readOnly" :data-save-state="status" @click="confirmFrame"><span class="btn-label" id="mConfirmLabel">{{ report.readOnly ? 'Read only' : labels.mobileLabel }}</span><kbd class="keycap" aria-hidden="true">↵</kbd></button>
       <button type="button" class="btn" id="mNext" aria-label="Next frame"
               :disabled="position.index >= position.length - 1" @click="step(1)">›</button>
     </div>

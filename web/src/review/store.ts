@@ -5,7 +5,7 @@ import {reactive} from 'vue';
 import {readLocal} from './dom';
 import {isFilter} from './frames';
 import type {
-  Drag, Filter, FrameEdit, FrameRow, Hint, HintStats, LastSave, Notice, Payload, RouteLink, ServerState,
+  Busy, Drag, Filter, FrameEdit, FrameRow, Hint, HintStats, LastSave, Notice, Payload, RouteLink, ServerState,
   Suspicious,
 } from './types';
 
@@ -30,11 +30,15 @@ export interface Report {
   lastKeyStorage: string;
   /** Who proposed the signs (vietnam, ours, qwen), null when not known. */
   proposer: string | null;
+  /** Propose again worked on this drive when the page was made: read only until reloaded (review/busy.ts). */
+  readOnly: boolean;
+  /** The page shows the new proposals made so far, not the report (the drive at work). */
+  atWork: boolean;
 }
 
 export const report: Report = {
   runId: '', routeId: '', rows: [], routes: [], countries: {}, hintStats: null, routeHasHints: false, apiBase: null,
-  storageKey: '', lastKeyStorage: '', proposer: null,
+  storageKey: '', lastKeyStorage: '', proposer: null, readOnly: false, atWork: false,
 };
 
 let hintsByFrame: Record<string, Hint[]> = {};
@@ -91,6 +95,8 @@ export interface ReviewState {
   saveCount: number;
   lastSave: LastSave | null;
   server: ServerState;
+  /** How the drive is now for Propose again (asked again while the page is read only); null: not busy (any more). */
+  busy: Busy | null;
 }
 
 export const state: ReviewState = reactive({
@@ -123,6 +129,7 @@ export const state: ReviewState = reactive({
   saveCount: 0,
   lastSave: null,
   server: 'offline',
+  busy: null,
 });
 
 /** The payload of the page (<script id="payload">), read once before the app mounts. */
@@ -141,7 +148,10 @@ export function initStore(raw: Partial<Payload>): void {
     storageKey: 'nnslr-review-v1-' + String(raw.run_id),
     lastKeyStorage: 'nnslr-review-last-' + String(raw.run_id),
     proposer: typeof raw.proposer === 'string' ? raw.proposer : null,
+    readOnly: isRecord(raw.busy),
+    atWork: isRecord(raw.busy) && raw.busy['phase'] === 'proposing again',
   } satisfies Report);
+  state.busy = isRecord(raw.busy) ? raw.busy as unknown as Busy : null;
   rowIndex = new Map(report.rows.map((row, index) => [row.frame_key, index]));
   state.suspicious = isRecord(raw.suspicious) ? raw.suspicious as Suspicious : {};
 }

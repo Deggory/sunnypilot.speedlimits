@@ -687,6 +687,9 @@ def save_frame_review(store: ReviewStore, root: Path, *, route_id: str, run_id: 
     """
     if channel not in REVIEW_CHANNELS:
         raise ValueError(f'unknown review channel {channel!r}')
+    # A drive Propose again is working on is read only: its report is about to be replaced.
+    from nnslr_tools.reproposing import refuse_if_busy
+    refuse_if_busy(root, route_id)
     if not isinstance(body, dict):
         raise ReviewRejected(400, 'invalid_schema', italian_message('invalid_schema', 'the request must be an object'))
     if require_versioning:

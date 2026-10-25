@@ -5,6 +5,7 @@
 // that comes after the reviewer moved on is kept for its frame. The route's last "Try without saving" (GET
 // …/ai-trial) comes in the same way, one ready suggestion per frame it tried, and fills the "AI trial" filter.
 // Not offline (the static report has no server).
+import {refuseChange} from './busy';
 import {reactive} from 'vue';
 import {messageOf} from '../common/api';
 import type {AiAction, AiState, AiSuggestion, AiTrial} from '../common/ai-types';
@@ -142,7 +143,7 @@ export async function askAi(): Promise<void> {
 /** Apply: the suggestion becomes the boxes of the frame on screen, to check and then confirm (nothing is saved). */
 export async function applyAi(): Promise<void> {
   const row = currentRow();
-  if (!row) return;
+  if (!row || refuseChange()) return;
   const key = row.frame_key;
   const ask = ai.asks[key];
   const suggestion = ask?.suggestion;

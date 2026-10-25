@@ -162,6 +162,8 @@ border:1.5px solid var(--line-strong);background:var(--surface);color:var(--mute
 .prep-routes li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;align-items:center;font-size:13px}
 .prep-routes .bar{grid-column:1/-1;height:6px}
 .prep-route{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+a.prep-route{color:var(--accent);text-decoration:none}
+a.prep-route:hover{text-decoration:underline}
 .prep-phase{color:var(--muted);text-align:right;font-variant-numeric:tabular-nums}
 /* A phone: the drive's name on its own line, what it is doing under it, so neither cuts the other. */
 @media (max-width:600px){.prep-routes li{grid-template-columns:minmax(0,1fr)}.prep-phase{text-align:left}}

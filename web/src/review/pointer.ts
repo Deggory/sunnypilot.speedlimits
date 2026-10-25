@@ -6,7 +6,7 @@ import {datasetOf} from './dom';
 import {addManualBox, changed} from './edits';
 import {currentRow, selectedDetection} from './frames';
 import {revealEditor} from './scroll';
-import {state} from './store';
+import {report, state} from './store';
 import type {Box, Corner, FrameRow, Point, Surface} from './types';
 
 function isCorner(value: string | undefined): value is Corner {
@@ -44,7 +44,8 @@ function drawDraft(a: Point, b: Point): void {
 export function onPointerDown(event: PointerEvent, surface: Surface): void {
   const row = currentRow();
   const svg = svgOf(event);
-  if (!row || svg === null) return;
+  // Read only (review/busy.ts): a box is chosen by a click, never drawn, moved or resized.
+  if (!row || svg === null || report.readOnly) return;
   if (surface === 'scene' && state.drawing) {
     event.preventDefault();
     const start = toImagePoint(svg, event, row);

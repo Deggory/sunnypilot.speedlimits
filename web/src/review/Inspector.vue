@@ -5,6 +5,7 @@ import {computed} from 'vue';
 import AiSection from './AiSection.vue';
 import BoxEditor from './BoxEditor.vue';
 import BoxList from './BoxList.vue';
+import BusyBanner from './BusyBanner.vue';
 import {boxCountText} from './boxes';
 import {applyPrevious, carryState} from './carry';
 import ConfirmArea from './ConfirmArea.vue';
@@ -43,6 +44,7 @@ const countryText = computed(() => {
   <aside class="panel" :class="{editing: selectedBox !== null}" aria-label="Review of the frame">
     <section>
       <RoutePick/>
+      <BusyBanner/>
       <div class="section-head"><h2>Signs</h2><span class="count" id="boxCount">{{ boxCountText(count) }}</span>
         <!-- Off, it still answers a press: the reason why appears on the status line. -->
         <button v-if="carry.shown" type="button" class="btn small carry" id="applyPrevious" :aria-disabled="!carry.enabled"

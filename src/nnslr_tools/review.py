@@ -285,6 +285,22 @@ class ReviewApp(ReviewService):
             name = name.rsplit(':', 1)[0]
         return is_loopback(name)
 
+    def view(self, route: str) -> tuple[Path, str, list[dict], dict | None, str]:
+        """What the review page shows of a drive: (folder of its pictures, run id, rows, busy, proposer). Its report,
+        or, while Propose again works on it (nnslr_tools.reproposing), the new proposals made so far, read only; busy
+        is then the state of the drive for the page, else None. Raises as report() for an unknown drive."""
+        from nnslr_tools import reproposing
+        directory, rows, _by_key = self.report(route)
+        item = reproposing.of(self.root, route)
+        if item is not None and item['phase'] == 'proposing again':
+            fresh = reproposing.at_work_rows(item)
+            for row in fresh:
+                for name in ('gps', 'country_proposed', 'country_from'):
+                    row.setdefault(name, None)
+            return (item['pending'], item['pending'].name, fresh, reproposing.public(item, len(rows)),
+                    item.get('proposer_id') or _report_proposer(directory))
+        return directory, directory.name, rows, reproposing.public(item, len(rows)), _report_proposer(directory)
+
     def frame_rows(self, route: str) -> dict:
         """The rows of the current pre-annotation report of a route by frame key ({} without a report): the Watch
         panel of the Evaluate tab shows a frame with its preview."""
@@ -637,6 +653,19 @@ def make_handler(app: ReviewApp):
             if match:
                 self._send_reviews(match.group(1))
                 return
+            # Is the drive read only now (Propose again works on it)? The review page asks while it is.
+            match = re.fullmatch(r'/api/route/([^/]+)/busy', path)
+            if match:
+                route = match.group(1)
+                try:
+                    parse_route_id(route)
+                    total = len(app.report(route)[1])
+                except (PreannotationError, ValueError, OSError):
+                    self._problem(404, 'unknown_route', UNKNOWN_DRIVE_MESSAGE, True)
+                    return
+                from nnslr_tools import reproposing
+                self._json(200, {'ok': True, 'busy': reproposing.public(reproposing.of(app.root, route), total)})
+                return
             if re.fullmatch(r'/api/route/[^/]+/frame/[^/]+/[^/]+', path):
                 self._problem(405, 'method_not_allowed', 'Use POST to save a frame.', True)
                 return
@@ -814,23 +843,23 @@ def make_handler(app: ReviewApp):
 
         def _send_route_page(self, route):
             try:
-                directory, rows, by_key = app.report(route)
+                directory, run_id, rows, busy, proposer = app.view(route)
             except (PreannotationError, ValueError, OSError):
                 self._problem(404, 'unknown_route', UNKNOWN_DRIVE_MESSAGE, False)
                 return
             hints_by_frame, hint_stats = app.hints(route, rows)
-            suspicious = app.suspicious(route, directory.name, rows, hints_by_frame)
+            suspicious = app.suspicious(route, run_id, rows, hints_by_frame)
             nonce = secrets.token_urlsafe(18)
-            page = render_review(rows, directory.name, route_id=route, server=True, nonce=nonce,
+            page = render_review(rows, run_id, route_id=route, server=True, nonce=nonce,
                                  hints=hints_by_frame, hint_stats=hint_stats, suspicious=suspicious,
-                                 routes=app.route_links(), proposer=_report_proposer(directory))
+                                 routes=app.route_links(), proposer=proposer, busy=busy)
             csp = ("default-src 'none'; script-src 'nonce-" + nonce + "'; style-src 'unsafe-inline'; "
                    "img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
             self._send(200, 'text/html; charset=utf-8', page.encode('utf-8'), csp)
 
         def _send_image(self, route, name):
             try:
-                directory, rows, by_key = app.report(route)
+                directory = app.view(route)[0]
             except (PreannotationError, ValueError, OSError):
                 self._problem(404, 'unknown_route', 'Unknown route, or route without a pre-annotation report.', False)
                 return
@@ -849,20 +878,21 @@ def make_handler(app: ReviewApp):
 
         def _send_reviews(self, route):
             try:
-                directory, rows, by_key = app.report(route)
+                directory, run_id, rows, busy, proposer = app.view(route)
             except (PreannotationError, ValueError, OSError):
                 self._problem(404, 'unknown_route', 'Unknown route, or route without a pre-annotation report.', True)
                 return
             reviews = []
             confirmed = 0
-            for review in app.store.reviews(route, directory.name):
+            for review in app.store.reviews(route, run_id):
                 reviews.append(public_review(review))
                 if review['confirmed']:
                     confirmed = confirmed + 1
             hints_by_frame, hint_stats = app.hints(route, rows)
-            suspicious = app.suspicious(route, directory.name, rows, hints_by_frame)
-            self._json(200, {'route_id': route, 'run_id': directory.name, 'frame_count': len(rows),
-                             'confirmed_count': confirmed, 'reviews': reviews, 'suspicious': suspicious})
+            suspicious = app.suspicious(route, run_id, rows, hints_by_frame)
+            self._json(200, {'route_id': route, 'run_id': run_id, 'frame_count': len(rows),
+                             'confirmed_count': confirmed, 'reviews': reviews, 'suspicious': suspicious,
+                             'busy': busy})
 
         def _post(self, path):
             # [site-login] - START

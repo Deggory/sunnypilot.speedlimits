@@ -118,6 +118,21 @@ export interface Payload {
   countries?: Record<string, string>;
   /** Who proposed the signs: vietnam, ours or qwen; null offline (not known). */
   proposer?: string | null;
+  /** Propose again works on this drive: read only (nnslr_tools.reproposing.public); null otherwise. */
+  busy?: Busy | null;
+}
+
+/** A drive Propose again works on, read only until its new proposals are in. */
+export interface Busy {
+  phase: 'waiting' | 'proposing again';
+  /** Who proposes ("Qwen3-VL"), null when not known. */
+  proposer: string | null;
+  message: string;
+  /** At work: the frames proposed so far, of the frames of its current report. */
+  done?: number;
+  total?: number | null;
+  /** Waiting: the drives before it in the batch. */
+  ahead?: number;
 }
 
 /** One saved frame as the server sends it (review_db.public_review). */

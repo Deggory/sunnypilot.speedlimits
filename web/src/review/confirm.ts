@@ -1,5 +1,6 @@
 // Confirm, Withdraw confirmation, Discard changes: what the reviewer decides about the frame on screen. With the
 // server a confirmation is saved at once; offline it stays in this browser until the JSONL export.
+import {refuseChange} from './busy';
 import {nextTick} from 'vue';
 import {messageOf} from '../common/api';
 import {hourMinute} from '../common/format';
@@ -48,7 +49,7 @@ function askAboutDuplicate(row: FrameRow): boolean {
 
 export async function confirmFrame(): Promise<void> {
   const row = currentRow();
-  if (!row) return;
+  if (!row || refuseChange()) return;
   const key = row.frame_key;
   if (state.inFlight.has(key)) return;
   // Already on the server and not changed since: Confirm moves on, it does not sign the frame again
@@ -105,7 +106,7 @@ export async function confirmFrame(): Promise<void> {
 export async function withdrawFrame(): Promise<void> {
   const row = currentRow();
   const apiBase = report.apiBase;
-  if (!row || !apiBase) return;
+  if (!row || !apiBase || refuseChange()) return;
   const key = row.frame_key;
   if (state.inFlight.has(key)) return;
   const reviewer = reviewerName();
