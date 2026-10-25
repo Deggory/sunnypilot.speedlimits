@@ -35,3 +35,22 @@ def test_none_gives_no_proposals_and_an_unknown_kind_is_another_sign():
     assert parse_answer("10 10 20 20 triangle 30", 1000, 1000)[0]['family'] == 'other_sign'
     # A speed on another sign is not proposed: only limits, zones and displays carry one.
     assert parse_answer("10 10 20 20 other 30", 1000, 1000)[0]['value_kph'] is None
+
+
+def test_an_answer_in_a_loop_keeps_only_its_speed_signs():
+    # Qwen3-VL sometimes writes a box, then the one just under it, and so on past the bottom of the picture.
+    column = '\n'.join(f'943 {y} 999 {y + 22} other' for y in range(170, 700, 22))
+    found = parse_answer('118 257 162 437 limit 30\n' + column, 1000, 1000)
+    assert [(item['family'], item['value_kph']) for item in found] == [('maximum_speed', 30)]
+    # The same beside each other, along a row.
+    row = '\n'.join(f'{x} 462 {x + 14} 500 other' for x in range(234, 600, 14))
+    assert parse_answer(row, 1000, 1000) == []
+    # The same line over and over.
+    assert parse_answer('520 594 567 635 other\n' * 20, 1000, 1000) == []
+
+
+def test_a_line_written_twice_counts_once_and_signs_side_by_side_stay():
+    twice = '412 653 452 723 other\n523 487 618 557 other\n' * 2
+    assert len(parse_answer(twice, 1000, 1000)) == 2
+    # Two plates one under the other (a limit and its panel) are not a loop.
+    assert len(parse_answer('500 300 540 360 limit 50\n500 360 540 380 other', 1000, 1000)) == 2

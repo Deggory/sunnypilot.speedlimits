@@ -27,6 +27,9 @@ LINE = re.compile(r'^\W*(\d+(?:\.\d+)?)[ ,]+(\d+(?:\.\d+)?)[ ,]+(\d+(?:\.\d+)?)[
                   r'(?:[ ,]+(\d+|-|null|none))?', re.I)
 # Qwen3-VL gives boxes relative to the image, from 0 to 1000.
 SCALE = 1000.0
+# An answer in a loop (_in_a_loop): this many boxes stacked in one column, edges within NEAR of each other (0-1000).
+STACKED = 3
+NEAR = 6
 
 
 def _items(text: str) -> list:
@@ -50,10 +53,47 @@ def _items(text: str) -> list:
     return items if isinstance(items, list) else []
 
 
+def _box_of(item) -> tuple | None:
+    box = item.get('bbox_2d') or item.get('bbox') if isinstance(item, dict) else None
+    if not (isinstance(box, list) and len(box) == 4 and all(isinstance(v, (int, float)) for v in box)):
+        return None
+    return tuple(float(v) for v in box)
+
+
+def _in_a_loop(boxes: list[tuple]) -> bool:
+    """Does the answer repeat itself? Qwen3-VL sometimes writes a box, then the one just under it (or beside it), and
+    so on to the edge of the picture and past it: STACKED or more boxes of one column (or row), each starting where
+    the one before ends; or the same line STACKED or more times. No sign looks like that."""
+    if any(boxes.count(box) >= STACKED for box in boxes):
+        return True
+    for along in (1, 0):
+        across = 1 - along
+        lines: dict[tuple, list[tuple]] = {}
+        for box in boxes:
+            lines.setdefault((round(box[across] / NEAR), round(box[across + 2] / NEAR)), []).append(box)
+        for line in lines.values():
+            line.sort(key=lambda box: box[along])
+            run = 1
+            for first, second in zip(line, line[1:]):
+                run = run + 1 if abs(second[along] - first[along + 2]) <= NEAR else 1
+                if run >= STACKED:
+                    return True
+    return False
+
+
 def parse_answer(text: str, width: int, height: int) -> list[dict]:
     """The proposals of an answer (_items), boxes in frame pixels; items without a usable box are dropped, an unknown
-    kind is another sign, a speed only when plausible."""
-    items = _items(text)
+    kind is another sign, a speed only when plausible. A line written twice counts once; an answer in a loop
+    (_in_a_loop) keeps only its speed signs (limits, ends, zones, displays), its other signs are the loop."""
+    every = [item for item in _items(text) if _box_of(item) is not None]
+    items, seen = [], set()
+    for item in every:
+        key = (_box_of(item), item.get('kind'))
+        if key not in seen:
+            seen.add(key)
+            items.append(item)
+    if _in_a_loop([_box_of(item) for item in every]):
+        items = [item for item in items if KINDS.get(item.get('kind'), 'other_sign') != 'other_sign']
     found = []
     for item in items:
         if not isinstance(item, dict):
