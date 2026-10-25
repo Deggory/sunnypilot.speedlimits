@@ -163,6 +163,21 @@ def test_logs_and_wrappers_from_before_the_english_footer_still_count(root, chec
         log.close()
 
 
+def test_a_job_whose_process_is_gone_is_interrupted_while_another_of_its_group_runs(root, checkout, monkeypatch):
+    panel = Panel(root, repo=checkout)
+    panel.logs.mkdir(parents=True, exist_ok=True)
+    # A measure that died without its exit code; its wrapper pid is no process any more.
+    (panel.logs / '20261025-110316-measure_proposer.log').write_text('Preannotating 416/604\n')
+    (panel.logs / '20261025-110316-measure_proposer.pid').write_text('999999999\n')
+    # A job from before the pid files: still taken for running while its group is busy.
+    (panel.logs / '20261024-090000-train.log').write_text('training\n')
+    busy = [{'group': 'train', 'label': 'cutter training', 'pid': 1}]
+    states = {job['id']: job['state'] for job in panel.jobs(busy)}
+    assert states['20261025-110316-measure_proposer'] == 'interrupted'
+    assert states['20261024-090000-train'] == 'running'
+    assert {job['id']: job['state'] for job in panel.jobs([])}['20261024-090000-train'] == 'interrupted'
+
+
 def test_stop_works_after_a_restart_of_the_server(root, checkout, monkeypatch):
     monkeypatch.setenv('FAKE_SLEEP', '30')
     job = Panel(root, repo=checkout).start('prepare')

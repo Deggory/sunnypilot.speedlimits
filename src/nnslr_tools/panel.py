@@ -344,9 +344,12 @@ class Panel:
                 state = 'running'
             elif code is not None:
                 state = 'ok' if code == 0 else 'failed'
-            elif process is None and (ACTIONS[action]['group'] in busy or self._group(job_id) is not None):
-                # Started before a restart of this server and still going: seen from a terminal, or its wrapper
-                # is still alive (the pid the panel wrote when it started it).
+            elif process is None and (self._group(job_id) is not None or (
+                    ACTIONS[action]['group'] in busy and not (self.logs / (job_id + '.pid')).exists())):
+                # Started before a restart of this server and still going: its wrapper is still alive (the pid the
+                # panel wrote when it started it), or, for a job from before those pids, its group is busy. A job
+                # with a pid that is gone was interrupted, whatever else of its group runs now: a measure that died
+                # at 416 of 604 frames showed as running for hours while a cutter trained.
                 state = 'running'
             else:
                 state = 'interrupted'
