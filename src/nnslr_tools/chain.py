@@ -65,6 +65,10 @@ MODEL_REFERENCE = re.compile(r'(cutter|classifier|decider):([A-Za-z0-9][A-Za-z0-
                              r'|experiment-b/(crop|crop_geom|full))')
 # The decider's weights are named after its variant: experiment-b/full/full-best.pt.
 WEIGHTS_FILE = {"cutter": "detector-best.pt", "classifier": "reader-best.pt", "decider": "{variant}-best.pt"}
+# No sign is boxed bigger than this share of the frame height on its longest side: in the reviews the biggest sign
+# boxes are about 240 px and a road marking 312 px wide, on 760 px; the cutter's boxes over half the sky or the road
+# are junk the classifier is not trained to reject.
+MAX_SIGN_SIDE = .5
 # Frames per batch of the cutter, crops per batch of the classifier.
 CUTTER_BATCH = 8
 CLASSIFIER_BATCH = 256
@@ -143,9 +147,9 @@ def _device(torch, name: str):
 def cutter_boxes(model, device, frames: list[dict[str, Any]], data_root: Path, *, min_score: float,
                  batch_size: int = CUTTER_BATCH, num_workers: int = 4, task: str = "chain",
                  ) -> Iterator[tuple[dict[str, Any], Any, list[dict[str, Any]]]]:
-    """(frame, its pixels as a 3 x H x W uint8 tensor, the cutter's boxes of score >= min_score, best first) for
-    every frame, in order. The frames are decoded by loader workers; the cutter sees them as nnslr evaluate does
-    (values 0..1, its own resize inside the model)."""
+    """(frame, its pixels as a 3 x H x W uint8 tensor, the cutter's boxes of score >= min_score and no bigger than
+    MAX_SIGN_SIDE, best first) for every frame, in order. The frames are decoded by loader workers; the cutter sees
+    them as nnslr evaluate does (values 0..1, its own resize inside the model)."""
     torch, Image, DataLoader, Dataset, TF, _, _ = _require()
     root = Path(data_root).resolve()
 
@@ -168,7 +172,9 @@ def cutter_boxes(model, device, frames: list[dict[str, Any]], data_root: Path, *
                 keep = (output["labels"] == 1) & (output["scores"] >= min_score)
                 boxes = output["boxes"][keep].float().cpu().tolist()
                 scores = output["scores"][keep].float().cpu().tolist()
-                predictions = sorted(({"box": box, "score": score} for box, score in zip(boxes, scores)),
+                largest = MAX_SIGN_SIDE * int(pixels.shape[1])
+                predictions = sorted(({"box": box, "score": score} for box, score in zip(boxes, scores)
+                                      if max(box[2] - box[0], box[3] - box[1]) <= largest),
                                      key=lambda item: -item["score"])
                 done += 1
                 report_progress(task, done, len(frames), f"{done} of {len(frames)} frames")
