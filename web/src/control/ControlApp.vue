@@ -4,10 +4,10 @@
 // details of a job. Evaluate reads the training runs itself (/api/panel/runs), Models the networks by role
 // (/api/panel/models).
 import {computed, provide, ref, watch} from 'vue';
-import type {Job} from '../common/panel-types';
+import type {ActionName, Job} from '../common/panel-types';
 import ToastHost from '../components/ToastHost.vue';
 import {usePanelStatus} from '../composables/panel-status';
-import {ACTION_GROUP, PREPARE_ACTIONS, TRAIN_ACTIONS} from './jobs';
+import {PREPARE_ACTIONS, TRAIN_ACTIONS} from './jobs';
 import LogSheet from './LogSheet.vue';
 import {recordMachine} from './machine-history';
 import EvaluateTab from './EvaluateTab.vue';
@@ -31,15 +31,24 @@ function details(job: Job): void {
   shownId.value = job.id;
 }
 
+/** The measures shown on Evaluate. */
+const EVALUATE_ACTIONS: ActionName[] = ['measure_proposer', 'measure_ai_reviewer'];
 /** The tabs with work running: a dot on their link in the top bar and on the tiles of the Overview. */
 const busy = computed((): ReadonlySet<ControlTab> => {
   const tabs = new Set<ControlTab>();
   const value = status.value;
   if (value === null) return tabs;
-  const groups = new Set([...value.jobs.filter((job) => job.state === 'running').map((job) => ACTION_GROUP[job.action]),
-    ...value.activities.map((activity) => activity.group)]);
-  if (PREPARE_ACTIONS.some((action) => groups.has(ACTION_GROUP[action]))) tabs.add('prepare');
-  if (TRAIN_ACTIONS.some((action) => groups.has(ACTION_GROUP[action]))) tabs.add('train');
+  // A job lights the tab it belongs to (a measure is Evaluate's even if it uses the GPU as a training does); work
+  // started from a terminal is known only by its group.
+  for (const job of value.jobs.filter((item) => item.state === 'running')) {
+    if (EVALUATE_ACTIONS.includes(job.action)) tabs.add('evaluate');
+    else if (PREPARE_ACTIONS.includes(job.action)) tabs.add('prepare');
+    else if (TRAIN_ACTIONS.includes(job.action)) tabs.add('train');
+  }
+  for (const activity of value.activities) {
+    if (activity.group === 'fetch' || activity.group === 'prepare') tabs.add('prepare');
+    else if (activity.group === 'train') tabs.add('train');
+  }
   return tabs;
 });
 watch(busy, markBusy);
