@@ -211,7 +211,7 @@ def test_chat_sends_the_key_and_asks_for_json():
     assert fake.auth_headers == ['Bearer ' + KEY]
     body = fake.requests[0]
     assert body['temperature'] == 0 and body['response_format'] == {'type': 'json_object'}
-    assert body['model'] == 'fake-vl' and 'chat_template_kwargs' not in body
+    assert body['model'] == 'fake-vl' and body['chat_template_kwargs'] == {'enable_thinking': False}
 
 
 def test_chat_without_a_key_sends_no_authorization():
@@ -225,7 +225,21 @@ def test_a_server_refusing_json_mode_is_asked_again_without_it():
     with FakeLlm('{"ok": 1}', refuse_json_mode=True) as fake:
         text, _ = llm_providers.chat(record(fake.base_url), [], timeout=5)
     assert text == '{"ok": 1}'
-    assert ['response_format' in body for body in fake.requests] == [True, False]
+    # Without chat_template_kwargs first (OpenAI refuses it), then thinking off again and without response_format.
+    assert [('response_format' in body, 'chat_template_kwargs' in body) for body in fake.requests] == [
+        (True, True), (True, False), (False, True)]
+
+
+def test_a_server_that_does_not_know_chat_template_kwargs_is_asked_again_without_it():
+    with FakeLlm('{"ok": 1}', refuse_template_kwargs=True) as fake:
+        text, _ = llm_providers.chat(record(fake.base_url), [], timeout=5)
+    assert text == '{"ok": 1}'
+    assert [('response_format' in body, 'chat_template_kwargs' in body) for body in fake.requests] == [
+        (True, True), (True, False)]
+    # Refusing both: the last request has neither.
+    with FakeLlm('{"ok": 2}', refuse_template_kwargs=True, refuse_json_mode=True) as fake:
+        assert llm_providers.chat(record(fake.base_url), [], timeout=5)[0] == '{"ok": 2}'
+    assert len(fake.requests) == 4 and set(fake.requests[-1]) == {'model', 'messages', 'temperature', 'max_tokens'}
 
 
 def test_redirects_are_refused_and_the_key_never_follows():

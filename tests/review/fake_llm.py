@@ -19,11 +19,12 @@ class FakeLlm:
     """``answer`` is the assistant text, or a function of the chat body that returns it. ``status`` other than
     200 answers every chat with that HTTP error; ``require_key`` answers 401 without that Bearer key;
     ``redirect`` answers every request with a 302 to that address; ``refuse_json_mode`` answers 400 to a chat
-    that asks for response_format."""
+    that asks for response_format, ``refuse_template_kwargs`` to one that sends chat_template_kwargs (OpenAI)."""
 
     def __init__(self, answer: str | Callable[[dict], str] = NO_SIGN_ANSWER, *, models=('fake-vl',),
                  text_only: bool = False, status: int = 200, delay: float = 0.0, require_key: str | None = None,
-                 redirect: str | None = None, refuse_json_mode: bool = False, error_message: str = 'fake error'):
+                 redirect: str | None = None, refuse_json_mode: bool = False, refuse_template_kwargs: bool = False,
+                 error_message: str = 'fake error'):
         self.answer = answer
         self.models = tuple(models)
         self.text_only = text_only
@@ -32,6 +33,7 @@ class FakeLlm:
         self.require_key = require_key
         self.redirect = redirect
         self.refuse_json_mode = refuse_json_mode
+        self.refuse_template_kwargs = refuse_template_kwargs
         self.error_message = error_message
         self.requests: list[dict] = []
         self.auth_headers: list[str | None] = []
@@ -86,6 +88,9 @@ class FakeLlm:
                 fake.requests.append(body)
                 if fake.refuse_json_mode and 'response_format' in body:
                     self._send(400, {'error': {'message': 'response_format is not supported'}})
+                    return
+                if fake.refuse_template_kwargs and 'chat_template_kwargs' in body:
+                    self._send(400, {'error': {'message': 'Unrecognized request argument: chat_template_kwargs'}})
                     return
                 if fake.status != 200:
                     self._send(fake.status, {'error': {'message': fake.error_message}})

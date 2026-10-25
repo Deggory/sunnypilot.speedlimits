@@ -530,22 +530,34 @@ def _content(answer) -> str:
     return content
 
 
+# Thinking models (Qwen3, Qwen3.8) think before they answer: on a frame Qwen3.8-27B on llama.cpp took 84 s and spent
+# every token of max_tokens thinking, with no answer. The servers of open models (llama.cpp, vLLM, SGLang) take
+# chat_template_kwargs to turn it off; one that does not know it (HTTP 400, e.g. OpenAI) is asked again without.
+NO_THINKING = {'enable_thinking': False}
+OPTIONAL_FIELDS = ('chat_template_kwargs', 'response_format')
+
+
 def chat(record: dict, messages: list[dict], *, timeout: float, json_mode: bool = True,
          max_tokens: int = 2048) -> tuple[str, float]:
-    """(assistant text, seconds) of POST {base_url}/chat/completions, temperature 0.
+    """(assistant text, seconds) of POST {base_url}/chat/completions, temperature 0, without thinking.
 
-    With json_mode the answer is asked as a JSON object; a server that refuses response_format (HTTP 400) is
-    asked once more without it."""
-    body = {'model': record['model'], 'messages': messages, 'temperature': 0, 'max_tokens': max_tokens}
+    With json_mode the answer is asked as a JSON object. A server that refuses a request (HTTP 400) is asked again
+    without chat_template_kwargs, then without response_format, then without both."""
+    body = {'model': record['model'], 'messages': messages, 'temperature': 0, 'max_tokens': max_tokens,
+            'chat_template_kwargs': dict(NO_THINKING)}
     if json_mode:
         body['response_format'] = {'type': 'json_object'}
+    optional = [name for name in OPTIONAL_FIELDS if name in body]
+    # The full request, then each optional field left out alone, then all of them.
+    attempts = [()] + [(name,) for name in optional] + ([tuple(optional)] if len(optional) > 1 else [])
     url = record['base_url'] + '/chat/completions'
     started = time.monotonic()
-    try:
-        answer = _call(url, record.get('key'), body=body, timeout=timeout)
-    except LlmError as exc:
-        if not json_mode or exc.http_code != 400:
-            raise
-        del body['response_format']
-        answer = _call(url, record.get('key'), body=body, timeout=timeout)
+    for number, left_out in enumerate(attempts):
+        try:
+            answer = _call(url, record.get('key'), body={key: value for key, value in body.items()
+                                                         if key not in left_out}, timeout=timeout)
+            break
+        except LlmError as exc:
+            if exc.http_code != 400 or number == len(attempts) - 1:
+                raise
     return _content(answer), time.monotonic() - started
