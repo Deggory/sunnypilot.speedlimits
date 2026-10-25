@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// Prepare: from the drives on the comma to frames with the proposed signs. The two actions, the download or
-// preparation running (or the last one), the routes.
+// Prepare: from the drives copied from the comma (the comma pill of the top bar downloads them) to frames with the
+// proposed signs: who proposes, the actions, the download or preparation running (or the last one), the routes.
 import {computed, ref, watch} from 'vue';
 import {plural} from '../common/format';
 import type {ActionName, ActionOptions, ActionState, Job, PanelStatus, Proposer, RouteState} from '../common/panel-types';
@@ -40,10 +40,8 @@ const unstarted = computed(() => (props.status?.routes ?? []).filter((row) => ro
 const PROPOSE_ACTIONS = computed((): [ActionName, string][] => unstarted.value ? [['prepare_again',
   'New proposals for the ' + plural(unstarted.value, 'drive') + ' nobody has started to review.']] : []);
 
-/** Step 1, the drives from the comma; step 2, the frames and the proposals, with the proposer chosen above them. */
-const FETCH_ACTIONS: [ActionName, string][] = [
-  ['fetch', 'Copies the new drives from the comma.'],
-];
+/** The frames and the proposals, with the proposer chosen above them (the drives come from the comma pill of the
+ * top bar). */
 /** Under the Qwen3-VL choice while it is missing (scripts/setup_vlm.sh). */
 const INSTALL_ACTIONS: [ActionName, string][] = [
   ['setup_vlm', 'Checks the files you copied (or downloads the missing ones, 17.5 GB), installs what it needs and tries it on the GPU.'],
@@ -71,17 +69,12 @@ const ready = computed(() => (props.status?.routes ?? []).filter((row) => !WAITI
 
   <section class="card tab-card" aria-labelledby="prepare-title">
     <h2 class="sr-only" id="prepare-title">New routes</h2>
-    <div class="prep-row">
-      <h3 class="prep-step"><span>1</span> Get the drives</h3>
-      <ActionList class="compact" :items="FETCH_ACTIONS" :actions="status?.actions ?? null" @run="(name, state) => emit('run', name, state)"/>
-    </div>
-    <p class="figure-note prep-state" id="prepare-big">{{ status === null ? '' : total
-      ? plural(total, 'drive') + ' copied from the comma, waiting to be prepared.'
-      : 'Every drive copied from the comma is prepared.' }}</p>
+    <p v-if="total" class="figure-note prep-state" id="prepare-big">{{ plural(total, 'drive') }} copied from the comma, waiting
+      to be prepared.</p>
     <ul v-if="total" class="chips">
       <li v-for="item in counts.filter((entry) => entry.count)" :key="item.state"><strong>{{ item.count }}</strong> {{ item.label }}</li>
     </ul>
-    <h3 class="prep-step"><span>2</span> Find the signs</h3>
+    <h3 class="prep-step">Find the signs</h3>
     <p class="figure-note prep-state">Draws a box around every sign in every picture and reads it, for you to confirm in Review.</p>
     <div class="proposer">
       <span class="proposer-label">Found by</span>

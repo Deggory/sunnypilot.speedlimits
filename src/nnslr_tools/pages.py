@@ -42,6 +42,8 @@ BRAND_MARK = ('<span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 
 # mounted here by the page script). data-feed: the control pages have it from their status, the others ask
 # /api/panel/system.
 TABS_MACHINE = '<div class="tabs-machine" id="tabs-machine" data-feed="{feed}"></div>'
+# The comma before the server: reachable or not, and Download new drives (web/src/components/TopComma.vue).
+COMMA_PILL = '<div class="tabs-machine" id="comma-pill"></div>'
 
 # The tabs of the site: (key of the current page, address, label). Account is the icon at the right.
 # In the order of the work: prepare the routes, review them, train on the reviews, evaluate the runs, then choose
@@ -106,7 +108,7 @@ def top_bar(current: str = '', *, live: bool = False, signed_in: bool = True) ->
                    + label + '</a>' for key, href, label in SITE_TABS)
     return ('<header class="topbar"><div class="topbar-inner site-bar">' + brand
             + '<nav class="tabs" aria-label="Sections">' + tabs + '</nav>'
-            + '<div class="bar-end">' + (LIVE if live else '')
+            + '<div class="bar-end">' + (LIVE if live else '') + COMMA_PILL
             + TABS_MACHINE.format(feed='status' if live else 'system') + bar_end(current) + '</div></div></header>')
 
 

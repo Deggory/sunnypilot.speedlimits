@@ -553,6 +553,9 @@ def make_handler(app: ReviewApp):
             if path == '/api/panel/system':
                 self._json(200, {'system': app.panel.system()})
                 return
+            if path == '/api/panel/comma':
+                self._json(200, {'comma': app.panel.comma()})
+                return
             if path == '/api/panel/runs':
                 self._json(200, app.panel.runs())
                 return
@@ -849,6 +852,15 @@ def make_handler(app: ReviewApp):
                 self._auth_post(path, self._read_json())
                 return
             # [site-login] - END
+            if path == '/api/panel/comma':
+                # The address of the comma: same protections as the AI settings (same origin, JSON, a session).
+                if self._ai_post_refused():
+                    return
+                try:
+                    self._json(200, {'comma': app.panel.set_comma_address(self._read_json())})
+                except PanelError as error:
+                    self._problem(error.status, error.reason, error.message, True)
+                return
             # [ai-reviewer] - START
             if path in AI_SETTINGS_POSTS or AI_DELETE_RE.fullmatch(path):
                 if self._ai_post_refused():

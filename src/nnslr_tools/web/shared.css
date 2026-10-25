@@ -116,6 +116,7 @@ font-variant-numeric:tabular-nums;transition:background .2s}
 .tm-pill .dot.busy{background:var(--accent);animation:pulse 1.6s infinite}
 .tm-pill .dot.warm{background:var(--todo)}
 .tm-pill .dot.hot{background:var(--bad)}
+.tm-pill .dot.on{background:var(--ok)}.tm-pill .dot.off{background:var(--placeholder)}
 .tm-pop{position:absolute;right:0;top:calc(100% + 10px);z-index:30;width:300px;padding:14px 16px 10px;border-radius:16px;
 background:var(--surface);border:.5px solid var(--line-strong);box-shadow:var(--pop-shadow)}
 .tm-pop h2{margin:0 0 2px;font-size:15px;font-weight:600;letter-spacing:-.01em}
@@ -129,8 +130,16 @@ background:var(--surface);border:.5px solid var(--line-strong);box-shadow:var(--
 .tm-meter span{display:block;height:100%;border-radius:2px;background:var(--ok);transition:width .6s}
 .tm-meter.warm span{background:var(--todo)}.tm-meter.hot span{background:var(--bad)}
 .tm-update{display:flex;align-items:center;gap:10px;padding:12px 0 4px;border-top:.5px solid var(--line)}
+/* A button that reads as a link (Details, Change, Show all). */
+.link-button{appearance:none;border:0;background:none;padding:0;font:inherit;color:var(--accent);font-weight:500;cursor:pointer}
+.tm-address{align-items:center}
+.tm-address .link-button{font-size:14px}
+.tm-edit{grid-column:1/-1;display:flex;flex-direction:column;gap:8px}
+.tm-edit input{font:inherit;font-size:16px;padding:8px 12px;border-radius:10px;border:0;background:var(--surface-2);color:var(--fg);width:100%}
+.tm-edit-actions{display:flex;justify-content:flex-end;gap:8px}
 .tm-update .tm-sub{margin:0}
 @media (max-width:560px){
+  .brand-name{display:none}
   .tabs a{flex:1 1 auto;padding:5px 5px;font-size:12.5px;letter-spacing:-.02em}
   .tm-pop{position:fixed;left:12px;right:12px;top:calc(env(safe-area-inset-top,0px) + 58px);width:auto}
 }

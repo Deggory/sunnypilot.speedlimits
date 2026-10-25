@@ -306,6 +306,24 @@ class Panel:
         return result
 
     # -- the machine ---------------------------------------------------------------------------
+    def comma(self) -> dict:
+        """The comma pill of the top bar: reachable or not (nnslr_tools.comma_link), and whether a download from it
+        runs now (a job of the panel or helpers/fetch_comma_segments.sh from a terminal)."""
+        from nnslr_tools import comma_link
+        return {**comma_link.state(self.root), 'downloading': 'fetch' in self._running_groups(self.activities())}
+
+    def set_comma_address(self, body) -> dict:
+        """The address of the comma from its panel ({'address': '192.168.1.20'}; '' for the ssh host "comma")."""
+        from nnslr_tools import comma_link
+        address = body.get('address') if isinstance(body, dict) else None
+        if not isinstance(address, str):
+            raise PanelError(400, 'bad_address', 'The address is a string.')
+        try:
+            comma_link.set_address(self.root, address)
+        except comma_link.AddressError as exc:
+            raise PanelError(400, 'bad_address', str(exc)) from None
+        return self.comma()
+
     def system(self) -> dict:
         """The machine, for the Stato page (as distill-web's Status): GPU, CPU per core, RAM, disk."""
         info = {'gpu': None, 'disk': None, 'cpus': os.cpu_count(), 'load': None, 'loads': None,
@@ -530,6 +548,10 @@ class Panel:
                           f'now {payload["reviewed_routes"]}')
             elif name.startswith('train') and gpu is not None and gpu['processes']:
                 reason = 'the GPU is busy with another process'
+            elif (name == 'setup_vlm' and gpu is not None and gpu.get('memory_used_mb') and gpu.get('memory_total_mb')
+                  and gpu['memory_used_mb'] > gpu['memory_total_mb'] / 2):
+                # Its last step loads Qwen3-VL on the GPU (about 17 GB): it would only run out of memory.
+                reason = 'the GPU memory is taken by another program: free it first'
             elif name == 'train_classifier':
                 # It mines the false boxes of the cutter in use (models/active.json): there must be one.
                 reason = self.models_index.in_use('cutter')[1]
@@ -832,6 +854,11 @@ class Panel:
                 raise PanelError(400, 'bad_option', 'The ' + key + ' is a string.')
         if action in AI_ACTIONS:
             start_args += self._ai_arguments(action, options or {})
+        if action == 'fetch':
+            # The address set in the comma panel of the top bar; without one the script's ssh host "comma".
+            from nnslr_tools.comma_link import configured
+            if configured(self.root):
+                start_args.append('--host=' + configured(self.root))
         # [ai-reviewer] - END
         proposer = (options or {}).get('proposer')
         if proposer is not None:

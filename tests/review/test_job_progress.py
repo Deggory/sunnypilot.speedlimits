@@ -1,7 +1,7 @@
 """The progress of a panel action read from its log: steps, percent, detail, last line."""
 from __future__ import annotations
 
-from nnslr_tools.job_progress import progress
+from nnslr_tools.job_progress import last_line, progress
 
 TRAIN_LOG = """== helpers/3_train.sh
 == a. importo le revisioni confermate
@@ -228,3 +228,9 @@ def test_the_cutter_that_stops_early_and_its_reports():
     # The numbered phases of the pipeline are not the cutter's, nor the cutter's titles the pipeline's.
     assert states(progress('train_cutter', 'running', '== 4/10 Train detector ==\n'))['checks'] == 'current'
     assert states(progress('train', 'running', '== a. importo\n== 3/4 Train the detector at 960x544 ==\n'))['import'] == 'current'
+
+
+def test_the_last_line_is_the_error_not_the_hint_after_it():
+    log = ('== 3/3 Try it on the GPU\ntorch.AcceleratorError: CUDA error: out of memory\n'
+           "Search for `cudaErrorMemoryAllocation' in https://docs.nvidia.com/cuda/ for more information.\n\n== finito con codice 1\n")
+    assert last_line(log) == 'torch.AcceleratorError: CUDA error: out of memory'

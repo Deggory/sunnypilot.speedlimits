@@ -16,7 +16,7 @@ Ogni operazione qui sotto è uno script del repository: niente passaggi a mano d
 
 | Passo | Comando | Cosa fai tu |
 | --- | --- | --- |
-| 0 | `helpers/fetch_comma_segments.sh` | Scarica tutti i giri ancora sul comma, anche quelli vecchi non in dashcam mode, nella cartella condivisa con `openpilot.distill` (`/root/comma-videos`); toglie i primi due e gli ultimi due segmenti e quelli con la retromarcia. Distill non li usa: allena solo su quelli che scarica lui (dashcam). |
+| 0 | `helpers/fetch_comma_segments.sh` (sul sito: la pillola **comma** in alto a destra, pallino verde se il comma è raggiungibile, **Download new drives**; lì si cambia anche il suo indirizzo, salvato in `data/web/comma.json` e passato come `--host`) | Scarica tutti i giri ancora sul comma, anche quelli vecchi non in dashcam mode, nella cartella condivisa con `openpilot.distill` (`/root/comma-videos`); toglie i primi due e gli ultimi due segmenti e quelli con la retromarcia. Distill non li usa: allena solo su quelli che scarica lui (dashcam). |
 | 1 | `helpers/1_prepare.sh` | Niente: collega i video, estrae i frame (1 al secondo) e propone i cartelli per ogni route nuova. |
 | 2 | `helpers/2_review.sh` | Apri il link che stampa e confermi o correggi i cartelli. È l'unico passo a mano. |
 | 3 | `helpers/3_train.sh` | Niente: importa le revisioni, controlla il dataset, fissa lo split, crea `.venv-gpu` la prima volta e allena. |

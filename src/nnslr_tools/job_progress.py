@@ -97,11 +97,16 @@ FINISHED = re.compile(r'^== finito con codice ')
 JSON_LINE = re.compile(r'^(?!\[\d+/\d+\] )(?:[{}\[\]"]|(?:-?\d[\d.eE+-]*|true|false|null),?$)')
 
 
+# Lines a library prints after its error, pointing to its documentation: they say nothing of what went wrong.
+HINT_LINE = re.compile(r'^(Search for `|For debugging consider passing|Compile with `TORCH_USE_CUDA_DSA`)')
+
+
 def last_line(text: str) -> str:
-    """The last line that says something: not the start and end markers of the wrapper, not JSON, not empty."""
+    """The last line that says something: not the start and end markers of the wrapper, not JSON, not a library's
+    hint to its documentation, not empty."""
     for line in reversed(text.splitlines()):
         line = line.strip()
-        if (line and not FINISHED.match(line) and not JSON_LINE.match(line)
+        if (line and not FINISHED.match(line) and not JSON_LINE.match(line) and not HINT_LINE.match(line)
                 and not line.startswith(('== helpers/', '== scripts/'))):
             return line[:300]
     return ''
