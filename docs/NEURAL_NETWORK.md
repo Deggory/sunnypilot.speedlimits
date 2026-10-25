@@ -8,10 +8,10 @@ A plan, started on 24 October 2026 from Codex's "teacher and student" proposal, 
 
 **All training happens on the server**, on the V100. The comma never trains anything.
 
-- **The teacher** is made of big networks. They are trained on the server and only ever run there: they label new drives and help train the student.
-- **The student** is made of small networks. They are also trained on the server, from the reviews and from the teacher. When they are finished they are copied to the car and run on the comma while driving: they read the camera and show the limit. They learn nothing in the car, and see only the past, since there are no future frames while driving.
+- **The networks for the car** are trained on the server from the reviews, then copied to the car. They run on **Chestnut**, comma's external GPU, not on the comma four's own chip (decided on 24 October 2026): the chip would need the frame shrunk until distant signs disappear, while Chestnut takes the full 1344 × 760 frame. Chestnut also runs openpilot's driving model, which always comes first: the room left next to it is still to be measured. In the car they learn nothing and see only the past, since there are no future frames while driving.
+- **The same networks prepare new drives on the server** (Prepare, the "Our networks" proposer). There a drive can also be looked at with its later frames, its GPS and the map: that extra step (the teacher below) makes better proposals than the car can, without needing a different network.
 
-## The student: three networks, each trained and measured on its own
+## Three networks, each trained and measured on its own
 
 1. **Cut: the cutter finds every box that could be a sign.**
    - It looks at the frame of the main road camera (1344 × 760 on the comma four, full resolution), scaled down, plus the band where signs appear.
@@ -34,7 +34,7 @@ A plan, started on 24 October 2026 from Codex's "teacher and student" proposal, 
 5. **The limit now** is rules and explicit state, not a network, so the reason for a limit is always visible.
    - The country comes from the GPS, and its rules interpret what the networks read: a town entry in Poland means 50.
    - The logic is written and tested here, in `speed_vision_core`, and replayed offline on the recorded routes.
-   - Only then does it go into sunnypilot, as a separate change: a process on the comma runs the student, and Speed Limit Assist takes it as a third source next to the OSM map and the car's CAN, which the 3008 does not have. At first the limit is only shown on the screen.
+   - Only then does it go into sunnypilot, as a separate change: the networks run on Chestnut through openpilot's model process (`modeld` owns Chestnut: no second process may start it), and Speed Limit Assist takes it as a third source next to the OSM map and the car's CAN, which the 3008 does not have. At first the limit is only shown on the screen.
 
 ## Why the cutter needs pixels
 
@@ -143,7 +143,7 @@ The full image reached 99.7% on training: it learned the places. The test has no
 
 The teacher has bigger versions of the three networks, at full resolution everywhere. It also sees the later frames, the GPS and the map. It is used in three separate ways:
 - **new labels**, which a person checks on the site;
-- **distillation**: the student also learns how sure the teacher is;
+- **distillation**: the networks for the car also learn how sure the teacher is;
 - **starting weights**.
 
 The test stays human: route 0000012d, reviewed by hand, split by place, never trained on.
@@ -157,7 +157,7 @@ The test stays human: route 0000012d, reviewed by hand, split by place, never tr
 | 3. Decider | A small network over the classifier's answers, positions, speed and a small scene image; collect "Another" cases (ramps, parallel roads, exits), proposed from GPS and map | Position helped in experiment B; the full image memorised places; 125 "Another" against 1463 "Ours" |
 | 4. Site | Every network by role (cutter, classifier, decider): versions, numbers, a training button, the version in use; the whole chain measured end to end | Each network is replaced on its own, and the site must show what is in use |
 | 5. Time and state | Tracks, "passed or not" and the limit state on whole routes; time with a wrong limit on the screen measured | The limit must stay valid when the sign is out of sight |
-| 6. Comma | Export of the student; latency and memory measured on the device (Cristian installs it) | The driving model comes first |
+| 6. Chestnut | Export of the networks for the car; latency and memory measured on Chestnut next to the driving model (Cristian installs it) | The driving model comes first |
 
 Data comes before all of these. Route 0000012d is reviewed by hand as the test, drives on new roads and at night are needed, and the split is by place: 75–100% of every route runs on the same roads as another route.
 
