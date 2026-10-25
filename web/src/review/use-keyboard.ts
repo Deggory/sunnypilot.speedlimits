@@ -9,7 +9,7 @@ import {onBeforeUnmount, onMounted} from 'vue';
 import {askAi, fitBox} from './ai';
 import {applyPrevious} from './carry';
 import {confirmFrame} from './confirm';
-import {cancelAll, removeSelected, selectBox, setField, setKind, setOtherOurs, setValue, toggleDrawing, toggleHints} from './edits';
+import {cancelAll, removeAllBoxes, removeSelected, selectBox, setField, setKind, setOtherOurs, setValue, toggleDrawing, toggleHints} from './edits';
 import {currentRow, workOf} from './frames';
 import {go, step} from './navigation';
 import {report, state} from './store';
@@ -188,6 +188,11 @@ export function useKeyboard(): void {
           event.preventDefault();
           toggleHints();
         }
+        break;
+      case 'd':
+      case 'D':
+        event.preventDefault();
+        removeAllBoxes();
         break;
       case 'Delete':
         // Only a box the reviewer selected: never the one the page opened on, never with Backspace.

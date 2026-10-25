@@ -96,6 +96,22 @@ export function removeSelected(): void {
   removeBox(state.selected);
 }
 
+/** D: every box of the frame on screen goes, as an unsaved change (Discard changes brings them back; Confirm
+ * then saves the frame without signs). */
+export function removeAllBoxes(): void {
+  const row = currentRow();
+  if (!row || refuseChange()) return;
+  const work = workOf(row);
+  const count = work.detections.length;
+  if (count === 0) return;
+  work.detections.splice(0);
+  state.selected = -1;
+  state.drawing = false;
+  changed(row);
+  state.notice = {key: row.frame_key, error: false, warn: true,
+    text: (count === 1 ? 'The box is' : 'All ' + count + ' boxes are') + ' removed: Confirm saves the frame without signs, Discard changes brings them back.'};
+}
+
 /** A detection id no other box of the frame has: manual-<time>[-n]. */
 function manualId(work: FrameEdit): string {
   const stamp = Date.now();
