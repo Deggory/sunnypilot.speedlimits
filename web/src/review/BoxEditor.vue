@@ -4,9 +4,10 @@
 import {computed, ref, useTemplateRef, watchEffect} from 'vue';
 import {BOOLEAN_FIELDS, FAMILIES, QUICK_VALUES, ROADS, SELECT_FIELDS, SIGN_KIND_GROUPS, familyHasValue,
   type BooleanField, type SelectField} from './catalog';
+import {aiBlocker, fitBox, fitting} from './ai';
 import {addedBy, originalOf} from './boxes';
 import {coarsePointer, releaseFocus} from './dom';
-import {setFamily, setField, setKind, setValue} from './edits';
+import {setFamily, setField, setKind, setOtherOurs, setValue} from './edits';
 import {workOf} from './frames';
 import {vFill} from './fill';
 import {handlesOf, sceneScale, zoomView, type Rect} from './overlay';
@@ -51,6 +52,10 @@ const hasValueField = computed(() => props.detection !== null && familyHasValue(
 const noValue = computed(() => hasValueField.value
   && (props.detection?.value_kph === null || props.detection?.value_kph === undefined));
 const road = computed(() => props.detection?.applicability || 'unresolved');
+// O X U on a keyboard (use-keyboard.ts).
+const ROAD_KEYS: Record<string, string> = {own_road: 'O', other_road: 'X', unresolved: 'U'};
+const canFit = computed(() => props.detection !== null && aiBlocker() === '');
+const fittingThis = computed(() => fitting.key === props.row.frame_key && fitting.index === state.selected);
 // Where the box comes from: the model's proposal, else who added it (the reviewer by hand, or an AI reviewer).
 const evidence = computed(() => {
   const d = props.detection;
@@ -124,12 +129,22 @@ function booleanChanged(key: BooleanField, event: Event): void {
         </g>
       </svg>
     </div>
-    <p class="evidence" id="evidence">{{ evidence }}</p>
+    <div class="zoom-foot">
+      <p class="evidence" id="evidence">{{ evidence }}</p>
+      <!-- A rough box made tight by the AI, shown only the picture around it (C). -->
+      <button v-if="canFit" type="button" class="chip fit" id="fitBox" :disabled="fitting.key !== null"
+              @click="fitBox(); releaseFocus($event)">{{ fittingThis ? 'Fitting…' : 'Fit with AI' }}<kbd>C</kbd></button>
+    </div>
     <!-- Asked for nearly every box: right under the zoom. -->
     <p class="field-label">Road</p>
     <div class="segmented" id="roads" role="group" aria-label="Which road it applies to">
       <button v-for="item in ROADS" :key="item.id" type="button" :aria-pressed="road === item.id"
-              :data-applicability="item.id" @click="setField('applicability', item.id); releaseFocus($event)">{{ item.label }}</button>
+              :data-applicability="item.id" @click="setField('applicability', item.id); releaseFocus($event)">{{ item.label }}<kbd class="key-hint">{{ ROAD_KEYS[item.id] }}</kbd></button>
+    </div>
+    <!-- Most boxes: an other sign for our road, in one tap (S). -->
+    <div class="quick-row">
+      <!-- An action, never lit: Road and Type above and below say what the box is. -->
+      <button type="button" class="chip quick" id="otherOurs" @click="setOtherOurs(); releaseFocus($event)">Other sign · our road<kbd>S</kbd></button>
     </div>
     <!-- The signs are always there: a number makes the box a speed limit, "?" means the number cannot be read. -->
     <div class="signs" id="quickValues" role="group" aria-label="Speed">

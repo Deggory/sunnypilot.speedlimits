@@ -10,7 +10,7 @@ from __future__ import annotations
 
 SIGN_TYPES = (
     # Danger
-    'pedestrian_crossing', 'children', 'traffic_queue', 'roadworks', 'danger_other',
+    'pedestrian_crossing', 'children', 'cyclists', 'traffic_queue', 'roadworks', 'danger_other',
     # Priority
     'give_way', 'stop', 'main_road', 'main_road_end',
     # Bans and other numbers

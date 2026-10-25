@@ -425,6 +425,7 @@
       "enum": [
         "pedestrian_crossing",
         "children",
+        "cyclists",
         "traffic_queue",
         "roadworks",
         "danger_other",

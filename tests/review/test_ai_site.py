@@ -25,6 +25,7 @@ SESSION_ONLY = (
     ('/api/settings/ai/models', {'id': 'fake'}),
     ('/api/settings/ai/test', {'id': 'fake'}),
     (f'/api/route/{ROUTE}/frame/0/0/ai-suggest', {'run_id': RUN_ID}),
+    (f'/api/route/{ROUTE}/frame/0/0/ai-fit', {'run_id': RUN_ID, 'box': [1, 2, 15, 20]}),
     ('/api/panel/run/ai_review', {'route': ROUTE}),
     ('/api/panel/run/measure_ai_reviewer', {}),
 )
@@ -212,6 +213,40 @@ def test_a_suggestion_has_pixel_boxes_and_saves_nothing(local, fake):
     assert status == 200, data
     review = json_of(data)['review']
     assert review['reviewer'] == 'Cristian' and review.get('reviewer_kind', 'human') == 'human'
+
+
+def test_fit_with_ai_sends_only_the_crop_around_the_box_and_gives_it_back_tight(local):
+    server, root = local
+    with FakeLlm('{"found": true, "box": [250, 250, 750, 750]}', require_key=KEY) as llm:
+        add_provider(root, llm.base_url)
+        status, response, data = server.request('POST', f'/api/route/{ROUTE}/frame/0/0/ai-fit',
+                                                body={'run_id': RUN_ID, 'box': [1, 2, 15, 20]})
+        assert status == 200, data
+        fitted = json_of(data)
+        # The 32 x 24 frame: the crop is its 24 x 24 square on the left; the answer back in pixels of the frame.
+        assert fitted['box'] == pytest.approx([6.0, 6.0, 18.0, 18.0])
+        assert fitted['message'].startswith('Box fitted by fake-vl')
+        content = llm.requests[0]['messages'][0]['content']
+        # One picture, the crop enlarged (a PNG, not the frame's JPEG), and the rough box in 0-1000 of the crop.
+        assert content[0]['image_url']['url'].startswith('data:image/png;base64,')
+        assert '42 83 625 833' in content[1]['text']
+        assert llm.requests[0]['max_tokens'] == ai_review.FIT_TOKENS
+    # Nothing there: no box, and nothing saved either way.
+    with FakeLlm('{"found": false}', require_key=KEY) as llm:
+        add_provider(root, llm.base_url)
+        status, response, data = server.request('POST', f'/api/route/{ROUTE}/frame/0/0/ai-fit',
+                                                body={'run_id': RUN_ID, 'box': [1, 2, 15, 20]})
+        assert status == 200 and json_of(data)['box'] is None
+    status, response, data = server.request('POST', f'/api/route/{ROUTE}/frame/0/0/ai-fit',
+                                            body={'run_id': RUN_ID, 'box': [40, 40, 41, 41]})
+    assert status == 400 and json_of(data)['error'] == 'invalid_box'
+    assert server.app.store.confirmed_count(ROUTE, RUN_ID) == 0
+
+
+def test_the_crop_of_a_fit_is_a_square_around_the_box_inside_the_frame():
+    assert ai_review.fit_crop([600, 300, 620, 330], 1344, 760) == [565, 270, 655, 360]
+    assert ai_review.fit_crop([0, 0, 40, 30], 1344, 760) == [0, 0, 120, 120]
+    assert ai_review.fit_crop([1300, 700, 1344, 760], 1344, 760) == [1164, 580, 1344, 760]
 
 
 def test_suggestion_refusals(local, fake):

@@ -293,11 +293,9 @@ def _item(value) -> dict | None:
     return item
 
 
-def parse_answer(text: str) -> dict:
-    """The JSON object of a model answer, normalized: {boxes, added, no_sign, comment, repaired}.
-
-    <think> blocks and code fences are dropped; an answer cut off by the token limit is closed once more.
-    Coordinates stay as the model gave them (to_suggestion converts them)."""
+def _json_of(text: str) -> tuple[dict, bool]:
+    """(the JSON object of a model answer, whether it had to be closed): <think> blocks and code fences are dropped;
+    an answer cut off by the token limit is closed once more."""
     if not isinstance(text, str):
         raise LlmError(502, 'ai_bad_answer', 'The AI answer is not text.')
     text = re.sub(r'<think>.*?</think>', '', text, flags=re.S)
@@ -331,6 +329,14 @@ def parse_answer(text: str) -> dict:
             break
     if not isinstance(data, dict):
         raise LlmError(502, 'ai_bad_answer', 'The AI answer is not a JSON object of the asked form.')
+    return data, repaired
+
+
+def parse_answer(text: str) -> dict:
+    """The JSON object of a model answer, normalized: {boxes, added, no_sign, comment, repaired}.
+
+    Coordinates stay as the model gave them (to_suggestion converts them)."""
+    data, repaired = _json_of(text)
     boxes = data.get('boxes', data.get('proposals'))
     added = data.get('added')
     result = {'boxes': [], 'added': [], 'no_sign': data.get('no_sign') is True,
@@ -594,6 +600,85 @@ def suggest_frame(service, route: str, frame_key: str, provider: dict, *, detect
     width, height = _frame_size(frame)
     boxes = _sent_boxes(frame['proposals'] if detections is None else detections, width, height)
     return _suggest(service, frame, provider, boxes, timeout)
+
+
+# ---------- one box fitted ----------
+
+# Fit with AI: the reviewer's rough box, sent with only the picture around it. The crop has the box in its middle and
+# FIT_MARGIN times the box's longer side on each side (at least FIT_MIN_SIDE pixels of the frame), enlarged to
+# FIT_LONG_SIDE so that a far sign has pixels enough for the model; the answer is a short JSON.
+FIT_MARGIN = 1.0
+FIT_MIN_SIDE = 64
+FIT_LONG_SIDE = 512
+FIT_TOKENS = 200
+FIT_PROMPT = (
+    'This is a crop of a dashcam frame of a car driving in Switzerland. A reviewer drew a rough box around a traffic '
+    'sign near the middle: {rough} (x1 y1 x2 y2, relative to this crop from 0 to 1000, x to the right, y down). Give '
+    'the tight box of that sign: the whole sign face (the disc, triangle or plate with its border), not its pole and '
+    'not a panel under it. Answer with this JSON only: {{"found": true, "box": [x1, y1, x2, y2]}} in the same 0-1000 '
+    'coordinates of this crop, or {{"found": false}} when there is no sign there.')
+
+
+def fit_crop(box: list[float], width: int, height: int) -> list[int]:
+    """The square of the frame sent to fit ``box`` (pixels of the frame): the box in its middle, inside the frame."""
+    side = max(box[2] - box[0], box[3] - box[1], 1.0)
+    full = min(max(side * (1 + 2 * FIT_MARGIN), FIT_MIN_SIDE), width, height)
+    cx, cy = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+    left = min(max(cx - full / 2, 0.0), width - full)
+    top = min(max(cy - full / 2, 0.0), height - full)
+    return [int(left), int(top), int(round(left + full)), int(round(top + full))]
+
+
+def fit_box(service, route: str, frame_key: str, box, provider: dict, *, run_id: str | None = None,
+            timeout: float = ANSWER_TIMEOUT) -> dict:
+    """The tight box of the sign in the reviewer's rough ``box`` (pixels of the full frame), from the model of
+    ``provider`` shown only the crop around it (fit_crop): {box (pixels) or None when it found no sign, seconds,
+    message}. Nothing is saved."""
+    frame = service.get_frame(route, frame_key)
+    if run_id is not None and run_id != frame['run_id']:
+        raise ReviewRejected(409, 'stale_report', 'The report of this route was rebuilt: reload the page.')
+    width, height = _frame_size(frame)
+    rough = _box_of(box)
+    if rough is None:
+        raise ReviewRejected(400, 'invalid_box', 'box is [x1, y1, x2, y2] in pixels of the frame.')
+    x1, x2 = sorted((min(max(rough[0], 0.0), width), min(max(rough[2], 0.0), width)))
+    y1, y2 = sorted((min(max(rough[1], 0.0), height), min(max(rough[3], 0.0), height)))
+    if _small([x1, y1, x2, y2]):
+        raise ReviewRejected(400, 'invalid_box', 'The box is outside the frame or too small to fit.')
+    crop = fit_crop([x1, y1, x2, y2], width, height)
+    try:
+        image = service.image(route, frame_key, variant='original', crop=crop, long_side=FIT_LONG_SIDE)
+    except (ReviewRejected, OSError):
+        image = service.image(route, frame_key, variant='preview', crop=crop, long_side=FIT_LONG_SIDE)
+    crop_width, crop_height = crop[2] - crop[0], crop[3] - crop[1]
+    relative = [round((x1 - crop[0]) * SCALE / crop_width), round((y1 - crop[1]) * SCALE / crop_height),
+                round((x2 - crop[0]) * SCALE / crop_width), round((y2 - crop[1]) * SCALE / crop_height)]
+    url = 'data:' + image['mime_type'] + ';base64,' + base64.b64encode(image['data']).decode('ascii')
+    messages = [{'role': 'user', 'content': [
+        {'type': 'image_url', 'image_url': {'url': url}},
+        {'type': 'text', 'text': FIT_PROMPT.format(rough=' '.join(str(value) for value in relative))}]}]
+    text, seconds = llm_providers.chat(provider, messages, timeout=timeout, max_tokens=FIT_TOKENS)
+    data, _repaired = _json_of(text)
+    seconds = round(seconds, 1)
+    found = _box_of(data.get('box', data.get('bbox', data.get('bbox_2d'))))
+    if data.get('found') is False or found is None:
+        return {'ok': True, 'box': None, 'seconds': seconds,
+                'message': f'{provider["model"]} sees no sign in this box · {seconds:.1f} s'}
+    # The answer in 0-1000 of the crop (or 0-1, or pixels of the picture sent), back to pixels of the frame.
+    sent = max(image['width'] or 0, image['height'] or 0)
+    if all(value <= 1.0 for value in found):
+        found = [value * SCALE for value in found]
+    elif any(value > SCALE for value in found) and sent and all(value <= sent for value in found):
+        found = [found[0] * SCALE / image['width'], found[1] * SCALE / image['height'],
+                 found[2] * SCALE / image['width'], found[3] * SCALE / image['height']]
+    fx1, fx2 = sorted((min(max(found[0], 0.0), SCALE), min(max(found[2], 0.0), SCALE)))
+    fy1, fy2 = sorted((min(max(found[1], 0.0), SCALE), min(max(found[3], 0.0), SCALE)))
+    fitted = [round(crop[0] + fx1 * crop_width / SCALE, 1), round(crop[1] + fy1 * crop_height / SCALE, 1),
+              round(crop[0] + fx2 * crop_width / SCALE, 1), round(crop[1] + fy2 * crop_height / SCALE, 1)]
+    if _small(fitted):
+        return {'ok': True, 'box': None, 'seconds': seconds,
+                'message': f'{provider["model"]} gave no usable box · {seconds:.1f} s'}
+    return {'ok': True, 'box': fitted, 'seconds': seconds, 'message': f'Box fitted by {provider["model"]} · {seconds:.1f} s'}
 
 
 def save_body(suggestion: dict, frame: dict, provider: dict) -> dict:

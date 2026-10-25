@@ -653,7 +653,7 @@ def make_handler(app: ReviewApp):
                 self._json(200, {'ok': True, 'trial': ai_review.latest_trial(app, match.group(1))})
                 return
             if (path in AI_SETTINGS_POSTS or AI_DELETE_RE.fullmatch(path)
-                    or re.fullmatch(r'/api/route/[^/]+/frame/[^/]+/[^/]+/ai-suggest', path)):
+                    or re.fullmatch(r'/api/route/[^/]+/frame/[^/]+/[^/]+/ai-(?:suggest|fit)', path)):
                 self._problem(405, 'method_not_allowed', 'Use POST.', True)
                 return
             # [ai-reviewer] - END
@@ -1000,8 +1000,8 @@ def make_handler(app: ReviewApp):
                     self._json(200, {'ok': True, **app.panel.stop(stop.group(1))})
                 return
             # [control-panel] - END
-            match = re.fullmatch(r'/api/route/([^/]+)/frame/([0-9]{1,9})/([0-9]{1,9})(/apply-previous|/ai-suggest)?',
-                                 path)
+            match = re.fullmatch(
+                r'/api/route/([^/]+)/frame/([0-9]{1,9})/([0-9]{1,9})(/apply-previous|/ai-suggest|/ai-fit)?', path)
             if match is None:
                 self._problem(404, 'not_found', 'Invalid save address.', True)
                 return
@@ -1013,7 +1013,7 @@ def make_handler(app: ReviewApp):
                 self._problem(415, 'unsupported_media_type', 'Only JSON data is accepted.', True)
                 return
             # [ai-reviewer] - START
-            if match.group(4) == '/ai-suggest':
+            if match.group(4) in ('/ai-suggest', '/ai-fit'):
                 self._require_ai_session()
             # [ai-reviewer] - END
             body = self._read_json()
@@ -1023,6 +1023,10 @@ def make_handler(app: ReviewApp):
             if match.group(4) == '/ai-suggest':
                 # The AI's suggestion for this frame: nothing is saved, the page shows it to apply and confirm.
                 self._ai_suggest(route, frame_key, body)
+                return
+            if match.group(4) == '/ai-fit':
+                # The rough box of the reviewer fitted by the AI: nothing is saved, the page moves the box.
+                self._ai_fit(route, frame_key, body)
                 return
             # [ai-reviewer] - END
             if match.group(4):
@@ -1187,6 +1191,30 @@ def make_handler(app: ReviewApp):
             print(f'AI: {terminal_text(route)} {frame_key} ({terminal_text(suggestion.get("reviewer", ""))}) '
                   f'{float(suggestion.get("seconds") or 0):.1f} s', flush=True)
             self._json(200, {**suggestion, 'ok': True})
+
+        def _ai_fit(self, route, frame_key, body):
+            """The reviewer's rough box fitted tight by the AI reviewer of Settings, shown only the crop around it."""
+            from nnslr_tools import ai_review, llm_providers
+            if not isinstance(body, dict):
+                raise ReviewRejected(400, 'invalid_json', 'A JSON object is required.')
+            run_id = body.get('run_id')
+            if run_id is not None and not isinstance(run_id, str):
+                raise ReviewRejected(400, 'invalid_json', 'run_id is the run of the report, a string.')
+            provider = llm_providers.reviewer_provider(app.root)
+            if provider is None:
+                raise ReviewRejected(409, 'no_ai_reviewer', 'Choose an AI reviewer in Settings.')
+            llm_providers.check_can_review(provider)
+            if not app.ai_slots.acquire(blocking=False):
+                raise ReviewRejected(429, 'ai_busy', 'The AI is already answering two frames: try again in a moment.')
+            try:
+                fitted = ai_review.fit_box(app, route, frame_key, body.get('box'), provider, run_id=run_id)
+            except ReviewRejected as exc:
+                print(f'AI fit: {terminal_text(route)} {frame_key} failed: {terminal_text(exc.reason)}', flush=True)
+                raise self._masked(exc, provider.get('key')) from None
+            finally:
+                app.ai_slots.release()
+            print(f'AI fit: {terminal_text(route)} {frame_key} {terminal_text(fitted["message"])}', flush=True)
+            self._json(200, fitted)
         # [ai-reviewer] - END
 
         def _same_origin(self):

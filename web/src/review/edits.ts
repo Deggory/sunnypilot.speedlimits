@@ -42,6 +42,18 @@ export function setFamily(id: string): void {
   });
 }
 
+/** The most common box: an "Other sign" (its kind kept when it has one) for the road the car drives on (S). */
+export function setOtherOurs(): void {
+  editSelected((d) => {
+    if (d.family !== 'other_sign') delete d.sign_type;
+    d.family = 'other_sign';
+    d.value_kph = null;
+    d.value_state = 'unknown';
+    d.applicability = 'own_road';
+    state.valueError = false;
+  });
+}
+
 /** A kind of "Other sign" (town entry, direction →...); pressed again, the kind goes and the sign stays. */
 export function setKind(id: string): void {
   editSelected((d) => {

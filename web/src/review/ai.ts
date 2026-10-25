@@ -9,6 +9,7 @@ import {refuseChange} from './busy';
 import {reactive} from 'vue';
 import {messageOf} from '../common/api';
 import type {AiAction, AiState, AiSuggestion, AiTrial} from '../common/ai-types';
+import type {Box} from './types';
 import {askConfirm} from '../composables/confirm';
 import {clone} from './dom';
 import {changed} from './edits';
@@ -137,6 +138,40 @@ export async function askAi(): Promise<void> {
     ask.phase = 'failed';
     // The reviewer may have been changed in Settings meanwhile.
     void loadAiState();
+  }
+}
+
+/** The box being fitted (Fit with AI), by frame key and index; null when none. */
+export const fitting = reactive<{key: string | null; index: number}>({key: null, index: -1});
+
+/** Fit with AI (C): the selected box sent with only the picture around it (…/ai-fit, ai_review.fit_box); it comes
+ * back tight, as an unsaved change to confirm. A box moved or removed meanwhile is left as it is. */
+export async function fitBox(): Promise<void> {
+  const row = currentRow();
+  const apiBase = report.apiBase;
+  const index = state.selected;
+  const detection = row ? workOf(row).detections[index] : undefined;
+  if (!row || !apiBase || !detection || fitting.key !== null || aiBlocker() !== '' || refuseChange()) return;
+  const key = row.frame_key;
+  const sent = JSON.stringify(detection.bbox_xyxy);
+  fitting.key = key;
+  fitting.index = index;
+  try {
+    const answer = await call<{box: Box | null; message: string}>('POST', apiBase + '/frame/' + key + '/ai-fit',
+      {run_id: report.runId, box: detection.bbox_xyxy});
+    const unchanged = workOf(row).detections.includes(detection) && JSON.stringify(detection.bbox_xyxy) === sent;
+    if (answer.box && unchanged) {
+      detection.bbox_xyxy = answer.box;
+      changed(row);
+    }
+    state.notice = {key, text: answer.message + (answer.box && !unchanged ? ': the box changed meanwhile, kept.' : '.'),
+      error: false, warn: !answer.box || !unchanged};
+  } catch (error) {
+    state.notice = {key, text: 'Fit with AI: ' + messageOf(error), error: true};
+    void loadAiState();
+  } finally {
+    fitting.key = null;
+    fitting.index = -1;
   }
 }
 

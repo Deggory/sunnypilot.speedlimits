@@ -1,13 +1,15 @@
 // Keyboard shortcuts: ← → frame (with Shift: the frame before or after in the filter), ↑ ↓ box, the speed typed
-// as it reads ("5 0" = 50, "1 2 0" = 120, "0" alone = not readable), O A U the road, Enter confirm, N new box,
-// P apply previous, I ask the AI, H second reading, Del removes a box the reviewer selected (on the one the page
+// as it reads ("5 0" = 50, "1 2 0" = 120, "0" alone = not readable), O X U the road (ours, another, unclear), S other
+// sign for our road,
+// Enter confirm, B or N new box, C fit (centre) the box with the AI,
+// A or P apply previous, I ask the AI, H second reading, Del removes a box the reviewer selected (on the one the page
 // opened on it says to click it first), Esc cancel. While a menu or panel of the site's top bar is open, the keys
 // are its own.
 import {onBeforeUnmount, onMounted} from 'vue';
-import {askAi} from './ai';
+import {askAi, fitBox} from './ai';
 import {applyPrevious} from './carry';
 import {confirmFrame} from './confirm';
-import {cancelAll, removeSelected, selectBox, setField, setValue, toggleDrawing, toggleHints} from './edits';
+import {cancelAll, removeSelected, selectBox, setField, setOtherOurs, setValue, toggleDrawing, toggleHints} from './edits';
 import {currentRow, workOf} from './frames';
 import {go, step} from './navigation';
 import {report, state} from './store';
@@ -15,8 +17,8 @@ import {report, state} from './store';
 // A speed is typed as it reads: the digits wait this long for the next one, then the value is set.
 const TYPING_MS = 900;
 
-// O A U: the road of the selected box.
-const ROAD_KEYS: Record<string, string> = {o: 'own_road', a: 'other_road', u: 'unresolved'};
+// O X U: the road of the selected box (A is Apply previous).
+const ROAD_KEYS: Record<string, string> = {o: 'own_road', x: 'other_road', u: 'unresolved'};
 
 /** ↑ ↓: the box before or after the selected one (from none: the first or the last). */
 function stepBox(delta: number): void {
@@ -92,7 +94,7 @@ export function useKeyboard(): void {
     }
     // Enter on any other focused button or summary belongs to that control.
     if (event.key === 'Enter' && (tag === 'button' || tag === 'summary' || tag === 'a')) return;
-    // With a box selected: its speed typed as it reads, and its road (O A U).
+    // With a box selected: its speed typed as it reads, and its road (O X U).
     if (state.selected >= 0 && !event.shiftKey && /^[0-9]$/.test(event.key)) {
       event.preventDefault();
       state.typing += event.key;
@@ -106,6 +108,11 @@ export function useKeyboard(): void {
       if (road) {
         event.preventDefault();
         setField('applicability', road);
+        return;
+      }
+      if (event.key === 's' || event.key === 'S') {
+        event.preventDefault();
+        setOtherOurs();
         return;
       }
     }
@@ -132,11 +139,22 @@ export function useKeyboard(): void {
         event.preventDefault();
         void confirmFrame();
         break;
+      case 'b':
+      case 'B':
       case 'n':
       case 'N':
         event.preventDefault();
         toggleDrawing();
         break;
+      case 'c':
+      case 'C':
+        if (report.apiBase && state.selected >= 0) {
+          event.preventDefault();
+          void fitBox();
+        }
+        break;
+      case 'a':
+      case 'A':
       case 'p':
       case 'P':
         if (report.apiBase) {
