@@ -548,6 +548,10 @@ def make_handler(app: ReviewApp):
             if path == '/api/panel/models':
                 self._json(200, app.panel.models())
                 return
+            # The proposers of Prepare as measured on the test frames, for the Evaluate tab.
+            if path == '/api/panel/proposers':
+                self._json(200, app.panel.proposers())
+                return
             if path == '/api/panel/models/active':
                 self._problem(405, 'method_not_allowed', 'Use POST, with {"role", "id"}.', True)
                 return

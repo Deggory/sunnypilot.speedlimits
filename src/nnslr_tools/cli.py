@@ -913,6 +913,16 @@ def _cmd_mine_negatives(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_evaluate_proposer(args: argparse.Namespace) -> int:
+    from nnslr_tools.proposer_eval import evaluate_proposer
+
+    root, dataset, splits = _dataset_and_split(args)
+    report = evaluate_proposer(args.proposer, root, dataset, splits, partition=args.partition,
+                               dataset_kind=args.dataset_kind, limit=args.limit)
+    print(json.dumps(report, indent=2, sort_keys=True, allow_nan=False))
+    return 0
+
+
 def _cmd_evaluate_chain(args: argparse.Namespace) -> int:
     from nnslr_tools.chain import chain_dry_run, evaluate_chain
     from nnslr_tools.evaluation import write_evaluation
@@ -1541,6 +1551,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_negatives.add_argument("--dry-run", action="store_true",
                              help="count the frames, sign crops, caps and the dataset's own negatives without torch")
     p_negatives.set_defaults(func=_cmd_mine_negatives)
+
+    p_proposer = sub.add_parser(
+        "evaluate-proposer",
+        help="run a proposer of Prepare (vietnam, ours, qwen) on the reviewed frames of a partition and measure its "
+             "proposals against the kept boxes: speed signs found and read right, every sign found, false proposals "
+             "per frame, seconds per frame (report in <data-root>/evaluations/proposers/)",
+    )
+    _dataset_arguments(p_proposer)
+    p_proposer.add_argument("--proposer", choices=("vietnam", "ours", "qwen"),
+                            default=os.environ.get("NNSLR_PROPOSER") or "vietnam")
+    p_proposer.add_argument("--partition", choices=("test", "validation"), default="test")
+    p_proposer.add_argument("--limit", type=int, default=None, help="only the first N frames (a quick try)")
+    p_proposer.set_defaults(func=_cmd_evaluate_proposer)
 
     p_chain = sub.add_parser(
         "evaluate-chain",

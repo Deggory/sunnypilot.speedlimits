@@ -12,7 +12,7 @@ export const RESUME_JOB: InjectionKey<(job: Job) => Promise<void>> = Symbol('res
 /** The question before an action; null: it starts at the click (preparing, importing the reviews). */
 /** The proposer as the Prepare tab names it. */
 function proposerName(proposer: string | undefined): string {
-  return proposer === 'ours' ? 'our cutter and classifier' : 'the Vietnamese YOLO of Hugging Face';
+  return proposer === 'ours' ? 'our cutter and classifier' : proposer === 'qwen' ? 'Qwen3-VL' : 'the Vietnamese YOLO of Hugging Face';
 }
 
 function question(name: ActionName, state: ActionState, start: TrainingStart | null, options: ActionOptions | null): ConfirmOptions | null {
@@ -31,6 +31,11 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
     return {title: 'Train the classifier?', action: 'Start training',
       text: 'Mines the false boxes of the cutter in use, trains the classifier with “not a sign” on the GPU, then measures it '
         + 'alone and in the chain: it takes hours. Its run is a new one, named by the time it starts.'};
+  }
+  if (name === 'measure_proposer') {
+    return {title: 'Measure ' + proposerName(options?.proposer) + '?', action: 'Measure',
+      text: 'It proposes the signs of the reviewed test frames, as Prepare would, and compares them with the boxes you kept. '
+        + 'Nothing changes in the reviews or the routes. Our networks and Qwen3-VL use the GPU.'};
   }
   if (name === 'prepare_again') {
     return {title: 'Propose the signs again?', action: 'Propose again',

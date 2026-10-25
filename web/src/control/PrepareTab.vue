@@ -55,18 +55,17 @@ const total = computed(() => counts.value.reduce((sum, item) => sum + item.count
   <h1 class="sr-only">Prepare</h1>
 
   <section class="card tab-card" aria-labelledby="prepare-title">
-    <div class="tab-card-head">
-      <div>
-        <h2 id="prepare-title">New routes</h2>
-        <div class="figure" id="prepare-big">{{ status === null ? '–' : total ? plural(total, 'route') + ' to prepare' : 'All prepared' }}</div>
-        <p class="figure-note">{{ status === null ? '' : total ? 'Videos arrived from the comma, not frames yet.' : 'No video waiting: for more routes, download from the comma.' }}</p>
-      </div>
-      <ul v-if="total" class="chips">
-        <li v-for="item in counts.filter((entry) => entry.count)" :key="item.state"><strong>{{ item.count }}</strong> {{ item.label }}</li>
-      </ul>
+    <h2 class="sr-only" id="prepare-title">New routes</h2>
+    <div class="prep-row">
+      <h3 class="prep-step"><span>1</span> Get the drives</h3>
+      <ActionList class="compact" :items="FETCH_ACTIONS" :actions="status?.actions ?? null" @run="(name, state) => emit('run', name, state)"/>
     </div>
-    <h3 class="prep-step"><span>1</span> Get the drives</h3>
-    <ActionList :items="FETCH_ACTIONS" :actions="status?.actions ?? null" @run="(name, state) => emit('run', name, state)"/>
+    <p class="figure-note prep-state" id="prepare-big">{{ status === null ? '' : total
+      ? plural(total, 'route') + ' to prepare: the videos arrived from the comma, no frames yet.'
+      : 'All prepared: no video waiting. Download to get the new drives of the comma.' }}</p>
+    <ul v-if="total" class="chips">
+      <li v-for="item in counts.filter((entry) => entry.count)" :key="item.state"><strong>{{ item.count }}</strong> {{ item.label }}</li>
+    </ul>
     <h3 class="prep-step"><span>2</span> Propose the signs</h3>
     <div class="proposer">
       <span class="proposer-label">Signs proposed by</span>

@@ -51,7 +51,7 @@ watch(busy, markBusy);
     <OverviewTab v-if="currentTab === 'overview'" :status="status" :busy="busy" @run="run" @stop="stop" @details="details"/>
     <PrepareTab v-else-if="currentTab === 'prepare'" :status="status" @run="run" @stop="stop" @details="details"/>
     <TrainTab v-else-if="currentTab === 'train'" :status="status" @run="run" @stop="stop" @details="details"/>
-    <EvaluateTab v-else-if="currentTab === 'evaluate'"/>
+    <EvaluateTab v-else-if="currentTab === 'evaluate'" :status="status" @run="run"/>
     <ModelsTab v-else :status="status"/>
   </main>
   <LogSheet :job="shownJob" @close="shownId = null"/>

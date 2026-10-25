@@ -161,6 +161,8 @@ The GPU environment comes from `bash scripts/setup_v100_training_env.sh`. It cre
 
 `nnslr preannotate --proposer ours` (or `NNSLR_PROPOSER=ours helpers/1_prepare.sh`, the **Signs proposed by** choice of the Prepare tab) proposes the signs with our cutter and classifier instead of the Vietnamese YOLO; `--proposer qwen` asks Qwen3-VL-8B for every sign of each frame (installed by `scripts/setup_vlm.sh`; its boxes have no score). Both run in `.venv-gpu`. `helpers/1_prepare.sh --again` (**Propose again**) proposes again the routes nobody has reviewed a frame of.
 
+`helpers/measure_proposer.sh [vietnam|ours|qwen]` (the **Measure** button of the Proposers view of Evaluate, `nnslr evaluate-proposer`) runs a proposer on the reviewed test frames exactly as Prepare would and compares its proposals with the kept boxes: speed signs found and read right (overall, by width, on the frames a person reviewed), every sign found, false proposals per frame, seconds per frame. Painted road numbers are left out. Nothing is written into the reviews; the report goes to `data/evaluations/proposers/`.
+
 **Training modes** (`--mode`, or the second argument of `run_v100_baseline.sh`):
 
 - **fresh** (the default) is a new run, started from torchvision's ImageNet-pretrained MobileNetV3 weights.

@@ -23,7 +23,7 @@ const rows = computed(() => {
 <template>
   <ul class="acts">
     <li v-for="row in rows" :key="row.name" class="act" :class="{blocked: row.state !== null && !row.state.allowed}" :data-action="row.name">
-      <button class="act-card" type="button" :id="'run-' + row.name" :disabled="row.state === null || !row.state.allowed"
+      <button class="act-card" type="button" :id="'run-' + row.name" :title="row.text" :disabled="row.state === null || !row.state.allowed"
               :aria-labelledby="'act-label-' + row.name"
               :aria-describedby="'act-text-' + row.name + (row.reason ? ' act-reason-' + row.name : '')"
               @click="row.state && $emit('run', row.name, row.state)">

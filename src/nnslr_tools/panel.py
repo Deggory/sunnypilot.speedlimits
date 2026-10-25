@@ -68,7 +68,8 @@ CUTTER_SIZE = '960x544'
 CUTTER_FAMILIES = ('all', 'speed')
 CUTTER_FAMILY = 'all'
 # The options an action takes, besides a training's start and the run to resume (checked by Panel.start).
-ACTION_OPTIONS = {'train_cutter': ('size', 'families'), 'prepare': ('proposer',), 'prepare_again': ('proposer',)}
+ACTION_OPTIONS = {'train_cutter': ('size', 'families'), 'prepare': ('proposer',), 'prepare_again': ('proposer',),
+                  'measure_proposer': ('proposer',)}
 # Who proposes the signs of a route (nnslr preannotate --proposer): the choice of the Prepare tab.
 PROPOSERS = ('vietnam', 'ours', 'qwen')
 
@@ -107,6 +108,8 @@ ACTIONS = {
     # The cutter: one detector of the size chosen, trained and measured on test and validation, on a run of its own
     # (start() adds <time>-cutter and the size; {'size', 'families'}).
     'train_cutter': {'label': 'Train the cutter', 'group': 'train', 'command': [CUTTER_SCRIPT]},
+    # A proposer of Prepare measured on the test frames (the Proposers view of Evaluate); in the train group: the GPU.
+    'measure_proposer': {'label': 'Measure a proposer', 'group': 'train', 'command': ['helpers/measure_proposer.sh']},
     # git pull + restart of this server (KillMode=process: the action itself survives the restart).
     # --no-link: the link with the token must not land in the log.
     'update': {'label': 'Update the code', 'group': 'update', 'command': ['helpers/update.sh', '--no-link']},
@@ -578,6 +581,13 @@ class Panel:
             raise PanelError(exc.status, exc.reason, exc.message) from exc
 
     # -- the networks by role, for the Models tab -----------------------------------------------------
+    def proposers(self) -> dict:
+        """The latest measure of each proposer of Prepare (helpers/measure_proposer.sh), and why one cannot run."""
+        from nnslr_tools.preannotate import PROPOSERS, vlm_missing
+        from nnslr_tools.proposer_eval import latest_reports
+        return {'proposers': [{'key': key, 'label': label, 'unavailable': vlm_missing(self.root) if key == 'qwen' else None}
+                              for key, label in PROPOSERS.items()], 'reports': latest_reports(self.root)}
+
     def models(self) -> dict:
         """Every trained cutter, classifier and decider with its numbers, newest first, and the one in use."""
         return self.models_index.index()
@@ -714,7 +724,7 @@ class Panel:
                 raise PanelError(400, 'bad_option', 'Only "Train the cutter" takes a ' + ('size' if key == 'size' else 'choice of signs') + '.')
         proposer = (options or {}).get('proposer')
         if proposer is not None:
-            if action not in ('prepare', 'prepare_again'):
+            if action not in ('prepare', 'prepare_again', 'measure_proposer'):
                 raise PanelError(400, 'bad_option', 'Only preparing routes takes a proposer.')
             if proposer not in PROPOSERS:
                 raise PanelError(400, 'bad_option', 'Unknown proposer: ' + ', '.join(PROPOSERS) + '.')

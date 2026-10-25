@@ -253,8 +253,11 @@ def our_networks(root: Path) -> dict:
             'classifier_chosen': chosen}
 
 
-def run_preannotation(route: str, *, data_root: Path | None = None, confidence: float | None = None,
-                      python_executable: str | None = None, proposer: str = 'vietnam') -> dict:
+def proposer_setup(proposer: str, root: Path, *, confidence: float | None = None,
+                   python_executable: str | None = None) -> dict:
+    """What runs a proposer: its python, worker module, lowest score, the model as the rows record it, and the
+    fields of its request. Shared by Prepare (run_preannotation) and the measure of the proposers
+    (proposer_eval)."""
     if proposer not in PROPOSERS:
         raise PreannotationError('proposer must be one of ' + ', '.join(PROPOSERS))
     if confidence is None and proposer != 'qwen':
@@ -262,55 +265,66 @@ def run_preannotation(route: str, *, data_root: Path | None = None, confidence: 
         confidence = .1 if proposer == 'ours' else .25
     if proposer != 'qwen' and (not math.isfinite(confidence) or not 0 < confidence <= 1):
         raise PreannotationError('confidence must be in (0, 1]')
-    root=resolve_data_root(data_root)
-    frames=discover_frames(root,route)
     if proposer == 'qwen':
         missing = vlm_missing(root)
         if missing:
             raise PreannotationError(missing)
-        python=python_executable or str(GPU_PYTHON)
         model={'repository': VLM_REPOSITORY, 'revision': VLM_REVISION, 'proposer': 'qwen', 'path': str(vlm_dir(root)),
                'model_card_license': 'apache-2.0', 'training_domain': 'general images and text (Alibaba)',
                'swiss_validation': 'not_established'}
-        road_model=None; worker='nnslr_tools._vlm_proposer'
-    elif proposer == 'ours':
+        return {'python': python_executable or str(GPU_PYTHON), 'worker': 'nnslr_tools._vlm_proposer',
+                'confidence': confidence, 'model': model, 'road_model': None, 'ocr': None, 'request': {'model': model}}
+    if proposer == 'ours':
         python=python_executable or str(GPU_PYTHON)
         check=subprocess.run([python,'-c','import torch, torchvision'],capture_output=True,text=True)
         if check.returncode:
             raise PreannotationError('our networks need the GPU environment (.venv-gpu with torch): see docs/INSTALL.md')
-        model=our_networks(root); road_model=None; worker='nnslr_tools._chain_proposer'
-    else:
-        python=python_executable or sys.executable
-        check=subprocess.run([python,'-c','import numpy, PIL, onnxruntime, rapidocr'],capture_output=True,text=True)
-        if check.returncode:
-            raise PreannotationError('preannotation dependencies missing; in the nnslr environment run: python -m pip install ".[preannotate]"')
-        model=ensure_model(root)
-        road_model=ensure_road_model(root)
-        worker='nnslr_tools._preannotate_worker'
+        model=our_networks(root)
+        return {'python': python, 'worker': 'nnslr_tools._chain_proposer', 'confidence': confidence, 'model': model,
+                'road_model': None, 'ocr': None, 'request': {'model': model}}
+    python=python_executable or sys.executable
+    check=subprocess.run([python,'-c','import numpy, PIL, onnxruntime, rapidocr'],capture_output=True,text=True)
+    if check.returncode:
+        raise PreannotationError('preannotation dependencies missing; in the nnslr environment run: python -m pip install ".[preannotate]"')
+    model=ensure_model(root)
+    road_model=ensure_road_model(root)
+    return {'python': python, 'worker': 'nnslr_tools._preannotate_worker', 'confidence': confidence,
+            'model': MODEL_INFO, 'road_model': ROAD_MODEL_INFO, 'ocr': OCR_INFO,
+            'request': {'model_path': str(model), 'model': MODEL_INFO, 'road_model_path': str(road_model),
+                        'road_model': ROAD_MODEL_INFO, 'ocr': OCR_INFO}}
+
+
+def run_proposer_worker(setup: dict, root: Path, frames: list[dict], output: Path, run_id: str, route: str) -> list[dict]:
+    """Runs the worker of a proposer_setup on frames, writing into output (images/ and preannotations.jsonl);
+    returns its rows, one per frame in order."""
+    request={'schema_version':1,'run_id':run_id,'route_id':route,'data_root':str(root),
+             'confidence':setup['confidence'],'frames':frames,'output':str(output),**setup['request']}
+    request_path=output/'request.json'; request_path.write_text(json.dumps(request,allow_nan=False))
+    env=dict(os.environ)
+    # The worker imports nnslr_tools from this checkout, also from the GPU environment.
+    env['PYTHONPATH']=str(Path(__file__).resolve().parents[1])+(os.pathsep+env['PYTHONPATH'] if env.get('PYTHONPATH') else '')
+    proc=subprocess.run([setup['python'],'-m',setup['worker'],str(request_path)],capture_output=False,env=env)
+    if proc.returncode:
+        raise PreannotationError(f'preannotation failed; previous results preserved; diagnostic request: {request_path}')
+    rows=[json.loads(line) for line in (output/'preannotations.jsonl').read_text().splitlines()]
+    if len(rows)!=len(frames) or [r['frame_key'] for r in rows]!=[r['frame_key'] for r in frames]:
+        raise PreannotationError('worker returned incomplete or reordered frames')
+    return rows
+
+
+def run_preannotation(route: str, *, data_root: Path | None = None, confidence: float | None = None,
+                      python_executable: str | None = None, proposer: str = 'vietnam') -> dict:
+    root=resolve_data_root(data_root)
+    # The frames first: a route without frames downloads no model.
+    frames=discover_frames(root,route)
+    setup=proposer_setup(proposer, root, confidence=confidence, python_executable=python_executable)
+    confidence=setup['confidence']
+    model_info, road_info, ocr_info = setup['model'], setup['road_model'], setup['ocr']
     base=_inside(root,root/'derived/preannotations'/route)
     base.mkdir(parents=True,exist_ok=True)
     run_id=datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'-'+uuid.uuid4().hex[:8]
     pending=base/('.pending-'+run_id); pending.mkdir()
-    if proposer in ('ours', 'qwen'):
-        model_info, road_info, ocr_info = model, None, None
-        request={'schema_version':1,'run_id':run_id,'route_id':route,'data_root':str(root),'model':model,
-                 'confidence':confidence,'frames':frames,'output':str(pending)}
-    else:
-        model_info, road_info, ocr_info = MODEL_INFO, ROAD_MODEL_INFO, OCR_INFO
-        request={'schema_version':1,'run_id':run_id,'route_id':route,'data_root':str(root),'model_path':str(model),
-                 'model':MODEL_INFO,'road_model_path':str(road_model),'road_model':ROAD_MODEL_INFO,
-                 'ocr':OCR_INFO,'confidence':confidence,'frames':frames,'output':str(pending)}
-    request_path=pending/'request.json'; request_path.write_text(json.dumps(request,allow_nan=False))
-    env=dict(os.environ)
-    # The worker imports nnslr_tools from this checkout, also from the GPU environment.
-    env['PYTHONPATH']=str(Path(__file__).resolve().parents[1])+(os.pathsep+env['PYTHONPATH'] if env.get('PYTHONPATH') else '')
-    proc=subprocess.run([python,'-m',worker,str(request_path)],capture_output=False,env=env)
-    if proc.returncode:
-        raise PreannotationError(f'preannotation failed; previous results preserved; diagnostic request: {request_path}')
-    report=pending/'preannotations.jsonl'
-    rows=[json.loads(line) for line in report.read_text().splitlines()]
-    if len(rows)!=len(frames) or [r['frame_key'] for r in rows]!=[r['frame_key'] for r in frames]:
-        raise PreannotationError('worker returned incomplete or reordered frames')
+    rows=run_proposer_worker(setup, root, frames, pending, run_id, route)
     from nnslr_tools.review import write_review
     write_review(pending, rows, run_id)
     device='cpu'

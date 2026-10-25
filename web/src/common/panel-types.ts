@@ -1,6 +1,6 @@
 // GET /api/panel/status (nnslr_tools.panel.Panel.status): the control pages (Overview, Prepare, Train).
 
-export type ActionName = 'fetch' | 'prepare' | 'prepare_again' | 'dataset' | 'train' | 'train_continue' | 'train_resume' | 'train_classifier'
+export type ActionName = 'fetch' | 'prepare' | 'prepare_again' | 'measure_proposer' | 'dataset' | 'train' | 'train_continue' | 'train_resume' | 'train_classifier'
   | 'train_cutter' | 'update';
 /** What a cutter learns to find: every sign (the speed signs and the other signs) or the speed signs only. */
 export type CutterFamilies = 'all' | 'speed';
@@ -11,6 +11,33 @@ export interface CutterOptions {
 }
 /** Who proposes the signs of a route (nnslr preannotate --proposer). */
 export type Proposer = 'vietnam' | 'ours' | 'qwen';
+/** GET /api/panel/proposers: a proposer of Prepare measured on the test frames (nnslr_tools.proposer_eval). */
+export interface ProposerCounts {
+  truth: number;
+  found: number;
+  read_right: number;
+  found_share: number | null;
+  read_right_share: number | null;
+}
+export interface ProposerReport {
+  proposer: Proposer;
+  label: string;
+  partition: string;
+  frames: number;
+  limited: boolean;
+  seconds_per_frame: number;
+  measured_at: string;
+  speed_signs: ProposerCounts;
+  speed_signs_person: ProposerCounts;
+  every_sign: {truth: number; found: number; found_share: number | null};
+  by_width: (ProposerCounts & {key: string; label: string})[];
+  proposals_per_frame: number | null;
+  false_per_frame: number | null;
+}
+export interface ProposersPayload {
+  proposers: {key: Proposer; label: string; unavailable: string | null}[];
+  reports: ProposerReport[];
+}
 /** The options of an action: the cutter's size and signs, or the proposer of a preparation. */
 export interface ActionOptions {
   size?: string;

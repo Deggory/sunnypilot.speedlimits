@@ -2,22 +2,32 @@
 // Evaluate, by network: choose what to judge (the whole chain, the cutter, the classifier, the decider); every
 // version of it in one table, judged by the one number that matters for that network, next to the version in use;
 // the version chosen played frame by frame on the test (WatchSection), and all the numbers of its run folded below.
-import {computed, ref, watch} from 'vue';
+// The proposers of Prepare (the Vietnamese YOLO, our networks, Qwen3-VL) are judged the same way, each measured on the
+// reviewed test frames with its Measure button (helpers/measure_proposer.sh).
+import {computed, onBeforeUnmount, onMounted, ref, shallowRef, watch} from 'vue';
+import {api} from '../common/api';
 import {isoWhen, thousands} from '../common/format';
-import type {ClassifierModel, CutterModel, DeciderModel, ModelVersion, WatchModel} from '../common/panel-types';
+import type {ActionName, ActionOptions, ActionState, ClassifierModel, CutterModel, DeciderModel, ModelVersion, PanelStatus,
+  Proposer, ProposersPayload, WatchModel} from '../common/panel-types';
+import ActionList from './ActionList.vue';
 import {pct, points, useRunDetail, useRuns} from './evaluate';
 import {perFrame, sizeText, useModels} from './models';
 import RunDetailView from './RunDetail.vue';
 import Segmented from './Segmented.vue';
 import WatchSection from './WatchSection.vue';
 
-type View = 'chain' | 'cutter' | 'classifier' | 'decider';
+const props = defineProps<{status: PanelStatus | null}>();
+const emit = defineEmits<{run: [name: ActionName, state: ActionState, start?: undefined, options?: ActionOptions]}>();
+
+type View = 'proposers' | 'chain' | 'cutter' | 'classifier' | 'decider';
 const VIEWS: {key: View; label: string}[] = [
-  {key: 'chain', label: 'Chain'}, {key: 'cutter', label: 'Cutter'},
+  {key: 'proposers', label: 'Proposers'}, {key: 'chain', label: 'Chain'}, {key: 'cutter', label: 'Cutter'},
   {key: 'classifier', label: 'Classifier'}, {key: 'decider', label: 'Decider'},
 ];
 /** What each network must do, and the number that judges it. */
 const GOAL: Record<View, string> = {
+  proposers: 'Who proposes the signs in Prepare, each run on the same reviewed test frames. What counts: of the speed '
+    + 'signs, how many it proposes with the right number, and how many false proposals per frame you would have to delete.',
   chain: 'The cutter and the classifier together, on the test roads no training saw. What counts: of the 80 speed '
     + 'signs, how many are found and read right, and how many false boxes are left per frame.',
   cutter: 'Finds every box that could be a sign. What counts: how many of the 80 test speed signs it finds. Many '
@@ -44,7 +54,16 @@ interface Row {
   vs?: {text: string; kind: string} | undefined;
 }
 
-const view = ref<View>('chain');
+const view = ref<View>((localStorage.getItem('nnslr-evaluate-view') as View | null) ?? 'chain');
+watch(view, (value) => localStorage.setItem('nnslr-evaluate-view', value));
+/** The proposers as measured (helpers/measure_proposer.sh), asked again every 15 s: a measure takes minutes. */
+const proposers = shallowRef<ProposersPayload | null>(null);
+let timer: number | undefined;
+async function askProposers(): Promise<void> {
+  try { proposers.value = await api<ProposersPayload>('/api/panel/proposers'); } catch { /* the next time */ }
+}
+onMounted(() => { void askProposers(); timer = window.setInterval(() => void askProposers(), 15000); });
+onBeforeUnmount(() => window.clearInterval(timer));
 const picked = ref<string | null>(null);
 const {payload: models} = useModels();
 const {payload: runsPayload} = useRuns();
@@ -61,7 +80,19 @@ function ofText(found: number | null | undefined, truth: number | null | undefin
 
 const rows = computed((): Row[] => {
   const list: Row[] = [];
-  if (view.value === 'chain') {
+  if (view.value === 'proposers') {
+    for (const item of proposers.value?.proposers ?? []) {
+      const report = proposers.value?.reports.find((entry) => entry.proposer === item.key && entry.partition === 'test');
+      const speed = report?.speed_signs;
+      list.push({id: 'proposer:' + item.key, name: item.label, when: report ? isoWhen(report.measured_at) + (report.limited ? ' · a few frames only' : '') : '',
+        main: speed ? share(speed.read_right, speed.truth) : null,
+        mainText: speed ? ofText(speed.read_right, speed.truth, 'speed signs proposed with the right number')
+          : item.unavailable ? 'not installed' : 'not measured yet: press Measure',
+        second: report ? 'found ' + speed!.found + ' of ' + speed!.truth + ' · ' + perFrame(report.false_per_frame)
+          + ' false proposals per frame · ' + report.seconds_per_frame.toFixed(1) + ' s per frame' : '',
+        inUse: false, run: '', watch: null});
+    }
+  } else if (view.value === 'chain') {
     for (const version of versionsOf('classifier') as ClassifierModel[]) {
       const chain = version.chain;
       if (!chain) continue;
@@ -122,6 +153,12 @@ function versus(row: Row): {text: string; kind: string} {
 }
 
 const shown = computed(() => rows.value.find((row) => row.id === picked.value) ?? reference.value ?? rows.value[0] ?? null);
+/** The proposer of the row chosen, its latest report and its Measure button. */
+const shownProposer = computed((): Proposer | null => shown.value?.id.startsWith('proposer:') ? shown.value.id.slice(9) as Proposer : null);
+const proposerReport = computed(() => proposers.value?.reports.find((entry) => entry.proposer === shownProposer.value && entry.partition === 'test') ?? null);
+const proposerMissing = computed(() => proposers.value?.proposers.find((item) => item.key === shownProposer.value)?.unavailable ?? null);
+const MEASURE: [ActionName, string][] = [['measure_proposer', 'Proposes the signs of the reviewed test frames as Prepare would, '
+  + 'and compares them with the boxes you kept. Nothing changes in the reviews; minutes to an hour.']];
 watch(view, () => { picked.value = null; });
 
 const runSummary = computed(() => runsPayload.value?.runs.find((run) => run.name === shown.value?.run) ?? null);
@@ -157,7 +194,24 @@ const watchModels = computed((): WatchModel[] => {
     </ul>
   </section>
 
-  <template v-if="shown">
+  <section v-if="shown && shownProposer" class="card ev-card" aria-labelledby="proposer-title">
+    <h2 id="proposer-title">{{ shown.name }} <span class="ev-when">{{ shown.when }}</span></h2>
+    <p class="ev-goal">{{ shown.mainText }}<template v-if="shown.second"> · {{ shown.second }}</template></p>
+    <template v-if="proposerReport">
+      <p class="ev-goal">On {{ thousands(proposerReport.frames) }} test frames. Every sign, speed signs and the others: found
+        {{ proposerReport.every_sign.found }} of {{ proposerReport.every_sign.truth }}. Speed signs on the frames a person
+        reviewed: {{ ofText(proposerReport.speed_signs_person.read_right, proposerReport.speed_signs_person.truth, 'with the right number') }}.</p>
+      <ul class="ev-widths">
+        <li v-for="item in proposerReport.by_width" :key="item.key"><span class="ev-when">{{ item.label }} wide</span>
+          <strong>{{ item.truth ? item.found + ' of ' + item.truth : '–' }}</strong><span class="ev-when">found</span></li>
+      </ul>
+    </template>
+    <p v-if="proposerMissing" class="ev-goal ev-missing">{{ proposerMissing }}</p>
+    <ActionList v-else :items="MEASURE" :actions="props.status?.actions ?? null"
+                @run="(name, state) => shownProposer && emit('run', name, state, undefined, {proposer: shownProposer})"/>
+  </section>
+
+  <template v-if="shown && !shownProposer">
     <section class="card ev-card" aria-labelledby="watch-title">
       <h2 id="watch-title">{{ shown.name }} <span class="ev-when">{{ shown.when }}</span></h2>
       <p class="ev-goal">{{ shown.mainText }}<template v-if="shown.second"> · {{ shown.second }}</template></p>
