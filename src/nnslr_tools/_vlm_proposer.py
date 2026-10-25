@@ -5,8 +5,9 @@ _preannotate_worker writes. Run with the GPU environment (.venv-gpu) on the requ
 preannotate.run_preannotation. The model gives no score: the proposals carry none.
 
 Speed: the model writes its answer a token at a time, so the answer is short (one line per sign, not JSON) and
-BATCH frames are asked together (NNSLR_QWEN_BATCH, default 8; halved when the GPU runs out of memory). A group
-takes as long as its longest answer: an answer stops at MAX_TOKENS."""
+frames are asked together, as many as the memory of the GPU left by the model holds (batch_for; NNSLR_QWEN_BATCH
+chooses; halved when the GPU runs out of memory all the same). A group takes as long as its longest answer: an
+answer stops at MAX_TOKENS."""
 from __future__ import annotations
 
 import json
@@ -31,7 +32,11 @@ SCALE = 1000.0
 # About 12 lines of signs (a line is some 17 tokens). On Basel → Mumpf a real answer had at most 13 lines; 4 answers in
 # 10 went on in a loop to the 400 tokens of before, and a group of frames waits for its longest answer.
 MAX_TOKENS = 200
-BATCH = 8
+# A frame of a group takes FRAME_MIB of GPU memory (on the V100 the model holds 17 GB, a group of 4 took 1.75 GB more;
+# the attention of the images is one image at a time, so it grows with the frames, not faster). SPARE_MIB stays free.
+FRAME_MIB = 450
+SPARE_MIB = 1024
+MAX_BATCH = 32
 # An answer in a loop (_in_a_loop): this many boxes stacked in one column, edges within NEAR of each other (0-1000).
 STACKED = 3
 NEAR = 6
@@ -124,6 +129,11 @@ def parse_answer(text: str, width: int, height: int) -> list[dict]:
     return found
 
 
+def batch_for(free_bytes: int) -> int:
+    """The frames asked together with free_bytes of GPU memory free once the model is loaded: 1 to MAX_BATCH."""
+    return max(1, min(MAX_BATCH, (free_bytes // 2**20 - SPARE_MIB) // FRAME_MIB))
+
+
 def run(request: dict) -> None:
     import os
     import torch
@@ -138,7 +148,8 @@ def run(request: dict) -> None:
     processor = AutoProcessor.from_pretrained(model_dir)
     # Several frames in one generate: the shorter prompts are padded on the left, where generation does not look.
     processor.tokenizer.padding_side = 'left'
-    batch = max(1, int(os.environ.get('NNSLR_QWEN_BATCH', str(BATCH))))
+    chosen = os.environ.get('NNSLR_QWEN_BATCH')
+    batch = max(1, int(chosen)) if chosen else batch_for(torch.cuda.mem_get_info()[0])
     print(f"Proposals with {request['model']['repository']} on the GPU, {batch} frames at a time", file=sys.stderr, flush=True)
     output = Path(request['output'])
     (output / 'images').mkdir()

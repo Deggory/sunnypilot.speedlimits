@@ -1,5 +1,5 @@
 """The answers of Qwen3-VL as proposals of the review page (nnslr preannotate --proposer qwen)."""
-from nnslr_tools._vlm_proposer import parse_answer
+from nnslr_tools._vlm_proposer import batch_for, parse_answer
 
 
 def test_answer_in_fences_becomes_proposals_in_frame_pixels():
@@ -54,3 +54,11 @@ def test_a_line_written_twice_counts_once_and_signs_side_by_side_stay():
     assert len(parse_answer(twice, 1000, 1000)) == 2
     # Two plates one under the other (a limit and its panel) are not a loop.
     assert len(parse_answer('500 300 540 360 limit 50\n500 360 540 380 other', 1000, 1000)) == 2
+
+
+def test_the_frames_asked_together_fill_the_gpu_memory_the_model_leaves():
+    gib = 2**30
+    # The V100 of 32 GB with the model loaded (about 14.5 GB free): 30 frames; less with another job on the GPU.
+    assert batch_for(int(14.5 * gib)) == 30
+    assert batch_for(4 * gib) == 6
+    assert batch_for(64 * gib) == 32 and batch_for(gib // 2) == 1
