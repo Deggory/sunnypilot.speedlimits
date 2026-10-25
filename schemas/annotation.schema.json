@@ -431,6 +431,7 @@
         "danger_other",
         "give_way",
         "stop",
+        "priority_to_right",
         "main_road",
         "main_road_end",
         "no_overtaking",

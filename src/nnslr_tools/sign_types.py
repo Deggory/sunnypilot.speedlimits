@@ -12,7 +12,7 @@ SIGN_TYPES = (
     # Danger
     'pedestrian_crossing', 'children', 'cyclists', 'traffic_queue', 'roadworks', 'danger_other',
     # Priority
-    'give_way', 'stop', 'main_road', 'main_road_end',
+    'give_way', 'stop', 'priority_to_right', 'main_road', 'main_road_end',
     # Bans and other numbers
     'no_overtaking', 'no_overtaking_end', 'no_entry', 'minimum_speed', 'weight_limit', 'height_limit',
     'width_limit',

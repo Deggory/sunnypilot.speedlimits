@@ -49,6 +49,7 @@ export const SIGN_KIND_GROUPS: readonly {label: string; kinds: readonly SignKind
   {label: 'Priority', kinds: [
     {id: 'give_way', label: 'Give way', chip: 'Give way', short: 'give way'},
     {id: 'stop', label: 'Stop', chip: 'Stop', short: 'stop'},
+    {id: 'priority_to_right', label: 'Junction: priority to the right', chip: 'Priority to the right', short: 'right first'},
     {id: 'main_road', label: 'Main road', chip: 'Main road', short: 'main road'},
     {id: 'main_road_end', label: 'End of main road', chip: 'End of main road', short: 'main road end'},
   ]},
