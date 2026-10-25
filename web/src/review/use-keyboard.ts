@@ -1,6 +1,6 @@
 // Keyboard shortcuts: ← → frame (with Shift: the frame before or after in the filter), ↑ ↓ box, the speed typed
 // as it reads ("5 0" = 50, "1 2 0" = 120, "0" alone = not readable), O X U the road (ours, another, unclear), S other
-// sign for our road, G give way, Enter confirm, B or N new box, C fit (centre) the box with the AI, A or P apply
+// sign for our road, G give way, Enter confirm, B or N new box, C fit (centre) the box picked with the AI (every box of the frame when none was picked), A or P apply
 // previous, I ask the AI, H second reading, D removes every box of the frame, Del removes a box the reviewer selected
 // (on the one the page opened on it says to click it first), Esc cancel. While a menu or panel of the site's top bar is open, the keys
 // are its own.
@@ -160,7 +160,8 @@ export function useKeyboard(): void {
         break;
       case 'c':
       case 'C':
-        if (report.apiBase && state.selected >= 0) {
+        // The box picked (a click, ↑ ↓), else every box of the frame.
+        if (report.apiBase) {
           event.preventDefault();
           void fitBox();
         }

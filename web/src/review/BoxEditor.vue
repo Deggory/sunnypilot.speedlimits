@@ -133,7 +133,7 @@ function booleanChanged(key: BooleanField, event: Event): void {
       <p class="evidence" id="evidence">{{ evidence }}</p>
       <!-- A rough box made tight by the AI, shown only the picture around it (C). -->
       <button v-if="canFit" type="button" class="chip fit" id="fitBox" :disabled="fitting.key !== null"
-              @click="fitBox(); releaseFocus($event)">{{ fittingThis ? 'Fitting…' : 'Fit with AI' }}<kbd>C</kbd></button>
+              @click="fitBox(true); releaseFocus($event)">{{ fittingThis ? 'Fitting…' : 'Fit with AI' }}<kbd>C</kbd></button>
     </div>
     <!-- Asked for nearly every box: right under the zoom. -->
     <p class="field-label">Road</p>

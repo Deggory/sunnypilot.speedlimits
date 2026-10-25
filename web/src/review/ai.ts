@@ -144,30 +144,47 @@ export async function askAi(): Promise<void> {
 /** The box being fitted (Fit with AI), by frame key and index; null when none. */
 export const fitting = reactive<{key: string | null; index: number}>({key: null, index: -1});
 
-/** Fit with AI (C): the selected box sent with only the picture around it (…/ai-fit, ai_review.fit_box); it comes
- * back tight, as an unsaved change to confirm. A box moved or removed meanwhile is left as it is. */
-export async function fitBox(): Promise<void> {
+/** Fit with AI (C): the box the reviewer picked (``selected``: the one selected, as the button of its editor), else
+ * every box of the frame (the page selects the first one by itself), sent with only the picture around it
+ * (…/ai-fit, ai_review.fit_box), one after the other; each comes back tight, as an unsaved change to confirm. A box
+ * moved or removed meanwhile is left as it is. */
+export async function fitBox(selected = false): Promise<void> {
   const row = currentRow();
   const apiBase = report.apiBase;
-  const index = state.selected;
-  const detection = row ? workOf(row).detections[index] : undefined;
-  if (!row || !apiBase || !detection || fitting.key !== null || aiBlocker() !== '' || refuseChange()) return;
+  if (!row || !apiBase || fitting.key !== null || aiBlocker() !== '' || refuseChange()) return;
+  const boxes = workOf(row).detections;
+  const chosen = selected || state.selectedByUser ? boxes[state.selected] : undefined;
+  const targets = chosen ? [chosen] : [...boxes];
+  if (targets.length === 0) return;
   const key = row.frame_key;
-  const sent = JSON.stringify(detection.bbox_xyxy);
   fitting.key = key;
-  fitting.index = index;
+  fitting.index = chosen ? state.selected : -1;
+  let fitted = 0;
+  let empty = 0;
+  let kept = 0;
+  let message = '';
   try {
-    const answer = await call<{box: Box | null; message: string}>('POST', apiBase + '/frame/' + key + '/ai-fit',
-      {run_id: report.runId, box: detection.bbox_xyxy});
-    const unchanged = workOf(row).detections.includes(detection) && JSON.stringify(detection.bbox_xyxy) === sent;
-    if (answer.box && unchanged) {
-      detection.bbox_xyxy = answer.box;
-      // A box carried from the previous frame is now on its sign: as "Here" does, its check goes.
-      delete detection.check_position;
-      changed(row);
+    for (const [number, detection] of targets.entries()) {
+      if (targets.length > 1) state.notice = {key, text: 'Fitting box ' + (number + 1) + ' of ' + targets.length + '…', error: false};
+      const sent = JSON.stringify(detection.bbox_xyxy);
+      const answer = await call<{box: Box | null; message: string}>('POST', apiBase + '/frame/' + key + '/ai-fit',
+        {run_id: report.runId, box: detection.bbox_xyxy});
+      message = answer.message;
+      const unchanged = workOf(row).detections.includes(detection) && JSON.stringify(detection.bbox_xyxy) === sent;
+      if (!answer.box) empty += 1;
+      else if (!unchanged) kept += 1;
+      else {
+        detection.bbox_xyxy = answer.box;
+        // A box carried from the previous frame is now on its sign: as "Here" does, its check goes.
+        delete detection.check_position;
+        changed(row);
+        fitted += 1;
+      }
     }
-    state.notice = {key, text: answer.message + (answer.box && !unchanged ? ': the box changed meanwhile, kept.' : '.'),
-      error: false, warn: !answer.box || !unchanged};
+    const text = targets.length === 1 ? message + (kept ? ': the box changed meanwhile, kept.' : '.')
+      : fitted + ' of ' + targets.length + ' boxes fitted by AI' + (empty ? ', ' + empty + ' with no sign seen' : '')
+        + (kept ? ', ' + kept + ' changed meanwhile and kept' : '') + '.';
+    state.notice = {key, text, error: false, warn: fitted < targets.length};
   } catch (error) {
     state.notice = {key, text: 'Fit with AI: ' + messageOf(error), error: true};
     void loadAiState();
