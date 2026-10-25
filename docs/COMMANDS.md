@@ -196,6 +196,7 @@ Before publishing:
 
 | Command | What it does | Effects |
 |---|---|---|
+| `uv run --no-project --with osmium python scripts/osm_places.py` | Keeps the names of the Swiss cities, towns, villages and districts of the same local map in `derived/osm/places.jsonl`; the Review list names each drive by them ("Herznach → Zürich", with the day and time from the last segment video). Run it again after a newer map. | writes data |
 | `uv run --no-project --with osmium python scripts/osm_roads.py` | Keeps the OpenStreetMap roads near the drives (from a local Geofabrik extract in `raw/osm/`, read offline) in `derived/osm/roads.jsonl`. They are a possible input for "another road". Map data © OpenStreetMap contributors, ODbL. | writes data |
 | `python scripts/make_country_borders.py [<file.geojson>]` | Rebuilds `src/nnslr_tools/data/countries.json.gz`, the Natural Earth borders (public domain) used to propose the country of a frame | network (downloads the source), writes the file |
 

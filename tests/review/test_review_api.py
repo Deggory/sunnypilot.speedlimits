@@ -134,7 +134,7 @@ def test_routes_and_progress(api):
     legacy = json_of(server.request('GET', '/api/routes')[2])['routes']
     assert set(next(r for r in legacy if r['route_id'] == ROUTE)) == {
         'route_id', 'run_id', 'frame_count', 'frames_with_proposals', 'confirmed_count', 'suspicious_count',
-        'hint_frames', 'url'}
+        'hint_frames', 'url', 'drive'}
     assert get(server, '/api/v1/routes/00000009--abcdef1234')[0] == 404
     assert get(server, '/api/v1/routes/not-a-route')[0] == 404
 

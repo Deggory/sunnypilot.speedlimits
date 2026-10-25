@@ -27,6 +27,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
+from nnslr_tools.drives import drive_of
 from nnslr_tools.manifest import parse_route_id
 from nnslr_tools.preannotate import PreannotationError, _inside, resolve_data_root
 # [site-login] - START
@@ -300,6 +301,8 @@ class ReviewApp(ReviewService):
                 'suspicious_count': len(suspicious),
                 'hint_frames': hint_stats['frames'],
                 'url': '/route/' + route + '/',
+                # The route as the drive it was: when, how long, from where to where (nnslr_tools.drives).
+                'drive': drive_of(self.root, route),
             })
         return summaries
 

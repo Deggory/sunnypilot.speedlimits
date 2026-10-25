@@ -112,6 +112,15 @@ Other signs were mostly taken for variable displays: the AI reviewer used to lea
 - **Fixed:** in those frames, removed other-sign proposals and mined boxes scoring 0.3 or more are no longer "not a sign" (`BOXES_OTHER_SIGNS`, `mine-negatives --sign-score`). Run `2026-10-24_1835-classifier` (cutter 1344 × 760, score 0.1, test) measures the fix: other signs read right went from 0 to **18 of 54**; speed signs found and read right **66%** (53 of 80; old reader 68%); the cutter's 210 false boxes per frame drop to **0.49**. In train, 650 likely signs were left out of the mined boxes.
 - Those 1,339 removed proposals are other signs waiting for their kind: reviewing them would give the classifier its first real set of other signs.
 
+**Proposers of Prepare (`helpers/measure_proposer.sh`, 25 October 2026, the 604 test frames)**
+
+| Proposer | Speed signs proposed with the right number | Speed signs found | All signs found | False proposals per frame | Seconds per frame |
+|---|---|---|---|---|---|
+| Vietnamese YOLO (Hugging Face) | 2 of 80 | 27 of 80 | 45 of 134 | 0.08 | 0.5 |
+| Our cutter + classifier | **51 of 80** | **60 of 80** | 66 of 134 | 0.45 | 0.8 |
+
+The Vietnamese model, which proposed the signs of every route so far, finds a third of the test speed signs and reads almost none right: reviewers drew and labelled the rest by hand. Our networks propose most of them with the right number, at the cost of about one false proposal every two frames to delete.
+
 **Experiment B (run `2026-10-24_expB`, on the reviewed boxes)**
 
 | Variant | Reading on validation | "Another" found on validation | Reading on test |

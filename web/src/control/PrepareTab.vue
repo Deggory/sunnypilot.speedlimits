@@ -7,7 +7,7 @@ import type {ActionName, ActionOptions, ActionState, Job, PanelStatus, Proposer,
 import Segmented from './Segmented.vue';
 import ActionList from './ActionList.vue';
 import JobProgress from './JobProgress.vue';
-import {jobOf, PREPARE_ACTIONS, terminalActivities} from './jobs';
+import {jobOf, PREPARE_ACTIONS, startedWhen, terminalActivities} from './jobs';
 import PrepRoutes from './PrepRoutes.vue';
 import RouteTable from './RouteTable.vue';
 import TerminalActivity from './TerminalActivity.vue';
@@ -49,6 +49,12 @@ const activities = computed(() => terminalActivities(props.status, ['fetch', 'pr
 const counts = computed(() => COUNTS.map(([state, label]) => ({state, label,
   count: (props.status?.routes ?? []).filter((row) => row.state === state).length})));
 const total = computed(() => counts.value.reduce((sum, item) => sum + item.count, 0));
+const running = computed(() => job.value?.state === 'running' || activities.value.length > 0);
+/** The job shown as a card: running, or failed (its error must be read); a finished one is a line. */
+const bigJob = computed(() => job.value && job.value.state !== 'ok' ? job.value : null);
+const WAITING: RouteState[] = ['collegare', 'estrarre', 'preannotare'];
+const notReady = computed(() => (props.status?.routes ?? []).filter((row) => WAITING.includes(row.state)));
+const ready = computed(() => (props.status?.routes ?? []).filter((row) => !WAITING.includes(row.state)).length);
 </script>
 
 <template>
@@ -77,15 +83,20 @@ const total = computed(() => counts.value.reduce((sum, item) => sum + item.count
                 @run="(name, state) => emit('run', name, state, undefined, {proposer})"/>
   </section>
 
-  <section v-if="job || activities.length" class="live-section" :class="{now: job?.state === 'running' || activities.length > 0}" aria-labelledby="prepare-job-title">
-    <h2 class="section-title" id="prepare-job-title">{{ job?.state === 'running' || activities.length ? 'Running' : 'Last job' }}</h2>
+  <!-- Only what is happening now, or a job that failed: a finished job is one line. -->
+  <section v-if="bigJob || activities.length" class="live-section" :class="{now: running}" aria-labelledby="prepare-job-title">
+    <h2 class="section-title" id="prepare-job-title">{{ running ? 'Running' : 'Last job failed' }}</h2>
     <div class="jp-list" aria-live="polite">
-      <JobProgress v-if="job" :job="job" :heading="job.state !== 'running' && activities.length ? 'Last job' : undefined" @details="$emit('details', $event)" @stop="$emit('stop', $event)">
-        <PrepRoutes v-if="job.action === 'prepare' && job.state === 'running' && status?.preparation" :routes="status.preparation.working"/>
+      <JobProgress v-if="bigJob" :job="bigJob" @details="$emit('details', $event)" @stop="$emit('stop', $event)">
+        <PrepRoutes v-if="bigJob.action === 'prepare' && bigJob.state === 'running' && status?.preparation" :routes="status.preparation.working"/>
       </JobProgress>
       <TerminalActivity v-for="activity in activities" :key="activity.pid + activity.label" :activity="activity" :preparation="status?.preparation ?? null"/>
     </div>
   </section>
+  <p v-else-if="job" class="last-line">Last: {{ job.label }}, {{ startedWhen(job) }} · done ·
+    <button type="button" class="link-button" @click="$emit('details', job)">Details</button></p>
 
-  <RouteTable :routes="status?.routes ?? null"/>
+  <!-- The routes still on their way; the ready ones are on the Review tab, as drives. -->
+  <RouteTable v-if="notReady.length" :routes="notReady"/>
+  <p v-if="ready" class="last-line"><a href="/routes">{{ plural(ready, 'route') }} ready to review, as drives with their day and places → Review</a></p>
 </template>

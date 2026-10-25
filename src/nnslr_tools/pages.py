@@ -221,9 +221,15 @@ def _route_row(summary: dict) -> str:
     if hint_frames:
         stats.append('<span>' + str(hint_frames) + ' with second reading</span>')
     route = html.escape(summary['route_id'])
+    # The drive first (when, how long, from where to where), the route's code small after it.
+    drive = summary.get('drive') or {}
+    when = [part for part in (drive.get('when'), _plural(drive['minutes'], 'min', 'min') if drive.get('minutes') else None) if part]
+    name = html.escape(drive.get('title') or summary['route_id'])
+    detail = html.escape(' · '.join(when)) + (' · ' if when else '') + '<code>' + html.escape(summary['route_id'].lstrip('0')) + '</code>'
     return ('<li><a class="card-row ' + state + '" href="' + html.escape(summary['url']) + '">'
             + '<span class="state-icon" aria-hidden="true">' + ('✓' if state == 'done' else '') + '</span>'
-            + '<span class="route" title="' + route + '">' + route + '</span>'
+            + '<span class="route" title="' + route + '"><span class="drive">' + name + '</span>'
+            + '<span class="drive-when">' + detail + '</span></span>'
             + '<span class="count">' + str(confirmed) + ' of ' + str(total)
             + ' <span class="unit">confirmed</span></span>'
             + '<span class="bar" aria-hidden="true"><span style="width:' + str(percent) + '%"></span></span>'
