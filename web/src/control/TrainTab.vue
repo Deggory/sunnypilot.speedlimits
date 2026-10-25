@@ -7,13 +7,14 @@
 // the Train button, or its training running (or failed) with its steps, then its curves and its latest version
 // (GET /api/panel/models, as the Models tab). The page does not move while work runs. What the dataset holds is below.
 import {computed, ref} from 'vue';
-import {plural, thousands} from '../common/format';
+import {isoWhen, plural, thousands} from '../common/format';
 import type {ActionName, ActionState, Activity, CutterFamilies, CutterOptions, Job, JobProgress as Progress, ModelRole, ModelVersion,
   PanelStatus, TrainingStart} from '../common/panel-types';
 import ActionList from './ActionList.vue';
 import DatasetSection from './DatasetSection.vue';
 import JobProgress from './JobProgress.vue';
 import {CHARTED_ACTIONS, JOB_STATE, jobOf, PIPELINE_ACTIONS, startedWhen, terminalActivities} from './jobs';
+import {pct} from './evaluate';
 import ModelItem from './ModelItem.vue';
 import {putInUse, sizeText, useModels} from './models';
 import Segmented from './Segmented.vue';
@@ -72,6 +73,23 @@ const latestDecider = computed(() => latest('decider'));
 const roleLabel = (role: ModelRole): string => roleOf(role)?.label ?? role;
 const sectionLatest = computed(() => section.value === 'cutter' ? latestCutter.value : section.value === 'classifier'
   ? latestClassifier.value : section.value === 'decider' ? latestDecider.value : null);
+/** The headline of a version in one line: its main number and what it counts (the numbers of ModelItem). */
+function headlineOf(version: ModelVersion): {value: string; text: string} | null {
+  if (version.role === 'cutter') {
+    const cut = version.test ?? version.validation ?? null;
+    if (cut === null) return null;
+    const speed = version.families === 'all' ? cut.by_family?.['speed'] ?? null : null;
+    if (speed) return {value: pct(speed.recall), text: 'speed signs found, ' + thousands(speed.found) + ' of ' + thousands(speed.truth ?? 0)};
+    return {value: pct(cut.recall), text: 'signs found'};
+  }
+  if (version.role === 'classifier') {
+    if (version.chain) return {value: pct(version.chain.recall), text: 'speed signs found and read right'};
+    if (version.test) return {value: pct(version.test.accuracy), text: 'test signs read right'};
+    return null;
+  }
+  return version.validation ? {value: pct(version.validation.other_road_recall), text: '“Another” found on validation'} : null;
+}
+const latestHeadline = computed(() => sectionLatest.value ? headlineOf(sectionLatest.value) : null);
 const readOnly = computed(() => (props.status !== null && !props.status.actions_enabled) || Boolean(models.value?.active_problem));
 const busy = ref<string | null>(null);
 async function choose(version: ModelVersion): Promise<void> {
@@ -166,6 +184,25 @@ const numbers = computed(() => {
     <p v-else-if="section === 'decider'" class="role-what">Says whom each sign applies to: our road, another road, or abstain.</p>
     <p v-else class="role-what">The detector and the reader together, from the reviews to a package: the way every model was trained so far.</p>
 
+    <!-- The latest version in one row; open, its whole card (numbers by width, Use this one, the run). -->
+    <details v-if="sectionLatest" class="latest-row">
+      <summary>
+        <span class="latest-what"><span class="latest-kicker">{{ section === 'decider' ? 'Latest prototype' : 'Latest' }} ·
+          {{ sectionLatest.trained_at ? isoWhen(sectionLatest.trained_at) : sectionLatest.run }}<span
+          v-if="sectionLatest.in_use" class="latest-use">in use</span><span v-else-if="!sectionLatest.finished" class="latest-wait">not finished</span></span>
+          <span class="latest-name">{{ sectionLatest.label }}</span>
+          <span v-if="latestHeadline" class="latest-text">{{ latestHeadline.text }}</span></span>
+        <strong v-if="latestHeadline" class="latest-value">{{ latestHeadline.value }}</strong>
+        <span class="latest-chev" aria-hidden="true">›</span>
+      </summary>
+      <ul class="model-list">
+        <ModelItem :version="sectionLatest" :role-label="roleLabel(sectionLatest.role)" :score="models?.cutter_score_threshold ?? 0.1"
+                   :read-only="readOnly" :busy="busy" @use="choose"/>
+      </ul>
+    </details>
+    <p v-else-if="section === 'cutter' || section === 'classifier'" class="latest-none">{{ models === null ? 'Loading…'
+      : 'None trained yet: the ' + (section === 'cutter' ? 'detector' : 'reader') + ' of a whole pipeline plays this role.' }}</p>
+
     <!-- The slot of the work: the training running (or failed) in place of its button. -->
     <div class="train-slot">
       <template v-if="bigJob || sectionActivities.length">
@@ -191,17 +228,13 @@ const numbers = computed(() => {
         <button type="button" class="link-button" @click="emit('details', job)">Details</button></p>
     </div>
 
-    <TrainingCharts v-if="charted" :progress="charted.progress" :running="charted.running"/>
+    <TrainingCharts v-if="charted?.running" :progress="charted.progress" :running="true"/>
+    <details v-else-if="charted" class="latest-row curves-row">
+      <summary><span class="latest-what"><span class="latest-name">Curves of the last training</span>
+        <span class="latest-text">recall and loss, epoch by epoch</span></span><span class="latest-chev" aria-hidden="true">›</span></summary>
+      <TrainingCharts :progress="charted.progress" :running="false"/>
+    </details>
 
-    <template v-if="section !== 'pipeline'">
-      <h3 class="ds-title">{{ section === 'decider' ? 'Latest prototype' : 'Latest version' }}</h3>
-      <ul v-if="sectionLatest" class="model-list">
-        <ModelItem :version="sectionLatest" :role-label="roleLabel(section)" :score="models?.cutter_score_threshold ?? 0.1"
-                   :read-only="readOnly" :busy="busy" @use="choose"/>
-      </ul>
-      <div v-else-if="section !== 'decider'" class="role-empty"><strong>{{ models === null ? 'Loading…' : 'None trained yet.' }}</strong>
-        <span v-if="models">The {{ section === 'cutter' ? 'detector' : 'reader' }} of a whole pipeline plays this role too.</span></div>
-    </template>
   </section>
 
   <DatasetSection :dataset="status?.dataset ?? null" :loading="status === null"/>
