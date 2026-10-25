@@ -131,6 +131,11 @@ export interface Busy {
   /** At work: the frames proposed so far, of the frames of its current report. */
   done?: number;
   total?: number | null;
+  /** At work: the seconds left for the drive (an estimate), null when not known yet. */
+  left_seconds?: number | null;
+  /** At work: the frames being proposed now, how long such a step takes and the seconds since the last one was
+   * written; null when the steps are too quick to show or not known yet. */
+  step?: {frames: number; seconds: number; since: number} | null;
   /** Waiting: the drives before it in the batch. */
   ahead?: number;
 }

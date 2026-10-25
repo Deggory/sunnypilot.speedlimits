@@ -290,13 +290,11 @@ class ReviewApp(ReviewService):
         or, while Propose again works on it (nnslr_tools.reproposing), the new proposals made so far, read only; busy
         is then the state of the drive for the page, else None. Raises as report() for an unknown drive."""
         from nnslr_tools import reproposing
-        directory, rows, _by_key = self.report(route)
+        directory, rows, by_key = self.report(route)
         item = reproposing.of(self.root, route)
         if item is not None and item['phase'] == 'proposing again':
-            fresh = reproposing.at_work_rows(item)
-            for row in fresh:
-                for name in ('gps', 'country_proposed', 'country_from'):
-                    row.setdefault(name, None)
+            fresh = located(reproposing.at_work_rows(item), by_key)
+            item = dict(item, done=max(item['done'], len(fresh)))
             return (item['pending'], item['pending'].name, fresh, reproposing.public(item, len(rows)),
                     item.get('proposer_id') or _report_proposer(directory))
         return directory, directory.name, rows, reproposing.public(item, len(rows)), _report_proposer(directory)
@@ -352,6 +350,16 @@ class ReviewApp(ReviewService):
                 'proposer': _report_proposer(directory),
             })
         return summaries
+
+
+def located(fresh: list[dict], by_key: dict) -> list[dict]:
+    """The new proposals of the drive at work with the GPS position and country of their frame, from its current
+    report (ReviewService.report adds them; the frames are the same)."""
+    for row in fresh:
+        known = by_key.get(row.get('frame_key')) or {}
+        for name in ('gps', 'country_proposed', 'country_from'):
+            row[name] = known.get(name)
+    return fresh
 
 
 def _report_proposer(directory: Path) -> str:
@@ -660,19 +668,22 @@ def make_handler(app: ReviewApp):
                 route = match.group(1)
                 try:
                     parse_route_id(route)
-                    total = len(app.report(route)[1])
+                    _directory, rows, by_key = app.report(route)
+                    total = len(rows)
                 except (PreannotationError, ValueError, OSError):
                     self._problem(404, 'unknown_route', UNKNOWN_DRIVE_MESSAGE, True)
                     return
                 from nnslr_tools import reproposing
                 item = reproposing.of(app.root, route)
-                answer = {'ok': True, 'busy': reproposing.public(item, total)}
+                fresh = None
                 if match.group(2) is not None and item is not None and item['phase'] == 'proposing again':
-                    fresh = reproposing.at_work_rows(item)[int(match.group(2)):]
-                    for row in fresh:
-                        for name in ('gps', 'country_proposed', 'country_from'):
-                            row.setdefault(name, None)
-                    answer.update(run_id=item['pending'].name, rows=fresh)
+                    every = reproposing.at_work_rows(item)
+                    # Frames written since the count: the page has them, so does its count.
+                    item = dict(item, done=max(item['done'], len(every)))
+                    fresh = every[int(match.group(2)):]
+                answer = {'ok': True, 'busy': reproposing.public(item, total)}
+                if fresh is not None:
+                    answer.update(run_id=item['pending'].name, rows=located(fresh, by_key))
                 self._json(200, answer)
                 return
             if re.fullmatch(r'/api/route/[^/]+/frame/[^/]+/[^/]+', path):

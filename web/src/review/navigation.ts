@@ -27,7 +27,8 @@ export function go(step: number): void {
   openFrame(target.frame_key);
 }
 
-export function openFrame(key: string): void {
+/** Opens a frame; reveal: on a phone, the photo back in view (not when the frame changes by itself). */
+export function openFrame(key: string, reveal = true): void {
   state.currentKey = key;
   state.selected = -1;
   state.drawing = false;
@@ -45,7 +46,7 @@ export function openFrame(key: string): void {
   // Once the page shows the frame: its tick in sight, and on a phone the photo.
   void nextTick(() => {
     scrollTimelineToCurrent();
-    revealStage();
+    if (reveal) revealStage();
   });
 }
 
@@ -135,6 +136,8 @@ export function pickFilter(filter: Filter): void {
 
 /** The frame last open in this browser, else the first of the filter, else the first one. */
 export function pickStartFrame(): string | null {
+  // The drive at work opens on its newest frame, and follows (review/busy.ts).
+  if (report.atWork) return report.rows[report.rows.length - 1]?.frame_key ?? null;
   const last = readLocal(report.lastKeyStorage, null);
   if (last !== null && rowOf(last)) return last;
   const first = report.rows.find((row) => matchesFilter(row, state.filter)) ?? report.rows[0];

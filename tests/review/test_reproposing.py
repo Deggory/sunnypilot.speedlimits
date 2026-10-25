@@ -3,10 +3,13 @@ page shows the new proposals made so far (the drive at work) or its report (a dr
 from __future__ import annotations
 
 import json
+import os
+import time
 
 import pytest
 
 from nnslr_tools import reproposing
+from nnslr_tools.gps import positions_path
 from nnslr_tools.review_db import ReviewRejected
 from review_helpers import OTHER_ROUTE, ROUTE, RUN_ID, RunningServer, json_of, make_report
 from test_route_list_and_page import payload_of
@@ -28,6 +31,11 @@ def batch(tmp_path, monkeypatch):
     fresh = dict(rows[0], run_id=NEW_RUN, detections=[])
     (pending / 'preannotations.jsonl').write_text(json.dumps(fresh) + '\n{"frame_key": "0/1", "rout')
     (pending / 'request.json').write_text(json.dumps({'model': {'proposer': 'qwen'}}))
+    # The GPS of the drive: the new proposals have it as the report does.
+    positions_path(tmp_path, ROUTE).parent.mkdir(parents=True, exist_ok=True)
+    positions_path(tmp_path, ROUTE).write_text(json.dumps(
+        {'frame_key': '0/0', 'segment_index': 0, 'output_index': 0, 'latitude': 47.55, 'longitude': 7.6,
+         'speed_mps': 20.0, 'bearing_deg': 90.0, 'country': 'CH', 'country_from': 'gps'}) + '\n')
     monkeypatch.setattr(reproposing, '_again_running', lambda: True)
     reproposing.reset_cache()
     yield tmp_path, rows, monkeypatch
@@ -50,6 +58,37 @@ def test_the_drives_of_a_running_batch_are_read_only_until_each_is_done(batch):
     monkeypatch.setattr(reproposing, '_again_running', lambda: False)
     reproposing.reset_cache()
     assert reproposing.busy(root) == {}
+
+
+def _pictures(pending, times):
+    (pending / 'images').mkdir(parents=True)
+    for index, at in enumerate(times):
+        path = pending / 'images' / f'{index:08d}.jpg'
+        path.write_bytes(b'preview')
+        os.utime(path, (at, at))
+
+
+def test_how_far_the_drive_at_work_is_from_the_times_of_its_pictures(tmp_path):
+    # Qwen3-VL: steps of 4 frames written together every 22 s, the last one 5 s ago.
+    start = time.time() - 49
+    _pictures(tmp_path / 'steps', [start + (index // 4) * 22 + (index % 4) * 0.01 for index in range(12)])
+    pace = reproposing._pace(tmp_path / 'steps', 12)
+    assert pace['step_frames'] == 4 and pace['step_seconds'] == pytest.approx(22)
+    assert pace['frame_seconds'] == pytest.approx(5.5, abs=0.01)
+    item = {'phase': 'proposing again', 'proposer': 'Qwen3-VL', 'done': 12, 'pace': pace}
+    shown = reproposing.public(item, 20)
+    assert shown['done'] == 12 and shown['total'] == 20 and shown['left_seconds'] == 44
+    assert shown['step']['frames'] == 4 and shown['step']['seconds'] == 22 and shown['step']['since'] == pytest.approx(5, abs=1)
+    # The last step of the drive: only the frames left.
+    assert reproposing.public(item, 14)['step']['frames'] == 2
+    # Quick frames: the drive and the time left, no step (it would only flicker).
+    _pictures(tmp_path / 'quick', [start + index * 2 for index in range(10)])
+    quick = reproposing._pace(tmp_path / 'quick', 10)
+    assert quick['step_seconds'] is None and quick['frame_seconds'] == pytest.approx(2)
+    assert reproposing.public({'phase': 'proposing again', 'done': 10, 'pace': quick}, 20)['step'] is None
+    # No picture yet: nothing known.
+    assert reproposing._pace(tmp_path / 'none', 0) == {'last_at': None, 'frame_seconds': None, 'step_frames': None,
+                                                       'step_seconds': None}
 
 
 def test_a_batch_of_new_drives_is_not_propose_again(tmp_path, monkeypatch):
@@ -86,6 +125,7 @@ def test_the_review_page_of_the_drive_at_work_shows_its_new_proposals_read_only(
         assert payload['run_id'] == '.pending-' + NEW_RUN and payload['proposer'] == 'qwen'
         assert payload['busy']['phase'] == 'proposing again' and payload['busy']['done'] == 1
         assert payload['busy']['total'] == 3
+        assert payload['frames'][0]['country_proposed'] == 'CH' and payload['frames'][0]['gps']['latitude'] == 47.55
         assert server.request('GET', f'/route/{ROUTE}/images/00000000.jpg')[2] == b'new preview'
         reviews = json_of(server.request('GET', f'/api/route/{ROUTE}/reviews')[2])
         assert reviews['run_id'] == '.pending-' + NEW_RUN and reviews['reviews'] == []
@@ -97,6 +137,7 @@ def test_the_review_page_of_the_drive_at_work_shows_its_new_proposals_read_only(
         # Live: the frames proposed after those the page has (the line being written is not one yet).
         live = json_of(server.request('GET', f'/api/route/{ROUTE}/busy/0')[2])
         assert live['run_id'] == '.pending-' + NEW_RUN and [row['frame_key'] for row in live['rows']] == ['0/0']
+        assert live['rows'][0]['country_proposed'] == 'CH'
         assert json_of(server.request('GET', f'/api/route/{ROUTE}/busy/1')[2])['rows'] == []
         assert 'rows' not in json_of(server.request('GET', f'/api/route/{OTHER_ROUTE}/busy/0')[2])
         # Once Propose again ends, the page asks again and the drive is free.

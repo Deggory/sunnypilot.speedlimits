@@ -86,10 +86,31 @@ input::placeholder { color: var(--placeholder); }
 /* The drive's count under its name in the inspector (ReviewToolbar.vue): the count, the bar, who reviews. */
 .route-status { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
 /* A drive Propose again works on: read only (review/busy.ts). */
-.busy-banner { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; padding: 10px 12px;
-  border-radius: 12px; background: var(--warn-soft); }
-.busy-banner p { margin: 0; flex: 1 1 220px; font-size: 13px; line-height: 1.4; }
-.busy-banner strong { display: block; }
+.busy-banner { display: flex; flex-direction: column; align-items: stretch; gap: 7px; margin-top: 10px;
+  padding: 12px 14px; border-radius: 12px; background: var(--warn-soft); }
+.busy-banner p { margin: 0; font-size: 13px; line-height: 1.4; }
+.busy-banner .btn { align-self: flex-start; }
+.busy-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.busy-head strong { font-size: 14px; min-width: 0; }
+.busy-pct { flex: none; font-size: 22px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.busy-bar { flex: 1 1 auto; min-width: 0; height: 6px; border-radius: 3px; background: rgba(127, 127, 127, 0.22); overflow: hidden; }
+.busy-bar span { display: block; height: 100%; width: 0; border-radius: 3px; background: var(--warn); transition: width 0.25s linear; }
+.busy-bar.thin { height: 4px; }
+/* Longer than the steps before (a long answer): the bar breathes until the frames come. */
+.busy-bar.over span { animation: busy-breathe 1.4s ease-in-out infinite; }
+@keyframes busy-breathe { 50% { opacity: 0.4; } }
+@media (prefers-reduced-motion: reduce) { .busy-bar.over span { animation: none; } }
+.busy-step { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.busy-banner .busy-step p { font-size: 12.5px; }
+.busy-step .nowrap { white-space: nowrap; }
+.busy-step-row { display: flex; align-items: center; gap: 10px; font-size: 12.5px; }
+.busy-step-pct { flex: none; min-width: 4ch; text-align: right; }
+.busy-banner .busy-note { color: var(--muted); font-size: 12.5px; }
+.busy-newest { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 -8px -6px;
+  padding: 8px; border: 0; border-radius: 8px; background: none; color: var(--fg); font: inherit; font-size: 13.5px;
+  font-weight: 600; text-align: left; cursor: pointer; }
+.busy-newest:hover { background: rgba(127, 127, 127, 0.12); }
+.busy-newest .chev { color: var(--muted); font-size: 19px; line-height: 1; }
 .progress { display: flex; flex-direction: column; align-items: stretch; gap: 6px; min-width: 0; }
 .progress-text { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .progress-text strong { color: var(--fg); font-size: 16px; font-weight: 750; letter-spacing: -0.01em; }
