@@ -125,7 +125,9 @@ export function drawStage(detections: readonly Detection[], selected: number, hi
     if (d.model_label) cls += ' proposal';
     if (d.check_position) cls += ' check';
     if (isSelected) cls += ' selected';
-    const text = (i + 1) + ' · ' + shortName(d) + (d.check_position ? ' · check' : '');
+    // The road too, when said: "2 · 50 · ours", "3 · give way · another".
+    const road = d.applicability === 'own_road' ? ' · ours' : d.applicability === 'other_road' ? ' · another' : '';
+    const text = (i + 1) + ' · ' + shortName(d) + road + (d.check_position ? ' · check' : '');
     const width = labelWidth(text, fontSize);
     const x = labelX(b[0], width, imageWidth, k);
     // The selected box has its corners outside: its label goes above them.
