@@ -24,6 +24,7 @@ const bigJob = computed(() => job.value && (job.value.state === 'running' || job
 const repo = computed(() => props.status?.networks?.repo ?? '');
 const latest = computed((): NetworkPackage | null => props.status?.networks?.packages[0] ?? null);
 const publishState = computed(() => props.status?.actions.networks_publish ?? null);
+const account = computed(() => props.status?.networks?.account ?? null);
 /** The package holds other networks than those in use now: a new one is needed to publish these. */
 const outdated = computed(() => latest.value !== null && ROLES.some((role) => props.inUse[role] && latest.value!.networks[role] !== props.inUse[role]));
 
@@ -43,6 +44,14 @@ function publish(): void {
     <p class="note">The three networks in use, as one package, on Hugging Face for other people
       (<a :href="'https://huggingface.co/' + repo" target="_blank" rel="noopener">{{ repo }}</a>). Every package is checked here
       before it can be published.</p>
+    <p class="hf-line" id="hf-line">
+      <template v-if="account?.source === 'portal'">Hugging Face: connected as <strong>{{ account.user }}</strong> ·
+        <a href="/account#huggingface">Settings ›</a></template>
+      <template v-else-if="account?.source === 'server'">Hugging Face: this server's own login ·
+        <a href="/account#huggingface">Connect a token in Settings ›</a></template>
+      <template v-else-if="account">Hugging Face: not connected ·
+        <a href="/account#huggingface">Connect it in Settings ›</a></template>
+    </p>
     <div class="train-slot">
       <JobProgress v-if="bigJob" :job="bigJob" @details="emit('details', $event)" @stop="emit('stop', $event)"/>
       <template v-else>

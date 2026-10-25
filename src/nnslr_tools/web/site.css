@@ -113,6 +113,18 @@ padding:6px 16px;border-radius:8px;cursor:pointer;min-height:32px;opacity:.85}
    (components/AiRouteSheet.vue). iOS grouped lists: rows on a grey inset card, separators that start after the
    margin, fields with the label at the left (above it on a phone), a checkmark on the model chosen. */
 #ai-reviewer{scroll-margin-top:84px}
+/* Hugging Face (account/HuggingFace.vue): who the token is of, and the wizard in three numbered steps. */
+#huggingface{scroll-margin-top:84px}
+.hf-connected{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px}
+.hf-connected .buttons{flex-basis:100%}
+.hf-when{color:var(--muted)}
+.hf-steps{list-style:none;counter-reset:hf;margin:4px 0 0;padding:0;display:flex;flex-direction:column;gap:14px}
+.hf-steps>li{counter-increment:hf;position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding-left:40px}
+.hf-steps>li::before{content:counter(hf);position:absolute;left:0;top:0;width:28px;height:28px;border-radius:50%;display:grid;
+place-items:center;background:var(--accent);color:#fff;font-weight:700;font-size:14px}
+.hf-step-title{font-weight:650}
+.hf-step-text{color:var(--muted);font-size:14px}
+.hf-steps .field{width:100%;max-width:420px}
 .ai-loading{color:var(--muted)}
 .ios-list{list-style:none;margin:0;padding:0;border-radius:14px;background:var(--surface-2);overflow:hidden}
 .ai-prov{position:relative;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;column-gap:12px}

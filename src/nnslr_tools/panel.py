@@ -478,8 +478,10 @@ class Panel:
         payload['proposers'] = {'qwen': vlm_missing(self.root), 'qwen_gpu': _qwen_gpu_reason(system['gpu']) or None,
                                 'ours': ours_missing(self.root)}
         # The packages of our networks prepared here, newest first, and where they are published (Models tab).
+        from nnslr_tools import hf_account
         from nnslr_tools.networks_package import packages
-        payload['networks'] = {'packages': packages(self.root)[:NETWORK_PACKAGES_SHOWN], 'repo': NETWORKS_REPO}
+        payload['networks'] = {'packages': packages(self.root)[:NETWORK_PACKAGES_SHOWN], 'repo': NETWORKS_REPO,
+                               'account': hf_account.public_state(self.root)}
         # [ai-reviewer] - START
         # The AI reviewer of Settings (a read of its file, no network): whether a route can be reviewed with AI.
         payload['ai_reviewer'], ai_providers = self._ai_settings()
@@ -635,8 +637,10 @@ class Panel:
             elif name == 'networks_prepare':
                 # Our networks only whole (the same rule as Prepare's proposer).
                 reason = payload.get('proposers', {}).get('ours') or ''
-            elif name == 'networks_publish':
-                reason = '' if payload.get('networks', {}).get('packages') else 'no package prepared yet'
+            elif name == 'networks_publish' and not payload.get('networks', {}).get('packages'):
+                reason = 'no package prepared yet'
+            elif name == 'networks_publish' and not (payload.get('networks', {}).get('account') or {}).get('connected'):
+                reason = 'connect Hugging Face first: Settings, Hugging Face'
             # [ai-reviewer] - START
             elif name in AI_ACTIONS and not (self.repo / action['command'][0]).is_file():
                 reason = action['command'][0] + ' is missing in this installation'
@@ -1096,7 +1100,15 @@ class Panel:
             from nnslr_tools.networks_package import packages
             if not isinstance(package, str) or package not in {item['name'] for item in packages(self.root)}:
                 raise PanelError(400, 'bad_option', 'Unknown package: prepare it first.')
+            from nnslr_tools import hf_account
+            if not hf_account.public_state(self.root)['connected']:
+                raise PanelError(409, 'not_available', 'Connect Hugging Face first: Settings, Hugging Face.')
             start_args.append('--name=' + package)
+            # The token kept in Settings, in the job's environment only (never its command line or log); without
+            # it the script uses this server's own Hugging Face login.
+            kept = hf_account.token(self.root)
+            if kept:
+                start_env['HF_TOKEN'] = kept
         if action == 'networks_prepare':
             from nnslr_tools.networks_package import new_name
             from nnslr_tools.preannotate import ours_missing

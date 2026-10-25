@@ -72,6 +72,8 @@ MAX_AI_SUGGESTIONS = 2
 AI_SETTINGS_POSTS = ('/api/settings/ai/providers', '/api/settings/ai/reviewer', '/api/settings/ai/models',
                      '/api/settings/ai/test')
 AI_DELETE_RE = re.compile(r'/api/settings/ai/providers/([a-z][a-z0-9-]{0,31})/delete')
+# Settings > Hugging Face: the token the networks are published with (nnslr_tools.hf_account).
+HF_POSTS = ('/api/settings/huggingface', '/api/settings/huggingface/remove')
 # [ai-reviewer] - END
 
 
@@ -638,6 +640,11 @@ def make_handler(app: ReviewApp):
             if path == '/api/settings/ai':
                 self._json(200, self._ai_settings())
                 return
+            # Whose Hugging Face token the portal keeps, never the token.
+            if path == '/api/settings/huggingface':
+                from nnslr_tools import hf_account
+                self._json(200, {**hf_account.public_state(app.root), 'can_edit': self._can_use_ai()})
+                return
             # Whether the review page can ask the AI, and why not.
             if path == '/api/ai/state':
                 self._json(200, self._ai_state())
@@ -652,7 +659,7 @@ def make_handler(app: ReviewApp):
                 from nnslr_tools import ai_review
                 self._json(200, {'ok': True, 'trial': ai_review.latest_trial(app, match.group(1))})
                 return
-            if (path in AI_SETTINGS_POSTS or AI_DELETE_RE.fullmatch(path)
+            if (path in AI_SETTINGS_POSTS or AI_DELETE_RE.fullmatch(path) or path == HF_POSTS[1]
                     or re.fullmatch(r'/api/route/[^/]+/frame/[^/]+/[^/]+/ai-(?:suggest|fit)', path)):
                 self._problem(405, 'method_not_allowed', 'Use POST.', True)
                 return
@@ -949,6 +956,12 @@ def make_handler(app: ReviewApp):
                     return
                 self._ai_settings_post(path, self._read_json())
                 return
+            if path in HF_POSTS:
+                # The same protections as the AI settings: same origin, JSON, a signed-in browser.
+                if self._ai_post_refused():
+                    return
+                self._hf_post(path, self._read_json())
+                return
             # [ai-reviewer] - END
             # [control-panel] - START
             run = re.fullmatch(r'/api/panel/run/([a-z_]+)', path)
@@ -1162,6 +1175,24 @@ def make_handler(app: ReviewApp):
                     self._json(200, {'ok': True, 'result': result, 'provider': provider})
             except ReviewRejected as exc:
                 raise self._masked(exc, typed, self._stored_key(body.get('id'))) from None
+
+        def _hf_post(self, path, body):
+            """Settings > Hugging Face: keep a token once Hugging Face says it can write, or forget it."""
+            from nnslr_tools import hf_account
+            if not isinstance(body, dict):
+                raise ReviewRejected(400, 'invalid_json', 'A JSON object is required.')
+            who = terminal_text(self._who()[0] or self._who()[1])
+            if path == HF_POSTS[1]:
+                state = hf_account.remove(app.root)
+                print(f'Hugging Face: token removed ({who})', flush=True)
+            else:
+                typed = body.get('token')
+                try:
+                    state = hf_account.save(app.root, typed)
+                except ReviewRejected as exc:
+                    raise self._masked(exc, typed) from None
+                print(f'Hugging Face: token of {terminal_text(state.get("user") or "?")} saved ({who})', flush=True)
+            self._json(200, {'ok': True, **state, 'can_edit': self._can_use_ai()})
 
         def _ai_suggest(self, route, frame_key, body):
             """One frame reviewed by the AI reviewer of Settings, in pixels of the full frame; nothing is saved."""

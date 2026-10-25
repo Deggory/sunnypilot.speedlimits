@@ -1,12 +1,13 @@
 <script setup lang="ts">
 // Account and settings: who is signed in, sign out, change the password (the appearance is in the Account menu),
-// and the AI reviewer (AiProviders.vue). The site on 127.0.0.1 has no sign-in: there only the AI reviewer. Opened
+// the AI reviewer (AiProviders.vue) and the Hugging Face account our networks are published with (HuggingFace.vue). The site on 127.0.0.1 has no sign-in: there only the AI reviewer. Opened
 // with the access token (an agent), nobody is signed in: one read-only line instead of the account cards.
 import {computed, onMounted, ref} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import type {AuthAnswer, AuthState} from '../common/auth-types';
 import {askConfirm} from '../composables/confirm';
 import AiProviders from './AiProviders.vue';
+import HuggingFace from './HuggingFace.vue';
 
 /** null until /api/auth/state answers. */
 const auth = ref<AuthState | null>(null);
@@ -92,5 +93,6 @@ onMounted(() => {
       <p class="note">After the change every other browser has to sign in again.</p>
     </section>
     <AiProviders/>
+    <HuggingFace/>
   </main>
 </template>

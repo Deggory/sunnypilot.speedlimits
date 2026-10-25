@@ -322,7 +322,9 @@ export interface PanelStatus {
   ai_reviewer: AiState;
   /** The packages of our networks prepared here, newest first (nnslr_tools.networks_package.packages), and the Hugging
    * Face repository they are published to. */
-  networks?: {packages: NetworkPackage[]; repo: string};
+  networks?: {packages: NetworkPackage[]; repo: string;
+    /** The Hugging Face account publishing uses (nnslr_tools.hf_account.public_state; never the token). */
+    account?: {connected: boolean; source: 'portal' | 'server' | null; user: string | null; can_write: boolean | null}};
 }
 
 /** A package of our three networks (scripts/publish_networks.sh). */

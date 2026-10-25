@@ -165,6 +165,7 @@ For each network (cutter, classifier and decider), this tab lists every version 
 
 - **Prepare the package** exports them to ONNX, checks each against PyTorch, and writes a model card with their test numbers. It runs here and uploads nothing.
 - **Publish on Hugging Face** uploads the latest package to `cristianku/sunnypilot-speedlimits-models`, public, after a question, and adds it to the catalog `speed_networks.json` that a car can download from. No frame or dataset leaves the server.
+- The Hugging Face account is connected in **Settings → Hugging Face**: a wizard creates a token with Write access, checks it and keeps it on the server ([docs/INSTALL.md](docs/INSTALL.md#publishing-a-model-on-hugging-face)).
 
 The commands are in [docs/COMMANDS.md](docs/COMMANDS.md#publishing-when-there-is-something-to-publish).
 
