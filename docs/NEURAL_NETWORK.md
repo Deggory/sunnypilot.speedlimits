@@ -180,3 +180,4 @@ It added two points, both taken: "Unclear" is taught as abstain rather than drop
 - **"Ours".** The sign is meant for the traffic on the carriageway we drive on, in our direction, whatever the lane. **"Another"** is an exit ramp, a side road, a parallel road or the opposite direction. The decider answers which applies; the label only fixes what the answer means. A lane label comes later, if gantries with different values per lane show up.
 - **"Unclear"** is taught as "abstain", not dropped.
 - **Other traffic signs** get a box with their kind, from people and from the AI reviewer alike.
+- **Our networks propose only whole** (25 October 2026): Prepare offers "Our networks" only when the cutter, the classifier and the decider are all in use and the proposer applies the decider (`preannotate.ours_missing`). Until then new drives are proposed by another proposer.

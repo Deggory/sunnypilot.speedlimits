@@ -248,27 +248,44 @@ def vlm_missing(root: Path) -> str | None:
 GPU_PYTHON = Path(__file__).resolve().parents[2] / '.venv-gpu' / 'bin' / 'python'
 
 
+# Our networks propose only whole (Cristian, 25 October 2026): the cutter finds the boxes, the classifier says what they
+# are, the decider whom they apply to. Each must be in use (Models tab), and the proposer must apply the decider:
+# _chain_proposer does not yet, so until then Our networks waits.
+OUR_PARTS = ('cutter', 'classifier', 'decider')
+CHAIN_APPLIES_DECIDER = False
+
+
+def ours_missing(root: Path) -> str | None:
+    """Why Our networks cannot propose on this server, or None: the parts not in use, or the decider not applied."""
+    try:
+        active = json.loads((Path(root) / 'models' / 'active.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        active = {}
+    missing = [part for part in OUR_PARTS if not (isinstance(active, dict) and active.get(part))]
+    if missing:
+        return ('Our networks propose only with all three parts in use (Models tab): ' + ', '.join(missing)
+                + (' is' if len(missing) == 1 else ' are') + ' not in use yet')
+    if not CHAIN_APPLIES_DECIDER:
+        return 'Our networks propose only with all three parts: the decider is not applied to the proposals yet'
+    return None
+
+
 def our_networks(root: Path) -> dict:
-    """The cutter and the classifier that propose with --proposer ours: those in use (Models tab); without a
-    classifier in use, the newest classifier with "not a sign" trained here."""
+    """The cutter and the classifier that propose with --proposer ours: those in use (Models tab), only when Our
+    networks are whole (ours_missing)."""
     from nnslr_tools.chain import resolve_model
+    missing = ours_missing(root)
+    if missing:
+        raise PreannotationError(missing)
     try:
         cutter = resolve_model('active', 'cutter', root)
-    except ValueError as exc:
-        raise PreannotationError(f'no cutter to propose with: {exc}') from exc
-    try:
         classifier = resolve_model('active', 'classifier', root)
-        chosen = 'in use'
-    except ValueError:
-        found = sorted((root / 'runs').glob('*/classifier/reader-best.pt'), key=lambda path: path.stat().st_mtime)
-        if not found:
-            raise PreannotationError('no classifier to propose with: train one on the Train tab')
-        classifier = {'path': found[-1], 'id': 'classifier:' + found[-1].parents[1].name + '/classifier'}
-        chosen = 'newest (none in use)'
+    except ValueError as exc:
+        raise PreannotationError(f'Our networks cannot load a part in use: {exc}') from exc
     return {'repository': 'ours', 'proposer': 'ours', 'training_domain': 'our reviewed Swiss drives',
             'cutter': cutter['id'] or str(cutter['path']), 'cutter_path': str(cutter['path']),
             'classifier': classifier['id'] or str(classifier['path']), 'classifier_path': str(classifier['path']),
-            'classifier_chosen': chosen}
+            'classifier_chosen': 'in use'}
 
 
 def proposer_setup(proposer: str, root: Path, *, confidence: float | None = None,

@@ -4,7 +4,7 @@
 // one), the routes.
 import {computed, onMounted, ref, shallowRef} from 'vue';
 import {api, messageOf, post} from '../common/api';
-import {plural, thousands} from '../common/format';
+import {plural, sentence, thousands} from '../common/format';
 import type {ActionName, ActionOptions, ActionState, Job, PanelStatus, Proposer, ProposersPayload,
   RouteState} from '../common/panel-types';
 import {toast} from '../composables/toast';
@@ -82,9 +82,12 @@ const gpuTaken = computed(() => {
 });
 /** Why the chosen proposer cannot run here, if it cannot. */
 const unavailable = computed(() => proposer.value === 'qwen' ? props.status?.proposers?.qwen ?? null : null);
+/** Why Our networks cannot propose yet: they propose only whole, cutter, classifier and decider in use. */
+const oursMissing = computed(() => proposer.value === 'ours' ? props.status?.proposers?.ours ?? null : null);
 /** Why Prepare and Propose again cannot start now with the proposer shown: Qwen3-VL missing, or the GPU memory it
  * needs taken (the server refuses it then: said on the cards before the click, not after the confirmation). */
 const proposerBlock = computed((): string => {
+  if (oursMissing.value) return sentence(oursMissing.value);
   if (proposer.value !== 'qwen') return '';
   if (unavailable.value) return 'Qwen3-VL is not ready on this server yet: install it above, or choose another';
   return props.status?.proposers?.qwen_gpu ?? '';
@@ -155,6 +158,7 @@ function openComma(): void {
       <Segmented v-model="proposer" :options="PROPOSERS" label="Who proposes the signs" :disabled="runningProposer !== null"/>
       <p class="figure-note">{{ PROPOSER_TEXT[proposer] }} {{ measureText(proposer) }}<template v-if="runningProposer"> It is
         proposing now: you can choose again when it ends.</template></p>
+      <p v-if="oursMissing" class="figure-note proposer-missing">{{ sentence(oursMissing) }}</p>
       <template v-if="unavailable">
         <p class="figure-note proposer-missing" :title="unavailable">{{ unavailable.includes('not checked yet')
           ? 'Qwen3-VL is copied here but not checked yet.' : 'Qwen3-VL is not installed on this server yet.' }}</p>

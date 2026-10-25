@@ -69,6 +69,8 @@ def measured(root, proposer, found, read_right, seconds=1.0):
 
 def test_the_choice_is_the_best_measured_until_one_is_kept(root, checkout, monkeypatch):
     monkeypatch.setattr('nnslr_tools.preannotate.vlm_missing', lambda root: None)
+    # Our networks whole (cutter, classifier and decider in use and applied).
+    monkeypatch.setattr('nnslr_tools.preannotate.ours_missing', lambda root: None)
     panel = Panel(root, repo=checkout)
     # Nothing measured: the helpers' own default.
     assert (panel.proposers()['chosen'], panel.proposers()['best']) == ('vietnam', None)
@@ -92,6 +94,31 @@ def test_the_choice_is_the_best_measured_until_one_is_kept(root, checkout, monke
     assert refused.value.status == 403
 
 
+def test_our_networks_propose_only_whole(root, checkout):
+    import json
+    from nnslr_tools import preannotate
+    panel = Panel(root, repo=checkout)
+    # Nothing in use: refused, and said why, on Prepare and on Evaluate's list of proposers.
+    why = panel.status()['proposers']['ours']
+    assert why and 'cutter, classifier, decider' in why
+    assert next(item for item in panel.proposers()['proposers'] if item['key'] == 'ours')['unavailable'] == why
+    with pytest.raises(PanelError) as refused:
+        panel.start('prepare_again', {'proposer': 'ours'})
+    assert refused.value.reason == 'not_available'
+    # Cutter and classifier in use: still waiting for the decider.
+    (root / 'models').mkdir(parents=True, exist_ok=True)
+    (root / 'models' / 'active.json').write_text(json.dumps({'cutter': {'id': 'c'}, 'classifier': {'id': 'k'}, 'decider': None}))
+    assert preannotate.ours_missing(root).endswith('decider is not in use yet')
+    # All three in use: whole only once the proposer applies the decider.
+    (root / 'models' / 'active.json').write_text(json.dumps({'cutter': {'id': 'c'}, 'classifier': {'id': 'k'}, 'decider': {'id': 'd'}}))
+    assert 'decider is not applied' in preannotate.ours_missing(root)
+    with pytest.raises(preannotate.PreannotationError):
+        preannotate.our_networks(root)
+    # A choice kept before stays out while it cannot run: the best that can is chosen.
+    panel.set_proposer({'proposer': 'ours'})
+    assert panel.proposers()['chosen'] != 'ours'
+
+
 def test_qwen_is_refused_and_said_so_when_the_gpu_is_taken(root, checkout, monkeypatch):
     monkeypatch.setattr('nnslr_tools.preannotate.vlm_missing', lambda root: None)
     panel = Panel(root, repo=checkout)
@@ -107,7 +134,8 @@ def test_qwen_is_refused_and_said_so_when_the_gpu_is_taken(root, checkout, monke
     assert panel.status()['proposers']['qwen_gpu'] is None
 
 
-def test_a_job_knows_its_proposer_and_when_it_ended(root, checkout):
+def test_a_job_knows_its_proposer_and_when_it_ended(root, checkout, monkeypatch):
+    monkeypatch.setattr('nnslr_tools.preannotate.ours_missing', lambda root: None)
     panel = Panel(root, repo=checkout)
     job = panel.start('prepare_again', {'proposer': 'ours'})
     done = finished(panel, job['id'])
@@ -141,6 +169,7 @@ def test_propose_again_running_has_the_progress_of_the_preparation(root, checkou
 
 
 def test_the_choice_is_kept_over_http(root, checkout, monkeypatch):
+    monkeypatch.setattr('nnslr_tools.preannotate.ours_missing', lambda root: None)
     server = RunningServer(root)
     server.app.panel = Panel(root, repo=checkout)
     try:

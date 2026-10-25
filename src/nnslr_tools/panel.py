@@ -458,9 +458,11 @@ class Panel:
         payload['actions'] = self._action_states(payload, activities, ai_providers=ai_providers)
         # [ai-reviewer] - END
         # Who can propose the signs on this server (the choice of the Prepare tab), and why not.
-        from nnslr_tools.preannotate import vlm_missing
-        # qwen: why it is not installed; qwen_gpu: why it cannot load on the GPU now (start() refuses it then).
-        payload['proposers'] = {'qwen': vlm_missing(self.root), 'qwen_gpu': _qwen_gpu_reason(system['gpu']) or None}
+        from nnslr_tools.preannotate import ours_missing, vlm_missing
+        # qwen: why it is not installed; qwen_gpu: why it cannot load on the GPU now (start() refuses it then); ours:
+        # why Our networks are not whole yet.
+        payload['proposers'] = {'qwen': vlm_missing(self.root), 'qwen_gpu': _qwen_gpu_reason(system['gpu']) or None,
+                                'ours': ours_missing(self.root)}
         # The choices of "Train the cutter", for its buttons.
         payload['cutter_options'] = {'sizes': list(CUTTER_SIZES), 'size': CUTTER_SIZE, 'families': list(CUTTER_FAMILIES),
                                      'family': CUTTER_FAMILY}
@@ -726,15 +728,17 @@ class Panel:
     # -- the networks by role, for the Models tab -----------------------------------------------------
     def proposers(self) -> dict:
         """The latest measure of each proposer of Prepare (helpers/measure_proposer.sh), and why one cannot run."""
-        from nnslr_tools.preannotate import PROPOSERS, vlm_missing
+        from nnslr_tools.preannotate import PROPOSERS, ours_missing, vlm_missing
         from nnslr_tools.proposer_eval import latest_reports
         reports = latest_reports(self.root)
-        missing = vlm_missing(self.root)
-        best = _best_proposer(reports, {'qwen'} if missing else set())
-        return {'proposers': [{'key': key, 'label': label, 'unavailable': missing if key == 'qwen' else None}
+        unavailable = {'qwen': vlm_missing(self.root), 'ours': ours_missing(self.root)}
+        best = _best_proposer(reports, {key for key, why in unavailable.items() if why})
+        kept = self._kept_proposer()
+        return {'proposers': [{'key': key, 'label': label, 'unavailable': unavailable.get(key)}
                               for key, label in PROPOSERS.items()], 'reports': reports,
-                # The choice of Prepare: kept on the server once made, else the best measured.
-                'chosen': self._kept_proposer() or best or DEFAULT_PROPOSER, 'best': best}
+                # The choice of Prepare: kept on the server once made (while it can run), else the best measured.
+                'chosen': (kept if kept and not unavailable.get(kept) else None) or best or DEFAULT_PROPOSER,
+                'best': best}
 
     def _kept_proposer(self) -> str | None:
         """The proposer chosen on the Prepare tab (PROPOSER_FILE), or None before a choice."""
@@ -1031,6 +1035,11 @@ class Panel:
                 raise PanelError(400, 'bad_option', 'Only preparing routes takes a proposer.')
             if proposer not in PROPOSERS:
                 raise PanelError(400, 'bad_option', 'Unknown proposer: ' + ', '.join(PROPOSERS) + '.')
+            if proposer == 'ours':
+                from nnslr_tools.preannotate import ours_missing
+                missing = ours_missing(self.root)
+                if missing:
+                    raise PanelError(409, 'not_available', missing + '.')
             if proposer == 'qwen':
                 from nnslr_tools.preannotate import vlm_missing
                 missing = vlm_missing(self.root)

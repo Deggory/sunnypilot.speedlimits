@@ -314,7 +314,8 @@ export interface PanelStatus {
   cutter_options?: {sizes: string[]; size: string; families: CutterFamilies[]; family: CutterFamilies};
   /** Why a proposer cannot run on this server (null: it can): qwen not installed, or qwen_gpu, the GPU memory it
    * needs taken now. */
-  proposers?: {qwen: string | null; qwen_gpu?: string | null};
+  /** Why a proposer cannot run here: qwen not installed, its GPU memory taken, Our networks not whole yet. */
+  proposers?: {qwen: string | null; qwen_gpu?: string | null; ours?: string | null};
   /** The AI reviewer chosen in Settings (llm_providers.ai_state: a file read, no network). */
   ai_reviewer: AiState;
 }
