@@ -112,6 +112,32 @@ def last_line(text: str) -> str:
     return ''
 
 
+def duration_text(seconds: float | None) -> str:
+    """"about 2 h 50 min", "about 12 min", "under a minute"; '' when unknown."""
+    if seconds is None:
+        return ''
+    minutes = round(seconds / 60)
+    if minutes < 1:
+        return 'under a minute'
+    return 'about ' + (f'{minutes // 60} h {minutes % 60} min' if minutes >= 60 else f'{minutes} min')
+
+
+def again_detail(preparation: dict) -> str:
+    """Propose again in one line: "Qwen3-VL · Basel → Mumpf, 138 of 2,160 frames · 0 of 4 drives ready · about
+    10 h 50 min left" (panel.Panel._again_progress)."""
+    parts = []
+    working = [item for item in preparation.get('working', []) if item.get('phase') == 'proposing again']
+    if working:
+        item = working[0]
+        parts.append((item.get('title') or item['route']) + f", {item['done']:,} of {item['total']:,} frames")
+    parts.append(f"{preparation.get('routes_done', 0)} of {preparation.get('routes_total', 0)} drives ready")
+    left = duration_text(preparation.get('seconds_left'))
+    if left:
+        parts.append(left + ' left')
+    head = preparation.get('proposer')
+    return ((head + ' · ') if head else '') + ' · '.join(parts)
+
+
 def progress(action: str, state: str, text: str, preparation: dict | None = None) -> dict:
     """{'steps': [{'key', 'label', 'state': done|current|todo|failed}], 'percent': 0-100 or None,
     'detail': str, 'last_line': str, 'step_progress': how far the current step is from the log alone (see
@@ -202,13 +228,15 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
             weight = dict((key, weight) for key, _, weight in steps)[current]
             reached += weight * inside['done'] / inside['total']
         percent = round(reached * 100 / total, 1)
-    elif action == 'prepare' and preparation is not None and preparation.get('percent') is not None:
+    elif action in ('prepare', 'prepare_again') and preparation is not None and preparation.get('percent') is not None:
         percent = float(preparation['percent'])
 
     if epoch is not None and epoch[0] == current and state == 'running' and epoch[0] in stopped:
         detail = epoch[0] + ' · stopped early after epoch ' + str(stopped[epoch[0]])
     elif epoch is not None and epoch[0] == current and state == 'running':
         detail = epoch[0] + ' · epoch ' + str(epoch[1]) + ' of ' + str(epoch[2])
+    elif action == 'prepare_again' and preparation is not None and preparation.get('again'):
+        detail = again_detail(preparation)
     elif action == 'prepare' and preparation is not None and preparation.get('routes_total'):
         detail = str(preparation['routes_done']) + ' of ' + str(preparation['routes_total']) + ' routes ready'
     elif action == 'fetch' and (fetched or route):

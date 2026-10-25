@@ -25,7 +25,7 @@ import subprocess
 import threading
 import time
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from nnslr_tools.job_progress import last_line, progress, with_step_progress
@@ -748,6 +748,9 @@ class Panel:
         for row in rows:
             by_route[row['route']] = row
         result = {'percent': None, 'routes_done': 0, 'routes_total': 0, 'working': []}
+        again = self._again_progress(by_route)
+        if again is not None:
+            return again
         batch = self._batch_routes()
         if batch is not None:
             total = 0
@@ -767,6 +770,61 @@ class Panel:
             if row is not None:
                 result['working'].append(self._route_progress(row))
         return result
+
+    def _again_progress(self, by_route: dict) -> dict | None:
+        """Propose again (helpers/1_prepare.sh --again): every route of the batch already has a report, the new
+        proposals are written aside (.pending-<run>) and replace it when the route is done. Per route: waiting, its
+        frames proposed so far, or ready (a report newer than the batch); the percent over the frames of the batch,
+        the time left from the pace of the route at work, and who proposes. None for a batch of new routes."""
+        try:
+            batch = json.loads((self.root / 'logs/prepare/batch.json').read_text(encoding='utf-8'))
+            started = datetime.strptime(batch['started'], '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
+            routes = [route for route in batch['routes'] if isinstance(route, str)]
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
+        if not routes or any(by_route.get(route, {}).get('run_id') is None for route in routes):
+            return None
+        from nnslr_tools.drives import drive_of
+        from nnslr_tools.preannotate import PROPOSER_NAMES
+        now = datetime.now(timezone.utc)
+        rows, done_frames, all_frames, pace = [], 0, 0, None
+        for route in routes:
+            row = by_route[route]
+            base = self.root / 'derived/preannotations' / route
+            total = row.get('frames') or row.get('report_frames') or 0
+            pending = sorted(base.glob('.pending-*'))
+            fresh = pending[-1] if pending and datetime.fromtimestamp(pending[-1].stat().st_mtime, timezone.utc) >= started else None
+            if fresh is not None:
+                done = min(_line_count(fresh / 'preannotations.jsonl'), total)
+                since = (now - datetime.fromtimestamp(fresh.stat().st_ctime, timezone.utc)).total_seconds()
+                if done and since > 0:
+                    pace = since / done
+                phase, percent = 'proposing again', (min(99, 100 * done // total) if total else 0)
+            elif str(row['run_id']) >= started.strftime('%Y%m%dT%H%M%SZ'):
+                done, phase, percent = total, 'ready', 100
+            else:
+                done, phase, percent = 0, 'waiting', 0
+            done_frames, all_frames = done_frames + done, all_frames + total
+            rows.append({'route': route, 'title': (drive_of(self.root, route) or {}).get('title'), 'phase': phase,
+                         'done': done, 'total': total, 'unit': 'frames', 'percent': percent})
+        left = round(pace * (all_frames - done_frames)) if pace else None
+        for item in rows:
+            if item['phase'] == 'proposing again' and pace:
+                item['seconds_left'] = round(pace * (item['total'] - item['done']))
+        proposer = self._again_proposer()
+        return {'percent': round(100 * done_frames / all_frames, 1) if all_frames else None,
+                'routes_done': sum(1 for item in rows if item['phase'] == 'ready'), 'routes_total': len(rows),
+                'working': rows, 'again': True, 'seconds_left': left,
+                'proposer': PROPOSER_NAMES.get(proposer, proposer) if proposer else None}
+
+    def _again_proposer(self) -> str | None:
+        """Who proposes again: the "(qwen)" of the newest prepare_again job's log."""
+        logs = sorted(self.logs.glob('*-prepare_again.log')) if self.logs.is_dir() else []
+        if not logs:
+            return None
+        found = re.findall(r'(?:proposing the signs again|propongo di nuovo i cartelli) \((\w+)\)',
+                           logs[-1].read_text(encoding='utf-8', errors='replace'))
+        return found[-1] if found else None
 
     def _route_progress(self, row: dict) -> dict:
         route = row['route']

@@ -325,8 +325,18 @@ class ReviewApp(ReviewService):
                 'url': '/route/' + route + '/',
                 # The route as the drive it was: when, how long, from where to where (nnslr_tools.drives).
                 'drive': drive_of(self.root, route),
+                # Who proposed the signs of this report: vietnam, ours or qwen (run.json).
+                'proposer': _report_proposer(directory),
             })
         return summaries
+
+
+def _report_proposer(directory: Path) -> str:
+    from nnslr_tools.preannotate import proposer_of
+    try:
+        return proposer_of(json.loads((directory / 'run.json').read_text(encoding='utf-8')))
+    except (OSError, ValueError):
+        return 'vietnam'
 
 
 def make_handler(app: ReviewApp):

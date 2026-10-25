@@ -188,11 +188,15 @@ export interface RouteRow {
 
 export interface RouteProgress {
   route: string;
+  /** The drive ("Basel → Mumpf"), when known. */
+  title?: string | null;
   phase: string;
   done: number;
   total: number;
   unit: string;
   percent: number;
+  /** Propose again: the time left for this route at its pace. */
+  seconds_left?: number;
 }
 
 export interface Preparation {
@@ -200,6 +204,10 @@ export interface Preparation {
   routes_done: number;
   routes_total: number;
   working: RouteProgress[];
+  /** Propose again (routes that had proposals): every route of the batch is listed, with who proposes. */
+  again?: boolean;
+  seconds_left?: number | null;
+  proposer?: string | null;
 }
 
 /** What is in the gold dataset (data/annotations/objects.jsonl), its split and the last import. */

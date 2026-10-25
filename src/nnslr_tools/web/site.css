@@ -34,6 +34,10 @@ font-variant-numeric:tabular-nums}
 .stats span::before{content:"·";display:inline-block;width:14px;text-align:center}
 .stats .sus{color:var(--sus);font-weight:600}
 .card-row .bar{grid-area:bar;height:6px}
+/* A route proposed again now (site.ts): who, how far, the time left, under the row. */
+.row-live{grid-column:2/-1;display:flex;align-items:center;gap:10px;margin-top:6px;font-size:13px;color:var(--rev);font-weight:500}
+.row-live[hidden]{display:none}
+.row-live .bar{flex:0 0 140px;height:4px}
 .card-row.done .bar span{background:var(--ok)}
 .count{grid-area:count;justify-self:end;text-align:right;white-space:nowrap;font-size:14px;font-weight:600;
 font-variant-numeric:tabular-nums}

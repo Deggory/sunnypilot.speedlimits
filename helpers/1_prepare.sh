@@ -69,11 +69,11 @@ prepare_route() {
   local worked=0
   if [ "${PREPARE_AGAIN:-0}" = 1 ]; then
     # Only a route nobody has reviewed a frame of: a new report would leave reviews on the old one.
-    todo repropose | grep -qx "$route" || { echo "$route: gia' in revisione, non la ripropongo"; return 0; }
-    echo "$route: propongo di nuovo i cartelli (${NNSLR_PROPOSER:-vietnam})..."
+    todo repropose | grep -qx "$route" || { echo "$route: already in review, left as it is"; return 0; }
+    echo "$route: proposing the signs again (${NNSLR_PROPOSER:-vietnam})..."
     "$NN" preannotate --route "$route" < /dev/null >> "$log" 2>&1 \
-      || { echo "$route: pre-annotazione fallita (vedi $log)"; return 1; }
-    echo "$route: pronta per la revisione"
+      || { echo "$route: proposing failed (see $log)"; return 1; }
+    echo "$route: ready to review"
     return 0
   fi
   if todo extract | grep -qx "$route"; then

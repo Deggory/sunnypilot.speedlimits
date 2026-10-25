@@ -215,6 +215,9 @@ def _route_row(summary: dict) -> str:
              '<span>' + f"{summary['frames_with_proposals']:,}" + ' with signs</span>']
     if suspicious:
         stats.append('<span class="sus">' + _plural(suspicious, 'suspicious', 'suspicious') + '</span>')
+    from nnslr_tools.preannotate import PROPOSER_NAMES
+    stats.append('<span>signs by ' + html.escape(PROPOSER_NAMES.get(summary.get('proposer') or 'vietnam', 'Vietnamese YOLO'))
+                 + '</span>')
     route = html.escape(summary['route_id'])
     # The drive (when, how long, from where to where); the route's code only in the tooltip.
     drive = summary.get('drive') or {}
@@ -238,7 +241,9 @@ def _route_row(summary: dict) -> str:
             + ' <span class="unit">confirmed</span></span>'
             + '<span class="bar" aria-hidden="true"><span style="width:' + str(percent) + '%"></span></span>'
             + '<span class="stats">' + ''.join(stats) + '</span>'
-            + '<span class="' + action_class + '">' + action + '</span></a>' + ai + '</li>')
+            + '<span class="' + action_class + '">' + action + '</span>'
+            # Filled by the page script while the route is proposed again (web/src/pages/site.ts).
+            + '<span class="row-live" data-live="' + route + '" hidden></span></a>' + ai + '</li>')
 
 
 def render_index(summaries: list[dict], database: Path, nonce: str = '') -> str:

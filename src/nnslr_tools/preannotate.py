@@ -201,6 +201,17 @@ def suppress_overlaps(detections: list[dict], threshold: float = .5) -> list[dic
 PROPOSERS = {'vietnam': 'Vietnamese traffic-sign YOLO (Hugging Face)',
              'ours': 'Our cutter and classifier',
              'qwen': 'Qwen3-VL-8B, a model that sees images'}
+# Short names of the proposers, as the site shows them.
+PROPOSER_NAMES = {'vietnam': 'Vietnamese YOLO', 'ours': 'Our networks', 'qwen': 'Qwen3-VL'}
+
+
+def proposer_of(run: dict) -> str:
+    """The proposer of a report (its run.json): its "proposer", or the Vietnamese YOLO of the reports made before
+    there was a choice."""
+    proposer = run.get('proposer') or (run.get('model') or {}).get('proposer')
+    return proposer if proposer in PROPOSERS else 'vietnam'
+
+
 # Qwen3-VL-8B-Instruct as scripts/setup_vlm.sh installs it (its four weight files), inside the data root.
 VLM_REPOSITORY = 'Qwen/Qwen3-VL-8B-Instruct'
 VLM_REVISION = '0c351dd01ed87e9c1b53cbc748cba10e6187ff3b'

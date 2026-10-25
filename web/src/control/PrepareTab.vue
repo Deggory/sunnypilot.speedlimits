@@ -97,7 +97,7 @@ const ready = computed(() => (props.status?.routes ?? []).filter((row) => !WAITI
     <h2 class="section-title" id="prepare-job-title">{{ running ? 'Running' : 'Last job failed' }}</h2>
     <div class="jp-list" aria-live="polite">
       <JobProgress v-if="bigJob" :job="bigJob" @details="$emit('details', $event)" @stop="$emit('stop', $event)">
-        <PrepRoutes v-if="bigJob.action === 'prepare' && bigJob.state === 'running' && status?.preparation" :routes="status.preparation.working"/>
+        <PrepRoutes v-if="(bigJob.action === 'prepare' || bigJob.action === 'prepare_again') && bigJob.state === 'running' && status?.preparation" :routes="status.preparation.working"/>
       </JobProgress>
       <TerminalActivity v-for="activity in activities" :key="activity.pid + activity.label" :activity="activity" :preparation="status?.preparation ?? null"/>
     </div>

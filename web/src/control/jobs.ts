@@ -72,6 +72,13 @@ export function roughText(ms: number): string {
 }
 
 /** The job a tab shows for these actions: the running one, else the latest. */
+/** "about 2 h 50 min", "about 12 min", "under a minute" (job_progress.duration_text). */
+export function durationText(seconds: number): string {
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 1) return 'under a minute';
+  return 'about ' + (minutes >= 60 ? Math.floor(minutes / 60) + ' h ' + (minutes % 60) + ' min' : minutes + ' min');
+}
+
 export function jobOf(status: PanelStatus | null, actions: ActionName[]): Job | null {
   const jobs = (status?.jobs ?? []).filter((job) => actions.includes(job.action));
   return jobs.find((job) => job.state === 'running') ?? jobs[0] ?? null;

@@ -42,7 +42,7 @@ const gpuProcesses = computed(() => props.status?.system.gpu?.process_list ?? []
     <h2 class="section-title" id="running-title">{{ running.length + activities.length ? 'Running' : 'Last job failed' }}</h2>
     <div class="jp-list" aria-live="polite">
       <JobProgress v-for="job in running" :key="job.id" :job="job" @details="$emit('details', $event)" @stop="$emit('stop', $event)">
-        <PrepRoutes v-if="job.action === 'prepare' && status?.preparation" :routes="status.preparation.working"/>
+        <PrepRoutes v-if="(job.action === 'prepare' || job.action === 'prepare_again') && status?.preparation" :routes="status.preparation.working"/>
       </JobProgress>
       <TerminalActivity v-for="activity in activities" :key="activity.pid + activity.label" :activity="activity"
                         :preparation="status?.preparation ?? null"/>
