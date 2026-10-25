@@ -109,7 +109,17 @@ min-height:36px;display:inline-flex;align-items:center;text-decoration:none;tran
   .tabs{flex-wrap:wrap}
   .tabs-machine{flex:1 0 100%;margin:2px 0 0;padding:6px 0 2px;border-top:1px solid var(--line)}
 }
-@media (max-width:560px){.tm-cell{padding:2px 7px}}
+/* On a phone: six small tiles, three by three, the label over the value and the notches at the side. */
+@media (max-width:560px){
+  .tabs-machine{padding-top:8px}
+  .tm{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;width:100%;padding:0}
+  .tm-cell{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:6px;align-items:center;padding:5px 9px;
+    border-radius:9px;background:var(--surface-2)}
+  .tm-cell+.tm-cell{border-left:0}
+  .tm-label{grid-column:1;grid-row:1;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em}
+  .tm-value{grid-column:1;grid-row:2;font-size:13px;overflow:hidden;text-overflow:ellipsis}
+  .tm-stack{grid-column:2;grid-row:1/3}
+}
 
 /* page */
 .page{max-width:1180px;margin:0 auto;padding:20px max(16px,env(safe-area-inset-right,0px))
