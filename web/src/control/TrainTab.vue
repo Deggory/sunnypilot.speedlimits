@@ -1,20 +1,19 @@
 <script setup lang="ts">
-// Train: from the reviews to a model. The numbers (reviewed routes against what the split needs, confirmed
-// frames still to import, what the dataset holds); then the networks of the pipeline by role (docs/NEURAL_NETWORK.md),
-// each with what it does, its own training and the latest version trained here with its headline numbers (GET
-// /api/panel/models, as the Models tab): the cutter (scripts/run_detector_sizes.sh, one input size and the signs it
-// finds), the classifier with “not a sign” (scripts/run_classifier.sh, on the false boxes of the cutter in use), the
-// decider (in preparation: experiment B is its prototype); the whole pipeline with the choice of where it starts
-// (helpers/3_train.sh: import, split, detector, reader, evaluation, export); the job running (or the last one) with all
-// its steps and its curves, and what the dataset holds.
+// Train: from the reviews to a model, as an app on the phone. One line says what the networks learn from (boxes, frames,
+// drives; the reviews not added yet, with Add: helpers/3_train.sh --dataset-only). Then one network at a time, chosen
+// in a switcher with a dot on the one training: the cutter (scripts/run_detector_sizes.sh, its input size and the
+// signs it finds), the classifier with "not a sign" (scripts/run_classifier.sh), the decider (in preparation:
+// experiment B), the whole pipeline (helpers/3_train.sh, with where it starts). Each has the same place for its work:
+// the Train button, or its training running (or failed) with its steps, then its curves and its latest version
+// (GET /api/panel/models, as the Models tab). The page does not move while work runs. What the dataset holds is below.
 import {computed, ref} from 'vue';
 import {plural, thousands} from '../common/format';
-import type {ActionName, ActionState, CutterFamilies, CutterOptions, Job, JobProgress as Progress, ModelRole, ModelVersion, PanelStatus,
-  TrainingStart} from '../common/panel-types';
+import type {ActionName, ActionState, Activity, CutterFamilies, CutterOptions, Job, JobProgress as Progress, ModelRole, ModelVersion,
+  PanelStatus, TrainingStart} from '../common/panel-types';
 import ActionList from './ActionList.vue';
 import DatasetSection from './DatasetSection.vue';
 import JobProgress from './JobProgress.vue';
-import {CHARTED_ACTIONS, JOB_STATE, jobOf, startedWhen, terminalActivities, TRAIN_ACTIONS} from './jobs';
+import {CHARTED_ACTIONS, JOB_STATE, jobOf, PIPELINE_ACTIONS, startedWhen, terminalActivities} from './jobs';
 import ModelItem from './ModelItem.vue';
 import {putInUse, sizeText, useModels} from './models';
 import Segmented from './Segmented.vue';
@@ -26,9 +25,41 @@ const props = defineProps<{status: PanelStatus | null}>();
 const emit = defineEmits<{run: [name: ActionName, state: ActionState, start?: TrainingStart, options?: CutterOptions]; stop: [job: Job];
   details: [job: Job]}>();
 
-const job = computed(() => jobOf(props.status, TRAIN_ACTIONS));
-/** The job as a card: running or failed; one done or stopped by hand is a line. */
+/** The page as an app: one line of data, then one network at a time (Cutter, Classifier, Decider, the whole Pipeline),
+ * whose Train button becomes its progress, in the same place, while it trains. */
+type Section = 'cutter' | 'classifier' | 'decider' | 'pipeline';
+const SECTIONS: {key: Section; label: string}[] = [{key: 'cutter', label: 'Cutter'}, {key: 'classifier', label: 'Classifier'},
+  {key: 'decider', label: 'Decider'}, {key: 'pipeline', label: 'Pipeline'}];
+function sectionOf(action: ActionName): Section | null {
+  if (action === 'train_cutter') return 'cutter';
+  if (action === 'train_classifier') return 'classifier';
+  return PIPELINE_ACTIONS.includes(action) ? 'pipeline' : null;
+}
+/** The newest job of a section (running or the last one). */
+function jobFor(section: Section): Job | null {
+  return props.status?.jobs.find((item) => sectionOf(item.action) === section) ?? null;
+}
+/** The work started from a terminal, by section (its label names the network; else the pipeline). */
+function activitiesFor(section: Section): Activity[] {
+  return activities.value.filter((activity) => {
+    const named: Section = activity.label.includes('cutter') ? 'cutter' : activity.label.includes('classifier') ? 'classifier' : 'pipeline';
+    return named === section;
+  });
+}
+const runningSections = computed(() => SECTIONS.map((item) => item.key)
+  .filter((key) => jobFor(key)?.state === 'running' || activitiesFor(key).length > 0));
+const picked = ref<Section | null>(null);
+/** The section shown: the one picked, else the one training, else the cutter. */
+const section = computed({
+  get: (): Section => picked.value ?? runningSections.value[0] ?? 'cutter',
+  set: (value: Section) => { picked.value = value; },
+});
+const job = computed(() => jobFor(section.value));
+/** The job of the section in its slot: running or failed; one done or stopped by hand is a line. */
 const bigJob = computed(() => job.value && (job.value.state === 'running' || job.value.state === 'failed') ? job.value : null);
+/** Adding the reviews (Import reviews): shown in the line of data. */
+const importJob = computed(() => jobOf(props.status, ['dataset']));
+const importing = computed(() => importJob.value?.state === 'running');
 
 /** The networks by role: every version trained here, newest first (the Models tab's data). */
 const {payload: models, refresh: refreshModels} = useModels();
@@ -39,6 +70,8 @@ const latestCutter = computed(() => latest('cutter'));
 const latestClassifier = computed(() => latest('classifier'));
 const latestDecider = computed(() => latest('decider'));
 const roleLabel = (role: ModelRole): string => roleOf(role)?.label ?? role;
+const sectionLatest = computed(() => section.value === 'cutter' ? latestCutter.value : section.value === 'classifier'
+  ? latestClassifier.value : section.value === 'decider' ? latestDecider.value : null);
 const readOnly = computed(() => (props.status !== null && !props.status.actions_enabled) || Boolean(models.value?.active_problem));
 const busy = ref<string | null>(null);
 async function choose(version: ModelVersion): Promise<void> {
@@ -69,19 +102,16 @@ const CUTTER_ACTIONS = computed((): [ActionName, string][] => [
   ['train_cutter', 'A new cutter at ' + sizeText(cutterSize.value) + ' for '
     + (cutterFamilies.value === 'all' ? 'every sign' : 'speed signs only') + '. Takes a few hours on the GPU.'],
 ]);
-/** Reviews into the training data, under the count of frames not yet in it. */
-const IMPORT_ACTIONS: [ActionName, string][] = [
-  ['dataset', 'Adds your latest reviews to what the networks learn from. A few minutes.'],
-];
 /** The classifier's training, in its card. */
 const CLASSIFIER_ACTIONS: [ActionName, string][] = [
   ['train_classifier', 'A new classifier, taught on the signs and on the cutter’s mistakes. Takes a few hours on the GPU.'],
 ];
-const activities = computed(() => terminalActivities(props.status, ['train', 'ai', 'other']));
+const activities = computed(() => terminalActivities(props.status, ['train']));
+const sectionActivities = computed(() => activitiesFor(section.value));
 /** The curves of a training: while it runs (a placeholder before the first epoch), or of the last one if it has any. */
 const charted = computed((): {progress: Progress; running: boolean} | null => {
   // A training started from a terminal: the server reads its progress from data/logs/train-<run>.log.
-  const terminal = activities.value.find((activity) => activity.group === 'train' && activity.progress);
+  const terminal = sectionActivities.value.find((activity) => activity.progress);
   if (terminal?.progress && !(job.value?.state === 'running')) return {progress: terminal.progress, running: true};
   const value = job.value;
   if (value === null || !CHARTED_ACTIONS.includes(value.action)) return null;
@@ -111,96 +141,68 @@ const numbers = computed(() => {
 <template>
   <h1 class="tab-title">Train</h1>
 
-  <!-- The job running (or failed) first: on a phone the network cards would push it far down. -->
-  <section v-if="bigJob || activities.length" class="live-section" :class="{now: bigJob?.state === 'running' || activities.length > 0}" aria-labelledby="train-job-title">
-    <h2 class="section-title" id="train-job-title">{{ bigJob?.state === 'running' || activities.length ? 'Running' : 'Last job failed' }}</h2>
-    <div class="jp-list" aria-live="polite">
-      <JobProgress v-if="bigJob" :job="bigJob" @details="emit('details', $event)" @stop="emit('stop', $event)"/>
-      <TrainingCharts v-if="charted" :progress="charted.progress" :running="charted.running"/>
-      <TerminalActivity v-for="activity in activities" :key="activity.pid + activity.label" :activity="activity" :preparation="null"/>
-    </div>
+  <!-- What the networks learn from, in one line; the reviews not in yet, with their button. -->
+  <section class="card data-strip" aria-label="What the networks learn from">
+    <p class="data-line"><strong>{{ numbers ? thousands(numbers.objects) : '–' }}</strong> boxes on
+      <strong>{{ numbers?.frames === null || !numbers ? '–' : thousands(numbers.frames) }}</strong> frames of
+      {{ numbers ? plural(numbers.inDataset, 'drive') : '–' }}<a v-if="status?.dataset" class="figure-link" href="#dataset">Details ›</a></p>
+    <p v-if="importing" class="data-new">Adding your reviews… <strong>{{ importJob?.progress.percent === null || importJob?.progress.percent === undefined
+      ? '' : Math.floor(importJob.progress.percent) + '%' }}</strong></p>
+    <p v-else-if="numbers?.fresh" class="data-new"><span><strong>{{ thousands(numbers.fresh) }}</strong> new
+      {{ numbers.fresh === 1 ? 'review' : 'reviews' }} to add</span>
+      <button type="button" class="btn small primary" :disabled="!status?.actions.dataset?.allowed"
+              :title="status?.actions.dataset?.allowed ? 'A few minutes' : status?.actions.dataset?.reason"
+              @click="status && emit('run', 'dataset', status.actions.dataset)">Add</button></p>
+    <p v-else-if="numbers" class="data-new muted">All your reviews are in.</p>
+    <p v-if="numbers && numbers.reviewed < numbers.needed" class="data-new warn">Training needs {{ numbers.needed }} reviewed drives
+      (now {{ numbers.reviewed }}): some are kept apart to test on roads the network never saw.</p>
   </section>
 
-  <section class="numbers" aria-label="The numbers">
-    <div class="card number">
-      <h2>Drives reviewed</h2>
-      <div class="figure" id="train-big">{{ numbers ? (numbers.reviewed >= numbers.needed ? numbers.reviewed : numbers.reviewed + ' of ' + numbers.needed) : '–' }}</div>
-      <div class="goal" aria-hidden="true"><span v-for="index in numbers?.needed ?? 0" :key="index" :class="{on: index <= (numbers?.reviewed ?? 0)}"></span></div>
-      <p class="figure-note">{{ numbers === null ? '' : numbers.reviewed >= numbers.needed ? 'Enough to train.'
-        : 'Training needs at least ' + numbers.needed + ': some drives are kept apart to test on roads the network never saw.' }}</p>
-    </div>
-    <div class="card number">
-      <h2>Waiting to be added</h2>
-      <div class="figure" id="train-fresh">{{ numbers ? thousands(numbers.fresh) : '–' }}<span class="figure-unit">{{ numbers?.fresh === 1 ? 'frame' : 'frames' }}</span></div>
-      <p class="figure-note">{{ numbers === null ? '' : numbers.fresh ? 'Reviewed since the last import, in ' + plural(numbers.freshRoutes, 'drive') + '.'
-        : 'Every reviewed frame is already in.' }}</p>
-      <ActionList v-if="numbers?.fresh" :items="IMPORT_ACTIONS" :actions="status?.actions ?? null"
-                  @run="(name, state) => emit('run', name, state)"/>
-    </div>
-    <div class="card number">
-      <h2>Learning from</h2>
-      <div class="figure" id="train-objects">{{ numbers ? thousands(numbers.objects) : '–' }}<span class="figure-unit">boxes</span></div>
-      <p class="figure-note">{{ numbers === null ? '' : 'Signs and look-alikes on ' + (numbers.frames === null ? '' : thousands(numbers.frames) + ' frames of ')
-        + plural(numbers.inDataset, 'drive') + '.' }} <a v-if="status?.dataset" class="figure-link" href="#dataset">Details</a></p>
-    </div>
-  </section>
+  <Segmented v-model="section" class="train-sections" :options="SECTIONS" :marked="runningSections" label="Network"/>
 
-  <div class="roles" id="train-roles">
-    <section class="card role-card" id="train-cutter" data-role="cutter" aria-labelledby="train-cutter-title">
-      <div class="ds-head"><h2 id="train-cutter-title">Cutter</h2></div>
-      <p class="role-what">Finds every box that could be a sign. It must miss nothing: the classifier drops its false boxes.</p>
-      <div class="seg-row">
-        <Segmented v-model="cutterSize" :options="sizeOptions" label="Input size of the cutter"/>
-        <Segmented v-model="cutterFamilies" :options="FAMILY_OPTIONS" label="Signs the cutter finds"/>
-      </div>
-      <ActionList :items="CUTTER_ACTIONS" :actions="status?.actions ?? null"
-                  @run="(name, state) => emit('run', name, state, undefined, {size: cutterSize, families: cutterFamilies})"/>
-      <h3 class="ds-title">Latest version</h3>
-      <ul v-if="latestCutter" class="model-list">
-        <ModelItem :version="latestCutter" :role-label="roleLabel('cutter')" :score="models?.cutter_score_threshold ?? 0.1"
-                   :read-only="readOnly" :busy="busy" @use="choose"/>
-      </ul>
-      <div v-else class="role-empty"><strong>{{ models === null ? 'Loading…' : 'No cutter trained yet.' }}</strong>
-        <span v-if="models">The detector of a whole pipeline plays this role too.</span></div>
-    </section>
+  <section class="card role-card train-section" :id="'train-' + section" :data-role="section" aria-live="polite">
+    <p v-if="section === 'cutter'" class="role-what">Finds every box that could be a sign. It must miss nothing: the classifier drops its false boxes.</p>
+    <p v-else-if="section === 'classifier'" class="role-what">Says what each box of the cutter is: a speed value, end of limit, another sign and its kind, or not a sign.</p>
+    <p v-else-if="section === 'decider'" class="role-what">Says whom each sign applies to: our road, another road, or abstain.</p>
+    <p v-else class="role-what">The detector and the reader together, from the reviews to a package: the way every model was trained so far.</p>
 
-    <section class="card role-card" id="train-classifier" data-role="classifier" aria-labelledby="train-classifier-title">
-      <div class="ds-head"><h2 id="train-classifier-title">Classifier</h2></div>
-      <p class="role-what">Says what each box of the cutter is: a speed value, end of limit, another sign and its kind, or not a sign.</p>
-      <ActionList :items="CLASSIFIER_ACTIONS" :actions="status?.actions ?? null" @run="(name, state) => emit('run', name, state)"/>
-      <h3 class="ds-title">Latest version</h3>
-      <ul v-if="latestClassifier" class="model-list">
-        <ModelItem :version="latestClassifier" :role-label="roleLabel('classifier')" :score="models?.cutter_score_threshold ?? 0.1"
-                   :read-only="readOnly" :busy="busy" @use="choose"/>
-      </ul>
-      <div v-else class="role-empty"><strong>{{ models === null ? 'Loading…' : 'No classifier trained yet.' }}</strong>
-        <span v-if="models">The reader of a whole pipeline plays this role too.</span></div>
-    </section>
-
-    <section class="card role-card" id="train-decider" data-role="decider" aria-labelledby="train-decider-title">
-      <div class="ds-head"><h2 id="train-decider-title">Decider</h2></div>
-      <p class="role-what">Says whom each sign applies to: our road, another road, or abstain.</p>
-      <div class="role-empty" id="train-decider-note"><strong>In preparation: experiment B is the prototype.</strong>
-        <span>No training from here yet: its variants are trained by scripts/run_experiment_b.sh.</span></div>
-      <template v-if="latestDecider">
-        <h3 class="ds-title">Latest prototype</h3>
-        <ul class="model-list">
-          <ModelItem :version="latestDecider" :role-label="roleLabel('decider')" :score="models?.cutter_score_threshold ?? 0.1"
-                     :read-only="readOnly" :busy="busy" @use="choose"/>
-        </ul>
+    <!-- The slot of the work: the training running (or failed) in place of its button. -->
+    <div class="train-slot">
+      <template v-if="bigJob || sectionActivities.length">
+        <JobProgress v-if="bigJob" :job="bigJob" @details="emit('details', $event)" @stop="emit('stop', $event)"/>
+        <TerminalActivity v-for="activity in sectionActivities" :key="activity.pid + activity.label" :activity="activity" :preparation="null"/>
       </template>
-    </section>
-  </div>
+      <template v-else-if="section === 'cutter'">
+        <div class="seg-row">
+          <Segmented v-model="cutterSize" :options="sizeOptions" label="Input size of the cutter"/>
+          <Segmented v-model="cutterFamilies" :options="FAMILY_OPTIONS" label="Signs the cutter finds"/>
+        </div>
+        <ActionList :items="CUTTER_ACTIONS" :actions="status?.actions ?? null"
+                    @run="(name, state) => emit('run', name, state, undefined, {size: cutterSize, families: cutterFamilies})"/>
+      </template>
+      <ActionList v-else-if="section === 'classifier'" :items="CLASSIFIER_ACTIONS" :actions="status?.actions ?? null"
+                  @run="(name, state) => emit('run', name, state)"/>
+      <div v-else-if="section === 'decider'" class="role-empty" id="train-decider-note"><strong>In preparation: experiment B is the prototype.</strong>
+        <span>No training from here yet: its variants are trained by scripts/run_experiment_b.sh.</span></div>
+      <TrainStart v-else :starts="status ? status.training_starts ?? [] : null" :state="status?.actions.train ?? null"
+                  @start="(start) => status && emit('run', 'train', status.actions.train, start)"/>
+      <p v-if="job && !bigJob && !sectionActivities.length" class="last-line">Last: {{ job.label }}, {{ startedWhen(job) }} ·
+        {{ job.state === 'interrupted' ? 'stopped' : JOB_STATE[job.state][0] }} ·
+        <button type="button" class="link-button" @click="emit('details', job)">Details</button></p>
+    </div>
 
-  <section class="card tab-card" id="train-pipeline" aria-labelledby="train-pipeline-title">
-    <h2 id="train-pipeline-title">Whole pipeline</h2>
-    <p class="role-what">The detector and the reader together, from the reviews to a package: the way every model was trained so far.</p>
-    <TrainStart :starts="status ? status.training_starts ?? [] : null" :state="status?.actions.train ?? null"
-                @start="(start) => status && emit('run', 'train', status.actions.train, start)"/>
+    <TrainingCharts v-if="charted" :progress="charted.progress" :running="charted.running"/>
+
+    <template v-if="section !== 'pipeline'">
+      <h3 class="ds-title">{{ section === 'decider' ? 'Latest prototype' : 'Latest version' }}</h3>
+      <ul v-if="sectionLatest" class="model-list">
+        <ModelItem :version="sectionLatest" :role-label="roleLabel(section)" :score="models?.cutter_score_threshold ?? 0.1"
+                   :read-only="readOnly" :busy="busy" @use="choose"/>
+      </ul>
+      <div v-else-if="section !== 'decider'" class="role-empty"><strong>{{ models === null ? 'Loading…' : 'None trained yet.' }}</strong>
+        <span v-if="models">The {{ section === 'cutter' ? 'detector' : 'reader' }} of a whole pipeline plays this role too.</span></div>
+    </template>
   </section>
-
-  <p v-if="job && !(bigJob || activities.length)" class="last-line">Last: {{ job.label }}, {{ startedWhen(job) }} · {{ job.state === 'interrupted' ? 'stopped' : JOB_STATE[job.state][0] }} ·
-    <button type="button" class="link-button" @click="emit('details', job)">Details</button></p>
 
   <DatasetSection :dataset="status?.dataset ?? null" :loading="status === null"/>
 </template>
