@@ -2,13 +2,14 @@
 (nnslr_tools.sign_types): proposed, saved, refused when wrong, the same list on the page and on the server."""
 from __future__ import annotations
 
+import gzip
 import json
 import re
 from pathlib import Path
 
 import pytest
 
-from nnslr_tools.gps import country_of, frame_position, positions_path
+from nnslr_tools.gps import DETAILED_BORDERS, GpsError, country_of, frame_position, positions_path, recountry_positions
 from nnslr_tools.sign_types import SIGN_TYPES
 from review_helpers import ROUTE, RUN_ID, TOKEN, RunningServer, json_of, make_report, page_body
 
@@ -20,6 +21,45 @@ CATALOG = Path(__file__).resolve().parents[2] / 'web/src/review/catalog.ts'
     (48.86, 2.35, 'FR'), (47.48, 8.05, 'CH'), (40.0, -40.0, None), (None, None, None)])
 def test_the_country_of_a_position(latitude, longitude, code):
     assert country_of(latitude, longitude) == code
+
+
+def _square(code, west, south, east, north):
+    ring = [[west, south], [east, south], [east, north], [west, north], [west, south]]
+    return {'code': code, 'name': code, 'bbox': [west, south, east, north], 'polygons': [[ring]]}
+
+
+def test_finer_borders_of_the_data_root_take_the_place_of_the_shipped_ones(tmp_path):
+    # Bad Säckingen: Germany, though the shipped Natural Earth borders put it in Switzerland.
+    assert country_of(47.5536, 7.9469) == 'CH'
+    target = tmp_path / DETAILED_BORDERS
+    target.parent.mkdir(parents=True)
+    target.write_bytes(gzip.compress(json.dumps({'countries': [
+        _square('DE', 7.0, 47.55, 9.0, 48.0), _square('CH', 7.0, 46.0, 9.0, 47.55)]}).encode()))
+    assert country_of(47.5536, 7.9469, tmp_path) == 'DE' and country_of(47.5464, 7.9214, tmp_path) == 'CH'
+    # Elsewhere the finer file knows nothing: no country (it covers Europe as the shipped one does).
+    assert country_of(48.86, 2.35, tmp_path) is None
+    # Without the file, the shipped borders.
+    assert country_of(47.5536, 7.9469, tmp_path / 'other') == 'CH'
+
+    # The routes already read get their country again, without their logs; a frame without a fix takes the
+    # country of the nearest one with a fix.
+    lines = [{'frame_key': '0/0', 'segment_index': 0, 'output_index': 0, 'latitude': 47.5536, 'longitude': 7.9469,
+              'country': 'CH', 'country_from': 'gps'},
+             {'frame_key': '0/1', 'segment_index': 0, 'output_index': 1, 'latitude': None, 'longitude': None,
+              'country': 'CH', 'country_from': 'nearest_fix'},
+             {'frame_key': '0/2', 'segment_index': 0, 'output_index': 2, 'latitude': 47.5464, 'longitude': 7.9214,
+              'country': 'CH', 'country_from': 'gps'}]
+    path = positions_path(tmp_path, ROUTE)
+    path.parent.mkdir(parents=True)
+    path.write_text(''.join(json.dumps(line) + '\n' for line in lines))
+    result = recountry_positions(tmp_path, ROUTE)
+    assert result['changed'] == {'CH->DE': 2} and result['countries'] == {'DE': 1, 'CH': 1}
+    again = [json.loads(line) for line in path.read_text().splitlines()]
+    assert [(line['country'], line['country_from']) for line in again] == [
+        ('DE', 'gps'), ('DE', 'nearest_fix'), ('CH', 'gps')]
+    assert again[0]['latitude'] == 47.5536
+    with pytest.raises(GpsError):
+        recountry_positions(tmp_path, '00000002--abcdef1234')
 
 
 def test_the_position_of_a_frame_is_the_nearest_fix():

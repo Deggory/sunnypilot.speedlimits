@@ -11,9 +11,13 @@ its time is the time of the segment's first encoded road frame plus k seconds; t
 (``gpsLocationExternal``, else ``gpsLocation``) gives its position. The logs are read by the Python of the
 comma fetch (openpilot's LogReader, or pycapnp with NNSLR_OPENPILOT_ROOT: helpers/comma_fetch_log.py).
 
-The country comes from the borders in ``data/countries.json.gz`` (Natural Earth, public domain;
-scripts/make_country_borders.py), Europe only: elsewhere it is None. It is a proposal: the reviewer
-confirms or corrects it with each frame (``country`` of the review).
+The country comes from the borders in ``data/countries.json.gz`` (Natural Earth 1:10 million, public domain;
+scripts/make_country_borders.py), Europe only: elsewhere it is None. Natural Earth is coarse where a border
+follows a river: along the Rhine from Wallbach to Laufenburg it puts Bad Säckingen and Rheinfelden (Baden) in
+Switzerland. ``<data root>/derived/gps/borders.json.gz``, when there (GISCO 1:1 million, EuroGeographics:
+non-commercial use, so never in git; ``scripts/make_country_borders.py --gisco``), takes its place. ``nnslr gps
+--countries`` gives the frames of the routes already read their country again from those borders. It is a
+proposal: the reviewer confirms or corrects it with each frame (``country`` of the review).
 """
 from __future__ import annotations
 
@@ -33,6 +37,8 @@ from nnslr_tools.manifest import parse_route_id
 GPS_RELATIVE_DIR = Path('derived') / 'gps'
 GPS_MAX_GAP_S = 2.0
 BORDERS = Path(__file__).resolve().parent / 'data' / 'countries.json.gz'
+# Finer borders of the data root (scripts/make_country_borders.py --gisco), used instead when there.
+DETAILED_BORDERS = GPS_RELATIVE_DIR / 'borders.json.gz'
 FETCH_PYTHON_ENV = 'COMMA_FETCH_PYTHON'
 HELPERS = Path(__file__).resolve().parents[2] / 'helpers'
 
@@ -124,9 +130,20 @@ def frame_position(segment_log_data: dict | None, output_index: int) -> dict | N
             'bearing_deg': round(best[4], 1)}
 
 
-@lru_cache(maxsize=1)
-def _borders() -> list[dict]:
-    return json.loads(gzip.decompress(BORDERS.read_bytes()))['countries']
+@lru_cache(maxsize=4)
+def _read_borders(path: str, stamp: int | None) -> tuple:
+    return tuple(json.loads(gzip.decompress(Path(path).read_bytes()))['countries'])
+
+
+def _borders(root: Path | None = None) -> tuple:
+    """The countries of the finer borders of the data root ``root`` when there, else of the shipped ones."""
+    if root is not None:
+        detailed = Path(root) / DETAILED_BORDERS
+        try:
+            return _read_borders(str(detailed), detailed.stat().st_mtime_ns)
+        except (OSError, ValueError, KeyError):
+            pass
+    return _read_borders(str(BORDERS), None)
 
 
 def _inside(lon: float, lat: float, ring: list) -> bool:
@@ -141,12 +158,12 @@ def _inside(lon: float, lat: float, ring: list) -> bool:
     return inside
 
 
-def country_of(latitude: float | None, longitude: float | None) -> str | None:
+def country_of(latitude: float | None, longitude: float | None, root: Path | None = None) -> str | None:
     """ISO 3166-1 alpha-2 code of the country at a position ("CH", "IT", "PL"...), None outside the borders
-    shipped (Europe) or without a position."""
+    (Europe) or without a position; with the finer borders of the data root ``root`` when there."""
     if latitude is None or longitude is None:
         return None
-    for country in _borders():
+    for country in _borders(root):
         west, south, east, north = country['bbox']
         if not (west <= longitude <= east and south <= latitude <= north):
             continue
@@ -158,7 +175,7 @@ def country_of(latitude: float | None, longitude: float | None) -> str | None:
 
 
 def country_names() -> dict[str, str]:
-    """{code: English name} of the countries the borders know."""
+    """{code: English name} of the countries the shipped borders know (the finer ones have the same codes)."""
     return {country['code']: country['name'] for country in _borders()}
 
 
@@ -188,7 +205,7 @@ def build_positions(root: Path, route: str, rows: list[dict], *, python: str | N
         if segment_data and segment_data.get('error'):
             errors.append(f"segment {row['segment_index']}: {segment_data['error']}")
         position = frame_position(segment_data, row['output_index'])
-        country = country_of(position['latitude'], position['longitude']) if position else None
+        country = country_of(position['latitude'], position['longitude'], root) if position else None
         line = {'frame_key': row['frame_key'], 'segment_index': row['segment_index'],
                 'output_index': row['output_index'], 'latitude': None, 'longitude': None, 'speed_mps': None,
                 'bearing_deg': None, 'country': country, 'country_from': 'gps' if country else None}
@@ -198,19 +215,52 @@ def build_positions(root: Path, route: str, rows: list[dict], *, python: str | N
         if country:
             countries[country] = countries.get(country, 0) + 1
         lines.append(line)
-    # A frame without a fix (the GPS still searching, a tunnel) takes the country of the nearest frame that has
-    # one: a route rarely crosses a border, and the reviewer sees where the proposal comes from.
-    located_at = [index for index, line in enumerate(lines) if line['country']]
-    for index, line in enumerate(lines):
-        if line['country'] is None and located_at:
-            nearest = min(located_at, key=lambda other: abs(other - index))
-            line['country'] = lines[nearest]['country']
-            line['country_from'] = 'nearest_fix'
+    _nearest_countries(lines)
     target = positions_path(root, route)
     atomic_write(target, jsonl_bytes(lines))
     return {'route_id': route, 'frames': len(lines), 'located': located, 'countries': countries,
             'segments_without_log': [segment for segment, path in logs.items() if path is None],
             'errors': sorted(set(errors)), 'output': str(target)}
+
+
+def _nearest_countries(lines: list[dict]) -> None:
+    """A frame without a fix (the GPS still searching, a tunnel) takes the country of the nearest frame that has
+    one: a route rarely crosses a border, and the reviewer sees where the proposal comes from."""
+    located_at = [index for index, line in enumerate(lines) if line['country'] and line['country_from'] == 'gps']
+    for index, line in enumerate(lines):
+        if line['country_from'] == 'gps':
+            continue
+        line['country'], line['country_from'] = None, None
+        if located_at:
+            nearest = min(located_at, key=lambda other: abs(other - index))
+            line['country'] = lines[nearest]['country']
+            line['country_from'] = 'nearest_fix'
+
+
+def recountry_positions(root: Path, route: str) -> dict:
+    """The country of every frame of positions.jsonl again, from its position and the borders now (country_of):
+    the logs are not read again. Returns counts, with the frames whose country changed."""
+    path = positions_path(root, route)
+    if not path.is_file():
+        raise GpsError(f'{route}: no positions yet: run nnslr gps --route {route} first')
+    lines = [line for line in load_jsonl(path) if isinstance(line, dict) and 'frame_key' in line]
+    before = [line.get('country') for line in lines]
+    countries: dict[str, int] = {}
+    for line in lines:
+        country = country_of(line.get('latitude'), line.get('longitude'), root)
+        line['country'], line['country_from'] = country, 'gps' if country else None
+        if country:
+            countries[country] = countries.get(country, 0) + 1
+    _nearest_countries(lines)
+    changed = {}
+    for old, line in zip(before, lines):
+        if old != line['country']:
+            pair = f'{old}->{line["country"]}'
+            changed[pair] = changed.get(pair, 0) + 1
+    if changed:
+        atomic_write(path, jsonl_bytes(lines))
+    return {'route_id': route, 'frames': len(lines), 'countries': countries, 'changed': changed,
+            'output': str(path)}
 
 
 def load_positions(root: Path, route: str) -> dict:

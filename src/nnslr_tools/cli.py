@@ -1360,6 +1360,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_gps.add_argument("--route", action="append", help="route id; repeat for more")
     p_gps.add_argument("--all", action="store_true", help="every route with a pre-annotation report")
     p_gps.add_argument("--missing", action="store_true", help="with --all: only routes without positions yet")
+    p_gps.add_argument("--countries", action="store_true",
+                       help="only the country of each frame again, from the positions already read and the borders "
+                            "now (after scripts/make_country_borders.py --gisco); the logs are not read")
     p_gps.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_gps.set_defaults(func=_cmd_gps)
     p_tracks = sub.add_parser("tracks", help="the same sign followed across consecutive confirmed frames "
@@ -1833,7 +1836,7 @@ def _cmd_review_reclassify(args: argparse.Namespace) -> int:
 
 
 def _cmd_gps(args: argparse.Namespace) -> int:
-    from nnslr_tools.gps import GpsError, build_positions, positions_path
+    from nnslr_tools.gps import GpsError, build_positions, positions_path, recountry_positions
     from nnslr_tools.preannotate import resolve_data_root
     from nnslr_tools.review import latest_report, list_reports, report_rows
     root = resolve_data_root(Path(args.data_root) if args.data_root else None)
@@ -1850,7 +1853,10 @@ def _cmd_gps(args: argparse.Namespace) -> int:
     failed = 0
     for route in routes:
         try:
-            result = build_positions(root, route, report_rows(latest_report(root, route)))
+            if args.countries:
+                result = recountry_positions(root, route)
+            else:
+                result = build_positions(root, route, report_rows(latest_report(root, route)))
         except (GpsError, ValueError, OSError) as exc:
             failed += 1
             result = {"route_id": route, "error": str(exc)}

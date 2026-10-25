@@ -34,6 +34,7 @@ Inside the data root:
 | `derived/frames/<route>/` | the extracted frames, one per second |
 | `derived/preannotations/` | the boxes proposed by the pre-annotation models |
 | `derived/gps/<route>/positions.jsonl` | position, speed, heading and country of every frame |
+| `derived/gps/borders.json.gz` | finer country borders (GISCO 1:1 million, non-commercial), from `scripts/make_country_borders.py --gisco` |
 | `derived/tracks/<route>/tracks.jsonl` | the same sign followed across confirmed frames |
 | `derived/hints/<route>/` | second readings shown on the review page |
 | `derived/osm/` | OpenStreetMap roads near the drives |
@@ -117,6 +118,7 @@ These helpers are the daily flow, and the portal's buttons run them. Each one sk
 |---|---|---|
 | `preannotate --route R` | proposes sign boxes on every frame of a route. Downloads the models on first use and checks their SHA-256. | network on first use, CPU-heavy (GPU with `.[preannotate-gpu]`), writes data |
 | `gps --all --missing` | GPS position and country of every frame (`derived/gps/`). The review page proposes that country. | writes data |
+| `gps --all --countries` | The country of every frame again, from the positions already read and the borders now (after `make_country_borders.py --gisco`); the logs are not read | writes data |
 | `tracks --all` | follows the same sign across consecutive confirmed frames (`derived/tracks/`) | writes data |
 | `review [--host H] [--port P] [--route R]` | serves the portal. By default it listens on 127.0.0.1:8765 with no sign-in. `--host 0.0.0.0` opens it to the LAN and requires the token. | serves the portal, writes reviews |
 | `mcp [--read-only]` | the MCP server of the review, over stdio | writes reviews unless `--read-only` |
@@ -227,6 +229,7 @@ Before publishing:
 | `uv run --no-project --with osmium python scripts/osm_places.py` | Keeps the names of the Swiss cities, towns, villages and districts of the same local map in `derived/osm/places.jsonl`; the Review list names each drive by them ("Herznach → Zürich", with the day and time from the last segment video). Run it again after a newer map. | writes data |
 | `uv run --no-project --with osmium python scripts/osm_roads.py` | Keeps the OpenStreetMap roads near the drives (from a local Geofabrik extract in `raw/osm/`, read offline) in `derived/osm/roads.jsonl`. They are a possible input for "another road". Map data © OpenStreetMap contributors, ODbL. | writes data |
 | `python scripts/make_country_borders.py [<file.geojson>]` | Rebuilds `src/nnslr_tools/data/countries.json.gz`, the Natural Earth borders (public domain) used to propose the country of a frame | network (downloads the source), writes the file |
+| `python scripts/make_country_borders.py --gisco [<file.geojson>]` | Writes finer borders, GISCO 1:1 million, into `<data root>/derived/gps/borders.json.gz`, used instead of Natural Earth when there (Natural Earth puts Bad Säckingen and Rheinfelden in Switzerland). Administrative boundaries © EuroGeographics, non-commercial use only: never in git. Then `nnslr gps --all --countries` | network (64 MB download), writes the file |
 
 ## Rules the tools follow
 
