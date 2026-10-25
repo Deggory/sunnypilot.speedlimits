@@ -161,6 +161,13 @@ The chain card answers the question that matters: how many of the test's speed s
 
 For each network (cutter, classifier and decider), this tab lists every version trained here, each with its main test number and the rest under **Details**, and the one in use. **Use this one** records the choice, with who made it and when. Other steps then use that version: for example, the classifier training learns from the false boxes of the cutter in use. Choosing copies, exports or installs nothing.
 
+**Publish**, under the three columns, shares the three networks in use with other people, together, on Hugging Face:
+
+- **Prepare the package** exports them to ONNX, checks each against PyTorch, and writes a model card with their test numbers. It runs here and uploads nothing.
+- **Publish on Hugging Face** uploads the latest package to `cristianku/sunnypilot-speedlimits-models`, public, after a question, and adds it to the catalog `speed_networks.json` that a car can download from. No frame or dataset leaves the server.
+
+The commands are in [docs/COMMANDS.md](docs/COMMANDS.md#publishing-when-there-is-something-to-publish).
+
 ## Results so far
 
 These are the first measurements, taken on 24 October 2026. The dataset is small and comes from one country. Most of it was labelled by AI reviewers, and everything is measured on a single test area. Read the numbers as a direction, not a promise.

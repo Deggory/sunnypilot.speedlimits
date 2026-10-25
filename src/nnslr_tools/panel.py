@@ -64,6 +64,10 @@ CUTTER_SCRIPT = 'scripts/run_detector_sizes.sh'
 # The decider: experiment B, its three variants (the crop alone; with position and speed; with the scene), on a run of
 # its own (start() adds <time>-decider).
 DECIDER_SCRIPT = 'scripts/run_experiment_b.sh'
+# Our three networks in use as one package (ONNX, model card), and that package on Hugging Face.
+NETWORKS_SCRIPT = 'scripts/publish_networks.sh'
+NETWORKS_REPO = os.environ.get('HF_REPO', 'cristianku/sunnypilot-speedlimits-models')
+NETWORK_PACKAGES_SHOWN = 5
 RUN_ARGUMENT_LINE = re.compile(r'^run:\s+(\S+)\s*$', re.M)
 RUN_LINES = {
     'train_classifier': (re.compile(r'^== scripts/run_classifier\.sh (\S+)\s*$', re.M), RUN_ARGUMENT_LINE),
@@ -80,7 +84,7 @@ CUTTER_FAMILY = 'all'
 # The GPU memory Qwen3-VL-8B takes in float16 (scripts/setup_vlm.sh: 17.5 GB), with a margin for one frame.
 QWEN_GPU_MB = 18 * 1024
 ACTION_OPTIONS = {'train_cutter': ('size', 'families'), 'prepare': ('proposer',), 'prepare_again': ('proposer',),
-                  'measure_proposer': ('proposer',),
+                  'measure_proposer': ('proposer',), 'networks_publish': ('package',),
                   'ai_review': ('route', 'provider', 'save', 'limit'), 'measure_ai_reviewer': ('provider', 'limit')}
 # [ai-reviewer] - START
 # The AI actions and their options (strings; checked by Panel._ai_arguments). The provider is an id of Settings
@@ -140,6 +144,10 @@ ACTIONS = {
     # (start() adds <time>-cutter and the size; {'size', 'families'}).
     'train_cutter': {'label': 'Train the cutter', 'group': 'train', 'command': [CUTTER_SCRIPT]},
     'train_decider': {'label': 'Train the decider', 'group': 'train', 'command': [DECIDER_SCRIPT]},
+    # The cutter, classifier and decider in use exported as one package (start() names it); nothing is uploaded.
+    'networks_prepare': {'label': 'Prepare the package', 'group': 'publish', 'command': [NETWORKS_SCRIPT]},
+    # A package prepared here ({'package': name}) uploaded to Hugging Face, public: other people download it.
+    'networks_publish': {'label': 'Publish on Hugging Face', 'group': 'publish', 'command': [NETWORKS_SCRIPT, '--upload']},
     # A proposer of Prepare measured on the test frames (the Proposers view of Evaluate); in the train group: the GPU.
     'measure_proposer': {'label': 'Measure a proposer', 'group': 'train', 'command': ['helpers/measure_proposer.sh']},
     # Qwen3-VL as the third proposer of Prepare: its packages, its weights (17.5 GB, what is already there is kept after
@@ -170,6 +178,7 @@ ACTIVITIES = (
     ('train', 'classifier training', 'run_classifier.sh'),
     ('train', 'cutter training', 'run_detector_sizes.sh'),
     ('update', 'code update', 'helpers/update.sh'),
+    ('publish', 'package of the networks', 'publish_networks.sh'),
     # [ai-reviewer] - START
     ('ai', 'AI review', 'nnslr ai-review'),
     ('ai', 'AI reviewer measure', 'nnslr measure-ai-reviewer'),
@@ -178,9 +187,10 @@ ACTIVITIES = (
     ('other', 'openpilot.distill training', 'supervised.train'),
 )
 # The groups of this checkout's own helpers (see Panel._ours).
-OWN_GROUPS = ('prepare', 'train', 'update', 'ai')
+OWN_GROUPS = ('prepare', 'train', 'update', 'ai', 'publish')
 GROUP_NAMES = {'fetch': 'a download from the comma', 'prepare': 'a preparation',
-               'train': 'an import or a training', 'update': 'a code update', 'ai': 'an AI review'}
+               'train': 'an import or a training', 'update': 'a code update', 'ai': 'an AI review',
+               'publish': 'a package of the networks'}
 # What runs, in the reason of an action that must wait ("A proposer measurement is running"): the job of the site by
 # its action, the work from a terminal by its label (ACTIVITIES); GROUP_NAMES when neither is known.
 RUNNING_NAMES = {'fetch': 'a download from the comma', 'prepare': 'a preparation', 'prepare_again': 'a preparation',
@@ -188,6 +198,7 @@ RUNNING_NAMES = {'fetch': 'a download from the comma', 'prepare': 'a preparation
                  'dataset': 'an import of the reviews', 'train': 'a training', 'train_continue': 'a training',
                  'train_resume': 'a training', 'train_classifier': 'a classifier training',
                  'train_cutter': 'a cutter training', 'train_decider': 'a decider training', 'update': 'a code update',
+                 'networks_prepare': 'the preparation of a package', 'networks_publish': 'a publication',
                  'ai_review': 'an AI review',
                  'measure_ai_reviewer': 'an AI reviewer measurement'}
 ACTIVITY_NAMES = {'download from the comma': 'a download from the comma', 'preparation': 'a preparation',
@@ -195,12 +206,14 @@ ACTIVITY_NAMES = {'download from the comma': 'a download from the comma', 'prepa
                   'dataset and training': 'an import or a training', 'GPU training': 'a training',
                   'classifier training': 'a classifier training', 'cutter training': 'a cutter training',
                   'code update': 'a code update', 'AI review': 'an AI review',
+                  'package of the networks': 'a package of the networks',
                   'AI reviewer measure': 'an AI reviewer measurement'}
 # Groups that never run together with a group, besides itself. The download and the preparation
 # both write the links of data/raw/routes; the update rewrites the helpers under a running bash
 # and restarts this server; a preparation replaces the report an AI review is working on.
 CONFLICTS = {'fetch': ('prepare', 'update'), 'prepare': ('fetch', 'update', 'ai'), 'train': ('update',),
-             'update': ('fetch', 'prepare', 'train', 'ai'), 'ai': ('prepare', 'update')}
+             'update': ('fetch', 'prepare', 'train', 'ai', 'publish'), 'ai': ('prepare', 'update'),
+             'publish': ('update',)}
 # The fetch reads the comma logs (trip length, reverse gear) with openpilot's LogReader; the
 # .venv of this repository has it only with the [log-reader] extra and the schema checkouts.
 FETCH_PYTHON_ENV = 'COMMA_FETCH_PYTHON'
@@ -458,17 +471,20 @@ class Panel:
             payload['min_routes'] = module.MIN_REVIEWED_ROUTES
             payload['reviewed_routes'] = sum(1 for row in rows if row['confirmed'])
             payload['next_action'] = _next_action(payload['next_step'])
-        # [ai-reviewer] - START
-        # The AI reviewer of Settings (a read of its file, no network): whether a route can be reviewed with AI.
-        payload['ai_reviewer'], ai_providers = self._ai_settings()
-        payload['actions'] = self._action_states(payload, activities, ai_providers=ai_providers)
-        # [ai-reviewer] - END
         # Who can propose the signs on this server (the choice of the Prepare tab), and why not.
         from nnslr_tools.preannotate import ours_missing, vlm_missing
         # qwen: why it is not installed; qwen_gpu: why it cannot load on the GPU now (start() refuses it then); ours:
         # why Our networks are not whole yet.
         payload['proposers'] = {'qwen': vlm_missing(self.root), 'qwen_gpu': _qwen_gpu_reason(system['gpu']) or None,
                                 'ours': ours_missing(self.root)}
+        # The packages of our networks prepared here, newest first, and where they are published (Models tab).
+        from nnslr_tools.networks_package import packages
+        payload['networks'] = {'packages': packages(self.root)[:NETWORK_PACKAGES_SHOWN], 'repo': NETWORKS_REPO}
+        # [ai-reviewer] - START
+        # The AI reviewer of Settings (a read of its file, no network): whether a route can be reviewed with AI.
+        payload['ai_reviewer'], ai_providers = self._ai_settings()
+        payload['actions'] = self._action_states(payload, activities, ai_providers=ai_providers)
+        # [ai-reviewer] - END
         # The choices of "Train the cutter", for its buttons.
         payload['cutter_options'] = {'sizes': list(CUTTER_SIZES), 'size': CUTTER_SIZE, 'families': list(CUTTER_FAMILIES),
                                      'family': CUTTER_FAMILY}
@@ -614,6 +630,13 @@ class Panel:
                 reason = CUTTER_SCRIPT + ' is missing in this installation'
             elif name == 'train_decider' and not (self.repo / DECIDER_SCRIPT).is_file():
                 reason = DECIDER_SCRIPT + ' is missing in this installation'
+            elif name in ('networks_prepare', 'networks_publish') and not (self.repo / NETWORKS_SCRIPT).is_file():
+                reason = NETWORKS_SCRIPT + ' is missing in this installation'
+            elif name == 'networks_prepare':
+                # Our networks only whole (the same rule as Prepare's proposer).
+                reason = payload.get('proposers', {}).get('ours') or ''
+            elif name == 'networks_publish':
+                reason = '' if payload.get('networks', {}).get('packages') else 'no package prepared yet'
             # [ai-reviewer] - START
             elif name in AI_ACTIONS and not (self.repo / action['command'][0]).is_file():
                 reason = action['command'][0] + ' is missing in this installation'
@@ -1066,6 +1089,21 @@ class Panel:
             if families not in CUTTER_FAMILIES:
                 raise PanelError(400, 'bad_option', 'Unknown signs for the cutter: all or speed.')
             start_env['NNSLR_CUTTER_FAMILIES'] = families
+        package = (options or {}).get('package')
+        if package is not None and action != 'networks_publish':
+            raise PanelError(400, 'bad_option', 'Only "Publish on Hugging Face" takes a package.')
+        if action == 'networks_publish':
+            from nnslr_tools.networks_package import packages
+            if not isinstance(package, str) or package not in {item['name'] for item in packages(self.root)}:
+                raise PanelError(400, 'bad_option', 'Unknown package: prepare it first.')
+            start_args.append('--name=' + package)
+        if action == 'networks_prepare':
+            from nnslr_tools.networks_package import new_name
+            from nnslr_tools.preannotate import ours_missing
+            missing = ours_missing(self.root)
+            if missing:
+                raise PanelError(409, 'not_available', missing + '.')
+            start_args.append('--name=' + new_name())
         resumed = (options or {}).get('run')
         if action == 'train_resume':
             if not isinstance(resumed, str) or not RUN_NAME.fullmatch(resumed) or not (self.root / 'runs' / resumed).is_dir():
@@ -1104,6 +1142,8 @@ class Panel:
             raise PanelError(403, 'actions_disabled', CUTTER_SCRIPT + ' is missing in this installation.')
         if action == 'train_decider' and not (self.repo / DECIDER_SCRIPT).is_file():
             raise PanelError(403, 'actions_disabled', DECIDER_SCRIPT + ' is missing in this installation.')
+        if action in ('networks_prepare', 'networks_publish') and not (self.repo / NETWORKS_SCRIPT).is_file():
+            raise PanelError(403, 'actions_disabled', NETWORKS_SCRIPT + ' is missing in this installation.')
         # [ai-reviewer] - START
         if action in AI_ACTIONS and not (self.repo / ACTIONS[action]['command'][0]).is_file():
             raise PanelError(403, 'actions_disabled', ACTIONS[action]['command'][0] + ' is missing in this installation.')

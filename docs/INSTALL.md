@@ -102,7 +102,7 @@ The providers and their keys are kept in `data/web/private/llm-providers.json`, 
 
 ### Publishing a model on Hugging Face
 
-Nothing to install: `scripts/publish_model.sh` runs the Hugging Face CLI through `uvx`. Log in once with a token that can write the target repository:
+Nothing to install: `scripts/publish_model.sh` and `scripts/publish_networks.sh` (our three networks, the Publish card of the Models tab) run the Hugging Face library through `uvx`. Log in once with a token that can write the target repository:
 
 ```sh
 uvx --from "huggingface_hub>=1,<3" hf auth login

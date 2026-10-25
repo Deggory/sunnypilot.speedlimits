@@ -55,7 +55,7 @@ watch(busyPaths, markBusy);
     <PrepareTab v-else-if="currentTab === 'prepare'" :status="status" @run="run" @stop="stop" @details="details"/>
     <TrainTab v-else-if="currentTab === 'train'" :status="status" @run="run" @stop="stop" @details="details"/>
     <EvaluateTab v-else-if="currentTab === 'evaluate'" :status="status" @run="run" @stop="stop" @details="details"/>
-    <ModelsTab v-else :status="status"/>
+    <ModelsTab v-else :status="status" @run="run" @stop="stop" @details="details"/>
   </main>
   <LogSheet :job="shownJob" @close="shownId = null" @stop="stop"/>
 </template>

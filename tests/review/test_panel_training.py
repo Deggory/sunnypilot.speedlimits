@@ -427,3 +427,45 @@ def test_a_cutter_training_started_from_a_terminal_has_the_progress_of_its_size_
     progress = payload['activities'][0]['progress']
     assert [(step['key'], step['state']) for step in progress['steps']] == [('checks', 'done'), ('detector', 'current'), ('evaluate', 'todo')]
     assert progress['detail'] == 'detector · epoch 4 of 20' and progress['curves']['detector']['points'][0]['val_recall'] == 0.5
+
+
+def test_the_networks_are_packaged_then_published_from_the_models_tab(root, checkout, monkeypatch):
+    """Publish (Models tab): Prepare the package only with Our networks whole, Publish only a package prepared here."""
+    import json as json_module
+    from nnslr_tools import networks_package
+    panel = Panel(root, repo=checkout)
+    states = panel._action_states(ready_payload(), [])
+    assert states['networks_prepare']['reason'] == 'scripts/publish_networks.sh is missing in this installation'
+    script = checkout / 'scripts' / 'publish_networks.sh'
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text('#!/usr/bin/env bash\necho "== Package of the networks"\necho "args: $*"\n'
+                      'echo "== 1/4 Export the cutter (c)"\n')
+    script.chmod(0o755)
+    payload = {**ready_payload(), 'proposers': {'ours': 'Our networks propose only with all three parts in use'},
+               'networks': {'packages': []}}
+    states = panel._action_states(payload, [])
+    assert states['networks_prepare']['reason'] == 'Our networks propose only with all three parts in use'
+    assert states['networks_publish']['reason'] == 'no package prepared yet'
+    monkeypatch.setattr(panel, 'activities', lambda: [])
+    with pytest.raises(PanelError) as refused:
+        panel.start('networks_prepare', None)
+    assert refused.value.reason == 'not_available'
+    monkeypatch.setattr('nnslr_tools.preannotate.ours_missing', lambda root: None)
+    job = panel.start('networks_prepare', None)
+    done = finished(panel, job['id'])
+    log = full_log(panel, job['id'])
+    assert done['state'] == 'ok' and re.search(r'args: --name=speedlimits-\d{8}-\d{4}$', log, re.M)
+    assert panel.job_progress(done, None)['steps'][0]['key'] == 'cutter'
+    # Publish: only a package that is here, by its name; never another option.
+    with pytest.raises(PanelError) as refused:
+        panel.start('networks_publish', {'package': 'nothing-here'})
+    assert refused.value.reason == 'bad_option'
+    with pytest.raises(PanelError):
+        panel.start('networks_prepare', {'package': 'x'})
+    folder = root / 'publish' / 'networks' / 'pkg-1'
+    folder.mkdir(parents=True)
+    (folder / 'networks.json').write_text(json_module.dumps({'created': '2026-10-25T22:00:00Z', 'networks': {}}))
+    assert [item['name'] for item in networks_package.packages(root)] == ['pkg-1']
+    job = panel.start('networks_publish', {'package': 'pkg-1'})
+    finished(panel, job['id'])
+    assert re.search(r'args: --upload --name=pkg-1$', full_log(panel, job['id']), re.M)

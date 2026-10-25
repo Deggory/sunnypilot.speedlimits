@@ -16,6 +16,10 @@ const ring = (x: number, y: number, r: number): string => `M${x - r} ${y}a${r} $
 export const ICONS = {
   /** Download from the comma: an arrow down into the device. */
   download: [{d: 'M12 3.5v10.5'}, {d: 'M7.5 9.8 12 14.3l4.5-4.5'}, {d: 'M4 14.5v3.3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3.3'}],
+  /** Publish on Hugging Face: an arrow up out of the tray. */
+  upload: [{d: 'M12 14.3V3.8'}, {d: 'M7.5 8 12 3.5 16.5 8'}, {d: 'M4 14.5v3.3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3.3'}],
+  /** Prepare a package: a box with its lid. */
+  package: [{d: 'M3.5 8.2 12 4l8.5 4.2v8.6L12 21l-8.5-4.2z'}, {d: 'M3.5 8.2 12 12.4l8.5-4.2'}, {d: 'M12 12.4V21'}],
   /** Prepare new routes: a film frame, an arrow, the sign it finds. */
   prepare: [{d: 'M3.5 6.5h7a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1z'}, {d: 'M2.5 9.5h9M2.5 14.5h9'},
     {d: 'M13.6 12h3.1'}, {d: 'M15.4 10.5l1.5 1.5-1.5 1.5'}, {d: ring(19.6, 12, 2.7)}],

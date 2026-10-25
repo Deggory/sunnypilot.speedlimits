@@ -12,7 +12,8 @@ export const RESUME_JOB: InjectionKey<(job: Job) => Promise<void>> = Symbol('res
  * the proposer it had. */
 export const RETRY_JOB: InjectionKey<{can: (job: Job) => boolean; run: (job: Job) => void}> = Symbol('retry-job');
 /** The actions whose failed job can simply run again: no option but the proposer (a training has Resume). */
-export const RETRY_ACTIONS: ActionName[] = ['fetch', 'prepare', 'prepare_again', 'setup_vlm', 'dataset', 'measure_proposer'];
+export const RETRY_ACTIONS: ActionName[] = ['fetch', 'prepare', 'prepare_again', 'setup_vlm', 'dataset', 'measure_proposer',
+  'networks_prepare'];
 
 /** The question before an action; null: it starts at the click (preparing, importing the reviews). */
 /** The proposer as the Prepare tab names it. */
@@ -41,6 +42,12 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
     return {title: 'Train the classifier?', action: 'Start training',
       text: 'Mines the false boxes of the cutter in use, trains the classifier with “not a sign” on the GPU, then measures it '
         + 'alone and in the chain: it takes hours. Its run is a new one, named by the time it starts.'};
+  }
+  if (name === 'networks_publish') {
+    return {title: 'Publish ' + (options?.package ?? 'the package') + ' on Hugging Face?', action: 'Publish', danger: true,
+      text: 'Uploads the cutter, the classifier and the decider of this package, their model card and the catalog to '
+        + 'Hugging Face, public: anyone can download them, and a copy may stay even if you delete it later. No frame '
+        + 'or dataset is uploaded.'};
   }
   if (name === 'setup_vlm') {
     return {title: 'Install Qwen3-VL?', action: 'Install',
@@ -100,6 +107,8 @@ const STOP_TEXT: Partial<Record<ActionName, string>> = {
   train_cutter: 'This training is lost: training again starts a new run from the beginning.',
   train_decider: 'The deciders already trained stay; training again starts a new run.',
   ai_review: 'The frames already saved stay saved; the others are left to review.',
+  networks_prepare: 'Nothing is kept: preparing again starts over.',
+  networks_publish: 'What Hugging Face already received may stay there.',
 };
 
 /** run() and stop() for the buttons; refresh reads /api/panel/status again. */

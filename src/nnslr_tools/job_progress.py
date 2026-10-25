@@ -47,6 +47,11 @@ DECIDER_STEPS = (
     ('experiment_b_full', 'Crop, position and the scene', 32),
 )
 PREPARE_STEPS = (('link', 'Link the videos', 5), ('frames', 'Extract the frames and propose the signs', 95))
+# scripts/publish_networks.sh: "== 1/4 Export the cutter" ... (prepare), "== 1/3 Check the package" ... (upload).
+NETWORKS_PREPARE_STEPS = (('cutter', 'Export the cutter', 40), ('classifier', 'Export the classifier', 20),
+                          ('decider', 'Export the decider', 30), ('package', 'Model card and checks', 10))
+NETWORKS_PUBLISH_STEPS = (('check', 'Check the package', 10), ('catalog', 'Read the catalog', 10),
+                          ('upload', 'Upload to Hugging Face', 80))
 FETCH_STEPS = (('fetch', 'Download the drives from the comma', 100),)
 UPDATE_STEPS = (('update', 'Update the code and restart the site', 100),)
 # [ai-reviewer] - START
@@ -57,10 +62,11 @@ AI_MEASURE_STEPS = (('measure', 'Measure the AI reviewer', 100),)
 STEPS = {'fetch': FETCH_STEPS, 'prepare': PREPARE_STEPS, 'dataset': DATASET_STEPS, 'train': TRAIN_STEPS,
          'train_continue': TRAIN_STEPS, 'train_resume': TRAIN_STEPS, 'train_classifier': CLASSIFIER_STEPS,
          'train_cutter': CUTTER_STEPS, 'train_decider': DECIDER_STEPS, 'update': UPDATE_STEPS, 'ai_review': AI_REVIEW_STEPS,
-         'measure_ai_reviewer': AI_MEASURE_STEPS}
+         'measure_ai_reviewer': AI_MEASURE_STEPS, 'networks_prepare': NETWORKS_PREPARE_STEPS,
+         'networks_publish': NETWORKS_PUBLISH_STEPS}
 # The actions whose percent is the weighted sum of their steps (the AI's: its frames done, from its reports).
 WEIGHTED = ('train', 'train_continue', 'train_resume', 'train_classifier', 'train_cutter', 'train_decider', 'dataset', 'ai_review',
-            'measure_ai_reviewer')
+            'measure_ai_reviewer', 'networks_prepare', 'networks_publish')
 
 # The sub-steps of scripts/run_v100_baseline.sh ("== 4/10 ...") and the step they belong to.
 PIPELINE = {1: 'checks', 2: 'checks', 3: 'checks', 4: 'detector', 5: 'reader', 6: 'evaluate', 7: 'export',
@@ -77,7 +83,9 @@ CUTTER_TITLES = ((re.compile(r'Validate the training'), 'checks'), (re.compile(r
 # scripts/run_experiment_b.sh ("== 3/5 Train variant crop ==").
 DECIDER_PIPELINE = {1: 'checks', 2: 'checks', 3: 'experiment_b_crop', 4: 'experiment_b_crop_geom', 5: 'experiment_b_full'}
 SUBSTEPS = {'train_classifier': (7, CLASSIFIER_PIPELINE), 'train_cutter': (None, CUTTER_PIPELINE),
-            'train_decider': (5, DECIDER_PIPELINE)}
+            'train_decider': (5, DECIDER_PIPELINE),
+            'networks_prepare': (4, {1: 'cutter', 2: 'classifier', 3: 'decider', 4: 'package'}),
+            'networks_publish': (3, {1: 'check', 2: 'catalog', 3: 'upload'})}
 TITLES = {'train_cutter': CUTTER_TITLES}
 MARKERS = (
     (re.compile(r'^== a\+b\. '), 'gpu_env', ('import', 'split')),

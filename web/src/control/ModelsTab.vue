@@ -1,15 +1,21 @@
 <script setup lang="ts">
 // Models: the three networks of the pipeline side by side (cutter, classifier, decider; docs/NEURAL_NETWORK.md), each
 // with every version trained on this server, newest first, its headline numbers on the test, and the one in use. A
-// role has no model in use until someone picks one: there is no default. The runs themselves are on Evaluate.
+// role has no model in use until someone picks one: there is no default. The runs themselves are on Evaluate. Under
+// them, Publish: the three in use as one package on Hugging Face.
 import {computed, ref} from 'vue';
-import type {ModelVersion, PanelStatus, RoleModels} from '../common/panel-types';
+import type {ActionName, ActionOptions, ActionState, Job, ModelVersion, PanelStatus, RoleModels} from '../common/panel-types';
 import ModelColumn from './ModelColumn.vue';
+import PublishSection from './PublishSection.vue';
 import {putInUse, useModels} from './models';
 
 const props = defineProps<{status: PanelStatus | null}>();
+const emit = defineEmits<{run: [name: ActionName, state: ActionState, start?: undefined, options?: ActionOptions];
+  stop: [job: Job]; details: [job: Job]}>();
 const {payload, error, refresh} = useModels();
 const roles = computed((): RoleModels[] => payload.value?.roles ?? []);
+/** The id in use of each role, for Publish. */
+const inUse = computed(() => Object.fromEntries(roles.value.map((role) => [role.role, role.active?.id ?? null])));
 /** Read-only server: the choice is off, as the buttons of the other tabs. */
 const readOnly = computed(() => props.status !== null && !props.status.actions_enabled);
 /** The version being put in use, so its button waits for the answer. */
@@ -39,5 +45,7 @@ async function choose(version: ModelVersion, roleLabel: string): Promise<void> {
     <p class="note models-foot">The choice is kept in <code>{{ payload.active_file }}</code> of the data root. It copies, exports
       and deploys nothing: nothing on the comma changes.</p>
     <p v-if="error" class="note">Not updated: {{ error }}</p>
+    <PublishSection :status="status" :in-use="inUse" @run="(...args) => emit('run', ...args)" @stop="emit('stop', $event)"
+                    @details="emit('details', $event)"/>
   </template>
 </template>

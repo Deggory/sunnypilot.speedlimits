@@ -1113,6 +1113,39 @@ def _cmd_verify_bundle(args: argparse.Namespace) -> int:
 # [model-bundle] - END
 
 
+# [networks-package] - START
+def _cmd_networks_package(args: argparse.Namespace) -> int:
+    from nnslr_tools.networks_package import new_name, prepare_package
+
+    report = prepare_package(_resolve_data_root(args.data_root), args.name or new_name(),
+                             log=lambda text: print(text, flush=True))
+    print(json.dumps(report, indent=2, sort_keys=True, allow_nan=False))
+    return 0
+
+
+def _cmd_verify_networks(args: argparse.Namespace) -> int:
+    from nnslr_tools.networks_package import verify_package
+
+    print(json.dumps(verify_package(Path(args.package)), indent=2, sort_keys=True, allow_nan=False))
+    return 0
+
+
+def _cmd_networks_catalog(args: argparse.Namespace) -> int:
+    from nnslr_tools.networks_package import add_to_catalog
+
+    print(json.dumps(add_to_catalog(Path(args.catalog), Path(args.package), args.base_url), indent=2,
+                     sort_keys=True, allow_nan=False))
+    return 0
+
+
+def _cmd_networks_published(args: argparse.Namespace) -> int:
+    from nnslr_tools.networks_package import mark_published
+
+    print(json.dumps(mark_published(Path(args.package), args.repo, args.url), indent=2, sort_keys=True))
+    return 0
+# [networks-package] - END
+
+
 # [core-export] - START
 def _cmd_export_core(args: argparse.Namespace) -> int:
     from nnslr_tools.core_snapshot import export_core_snapshot, verify_core_snapshot
@@ -1686,6 +1719,32 @@ def build_parser() -> argparse.ArgumentParser:
     p_verify.add_argument("bundle", help="bundle directory")
     p_verify.set_defaults(func=_cmd_verify_bundle)
     # [model-bundle] - END
+
+    # [networks-package] - START
+    p_networks = sub.add_parser(
+        "networks-package",
+        help="export the cutter, classifier and decider in use to ONNX as one package to publish "
+             "(<data root>/publish/networks/<name>; GPU environment; uploads nothing)",
+    )
+    p_networks.add_argument("--name", help="package name (default speedlimits-<UTC date>-<time>)")
+    p_networks.add_argument("--data-root")
+    p_networks.set_defaults(func=_cmd_networks_package)
+    p_verify_networks = sub.add_parser("verify-networks", help="verify a package of networks: files, sha256, contracts")
+    p_verify_networks.add_argument("package", help="package folder")
+    p_verify_networks.set_defaults(func=_cmd_verify_networks)
+    p_networks_catalog = sub.add_parser("networks-catalog",
+                                        help="add a package to the catalog speed_networks.json (a missing file "
+                                             "starts one)")
+    p_networks_catalog.add_argument("catalog", help="speed_networks.json")
+    p_networks_catalog.add_argument("--package", required=True, help="package folder")
+    p_networks_catalog.add_argument("--base-url", required=True, help="https://huggingface.co/<repo>/resolve/main")
+    p_networks_catalog.set_defaults(func=_cmd_networks_catalog)
+    p_networks_published = sub.add_parser("networks-published", help="record where a package was published")
+    p_networks_published.add_argument("package", help="package folder")
+    p_networks_published.add_argument("--repo", required=True)
+    p_networks_published.add_argument("--url", required=True)
+    p_networks_published.set_defaults(func=_cmd_networks_published)
+    # [networks-package] - END
 
     # [core-export] - START
     p_core = sub.add_parser(

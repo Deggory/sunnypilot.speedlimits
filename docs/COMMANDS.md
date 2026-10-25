@@ -210,10 +210,13 @@ The portal also serves a REST API at `/api/v1`: routes, paged frames, the next f
 
 ## Publishing (when there is something to publish)
 
-Nothing is published yet. Both commands below upload to Hugging Face, so start with their dry run.
+Nothing is published yet. The commands below upload to Hugging Face, so start with their dry run.
 
 | Command | What it does | Effects |
 |---|---|---|
+| `scripts/publish_networks.sh [--name=<name>]` | **Our networks**: exports the cutter, classifier and decider in use (Models tab) to ONNX, checks each against PyTorch with onnxruntime, and writes the model card, the manifest `networks.json` and the sha256 sums into `<data root>/publish/networks/<name>/`. Uploads nothing. The portal's **Prepare the package** (Models → Publish) runs it. | writes data |
+| `scripts/publish_networks.sh --upload --name=<name>` | Publishes that package: checks it again, adds it to the catalog `speed_networks.json`, creates the repository (public) if it is missing, and uploads `networks/<name>/*`, the catalog and the model card as `README.md` in one commit (`HF_REPO`, default `cristianku/sunnypilot-speedlimits-models`). Only the package's files: no frame, dataset, checkpoint or server path. The portal's **Publish on Hugging Face** runs it, after a question. | **publishes** |
+| `nnslr networks-package`, `nnslr verify-networks <folder>`, `nnslr networks-catalog <speed_networks.json> --package <folder> --base-url <url>` | The steps of the script: the export (GPU environment), the check of a package, the catalog. | writes data |
 | `scripts/publish_model.sh --no-upload [<bundle>]` | Verifies a bundle with `nnslr verify-bundle`, stages its files and updates the catalog `speed_models.json`, without uploading. Without `--no-upload` it publishes the bundle (`HF_REPO`, default `cristianku/sunnypilot-speedlimits-models`). Only model files are uploaded, never videos, logs, datasets or checkpoints. | writes data; publishes without `--no-upload` |
 | `python scripts/publish_training_weights.py ...` | Publishes fine-tunable PyTorch weights. It is a dry run by default and refuses optimizer checkpoints. `--upload --stable` uploads and moves `training/stable.json`. | publishes with `--upload` |
 

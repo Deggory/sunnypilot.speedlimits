@@ -2,7 +2,7 @@
 import type {AiState} from './ai-types';
 
 export type ActionName = 'fetch' | 'prepare' | 'prepare_again' | 'measure_proposer' | 'setup_vlm' | 'dataset' | 'train' | 'train_continue' | 'train_resume' | 'train_classifier'
-  | 'train_cutter' | 'train_decider' | 'update' | 'ai_review' | 'measure_ai_reviewer';
+  | 'train_cutter' | 'train_decider' | 'update' | 'ai_review' | 'measure_ai_reviewer' | 'networks_prepare' | 'networks_publish';
 /** What a cutter learns to find: every sign (the speed signs and the other signs) or the speed signs only. */
 export type CutterFamilies = 'all' | 'speed';
 /** The options of “Train the cutter” (POST /api/panel/run/train_cutter {"size", "families"}). */
@@ -53,6 +53,8 @@ export interface ActionOptions {
   provider?: string;
   save?: 'yes' | 'no';
   limit?: string;
+  /** The package to publish (networks_publish). */
+  package?: string;
 }
 export type JobState = 'running' | 'ok' | 'failed' | 'interrupted';
 export type RouteState = 'collegare' | 'estrarre' | 'preannotare' | 'revisionare' | 'importare' | 'pronta';
@@ -318,6 +320,19 @@ export interface PanelStatus {
   proposers?: {qwen: string | null; qwen_gpu?: string | null; ours?: string | null};
   /** The AI reviewer chosen in Settings (llm_providers.ai_state: a file read, no network). */
   ai_reviewer: AiState;
+  /** The packages of our networks prepared here, newest first (nnslr_tools.networks_package.packages), and the Hugging
+   * Face repository they are published to. */
+  networks?: {packages: NetworkPackage[]; repo: string};
+}
+
+/** A package of our three networks (scripts/publish_networks.sh). */
+export interface NetworkPackage {
+  name: string;
+  created: string | null;
+  networks: Record<'cutter' | 'classifier' | 'decider', string | null>;
+  bytes: number;
+  /** Where and when it was uploaded; null: only here. */
+  published: {repo: string; url: string; at: string} | null;
 }
 
 /** POST /api/panel/run/<action> */

@@ -249,4 +249,16 @@ def test_tiny_cpu_run_of_each_variant(tmp_path, capsys, variant):
     assert decided.returncode == 0, decided.stderr[-3000:]
     answers = json.loads(decided.stdout)
     assert len(answers) == 2 and all(road in OWNERSHIP_CLASSES and 0 < share <= 1 for road, share in answers)
+    # And exports to ONNX for the package of the networks, the same answers as PyTorch for one box and for several.
+    if importlib.util.find_spec("onnx") and importlib.util.find_spec("onnxruntime"):
+        script = ("import json, sys; from pathlib import Path; from nnslr_tools.exporting import export_decider_onnx; "
+                  "print(json.dumps(export_decider_onnx(Path(sys.argv[1]), Path(sys.argv[2]))['verification']))")
+        exported = subprocess.run([sys.executable, "-c", script, str(output / f"{variant}-best.pt"),
+                                   str(tmp_path / f"decider-{variant}.onnx")],
+                                  capture_output=True, text=True, env=environment, timeout=300)
+        assert exported.returncode == 0, exported.stderr[-3000:]
+        assert json.loads(exported.stdout.strip().splitlines()[-1])["passed"] is True
+        contract = json.loads((tmp_path / f"decider-{variant}.onnx.contract.json").read_text())
+        assert contract["task"] == "decider" and contract["inputs"]["crops"]["shape"][0] == "boxes"
+        assert ("scene" in contract["inputs"]) == (variant == "full")
     assert "torch" not in sys.modules
