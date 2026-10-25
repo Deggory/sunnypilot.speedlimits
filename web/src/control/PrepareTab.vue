@@ -35,9 +35,12 @@ const unstarted = computed(() => (props.status?.routes ?? []).filter((row) => ro
 const PROPOSE_ACTIONS = computed((): [ActionName, string][] => unstarted.value ? [['prepare_again',
   'Gives new proposals to the ' + plural(unstarted.value, 'route') + ' nobody has started reviewing, with the proposer chosen above. Routes in review stay as they are.']] : []);
 
-const ACTIONS: [ActionName, string][] = [
+/** Step 1, the drives from the comma; step 2, the frames and the proposals, with the proposer chosen above them. */
+const FETCH_ACTIONS: [ActionName, string][] = [
   ['fetch', 'Copies the new drives from the comma into the video folder, segment by segment; the routes already prepared stay as they are.'],
-  ['prepare', 'For every new route it links the videos, extracts the frames and has the model propose the signs: then the route is ready to review.'],
+];
+const PREPARE_ITEMS: [ActionName, string][] = [
+  ['prepare', 'For every new route it links the videos, extracts the frames and has the proposer chosen above propose the signs: then the route is ready to review.'],
 ];
 const COUNTS: [RouteState, string][] = [['collegare', 'to link'], ['estrarre', 'to extract'], ['preannotare', 'to pre-annotate']];
 
@@ -62,15 +65,16 @@ const total = computed(() => counts.value.reduce((sum, item) => sum + item.count
         <li v-for="item in counts.filter((entry) => entry.count)" :key="item.state"><strong>{{ item.count }}</strong> {{ item.label }}</li>
       </ul>
     </div>
+    <h3 class="prep-step"><span>1</span> Get the drives</h3>
+    <ActionList :items="FETCH_ACTIONS" :actions="status?.actions ?? null" @run="(name, state) => emit('run', name, state)"/>
+    <h3 class="prep-step"><span>2</span> Propose the signs</h3>
     <div class="proposer">
       <span class="proposer-label">Signs proposed by</span>
       <Segmented v-model="proposer" :options="PROPOSERS" label="Who proposes the signs"/>
       <p class="figure-note">{{ PROPOSER_TEXT[proposer] }}</p>
       <p v-if="unavailable" class="figure-note proposer-missing">{{ unavailable }}</p>
     </div>
-    <ActionList :items="ACTIONS" :actions="status?.actions ?? null"
-                @run="(name, state) => emit('run', name, state, undefined, name === 'prepare' ? {proposer} : undefined)"/>
-    <ActionList v-if="PROPOSE_ACTIONS.length" :items="PROPOSE_ACTIONS" :actions="status?.actions ?? null"
+    <ActionList :items="[...PREPARE_ITEMS, ...PROPOSE_ACTIONS]" :actions="status?.actions ?? null"
                 @run="(name, state) => emit('run', name, state, undefined, {proposer})"/>
   </section>
 

@@ -137,35 +137,35 @@ const watchModels = computed((): WatchModel[] => {
 <template>
   <h1 class="sr-only">Evaluate</h1>
 
-  <section class="card eval-card" aria-labelledby="eval-title">
-    <div class="eval-head">
+  <section class="card ev-card" aria-labelledby="eval-title">
+    <div class="ev-head">
       <h2 id="eval-title">What to judge</h2>
       <Segmented v-model="view" :options="VIEWS" label="Network to judge"/>
     </div>
-    <p class="eval-goal">{{ GOAL[view] }}</p>
+    <p class="ev-goal">{{ GOAL[view] }}</p>
     <p v-if="models === null" class="empty">Loading…</p>
     <p v-else-if="rows.length === 0" class="empty">Nothing measured yet: train one on the Train tab.</p>
-    <ul v-else class="eval-list" role="listbox" aria-label="Versions">
+    <ul v-else class="ev-list" role="listbox" aria-label="Versions">
       <li v-for="row in rows" :key="row.id" role="option" :aria-selected="shown?.id === row.id"
-          :class="['eval-row', {picked: shown?.id === row.id}]" tabindex="0"
+          :class="['ev-row', {picked: shown?.id === row.id}]" tabindex="0"
           @click="picked = row.id" @keydown.enter="picked = row.id">
-        <div class="eval-name"><strong>{{ row.name }}</strong><span v-if="row.inUse" class="in-use">in use</span>
-          <span class="eval-when">{{ row.when }}</span></div>
-        <div class="eval-main" :class="{top: row.main !== null && row.main === best && rows.length > 1}">{{ row.mainText }}</div>
-        <div class="eval-second">{{ row.second }}<span v-if="versus(row).text" :class="['eval-vs', versus(row).kind]">{{ versus(row).text }}</span></div>
+        <div class="ev-name"><strong>{{ row.name }}</strong><span v-if="row.inUse" class="ev-in-use">in use</span>
+          <span class="ev-when">{{ row.when }}</span></div>
+        <div class="ev-main" :class="{top: row.main !== null && row.main === best && rows.length > 1}">{{ row.mainText }}</div>
+        <div class="ev-second">{{ row.second }}<span v-if="versus(row).text" :class="['ev-vs', versus(row).kind]">{{ versus(row).text }}</span></div>
       </li>
     </ul>
   </section>
 
   <template v-if="shown">
-    <section class="card eval-card" aria-labelledby="watch-title">
-      <h2 id="watch-title">{{ shown.name }} <span class="eval-when">{{ shown.when }}</span></h2>
-      <p class="eval-goal">{{ shown.mainText }}<template v-if="shown.second"> · {{ shown.second }}</template></p>
+    <section class="card ev-card" aria-labelledby="watch-title">
+      <h2 id="watch-title">{{ shown.name }} <span class="ev-when">{{ shown.when }}</span></h2>
+      <p class="ev-goal">{{ shown.mainText }}<template v-if="shown.second"> · {{ shown.second }}</template></p>
       <WatchSection v-if="watchModels.length" :key="shown.id" :run="shown.run" :models="watchModels" :version="runSummary?.version ?? null"/>
       <p v-else-if="loading" class="empty">Loading the frames…</p>
       <p v-else class="empty">{{ shown.watch ? 'No frames to play for this version: its run kept none.' : 'Nothing to play: the decider is judged on its table.' }}</p>
     </section>
-    <details v-if="runSummary" class="card eval-more">
+    <details v-if="runSummary" class="card ev-more">
       <summary>All the numbers of run {{ shown.run }}</summary>
       <RunDetailView :key="runSummary.name" :summary="runSummary" :detail="detail" :loading="loading" :error="error" no-watch/>
     </details>
