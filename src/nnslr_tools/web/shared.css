@@ -54,7 +54,7 @@
 --has:#d9a93a;--none-cell:#2a3242;--disabled:#5d6675;--stage:#05070b;
 --sign-face:#ffffff;--sign-ink:#111111;--sign-ring:#e3001b;
 --ov-speed:#ff5964;--ov-cancel:#d4d9df;--ov-other:#ffa94d;--ov-none:#8a929c;--ov-selected:#ffd60a;--ov-hint:#64d2ff;
---ov-text:#fff3b0;--ov-halo:#0d0f12}
+--ov-text:#fff3b0;--ov-halo:#0d0f12;--ov-ai:#ff6fd8}
 :root[data-theme="light"]{--sus:#7e22ce;--sus-soft:rgba(147,51,234,.10);--warn:#c2410c;--warn-soft:rgba(234,88,12,.11);
 --has:#e0b13f;--none-cell:#e3e8f0;--disabled:#9aa3b2;--stage:#0b0f16}
 @media (prefers-color-scheme:light){:root[data-theme="auto"]{--sus:#7e22ce;--sus-soft:rgba(147,51,234,.10);--warn:#c2410c;--warn-soft:rgba(234,88,12,.11);
@@ -71,13 +71,13 @@ a{color:var(--rev)}
 code,.mono{font-family:var(--font-data);font-size:12.5px}
 code{background:var(--surface-2);border:1px solid var(--line);border-radius:6px;padding:1px 5px;word-break:break-all}
 
-/* top bar, one row like apple.com: the brand at the left, the tabs in the middle as a segmented control, at the
+/* top bar, one row like apple.com, as wide as the content of the page (1180 less its padding): the brand at the left, the tabs in the middle as a segmented control, at the
    right the server (TopMachine.vue: a small pill, the gauges in a panel under it) and the Account menu. The
    tabs go to a second row when the window is too narrow for all three. */
 .topbar{position:sticky;top:0;z-index:5;background:var(--topbar-bg);border-bottom:.5px solid var(--line-strong);
 -webkit-backdrop-filter:saturate(180%) blur(20px);backdrop-filter:saturate(180%) blur(20px);
 padding:8px max(16px,env(safe-area-inset-right,0px)) 8px max(16px,env(safe-area-inset-left,0px))}
-.topbar-inner{display:flex;align-items:center;gap:10px;max-width:1180px;margin:0 auto;min-height:40px}
+.topbar-inner{display:flex;align-items:center;gap:10px;max-width:1148px;margin:0 auto;min-height:40px}
 .site-bar{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:8px 16px}
 .brand{display:flex;align-items:center;gap:10px;color:inherit;text-decoration:none;min-width:0;justify-self:start}
 /* The logo (pages.BRAND_MARK, BrandMark.vue): a 50 sign in the corners of the selected box, on a dark tile. */
