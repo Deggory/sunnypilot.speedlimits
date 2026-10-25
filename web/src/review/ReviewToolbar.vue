@@ -1,35 +1,22 @@
 <script setup lang="ts">
-// The row of the review under the site's top bar (pages.top_bar, the same on every page): filters, route progress
-// and reviewer name (the drive is chosen at the top of the inspector, RoutePick.vue). On a computer it stays under the top bar while the page scrolls.
+// The drive's count ("476 of 2,760 confirmed", its bar) and who reviews, at the top of the inspector under the drive
+// (RoutePick.vue); nothing between the site's top bar and the photo. It also measures the site's top bar
+// (--sitebar-h): the photo and the inspector are sized under it.
 import {computed, onMounted, ref, useTemplateRef, watch} from 'vue';
 import {api} from '../common/api';
 import type {AuthState} from '../common/auth-types';
 import {thousands} from '../common/format';
 import {writeLocal} from './dom';
 import {routeCounts} from './current';
-import {pickFilter} from './navigation';
 import {report, state} from './store';
-import type {Filter} from './types';
 import {useHeightVar} from './use-layout';
 
-interface FilterButton {
-  filter: Filter;
-  label: string;
-  title?: string;
-}
-const FILTERS: readonly FilterButton[] = [
-  {filter: 'todo', label: 'To review', title: 'Not confirmed yet'},
-  {filter: 'suspicious', label: 'Suspicious', title: 'The model and the second reading disagree'},
-  {filter: 'proposals', label: 'With proposals', title: 'With proposals of the model'},
-  {filter: 'all', label: 'All'},
-];
 
-const header = useTemplateRef<HTMLElement>('header');
+
 const reviewerInput = useTemplateRef<HTMLInputElement>('reviewerInput');
 /** The site's top bar, rendered by pages.py above the app: the photo and the inspector are sized under both. */
 const siteBar = ref<Element | null>(document.querySelector('body > header.topbar'));
 useHeightVar(siteBar, '--sitebar-h');
-useHeightVar(header, '--reviewbar-h');
 const online = report.apiBase !== null;
 
 const counts = routeCounts;
@@ -61,33 +48,21 @@ watch(() => state.reviewerFocus, () => reviewerInput.value?.focus(), {flush: 'sy
 </script>
 
 <template>
-  <div ref="header" class="review-bar">
-    <div class="review-bar-inner">
-      <div class="filters" role="group" aria-label="Which frames to show">
-        <button v-for="item in FILTERS" :key="item.filter" type="button" :data-filter="item.filter"
-                :aria-pressed="state.filter === item.filter" :title="item.title"
-                @click="pickFilter(item.filter)">{{ item.label }}</button>
-        <!-- Only when an AI confirmed some frames (or while it is the filter in use). -->
-        <button type="button" data-filter="ai" :aria-pressed="state.filter === 'ai'"
-                title="Confirmed by an AI reviewer (REST API or MCP)"
-                :hidden="counts.byAi === 0 && state.filter !== 'ai'" @click="pickFilter('ai')">AI · {{ counts.byAi }}</button>
+  <div class="route-status">
+    <div class="progress" aria-live="polite">
+      <div class="progress-text" id="progressText">
+        <template v-if="counts.total === 0">No frames</template>
+        <template v-else><strong>{{ thousands(counts.done) }} of {{ thousands(counts.total) }}</strong> confirmed<template v-if="counts.suspicious > 0 || report.routeHasHints"> · <span :class="{sus: counts.suspicious > 0}">{{ thousands(counts.suspicious) }} suspicious</span></template></template>
       </div>
-      <div class="progress" aria-live="polite">
-        <div class="progress-text" id="progressText">
-          <template v-if="counts.total === 0">No frames</template>
-          <template v-else><strong>{{ thousands(counts.done) }} of {{ thousands(counts.total) }}</strong> confirmed<template v-if="counts.suspicious > 0 || report.routeHasHints"> · <span :class="{sus: counts.suspicious > 0}">{{ thousands(counts.suspicious) }} suspicious</span></template></template>
-        </div>
-        <div class="progress-bar"><span id="progressBar" :style="{width: barWidth}"></span></div>
-      </div>
-      <span class="progress-short" id="progressShort" aria-hidden="true">{{ counts.done }}/{{ counts.total }}</span>
-      <div v-if="signedUser" class="reviewer as" :title="'Your confirmations are saved as ' + signedUser">
-        Reviewing as <strong>{{ signedUser }}</strong>
-      </div>
-      <div v-else class="reviewer">
-        <label for="reviewer" class="sr-only">Reviewer</label>
-        <input ref="reviewerInput" type="text" id="reviewer" :class="{need: state.reviewerNeeded}" maxlength="100"
-               placeholder="Reviewer" autocomplete="name" spellcheck="false" :value="state.reviewer" @input="typed">
-      </div>
+      <div class="progress-bar"><span id="progressBar" :style="{width: barWidth}"></span></div>
+    </div>
+    <div v-if="signedUser" class="reviewer as" :title="'Your confirmations are saved as ' + signedUser">
+      Reviewing as <strong>{{ signedUser }}</strong>
+    </div>
+    <div v-else class="reviewer">
+      <label for="reviewer" class="reviewer-label">Reviewer</label>
+      <input ref="reviewerInput" type="text" id="reviewer" :class="{need: state.reviewerNeeded}" maxlength="100"
+             placeholder="Your name" autocomplete="name" spellcheck="false" :value="state.reviewer" @input="typed">
     </div>
   </div>
 </template>

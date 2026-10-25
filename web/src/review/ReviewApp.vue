@@ -11,7 +11,6 @@ import {unsavedKeys, workOf} from './frames';
 import Inspector from './Inspector.vue';
 import MobileBar from './MobileBar.vue';
 import {pickStartFrame, startAtWork} from './navigation';
-import ReviewToolbar from './ReviewToolbar.vue';
 import {scrollTimelineToCurrent} from './scroll';
 import {loadServer, retryUnsaved} from './server';
 import Stage from './Stage.vue';
@@ -79,7 +78,6 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <ReviewToolbar/>
   <div class="page">
     <div id="stateBox" class="state-box" :hidden="hasFrames">
       <template v-if="!hasFrames">

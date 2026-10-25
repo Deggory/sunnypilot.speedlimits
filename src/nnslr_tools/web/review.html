@@ -13,9 +13,8 @@ __NNSLR_SHARED_CSS__
   --control: 36px;
   --inspector: 384px;
   --topbar-row: 52px;
-  /* What is above the photo and the inspector: the site's top bar and the row of the review (both measured by
-     ReviewToolbar.vue). */
-  --topbar-h: calc(var(--sitebar-h, 57px) + var(--reviewbar-h, 52px));
+  /* What is above the photo and the inspector: the site's top bar (measured by ReviewToolbar.vue). */
+  --topbar-h: var(--sitebar-h, 57px);
   /* Confirmed by an AI: the green of a confirmation, hatched. Same look in the timeline, legend and state tag. */
   --ai-hatch: repeating-linear-gradient(135deg, var(--ok) 0 2px, transparent 2px 4px), var(--ok-soft);
   /* The top band of a frame confirmed with doubts. */
@@ -38,14 +37,6 @@ kbd {
   background: var(--surface-2); color: var(--fg); border: 1px solid var(--line-strong); border-bottom-width: 2px;
 }
 
-/* ---------- the row of the review under the site's top bar: route, filters, progress, reviewer ---------- */
-/* On a computer it stays under the top bar (sticky), full width, in the colours of the bar. */
-.review-bar {
-  position: sticky; top: var(--sitebar-h, 57px); z-index: 4; background: var(--topbar-bg); border-bottom: .5px solid var(--line-strong);
-  -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px);
-  padding: 0 max(16px, env(safe-area-inset-right, 0px)) 0 max(16px, env(safe-area-inset-left, 0px));
-}
-.review-bar-inner { display: flex; align-items: center; gap: 14px; min-height: var(--topbar-row); }
 /* The drive, at the top of the inspector (RoutePick.vue): its name in a menu to open another one. */
 .route-pick { display: flex; flex-direction: column; gap: 4px; min-width: 0; margin: 0 0 14px; }
 .route-pick-label { font-size: 13px; font-weight: 500; color: var(--muted); }
@@ -59,7 +50,7 @@ select:hover, input[type="text"]:hover, input[type="number"]:hover { border-colo
 input[type="text"]:focus, input[type="number"]:focus, select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
 input::placeholder { color: var(--placeholder); }
 /* Dense controls of the toolbar. */
-.review-bar select, .review-bar input[type="text"] { min-height: var(--control); padding: 5px 10px; font-size: 13px; border-radius: 10px; }
+.reviewer input[type="text"] { min-height: var(--control); padding: 5px 10px; font-size: 13px; border-radius: 10px; }
 /* Segmented controls as on iOS: a grey track, the chosen one a raised white (dark: grey) segment. */
 .filters, .segmented {
   display: inline-flex; gap: 2px; padding: 2px; flex: none; max-width: 100%;
@@ -74,17 +65,18 @@ input::placeholder { color: var(--placeholder); }
 .filters button[aria-pressed="true"], .segmented button[aria-pressed="true"] {
   opacity: 1; font-weight: 600; background: var(--seg-on); box-shadow: var(--seg-on-shadow);
 }
-/* Route progress: a large tabular count, then the bar. */
-.progress { display: flex; align-items: center; gap: 12px; flex: 1 1 180px; min-width: 0; }
+/* The drive's count under its name in the inspector (ReviewToolbar.vue): the count, the bar, who reviews. */
+.route-status { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.progress { display: flex; flex-direction: column; align-items: stretch; gap: 6px; min-width: 0; }
 .progress-text { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .progress-text strong { color: var(--fg); font-size: 16px; font-weight: 750; letter-spacing: -0.01em; }
 .progress-text .sus { color: var(--sus); font-weight: 600; }
-.progress-bar { flex: 1 1 auto; max-width: 360px; min-width: 28px; height: 8px; border-radius: 4px; background: var(--surface-3); overflow: hidden; }
+.progress-bar { width: 100%; height: 6px; border-radius: 4px; background: var(--surface-3); overflow: hidden; }
 .progress-bar span { display: block; height: 100%; width: 0; background: var(--ok); border-radius: 4px; transition: width 0.4s; }
 /* Phones only: "0/2160" next to the route. */
-.progress-short { display: none; }
-.reviewer { display: flex; align-items: center; flex: none; }
-.reviewer input { width: 140px; }
+.reviewer { display: flex; align-items: center; gap: 8px; flex: none; }
+.reviewer-label { font-size: 13px; color: var(--muted); }
+.reviewer input { flex: 1; }
 .reviewer.as { gap: 4px; font-size: 13px; color: var(--muted); white-space: nowrap; }
 .reviewer.as strong { color: var(--fg); font-weight: 650; }
 /* No name yet: dashed until filled, red once a save needed it. */
@@ -459,18 +451,14 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
 }
 @media (min-width: 981px) and (max-width: 1240px) {
   :root { --inspector: 352px; }
-  .review-bar-inner { gap: 10px; }
   .stage-col { padding: 16px 20px 32px; }
   .filters button { padding: 4px 8px; }
-  .reviewer input { width: 112px; }
-  .progress-text strong { font-size: 15px; }
 }
 
 /* ==========================================================================
    Tablet and phone: one column, the confirm button in a bottom bar.
    ========================================================================== */
 @media (max-width: 980px) {
-  .review-bar-inner { flex-wrap: wrap; padding-block: 8px; gap: 8px 12px; }
   #scene { max-height: none; }
   .stage-bar { flex-wrap: wrap; }
   .stage-bar .data { order: 5; flex-basis: 100%; white-space: normal; }
@@ -530,23 +518,10 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
   .switch { min-height: 44px; }
 }
 @media (max-width: 640px) {
-  /* Header: sign, route, "0/2160" and reviewer on one row, the filters on the next; the route progress is
-     also the header's bottom line. It scrolls away with the page. */
-  /* Not sticky on a phone, but above the photo: the Account menu opens over it. */
-  .review-bar { position: relative; top: auto; z-index: 3; padding-left: max(12px, env(safe-area-inset-left, 0px)); padding-right: max(12px, env(safe-area-inset-right, 0px)); }
-  .review-bar-inner { position: relative; padding-block: 6px 8px; gap: 6px 8px; }
-  .progress-short { order: 2; display: block; flex: none; font-size: 13px; font-weight: 750; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
-  .reviewer { order: 3; }
-  .review-bar .reviewer input { width: 80px; min-height: 40px; padding: 3px 8px; font-size: 16px; }
-  .reviewer input::placeholder { font-size: 14px; }
-  /* Five filters (with "AI · N") fit 390px; on a narrower screen the row scrolls, the page never does. */
-  .filters { order: 6; flex: 1 1 100%; display: flex; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+  /* The filters under the photo, next to the frame navigation: on their own row, scrolling if too wide. */
+  .filters { grid-area: filters; display: flex; min-width: 0; overflow-x: auto; scrollbar-width: none; }
   .filters::-webkit-scrollbar { display: none; }
-  .filters button { flex: 1 0 auto; padding: 3px 4px; font-size: 12px; }
-  .progress { position: absolute; left: calc(-1 * max(12px, env(safe-area-inset-left, 0px))); right: calc(-1 * max(12px, env(safe-area-inset-right, 0px))); bottom: -1px; gap: 0; }
-  .progress-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-  .progress-bar { max-width: none; height: 2px; border-radius: 0; background: transparent; }
-  .progress-bar span { border-radius: 0 2px 2px 0; }
+  .filters button { flex: 1 0 auto; padding: 3px 6px; font-size: 12.5px; }
 
   .page { padding-top: 0; padding-left: max(12px, env(safe-area-inset-left, 0px)); padding-right: max(12px, env(safe-area-inset-right, 0px)); }
   /* The photo first, edge to edge. */
@@ -555,7 +530,7 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
      second-reading switch (when the route has one) on a third. */
   .stage-bar {
     display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 10px; row-gap: 8px; align-items: center;
-    grid-template-areas: "nav nav tools" "pill data data" "hint hint hint";
+    grid-template-areas: "nav nav tools" "filters filters filters" "pill data data" "hint hint hint";
   }
   .nav { grid-area: nav; justify-self: start; }
   .nav .pos { min-width: 7ch; }
@@ -584,7 +559,6 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
   .mobilebar .keycap { display: none; }
 }
 @media (max-height: 500px) and (max-width: 980px) {
-  .review-bar { position: relative; top: auto; }
   #scene { max-height: calc(100vh - 96px); }
 }
 /* Key caps and shortcuts only where there is a keyboard: hidden on touch screens. */

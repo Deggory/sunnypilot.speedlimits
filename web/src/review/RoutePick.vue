@@ -1,7 +1,8 @@
 <script setup lang="ts">
-// The drive under review and the menu to open another one, at the top of the inspector (above the country of the
-// frame): its name ("Basel → Mumpf · Wed 21 Oct 2026 · 13:55", pages.route_links), the route's code only in the title.
+// The drive under review, the menu to open another one, its count and who reviews (ReviewToolbar.vue), at the top
+// of the inspector (above the country of the frame): its name ("Basel → Mumpf · Wed 21 Oct 2026 · 13:55", pages.route_links), the route's code only in the title.
 import {computed} from 'vue';
+import ReviewToolbar from './ReviewToolbar.vue';
 import {report} from './store';
 
 /** The routes of the server, this one chosen; offline only this report. */
@@ -28,5 +29,6 @@ function changeRoute(event: Event): void {
       <option v-for="option in options" :key="option.value + option.text" :value="option.value"
               :selected="option.selected">{{ option.text }}</option>
     </select>
+    <ReviewToolbar/>
   </div>
 </template>

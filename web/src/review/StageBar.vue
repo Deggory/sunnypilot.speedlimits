@@ -1,12 +1,13 @@
 <script setup lang="ts">
-// The bar under the photo: position in the route, state tag, frame data, drawing and removing boxes, the
-// second reading shown or not.
+// The bar under the photo: position in the route, which frames to show (ReviewFilters.vue), state tag, frame data,
+// drawing and removing boxes, the second reading shown or not.
 import {computed} from 'vue';
 import {position, selectedBox, status} from './current';
 import {removeSelected, toggleDrawing, toggleHints} from './edits';
 import {aiConfirmed, proposalsOf, reasonsOf, statusLabel} from './frames';
 import {step} from './navigation';
 import {hintsOf, report, state} from './store';
+import ReviewFilters from './ReviewFilters.vue';
 import type {FrameRow} from './types';
 
 const props = defineProps<{row: FrameRow}>();
@@ -40,6 +41,7 @@ function hintsSwitched(event: Event): void {
       <button type="button" class="btn icon" id="next" aria-label="Next frame"
               :disabled="position.index >= position.length - 1" @click="step(1)">›</button>
     </div>
+    <ReviewFilters/>
     <span id="statePill" :class="pillClass">{{ statusLabel(row.frame_key) }}</span>
     <span class="data" id="frameData">{{ frameData }}</span>
     <div class="stage-tools">
