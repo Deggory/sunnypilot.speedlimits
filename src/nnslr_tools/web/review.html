@@ -322,6 +322,12 @@ details[open] summary::after, .tl-toggle[aria-expanded="true"]::after { transfor
 }
 .box-row.selected .n { background: var(--accent); color: #fff; }
 .box-main .what { font-weight: 650; font-size: 14px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The road of the box: OURS in green with a road, another in grey, road ? while not said. */
+.road-tag { display: inline-flex; align-items: center; gap: 3px; margin-left: 8px; padding: 1px 6px; border-radius: 6px; font-size: 11.5px; font-weight: 700; letter-spacing: 0.02em; vertical-align: 1px; }
+.road-tag svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; }
+.road-tag.ours { color: var(--ok); background: var(--ok-soft); }
+.road-tag.another { color: var(--muted); background: var(--surface-3); font-weight: 600; }
+.road-tag.unclear { color: var(--muted); font-weight: 500; padding-left: 0; }
 .box-main .src { font-size: 12.5px; color: var(--muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .box-main .src .changed { color: var(--rev); font-weight: 650; }
 .box-main .src .dup { color: var(--warn); font-weight: 650; }

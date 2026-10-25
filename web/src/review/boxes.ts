@@ -21,6 +21,8 @@ export interface BoxItem {
   check: boolean;
   /** The earlier box this one repeats (same sign drawn twice), or null. */
   duplicateOf: number | null;
+  /** Which road it is for, as the photo says it: ours, another, or not said yet. */
+  road: 'ours' | 'another' | 'unclear';
 }
 
 // The proposal a reviewed box comes from, by detection_id; null for a box added by hand.
@@ -77,6 +79,7 @@ export function boxItems(row: FrameRow, work: FrameEdit): BoxItem[] {
     source: sourceOf(row, work, d),
     check: d.check_position === true,
     duplicateOf: duplicates[i] ?? null,
+    road: d.applicability === 'own_road' ? 'ours' : d.applicability === 'other_road' ? 'another' : 'unclear',
   }));
 }
 
