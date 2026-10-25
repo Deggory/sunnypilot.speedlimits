@@ -162,6 +162,8 @@ export async function fitBox(): Promise<void> {
     const unchanged = workOf(row).detections.includes(detection) && JSON.stringify(detection.bbox_xyxy) === sent;
     if (answer.box && unchanged) {
       detection.bbox_xyxy = answer.box;
+      // A box carried from the previous frame is now on its sign: as "Here" does, its check goes.
+      delete detection.check_position;
       changed(row);
     }
     state.notice = {key, text: answer.message + (answer.box && !unchanged ? ': the box changed meanwhile, kept.' : '.'),

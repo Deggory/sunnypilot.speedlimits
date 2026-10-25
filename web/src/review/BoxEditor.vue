@@ -181,7 +181,7 @@ function booleanChanged(key: BooleanField, event: Event): void {
         <span class="kind-group-label">{{ group.label }}</span>
         <button v-for="kind in group.kinds" :key="kind.id" type="button" class="chip kind"
                 :aria-pressed="detection?.family === 'other_sign' && detection?.sign_type === kind.id"
-                :data-kind="kind.id" @click="setKind(kind.id); releaseFocus($event)">{{ kind.chip }}</button>
+                :data-kind="kind.id" @click="setKind(kind.id); releaseFocus($event)">{{ kind.chip }}<kbd v-if="kind.id === 'give_way'" class="key-hint">G</kbd></button>
       </div>
     </div>
     <details>
