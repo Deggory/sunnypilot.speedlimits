@@ -111,6 +111,16 @@ const numbers = computed(() => {
 <template>
   <h1 class="tab-title">Train</h1>
 
+  <!-- The job running (or failed) first: on a phone the network cards would push it far down. -->
+  <section v-if="bigJob || activities.length" class="live-section" :class="{now: bigJob?.state === 'running' || activities.length > 0}" aria-labelledby="train-job-title">
+    <h2 class="section-title" id="train-job-title">{{ bigJob?.state === 'running' || activities.length ? 'Running' : 'Last job failed' }}</h2>
+    <div class="jp-list" aria-live="polite">
+      <JobProgress v-if="bigJob" :job="bigJob" @details="emit('details', $event)" @stop="emit('stop', $event)"/>
+      <TrainingCharts v-if="charted" :progress="charted.progress" :running="charted.running"/>
+      <TerminalActivity v-for="activity in activities" :key="activity.pid + activity.label" :activity="activity" :preparation="null"/>
+    </div>
+  </section>
+
   <section class="numbers" aria-label="The numbers">
     <div class="card number">
       <h2>Drives reviewed</h2>
@@ -189,15 +199,7 @@ const numbers = computed(() => {
                 @start="(start) => status && emit('run', 'train', status.actions.train, start)"/>
   </section>
 
-  <section v-if="bigJob || activities.length" class="live-section" :class="{now: bigJob?.state === 'running' || activities.length > 0}" aria-labelledby="train-job-title">
-    <h2 class="section-title" id="train-job-title">{{ bigJob?.state === 'running' || activities.length ? 'Running' : 'Last job failed' }}</h2>
-    <div class="jp-list" aria-live="polite">
-      <JobProgress v-if="bigJob" :job="bigJob" @details="emit('details', $event)" @stop="emit('stop', $event)"/>
-      <TrainingCharts v-if="charted" :progress="charted.progress" :running="charted.running"/>
-      <TerminalActivity v-for="activity in activities" :key="activity.pid + activity.label" :activity="activity" :preparation="null"/>
-    </div>
-  </section>
-  <p v-else-if="job" class="last-line">Last: {{ job.label }}, {{ startedWhen(job) }} · {{ job.state === 'interrupted' ? 'stopped' : JOB_STATE[job.state][0] }} ·
+  <p v-if="job && !(bigJob || activities.length)" class="last-line">Last: {{ job.label }}, {{ startedWhen(job) }} · {{ job.state === 'interrupted' ? 'stopped' : JOB_STATE[job.state][0] }} ·
     <button type="button" class="link-button" @click="emit('details', job)">Details</button></p>
 
   <DatasetSection :dataset="status?.dataset ?? null" :loading="status === null"/>
