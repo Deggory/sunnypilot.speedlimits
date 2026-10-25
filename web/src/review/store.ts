@@ -1,7 +1,7 @@
 // The page's data and its one reactive state: the payload embedded by the server (or by write_review for the
 // offline report), the working copies of the frames, what is on screen. The modules change this state; the
 // components of ReviewApp.vue follow it.
-import {reactive} from 'vue';
+import {reactive, shallowReactive} from 'vue';
 import {readLocal} from './dom';
 import {isFilter} from './frames';
 import type {
@@ -36,10 +36,11 @@ export interface Report {
   atWork: boolean;
 }
 
-export const report: Report = {
+// Shallow: only its fields are followed (the rows of the drive at work grow while the page is open, appendRows).
+export const report: Report = shallowReactive({
   runId: '', routeId: '', rows: [], routes: [], countries: {}, hintStats: null, routeHasHints: false, apiBase: null,
   storageKey: '', lastKeyStorage: '', proposer: null, readOnly: false, atWork: false,
-};
+});
 
 let hintsByFrame: Record<string, Hint[]> = {};
 let rowIndex = new Map<string, number>();
@@ -154,6 +155,14 @@ export function initStore(raw: Partial<Payload>): void {
   state.busy = isRecord(raw.busy) ? raw.busy as unknown as Busy : null;
   rowIndex = new Map(report.rows.map((row, index) => [row.frame_key, index]));
   state.suspicious = isRecord(raw.suspicious) ? raw.suspicious as Suspicious : {};
+}
+
+/** The new proposals of the drive at work (review/busy.ts), after the rows the page has. */
+export function appendRows(rows: readonly FrameRow[]): void {
+  const fresh = rows.filter((row) => !rowIndex.has(row.frame_key));
+  if (fresh.length === 0) return;
+  report.rows = [...report.rows, ...fresh];
+  rowIndex = new Map(report.rows.map((row, index) => [row.frame_key, index]));
 }
 
 export function indexOf(key: string): number {

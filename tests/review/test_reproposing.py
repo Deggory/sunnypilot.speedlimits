@@ -94,6 +94,11 @@ def test_the_review_page_of_the_drive_at_work_shows_its_new_proposals_read_only(
         assert waiting['run_id'] == RUN_ID and len(waiting['frames']) == 2
         assert waiting['busy']['phase'] == 'waiting' and waiting['busy']['ahead'] == 1
         assert json_of(server.request('GET', f'/api/route/{OTHER_ROUTE}/busy')[2])['busy']['phase'] == 'waiting'
+        # Live: the frames proposed after those the page has (the line being written is not one yet).
+        live = json_of(server.request('GET', f'/api/route/{ROUTE}/busy/0')[2])
+        assert live['run_id'] == '.pending-' + NEW_RUN and [row['frame_key'] for row in live['rows']] == ['0/0']
+        assert json_of(server.request('GET', f'/api/route/{ROUTE}/busy/1')[2])['rows'] == []
+        assert 'rows' not in json_of(server.request('GET', f'/api/route/{OTHER_ROUTE}/busy/0')[2])
         # Once Propose again ends, the page asks again and the drive is free.
         monkeypatch.setattr(reproposing, '_again_running', lambda: False)
         reproposing.reset_cache()

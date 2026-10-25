@@ -10,6 +10,14 @@ export function scrollTimelineToCurrent(): void {
   if (timeline === null) return;
   for (const tick of timeline.querySelectorAll<HTMLButtonElement>('button')) {
     if (tick.dataset['key'] !== state.currentKey) continue;
+    // On a computer the timeline card scrolls on its own (the photo stays): the segment of the frame in view.
+    const card = timeline.closest<HTMLElement>('.tl-card');
+    if (card !== null && card.scrollHeight > card.clientHeight) {
+      const box = card.getBoundingClientRect();
+      const line = (tick.closest('.tl-seg') ?? tick).getBoundingClientRect();
+      if (line.top < box.top) card.scrollTop -= box.top - line.top + 8;
+      else if (line.bottom > box.bottom) card.scrollTop += line.bottom - box.bottom + 8;
+    }
     const strip = tick.parentElement;
     if (strip === null || strip.scrollWidth <= strip.clientWidth) return;
     const left = tick.offsetLeft - strip.offsetLeft;

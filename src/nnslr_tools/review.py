@@ -653,8 +653,9 @@ def make_handler(app: ReviewApp):
             if match:
                 self._send_reviews(match.group(1))
                 return
-            # Is the drive read only now (Propose again works on it)? The review page asks while it is.
-            match = re.fullmatch(r'/api/route/([^/]+)/busy', path)
+            # Is the drive read only now (Propose again works on it)? The review page asks while it is. With
+            # /<after>, the drive at work also sends its new proposals after the first <after> frames (run: theirs).
+            match = re.fullmatch(r'/api/route/([^/]+)/busy(?:/([0-9]{1,7}))?', path)
             if match:
                 route = match.group(1)
                 try:
@@ -664,7 +665,15 @@ def make_handler(app: ReviewApp):
                     self._problem(404, 'unknown_route', UNKNOWN_DRIVE_MESSAGE, True)
                     return
                 from nnslr_tools import reproposing
-                self._json(200, {'ok': True, 'busy': reproposing.public(reproposing.of(app.root, route), total)})
+                item = reproposing.of(app.root, route)
+                answer = {'ok': True, 'busy': reproposing.public(item, total)}
+                if match.group(2) is not None and item is not None and item['phase'] == 'proposing again':
+                    fresh = reproposing.at_work_rows(item)[int(match.group(2)):]
+                    for row in fresh:
+                        for name in ('gps', 'country_proposed', 'country_from'):
+                            row.setdefault(name, None)
+                    answer.update(run_id=item['pending'].name, rows=fresh)
+                self._json(200, answer)
                 return
             if re.fullmatch(r'/api/route/[^/]+/frame/[^/]+/[^/]+', path):
                 self._problem(405, 'method_not_allowed', 'Use POST to save a frame.', True)

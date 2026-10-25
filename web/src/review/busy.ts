@@ -1,13 +1,20 @@
 // A drive Propose again works on (nnslr_tools.reproposing) is read only: nothing on it is confirmed or changed until
-// its new proposals are in (the server refuses a save too). The drive at work shows the new proposals made so far;
-// a drive waiting its turn shows its current report. While the page is read only it asks the server every
-// INTERVAL_MS how far it is, and says when it is done: then a reload shows the new proposals, to review.
+// its new proposals are in (the server refuses a save too). The drive at work shows the new proposals made so far,
+// live: every LIVE_MS the page asks for the frames proposed since, adds them to the timeline and, following, shows
+// the newest. A drive waiting its turn shows its current report and asks every INTERVAL_MS. When the drive is done
+// the page says so: a reload shows the new proposals, to review.
+import {ref} from 'vue';
 import {currentRow} from './frames';
+import {openFrame} from './navigation';
 import {call} from './server';
-import {report, state} from './store';
-import type {Busy} from './types';
+import {appendRows, report, state} from './store';
+import type {Busy, FrameRow} from './types';
 
 const INTERVAL_MS = 15000;
+const LIVE_MS = 4000;
+/** Following: each frame proposed shows as it comes; going to another frame stops it (followed: the one shown). */
+export const following = ref(false);
+let followed: string | null = null;
 const READ_ONLY_TEXT = 'Read only while Propose again works on this drive.';
 let timer: number | undefined;
 
@@ -45,26 +52,48 @@ export function busyBanner(): {title: string; text: string; reload: string} | nu
       text: who + ' is proposing the signs of this drive again: ' + done.toLocaleString('en-GB') + of + ' frames so far.',
       reload: 'Show its proposals'};
   }
-  const shown = report.rows.length;
-  return {title: 'Read only · ' + who + ' at work',
-    text: 'You see its new proposals: ' + plural(shown, 'frame') + of + ' so far' + (done > shown ? ' (' + done.toLocaleString('en-GB')
-      + ' now)' : '') + '. Nothing can be confirmed until it has done them all.',
-    reload: done > shown ? 'Show the newest' : ''};
+  return {title: 'Live · ' + who + ' at work',
+    text: 'Its new proposals appear here as it makes them: ' + plural(report.rows.length, 'frame') + of + ' so far. '
+      + 'Read only until it has done them all.', reload: ''};
 }
 
+/** Follow on: the newest frame proposed now, then each one as it comes. */
+export function toggleFollow(): void {
+  following.value = !following.value;
+  const last = report.rows[report.rows.length - 1];
+  if (following.value && last) {
+    openFrame(last.frame_key);
+    followed = last.frame_key;
+  }
+}
+
+let asking = false;
 async function ask(): Promise<void> {
-  if (!report.apiBase) return;
+  if (!report.apiBase || asking) return;
+  asking = true;
   try {
-    const answer = await call<{busy: Busy | null}>('GET', report.apiBase + '/busy');
+    const url = report.apiBase + '/busy' + (report.atWork ? '/' + report.rows.length : '');
+    const answer = await call<{busy: Busy | null; run_id?: string; rows?: FrameRow[]}>('GET', url);
     state.busy = answer.busy;
     if (answer.busy === null) window.clearInterval(timer);
+    if (answer.rows && answer.run_id === report.runId && answer.rows.length > 0) {
+      appendRows(answer.rows);
+      const last = answer.rows[answer.rows.length - 1];
+      if (following.value && state.currentKey !== followed) following.value = false;
+      if (following.value && last) {
+        openFrame(last.frame_key);
+        followed = last.frame_key;
+      }
+    }
   } catch {
     // The network or a restart of the site: asked again at the next round.
+  } finally {
+    asking = false;
   }
 }
 
 /** Follows a read-only drive until Propose again is done with it. */
 export function watchBusy(): void {
   if (!report.readOnly || !report.apiBase || timer !== undefined) return;
-  timer = window.setInterval(() => void ask(), INTERVAL_MS);
+  timer = window.setInterval(() => void ask(), report.atWork ? LIVE_MS : INTERVAL_MS);
 }

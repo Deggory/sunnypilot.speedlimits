@@ -461,6 +461,14 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
     background: var(--topbar-bg); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
   }
   .panel .confirm-section.quiet .status-line { min-height: 0; }
+  /* The photo stays where it is: the column has the window's height and the timeline card scrolls on its own, in
+     the room left under the photo. */
+  .stage-col {
+    position: sticky; top: var(--topbar-h, 57px); height: calc(100vh - var(--topbar-h, 57px));
+    height: calc(100dvh - var(--topbar-h, 57px)); padding-bottom: 20px;
+  }
+  .stage-col > :not(.tl-card) { flex-shrink: 0; }
+  .stage-col > .tl-card { flex: 1 1 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 }
 @media (min-width: 641px) {
   /* "+ Box" and "Cancel" take the same width: the bar never re-wraps while drawing. */
@@ -613,6 +621,10 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
 }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
+}
+@media (min-width: 981px) {
+  /* Under the photo, room for its bar and a few rows of the timeline on a low window too (after the rules above). */
+  #scene, body:has(#hintToggle:not([hidden])) #scene { max-height: min(72vh, calc(100vh - var(--topbar-h, 57px) - 330px)); }
 }
 </style>
 </head>

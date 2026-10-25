@@ -17,13 +17,13 @@ const OPENS = new Set(['ready', 'pronta', 'waiting', 'proposing again']);
 <template>
   <ul v-if="routes.length" class="prep-routes">
     <li v-for="route in routes" :key="route.route">
-      <a v-if="OPENS.has(route.phase)" class="prep-route" :href="'/route/' + encodeURIComponent(route.route) + '/'"
-         :title="route.phase === 'ready' ? 'Review this drive' : 'See it, read only while it is proposed again'">{{ route.title
-           || route.route.replace(/^0+(?=[0-9a-f]+--)/, '') }}</a>
-      <span v-else class="prep-route" :title="route.route">{{ route.title || route.route.replace(/^0+(?=[0-9a-f]+--)/, '') }}</span>
-      <span class="prep-phase">{{ PHASE[route.phase] ?? route.phase }}<template v-if="route.total && route.phase !== 'waiting'"> · {{ thousands(route.done) }}
-        of {{ thousands(route.total) }} {{ route.unit }}</template></span>
-      <Bar :percent="route.percent" :kind="route.percent >= 100 ? 'ok' : 'run'"/>
+      <component :is="OPENS.has(route.phase) ? 'a' : 'div'" class="prep-drive"
+                 :href="OPENS.has(route.phase) ? '/route/' + encodeURIComponent(route.route) + '/' : undefined">
+        <span class="prep-route">{{ route.title || route.route.replace(/^0+(?=[0-9a-f]+--)/, '') }}</span>
+        <span class="prep-phase">{{ PHASE[route.phase] ?? route.phase }}<template v-if="route.total && route.phase !== 'waiting'"> · {{ thousands(route.done) }}
+          of {{ thousands(route.total) }} {{ route.unit }}</template><span v-if="OPENS.has(route.phase)" class="prep-chev" aria-hidden="true">›</span></span>
+        <Bar :percent="route.percent" :kind="route.percent >= 100 ? 'ok' : 'run'"/>
+      </component>
     </li>
   </ul>
 </template>

@@ -45,7 +45,7 @@ function hintsSwitched(event: Event): void {
     <span id="statePill" :class="pillClass">{{ statusLabel(row.frame_key) }}</span>
     <span class="data" id="frameData" :title="'Segment ' + row.segment_index + ', image ' + row.output_index">{{ frameData }}</span>
     <div class="stage-tools">
-      <button type="button" class="btn" :class="{on: state.drawing}" id="draw" @click="toggleDrawing">{{ state.drawing ? 'Cancel' : '+ Box' }}</button>
+      <button type="button" class="btn" :class="{on: state.drawing}" id="draw" :disabled="report.readOnly" @click="toggleDrawing">{{ state.drawing ? 'Cancel' : '+ Box' }}</button>
       <button type="button" class="btn danger" id="remove" :disabled="selectedBox === null" @click="removeSelected">Delete</button>
     </div>
     <label class="switch" id="hintToggle" :hidden="!report.routeHasHints"><input type="checkbox" id="showHints" :checked="state.showHints" @change="hintsSwitched"><span class="track" aria-hidden="true"></span>Second reading</label>
