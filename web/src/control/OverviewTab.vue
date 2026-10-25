@@ -36,7 +36,7 @@ const gpuNames = computed(() => gpuProcessNames(props.status));
 </script>
 
 <template>
-  <h1 class="sr-only">Overview</h1>
+  <h1 class="tab-title">Overview</h1>
   <NextStepCard :next="next" :actions="status?.actions ?? null" :review-href="reviewHref" @run="(name, state) => $emit('run', name, state)"/>
   <FlowTiles :status="status" :attention="next.attention" :busy="busy"/>
 

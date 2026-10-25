@@ -324,7 +324,7 @@ const nothingToPlay = computed((): string => {
 </script>
 
 <template>
-  <h1 class="sr-only">Evaluate</h1>
+  <h1 class="tab-title">Evaluate</h1>
 
   <section v-if="measureJob" class="live-section" :class="{now: measureJob.state === 'running'}" aria-labelledby="measure-job-title">
     <h2 class="section-title" id="measure-job-title">{{ measureJob.state === 'running' ? 'Running' : 'Last measure failed' }}</h2>

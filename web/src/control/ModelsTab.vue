@@ -27,7 +27,7 @@ async function choose(version: ModelVersion, roleLabel: string): Promise<void> {
 </script>
 
 <template>
-  <h1 class="sr-only">Models</h1>
+  <h1 class="tab-title">Models</h1>
 
   <p v-if="payload === null" class="card empty">{{ error ? 'The models cannot be read: ' + error : 'Loading…' }}</p>
   <template v-else>

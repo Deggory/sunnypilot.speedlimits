@@ -137,7 +137,7 @@ function openComma(): void {
 </script>
 
 <template>
-  <h1 class="sr-only">Prepare</h1>
+  <h1 class="tab-title">Prepare</h1>
 
   <section class="card tab-card" aria-labelledby="prepare-title">
     <h2 class="sr-only" id="prepare-title">New drives</h2>

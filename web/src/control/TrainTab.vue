@@ -109,7 +109,7 @@ const numbers = computed(() => {
 </script>
 
 <template>
-  <h1 class="sr-only">Train</h1>
+  <h1 class="tab-title">Train</h1>
 
   <section class="numbers" aria-label="The numbers">
     <div class="card number">
