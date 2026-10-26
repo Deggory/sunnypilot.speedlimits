@@ -65,6 +65,10 @@ export const SIGN_KIND_GROUPS: readonly {label: string; kinds: readonly SignKind
     {id: 'height_limit', label: 'Height limit', chip: 'Height', short: 'height'},
     {id: 'width_limit', label: 'Width limit', chip: 'Width', short: 'width'},
   ]},
+  {label: 'Mandatory', kinds: [
+    {id: 'keep_right', label: 'Keep right', chip: 'Keep right ↘', short: 'keep right'},
+    {id: 'keep_left', label: 'Keep left', chip: '↙ Keep left', short: 'keep left'},
+  ]},
   {label: 'Roads and places', kinds: [
     {id: 'town_entry', label: 'Town entry', chip: 'Town entry', short: 'town'},
     {id: 'town_exit', label: 'Town exit', chip: 'Town exit', short: 'town end'},

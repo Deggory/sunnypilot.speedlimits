@@ -441,6 +441,8 @@
         "weight_limit",
         "height_limit",
         "width_limit",
+        "keep_right",
+        "keep_left",
         "town_entry",
         "town_exit",
         "motorway_start",

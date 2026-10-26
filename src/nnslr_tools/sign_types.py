@@ -20,6 +20,8 @@ SIGN_TYPES = (
     # Bans and other numbers
     'no_overtaking', 'no_overtaking_end', 'no_entry', 'minimum_speed', 'weight_limit', 'height_limit',
     'width_limit',
+    # Mandatory (round, blue)
+    'keep_right', 'keep_left',
     # Roads and places
     'town_entry', 'town_exit', 'motorway_start', 'motorway_end', 'expressway_start', 'expressway_end',
     'roundabout', 'one_way',
