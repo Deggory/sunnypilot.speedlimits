@@ -9,6 +9,8 @@ import type {
   Suspicious,
 } from './types';
 
+// The working copies of a drive in this browser, by run: STORAGE_PREFIX + run id.
+const STORAGE_PREFIX = 'nnslr-review-v1-';
 // Whether the list of keys under Confirm is open, in this browser.
 const KEYS_SHOWN = 'nnslr-review-keys-shown';
 
@@ -161,7 +163,7 @@ export function initStore(raw: Partial<Payload>): void {
     hintStats: isRecord(raw.hint_stats) ? raw.hint_stats as unknown as HintStats : null,
     routeHasHints: Object.keys(hintsByFrame).length > 0,
     apiBase: raw.server ? '/api/route/' + encodeURIComponent(routeId) : null,
-    storageKey: 'nnslr-review-v1-' + String(raw.run_id),
+    storageKey: STORAGE_PREFIX + String(raw.run_id),
     lastKeyStorage: 'nnslr-review-last-' + String(raw.run_id),
     proposer: typeof raw.proposer === 'string' ? raw.proposer : null,
     readOnly: isRecord(raw.busy),
@@ -194,13 +196,55 @@ export function hintsOf(key: string): Hint[] {
   return Array.isArray(list) ? list : [];
 }
 
-/** Keeps the working copies in this browser; a failure (storage full or off) becomes a warning. */
+/** What this browser keeps of a drive: with the review server only the frames it does not have yet (changed and not
+ * saved, or confirmed and not sent), since it gives the others back at every load; offline (the static report)
+ * every frame. Kept whole, the copies of a few drives the AI reviewed filled the browser's room. */
+function kept(edits: Record<string, FrameEdit>): Record<string, FrameEdit> {
+  if (!report.apiBase) return edits;
+  const result: Record<string, FrameEdit> = {};
+  for (const [key, edit] of Object.entries(edits)) {
+    if (edit.saved === false) result[key] = edit;
+  }
+  return result;
+}
+
+/** Room in this browser: the copies of the other drives keep only their frames the server does not have. */
+function compactOthers(): void {
+  for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+    const key = localStorage.key(index);
+    if (key === null || !key.startsWith(STORAGE_PREFIX) || key === report.storageKey) continue;
+    try {
+      const value: unknown = JSON.parse(localStorage.getItem(key) || '{}');
+      if (!isRecord(value)) continue;
+      const pending = Object.entries(value).filter(([, edit]) => isRecord(edit) && edit['saved'] === false);
+      if (pending.length === 0) localStorage.removeItem(key);
+      else localStorage.setItem(key, JSON.stringify(Object.fromEntries(pending)));
+    } catch {
+      // Left as it is.
+    }
+  }
+}
+
+/** Keeps the working copies in this browser; full, it makes room first; a failure (storage full or off) becomes a
+ * warning. */
 export function store(): void {
+  const text = JSON.stringify(kept(state.edits));
   try {
-    localStorage.setItem(report.storageKey, JSON.stringify(state.edits));
+    localStorage.setItem(report.storageKey, text);
+    state.storageWarning = '';
+    return;
+  } catch {
+    // Full: room is made below.
+  }
+  try {
+    if (report.apiBase) compactOthers();
+    localStorage.setItem(report.storageKey, text);
     state.storageWarning = '';
   } catch {
-    state.storageWarning = 'Saving in this browser is not available: download the JSONL before closing.';
+    state.storageWarning = report.apiBase
+      ? 'This browser cannot keep changes not confirmed yet: confirm a frame before leaving it. Confirmed frames are '
+        + 'saved on the server.'
+      : 'Saving in this browser is not available: download the JSONL before closing.';
   }
 }
 

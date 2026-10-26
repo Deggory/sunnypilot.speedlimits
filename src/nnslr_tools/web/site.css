@@ -39,7 +39,12 @@ font-variant-numeric:tabular-nums}
 .card-row .bar .ai{background:repeating-linear-gradient(135deg,var(--accent) 0 2px,transparent 2px 4px),var(--accent-soft)}
 .card-row.done .bar .ai{background:repeating-linear-gradient(135deg,var(--ok) 0 2px,transparent 2px 4px),var(--ok-soft)}
 /* A route proposed again now (site.ts): who, how far, the time left, under the row. */
-.row-live{grid-column:2/-1;display:flex;align-items:center;gap:10px;margin-top:6px;font-size:13px;color:var(--rev);font-weight:500}
+.row-live{display:flex;align-items:center;gap:10px;margin-top:-6px;padding:0 20px 14px 58px;font-size:13px;color:var(--rev);font-weight:500}
+@media (min-width:981px){
+  .cards > li > .card-row{grid-column:1;grid-row:1}
+  .cards > li > .ai-route,.page:has(.ai-route) .cards > li:not(:has(> .ai-route))::after{grid-column:2;grid-row:1}
+  .cards > li > .row-live{grid-column:1/-1;grid-row:2}
+}
 .row-live[hidden]{display:none}
 .row-live .bar{flex:0 0 140px;height:4px}
 .card-row.done .bar span{background:var(--ok)}
@@ -232,6 +237,7 @@ border-radius:14px;background:var(--surface-2);cursor:pointer;transition:backgro
   .card-row .open{min-width:0}
   .cards > li{grid-template-columns:minmax(0,1fr)}
   .ai-route{justify-self:start;margin:-4px 16px 14px 44px}
+  .row-live{padding:0 16px 12px 44px;flex-wrap:wrap}
   .page:has(.ai-route) .cards > li:not(:has(> .ai-route))::after{display:none}
   .count .by-ai{display:inline;font-size:inherit}
   .count .by-ai::before{content:" · "}

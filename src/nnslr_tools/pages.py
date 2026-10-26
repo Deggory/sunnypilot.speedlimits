@@ -265,9 +265,10 @@ def _route_row(summary: dict, *, ai_reviewer: bool = True) -> str:
             + '<span class="bar" aria-hidden="true"><span style="width:' + str(by_people_percent) + '%"></span>'
             + ('<span class="ai" style="width:' + str(by_ai_percent) + '%"></span>' if by_ai else '') + '</span>'
             + '<span class="stats">' + ''.join(stats) + '</span>'
-            + '<span class="' + action_class + '">' + action + '</span>'
-            # Filled by the page script while the route is proposed again (web/src/pages/site.ts).
-            + '<span class="row-live" data-live="' + route + '" hidden></span></a>' + ai + '</li>')
+            + '<span class="' + action_class + '">' + action + '</span></a>'
+            # Filled by the page script while the route is proposed again or reviewed by the AI (web/src/pages/site.ts):
+            # under the row and its AI button, which stay side by side.
+            + '<span class="row-live" data-live="' + route + '" hidden></span>' + ai + '</li>')
 
 
 def render_index(summaries: list[dict], database: Path, nonce: str = '', *, ai_reviewer: bool = True) -> str:
