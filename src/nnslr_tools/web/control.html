@@ -493,7 +493,9 @@ border-radius:8px;cursor:pointer;min-height:30px;opacity:.85;transition:backgrou
 .drive-main{display:grid;grid-template-columns:minmax(0,1fr) 230px;grid-template-areas:"stage side" "time time";gap:12px 16px;align-items:start}
 .drive-stage{grid-area:stage;position:relative;width:min(100%,calc((100dvh - 400px) * 1344 / 760));min-width:min(100%,420px);
 justify-self:center;border-radius:12px;overflow:hidden;background:#000;cursor:pointer;outline-offset:3px}
-.drive-stage img{position:absolute;inset:0;width:100%;height:100%;object-fit:fill;user-select:none}
+.drive-stage img,.drive-stage video{position:absolute;inset:0;width:100%;height:100%;object-fit:fill;user-select:none;display:block}
+.drive-making{position:absolute;left:12px;bottom:12px;padding:5px 11px;border-radius:999px;background:rgba(0,0,0,.6);color:#fff;
+font-size:12.5px;font-variant-numeric:tabular-nums;-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
 .drive-mark rect{fill:none}
 .drive-mark text{font-weight:800;paint-order:stroke;stroke:rgba(0,0,0,.75);font-family:inherit}
 .drive-mark.right rect{stroke:#30d158}.drive-mark.right text{fill:#30d158}

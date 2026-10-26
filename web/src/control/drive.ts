@@ -93,15 +93,13 @@ export function replayDrive(frames: readonly WatchFrame[], score: number): {fram
         }
         continue;
       }
+      // Only what changes the limit is drawn: a speed sign or an end of limit read (another sign never does).
+      if (limit === null) continue;
       const truthLabel = item.match >= 0 ? frame.truth[item.match]?.label ?? null : null;
-      // Only what can change the limit is drawn: a speed sign or an end read, or any sign read where there is none.
-      if (limit === null && item.match >= 0) continue;
       const tone = item.match < 0 ? 'false' : limitOf(truthLabel) === limit ? 'right' : 'wrong';
-      marks.push({box: item.box, text: limit === null ? 'sign?' : limitText(limit), tone});
-      if (limit !== null) {
-        read.push({box: item.box, limit});
-        if (item.match < 0) summary.invented += 1;
-      }
+      marks.push({box: item.box, text: limitText(limit), tone});
+      read.push({box: item.box, limit});
+      if (item.match < 0) summary.invented += 1;
     }
     const reviewed: {box: PixelBox; limit: Limit}[] = [];
     frame.truth.forEach((item, index) => {

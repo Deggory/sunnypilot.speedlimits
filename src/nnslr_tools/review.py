@@ -585,9 +585,11 @@ def make_handler(app: ReviewApp):
             # The control pages: one Vue app, a tab each (web/src/control); the old addresses lead there.
             if path in CONTROL_TABS:
                 nonce = secrets.token_urlsafe(18)
-                # img-src: the frames of the Watch panel of the Evaluate tab (the previews of /route/<id>/images/).
+                # img-src: the frames of the Watch panel of the Evaluate tab (the previews of /route/<id>/images/);
+                # media-src: the video of a drive in the Drive view of Results (/route/<id>/video.mp4).
                 csp = ("default-src 'none'; script-src 'nonce-" + nonce + "'; style-src 'unsafe-inline'; "
-                       "img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+                       "img-src 'self'; media-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; "
+                       "frame-ancestors 'none'")
                 self._send(200, 'text/html; charset=utf-8', render_control(nonce, CONTROL_TABS[path]).encode('utf-8'),
                            csp)
                 return
@@ -619,6 +621,14 @@ def make_handler(app: ReviewApp):
                 value = lambda name: query.get(name, [None])[0]  # noqa: E731
                 self._json(200, app.panel.frames(match.group(1), value('model'), value('partition') or 'test',
                                                  value('route') or None, app.frame_rows))
+                return
+            # The video of a drive for the Drive view of Results (nnslr_tools.drive_video): ready, or being made;
+            # ?start=1 begins making it when it is missing.
+            match = re.fullmatch(r'/api/panel/drive-video/([0-9a-f]{8}--[0-9a-f]{10})', path)
+            if match:
+                from nnslr_tools import drive_video
+                start = parse_qs(urlsplit(self.path).query).get('start', [''])[0] == '1'
+                self._json(200, drive_video.state(app.root, match.group(1), start=start))
                 return
             # The networks by role (cutter, classifier, decider) and the one in use, for the Models tab.
             if path == '/api/panel/models':
@@ -717,6 +727,10 @@ def make_handler(app: ReviewApp):
             match = re.fullmatch(r'/route/([^/]+)(/images/[0-9]{8}\.jpg)', path)
             if match:
                 self._send_image(match.group(1), match.group(2))
+                return
+            match = re.fullmatch(r'/route/([0-9a-f]{8}--[0-9a-f]{10})/video\.mp4', path)
+            if match:
+                self._send_video(match.group(1))
                 return
             self._problem(404, 'not_found', 'Page not found.', path.startswith('/api/'))
 
@@ -910,6 +924,46 @@ def make_handler(app: ReviewApp):
             with path.open('rb') as source:
                 while block := source.read(65536):
                     self.wfile.write(block)
+
+        def _send_video(self, route):
+            """The video of a drive (nnslr_tools.drive_video), with byte ranges: the player seeks in it."""
+            from nnslr_tools import drive_video
+            path = drive_video.paths(app.root, route)[0]
+            try:
+                size = path.stat().st_size
+            except OSError:
+                self._problem(404, 'not_found', 'This drive has no video yet.', False)
+                return
+            first, last, status = 0, size - 1, 200
+            wanted = re.fullmatch(r'bytes=([0-9]*)-([0-9]*)', self.headers.get('Range', '').strip())
+            if wanted and (wanted.group(1) or wanted.group(2)):
+                if wanted.group(1):
+                    first = int(wanted.group(1))
+                    last = min(int(wanted.group(2)), size - 1) if wanted.group(2) else size - 1
+                else:
+                    first = max(0, size - int(wanted.group(2)))
+                if first > last or first >= size:
+                    self._send(416, 'text/plain', b'', DEFAULT_CSP, [('Content-Range', f'bytes */{size}')])
+                    return
+                status = 206
+            self.send_response(status)
+            self.send_header('Content-Type', 'video/mp4')
+            self.send_header('Content-Length', str(last - first + 1))
+            self.send_header('Accept-Ranges', 'bytes')
+            if status == 206:
+                self.send_header('Content-Range', f'bytes {first}-{last}/{size}')
+            self._security_headers(DEFAULT_CSP)
+            self.end_headers()
+            try:
+                with path.open('rb') as source:
+                    source.seek(first)
+                    left = last - first + 1
+                    while left > 0 and (block := source.read(min(1 << 18, left))):
+                        self.wfile.write(block)
+                        left -= len(block)
+            except (BrokenPipeError, ConnectionResetError):
+                # The player asked for another range and closed this one.
+                pass
 
         def _send_reviews(self, route):
             try:

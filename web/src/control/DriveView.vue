@@ -6,6 +6,7 @@
 // goes there. The chain of a classifier version (with the cutter it was measured with), on the test drives (never
 // trained on) or the validation drives. Space plays, the arrows step.
 import {computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watch} from 'vue';
+import {api} from '../common/api';
 import {isoWhen, plural, thousands} from '../common/format';
 import type {ClassifierModel, WatchPartition, WatchRoute} from '../common/panel-types';
 import {type DriveFrame, limitText, replayDrive, stateRuns} from './drive';
@@ -59,9 +60,61 @@ const runs = computed(() => stateRuns(replay.value.frames));
 const summary = computed(() => replay.value.summary);
 const rightShare = computed(() => summary.value.judged ? Math.round(summary.value.right * 100 / summary.value.judged) : null);
 
-// -- the frame wanted, and the one shown (its image decoded first, so the marks never sit on another frame) --------------
+// -- the video of the drive (nnslr_tools.drive_video): made once by the server, then played instead of the frames ------
+interface VideoIndex {fps: number; duration: number; segments: {segment: number; start: number; frames: number}[]}
+interface VideoState {state: 'ready' | 'waiting' | 'making' | 'failed' | 'missing'; progress?: number; reason?: string;
+  url?: string; index?: VideoIndex}
+const video = ref<VideoState | null>(null);
+const player = useTemplateRef<HTMLVideoElement>('player');
+const ready = computed(() => video.value?.state === 'ready' && Boolean(video.value.url));
+let videoTimer: number | undefined;
+let videoAsked = 0;
+/** Asks how the video of the drive stands; the first time it starts making it, then follows it every 2 s. */
+async function askVideo(route: string, start: boolean): Promise<void> {
+  window.clearTimeout(videoTimer);
+  const ticket = ++videoAsked;
+  try {
+    const answer = await api<VideoState>('/api/panel/drive-video/' + encodeURIComponent(route) + (start ? '?start=1' : ''));
+    if (ticket !== videoAsked) return;
+    video.value = answer;
+    if (answer.state === 'waiting' || answer.state === 'making') videoTimer = window.setTimeout(() => void askVideo(route, false), 2000);
+  } catch {
+    if (ticket === videoAsked) video.value = null;
+  }
+}
+onBeforeUnmount(() => window.clearTimeout(videoTimer));
+/** Each frame's time in the video: its minute's start, plus its image number (frames are one a second). */
+const times = computed((): (number | null)[] => {
+  const starts = new Map((video.value?.index?.segments ?? []).map((item) => [item.segment, item.start]));
+  return frames.value.map((item) => {
+    const start = item.segment === null ? undefined : starts.get(item.segment);
+    return start === undefined || item.index === null ? null : start + item.index;
+  });
+});
+/** The frame of a time in the video: the last one at or before it. */
+function frameAt(time: number): number {
+  let found = 0;
+  times.value.forEach((value, index) => { if (value !== null && value <= time + 0.02) found = index; });
+  return found;
+}
+/** The marks of a frame stay on the video for half a second: the car moves on, they would sit beside the sign. */
+const fresh = ref(true);
+let frameRequest = 0;
+function follow(): void {
+  const element = player.value;
+  if (!element) return;
+  const index = frameAt(element.currentTime);
+  if (cursor.value !== index) cursor.value = index;
+  const at = times.value[index];
+  fresh.value = at !== null && at !== undefined && element.currentTime - at < 0.5;
+  if (!element.paused) frameRequest = requestAnimationFrame(follow);
+}
+onBeforeUnmount(() => cancelAnimationFrame(frameRequest));
+
+// -- the frame wanted, and the one shown (without the video: its image decoded first, so the marks never sit on another
+// frame) ----------------------------------------------------------------------------------------------------------------
 const playing = ref(false);
-const speed = ref<Speed>(2);
+const speed = ref<Speed>(1);
 const cursor = ref(0);
 const shown = ref(0);
 const failed = ref(false);
@@ -70,18 +123,22 @@ const now = computed((): DriveFrame | null => replay.value.frames[shown.value] ?
 
 let cache = new Map<string, Promise<boolean>>();
 function load(url: string): Promise<boolean> {
-  let ready = cache.get(url);
-  if (ready === undefined) {
+  let loaded = cache.get(url);
+  if (loaded === undefined) {
     const image = new Image();
     image.decoding = 'async';
     image.src = url;
-    ready = image.decode().then(() => true, () => false);
-    cache.set(url, ready);
+    loaded = image.decode().then(() => true, () => false);
+    cache.set(url, loaded);
     if (cache.size > 48) cache.delete(cache.keys().next().value as string);
   }
-  return ready;
+  return loaded;
 }
 function showFrame(index: number): void {
+  if (ready.value) {
+    shown.value = index;
+    return;
+  }
   const url = frames.value[index]?.image ?? null;
   if (url === null) {
     shown.value = index;
@@ -101,18 +158,30 @@ function showFrame(index: number): void {
 watch(cursor, showFrame);
 watch(payload, (value, before) => {
   playing.value = false;
-  if (!before || before.route !== value?.route) cache = new Map();
+  if (!before || before.route !== value?.route) {
+    cache = new Map();
+    video.value = null;
+    if (value?.route) void askVideo(value.route, true);
+  }
   cursor.value = 0;
   showFrame(0);
 });
 
 function seek(index: number): void {
-  cursor.value = Math.min(Math.max(0, frames.value.length - 1), Math.max(0, index));
+  const target = Math.min(Math.max(0, frames.value.length - 1), Math.max(0, index));
+  const at = times.value[target];
+  if (ready.value && player.value && at !== null && at !== undefined) {
+    player.value.currentTime = at;
+    cursor.value = target;
+    fresh.value = true;
+    return;
+  }
+  cursor.value = target;
 }
 let timer: number | undefined;
 function schedule(): void {
   window.clearTimeout(timer);
-  if (!playing.value || shown.value !== cursor.value) return;
+  if (ready.value || !playing.value || shown.value !== cursor.value) return;
   timer = window.setTimeout(() => {
     if (cursor.value >= frames.value.length - 1) playing.value = false;
     else seek(cursor.value + 1);
@@ -120,8 +189,33 @@ function schedule(): void {
 }
 watch([playing, shown, speed], schedule);
 function toggle(): void {
+  const element = player.value;
+  if (ready.value && element) {
+    if (element.paused) void element.play();
+    else element.pause();
+    return;
+  }
   if (!playing.value && cursor.value >= frames.value.length - 1) seek(0);
   playing.value = !playing.value;
+}
+/** The video's own state: playing follows it, the time moves the frame shown. */
+function onPlay(): void {
+  playing.value = true;
+  cancelAnimationFrame(frameRequest);
+  frameRequest = requestAnimationFrame(follow);
+}
+function onPause(): void {
+  playing.value = false;
+  follow();
+}
+watch(speed, (value) => { if (player.value) player.value.playbackRate = value; });
+// The video once it can play: at the frame shown, at the speed chosen.
+function onLoaded(): void {
+  const element = player.value;
+  if (!element) return;
+  element.playbackRate = speed.value;
+  const at = times.value[cursor.value];
+  if (at !== null && at !== undefined) element.currentTime = at;
 }
 const speedOptions = SPEEDS.map((value) => ({key: String(value), label: (value === 0.5 ? '½' : String(value)) + '×'}));
 const speedKey = computed({
@@ -208,10 +302,12 @@ const stateWords = {right: 'Right', wrong: 'Wrong', none: 'No limit yet'} as con
     <div v-else class="drive-main">
       <div class="drive-stage" :style="{aspectRatio: size.width + ' / ' + size.height}" tabindex="0" role="img"
            :aria-label="'Frame ' + (cursor + 1) + ' of ' + frames.length" @click="toggle">
-        <img v-if="frame?.image && !failed" :src="frame.image" alt="" draggable="false">
+        <video v-if="ready" ref="player" :src="video?.url" muted playsinline preload="auto" @play="onPlay" @pause="onPause"
+               @ended="onPause" @seeked="follow" @loadedmetadata="onLoaded"></video>
+        <img v-else-if="frame?.image && !failed" :src="frame.image" alt="" draggable="false">
         <p v-else class="wp-noimage">{{ frame?.image ? 'The image of this frame cannot be loaded.' : 'No picture of this frame.' }}</p>
         <svg class="wp-overlay" :viewBox="'0 0 ' + size.width + ' ' + size.height" preserveAspectRatio="none" aria-hidden="true">
-          <g v-for="(mark, index) in now?.marks ?? []" :key="index" class="drive-mark" :class="mark.tone">
+          <g v-for="(mark, index) in fresh ? now?.marks ?? [] : []" :key="index" class="drive-mark" :class="mark.tone">
             <rect v-bind="rect(mark.box, unit * 3)" :stroke-width="unit * 2.5" :stroke-dasharray="mark.tone === 'missed' ? unit * 7 + ' ' + unit * 5 : undefined"
                   :rx="unit * 3"/>
             <text :x="mark.box[0] - unit * 3" :y="mark.box[1] - unit * 8" :font-size="unit * 15" :stroke-width="unit * 4">{{ mark.text }}</text>
@@ -222,6 +318,8 @@ const stateWords = {right: 'Right', wrong: 'Wrong', none: 'No limit yet'} as con
           <span class="drive-sign" :class="{end: now?.model === 'end', empty: now?.model === null}">{{ limitText(now?.model ?? null) }}</span>
           <span class="drive-truth">signs: <b>{{ limitText(now?.truth ?? null) }}</b></span>
         </div>
+        <span v-if="video && (video.state === 'waiting' || video.state === 'making')" class="drive-making">Making the video of this
+          drive… {{ Math.round((video.progress ?? 0) * 100) }}%</span>
         <span v-if="!playing" class="wp-paused" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path :d="MARKS.play" fill="currentColor"/></svg></span>
       </div>
 

@@ -1028,6 +1028,21 @@ def _cmd_export_onnx(args: argparse.Namespace) -> int:
 # [onnx-export] - END
 
 
+def _cmd_drive_video(args: argparse.Namespace) -> int:
+    """A drive as an MP4 for the Drive view of Results (nnslr_tools.drive_video)."""
+    from nnslr_tools import drive_video
+    from nnslr_tools.preannotate import resolve_data_root
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    made = None if args.again else drive_video.index(root, args.route)
+    if made is None:
+        made = drive_video.make(root, args.route,
+                                lambda share: print(f'\r{share * 100:5.1f}%', end='', file=sys.stderr, flush=True))
+        print(file=sys.stderr)
+    print(json.dumps({'video': str(drive_video.paths(root, args.route)[0]), 'minutes': len(made['segments']),
+                      'seconds': made['duration']}))
+    return 0
+
+
 # [offline-replay] - START
 def _cmd_replay(args: argparse.Namespace) -> int:
     from nnslr_tools.preannotate import resolve_data_root
@@ -1685,6 +1700,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_export.add_argument("--no-verify", action="store_true", help="skip ONNX Runtime numerical parity verification")
     p_export.set_defaults(func=_cmd_export_onnx)
     # [onnx-export] - END
+
+    p_video = sub.add_parser(
+        "drive-video",
+        help="make the MP4 of a drive (road camera, 960 px, H.264) that the Drive view of Results plays",
+    )
+    p_video.add_argument("route", help="route id, e.g. 0000012d--6552a45378")
+    p_video.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+    p_video.add_argument("--again", action="store_true", help="make it again even when it is up to date")
+    p_video.set_defaults(func=_cmd_drive_video)
 
     # [offline-replay] - START
     p_replay = sub.add_parser(

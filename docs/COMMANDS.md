@@ -155,6 +155,7 @@ These helpers are the daily flow, and the portal's buttons run them. Each one sk
 | `experiment-b --variant crop\|crop_geom\|full` | the decider prototype, trained on the reviewed boxes | GPU, writes data |
 | `mine-hard-examples` | extracts the errors from an evaluation report | writes data |
 | `replay` | runs detector then reader offline over the extracted frames of a route | GPU, writes data |
+| `drive-video ROUTE` | joins the comma's minutes of road video (`fcamera.hevc`, 1344 × 760, 20 fps) into one H.264 MP4 960 px wide with the start of each minute, `data/derived/video/<route>.mp4` and `.json`: what the Drive view of Results plays. The site makes it by itself the first time Drive shows the drive (low priority, 8 threads, about 4 minutes for 45 minutes of drive, about 3 MB a minute); `--again` makes it again | CPU, writes data |
 
 **Export and packaging**
 
