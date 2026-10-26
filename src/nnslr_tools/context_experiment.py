@@ -46,6 +46,7 @@ from nnslr_tools.evaluation import human_reviewed_metrics, label_basis_counts, r
 from nnslr_tools.progress import report as report_progress
 from nnslr_tools.splits import validate_splits
 from nnslr_tools.training import (
+    DEFAULT_WORKERS,
     ELIGIBLE_REVIEW_STATES,
     READER_NORMALIZE_MEAN,
     READER_NORMALIZE_STD,
@@ -579,7 +580,7 @@ class ExperimentConfig:
     scene_width: int = 384
     scene_height: int = 216
     ownership_loss_weight: float = 1.0
-    num_workers: int = 4
+    num_workers: int = DEFAULT_WORKERS
     seed: int = 0
     device: str = "cuda"
     pretrained: bool = False

@@ -863,6 +863,7 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
             device_name=args.device,
             score_threshold=args.score_threshold,
             iou_threshold=args.iou_threshold,
+            num_workers=args.num_workers,
         )
     else:
         report = evaluate_reader(
@@ -1168,6 +1169,7 @@ def _cmd_export_core(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
+    from nnslr_tools.training import DEFAULT_WORKERS
     parser = argparse.ArgumentParser(
         prog="nnslr",
         description=(
@@ -1497,7 +1499,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_train.add_argument("--select-by", choices=("recall", "loss"), default=None,
                          help="detector: what chooses the best epoch and stops early: validation recall at score "
                               "0.1, ties to fewer false boxes per frame (default), or validation loss")
-    p_train.add_argument("--num-workers", type=int, default=4)
+    p_train.add_argument("--num-workers", type=int, default=DEFAULT_WORKERS)
     p_train.add_argument("--seed", type=int, default=0)
     p_train.add_argument("--init-from", type=Path, default=None,
                          help="continue mode: start from these weights (a <task>-best.pt of an earlier run) "
@@ -1537,7 +1539,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_eval.add_argument("--checkpoint", help="reader-best.pt or detector-best.pt; required unless --dry-run")
     p_eval.add_argument("--device", choices=("cuda", "cpu"), default="cuda")
     p_eval.add_argument("--batch-size", type=int, default=None, help="reader evaluation batch size (default: 64)")
-    p_eval.add_argument("--num-workers", type=int, default=4)
+    p_eval.add_argument("--num-workers", type=int, default=DEFAULT_WORKERS)
     p_eval.add_argument("--score-threshold", type=float, default=.25, help="detector score threshold")
     p_eval.add_argument("--iou-threshold", type=float, default=.5, help="detector IoU match threshold")
     p_eval.add_argument("--dry-run", action="store_true", help="validate the evaluation population without importing torch")
@@ -1562,7 +1564,7 @@ def build_parser() -> argparse.ArgumentParser:
         parser.add_argument("--dataset-kind", choices=("gold", "training-candidate"), default="gold")
         parser.add_argument("--device", choices=("cuda", "cpu"), default="cuda")
         parser.add_argument("--batch-size", type=int, default=8, help="frames per batch of the cutter (default 8)")
-        parser.add_argument("--num-workers", type=int, default=4)
+        parser.add_argument("--num-workers", type=int, default=DEFAULT_WORKERS)
 
     p_negatives = sub.add_parser(
         "mine-negatives",
@@ -1648,7 +1650,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_expb.add_argument("--learning-rate", type=float, default=3e-4)
     p_expb.add_argument("--weight-decay", type=float, default=1e-4)
     p_expb.add_argument("--crop-size", type=int, default=96, help="side of the square box crop (default: 96)")
-    p_expb.add_argument("--num-workers", type=int, default=4)
+    p_expb.add_argument("--num-workers", type=int, default=DEFAULT_WORKERS)
     p_expb.add_argument("--seed", type=int, default=0)
     p_expb.add_argument("--limit", type=int, default=None,
                         help="keep only the first N frames of each partition (smoke runs, not a measure)")

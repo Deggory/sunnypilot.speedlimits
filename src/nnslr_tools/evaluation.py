@@ -16,6 +16,7 @@ from typing import Any
 from nnslr_tools.checkpoints import (detector_anchor_min_ratio, detector_input_size, format_input_size,
                                      load_detector, safe_torch_load)
 from nnslr_tools.training import (
+    DEFAULT_WORKERS,
     DETECTOR_FAMILIES,
     NEGATIVE_SOURCES,
     NOT_A_SIGN,
@@ -401,7 +402,7 @@ def evaluate_reader(
     partition: str = "test",
     device_name: str = "cuda",
     batch_size: int = 64,
-    num_workers: int = 4,
+    num_workers: int = DEFAULT_WORKERS,
 ) -> dict[str, Any]:
     torch, Image, DataLoader, Dataset, transforms, _, mobilenet_v3_small = _require_training_stack()
     if device_name == "cuda" and not torch.cuda.is_available():
@@ -525,6 +526,7 @@ def evaluate_detector(
     score_threshold: float = 0.25,
     iou_threshold: float = 0.5,
     score_thresholds: tuple[float, ...] = REPORT_SCORE_THRESHOLDS,
+    num_workers: int = DEFAULT_WORKERS,
 ) -> dict[str, Any]:
     if not 0 <= score_threshold <= 1 or not all(0 <= value <= 1 for value in score_thresholds):
         raise ValueError("invalid_score_threshold")
@@ -565,12 +567,22 @@ def evaluate_detector(
     scored: dict[float, list[dict[str, Any]]] = {value: [] for value in thresholds}
     seconds = []
     image_results = []
+    from torch.utils.data import DataLoader, Dataset
+
+    class Frames(Dataset):
+        def __len__(self):
+            return len(frames)
+
+        def __getitem__(self, index):
+            with Image.open(_safe_image_path(root, frames[index]["image_path"])) as source:
+                return TF.pil_to_tensor(source.convert("RGB"))
+
+    # The frames are read ahead by num_workers processes, so the GPU does not wait for the PNG decoder; the time
+    # measured below is still the model's alone.
+    loader = DataLoader(Frames(), batch_size=None, shuffle=False, num_workers=num_workers)
     with torch.no_grad():
-        for position, frame in enumerate(frames):
-            path = _safe_image_path(root, frame["image_path"])
-            with Image.open(path) as source:
-                image = source.convert("RGB")
-                tensor = TF.pil_to_tensor(image).float().div_(255.0).to(device)
+        for position, (frame, pixels) in enumerate(zip(frames, loader)):
+            tensor = pixels.float().div_(255.0).to(device)
 
             if position == 0:
                 for _ in range(INFERENCE_WARMUP_RUNS):
@@ -614,7 +626,7 @@ def evaluate_detector(
                 "false_negatives": matched["false_negatives"],
                 "matches": matched["matches"],
                 "false_positive_details": matched["false_positive_details"],
-                "size": [image.width, image.height],
+                "size": [int(pixels.shape[2]), int(pixels.shape[1])],
                 **per_frame_record(low, pairs),
             })
 

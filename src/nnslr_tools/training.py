@@ -29,6 +29,7 @@ from datetime import datetime
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 import random
 import time
@@ -79,6 +80,12 @@ REVIEW_TIERS = ("human", "ai_after_rule", "ai_before_rule", "other")
 # tiers an AI removed the other-sign proposals and left those signs without a box (1,339 of the 1,434 removed
 # proposals of train on 24 October 2026, mostly pedestrian crossings, give way, no parking and direction signs).
 BOXES_OTHER_SIGNS = ("human", "ai_after_rule")
+
+
+# The processes that read the frames for the GPU (DataLoader num_workers): half the cores, 4 to 16. A 1344 × 760 PNG
+# takes about 22 ms to decode on one core: 4 workers fed a cutter at most ~180 frames a second, with 28 cores idle.
+# How many read the frames changes nothing in what is learnt (a resumed run may use another number).
+DEFAULT_WORKERS = min(16, max(4, (os.cpu_count() or 8) // 2))
 
 
 def _sha256(path: Path) -> str:
@@ -879,7 +886,7 @@ class TrainConfig:
     learning_rate: float = 3e-4
     weight_decay: float = 1e-4
     input_size: int = 160
-    num_workers: int = 4
+    num_workers: int = DEFAULT_WORKERS
     seed: int = 0
     device: str = "cuda"
     pretrained: bool = False
@@ -1018,7 +1025,7 @@ class DetectorTrainConfig:
     batch_size: int = 8
     learning_rate: float = 1e-4
     weight_decay: float = 1e-4
-    num_workers: int = 4
+    num_workers: int = DEFAULT_WORKERS
     seed: int = 0
     device: str = "cuda"
     pretrained_backbone: bool = False
@@ -1145,8 +1152,9 @@ def _detector_config_differences(saved: Any, config: "DetectorTrainConfig") -> l
     if isinstance(before.get("input_size"), list):
         before["input_size"] = tuple(before["input_size"])
     current = config.__dict__
+    # The number of frame readers changes nothing in what is learnt.
     return [f"{key} {before.get(key)!r} -> {current.get(key)!r}" for key in sorted(set(before) | set(current))
-            if before.get(key) != current.get(key)]
+            if before.get(key) != current.get(key) and key != "num_workers"]
 
 
 # The flags of nnslr train for each setting of a saved configuration (bool settings are switches).

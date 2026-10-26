@@ -37,7 +37,7 @@ import time
 from typing import Any, Iterator
 
 from nnslr_tools.progress import report as report_progress
-from nnslr_tools.training import (BOXES_OTHER_SIGNS, DETECTOR_FAMILIES, NEGATIVE_MAX_IOU, NEGATIVE_PARTITIONS, NEGATIVES_KIND,
+from nnslr_tools.training import (BOXES_OTHER_SIGNS, DEFAULT_WORKERS, DETECTOR_FAMILIES, NEGATIVE_MAX_IOU, NEGATIVE_PARTITIONS, NEGATIVES_KIND,
                                   NOT_A_SIGN, OTHER_SIGN_RULE_AT, READER_NORMALIZE_MEAN, READER_NORMALIZE_STD,
                                   REVIEW_TIERS, _label_basis, _safe_image_path, box_overlap, checkpoint_class_scheme,
                                   classifier_positives, crop_rectangle, cutter_families, family_label, frame_boxes,
@@ -145,7 +145,7 @@ def _device(torch, name: str):
 
 
 def cutter_boxes(model, device, frames: list[dict[str, Any]], data_root: Path, *, min_score: float,
-                 batch_size: int = CUTTER_BATCH, num_workers: int = 4, task: str = "chain",
+                 batch_size: int = CUTTER_BATCH, num_workers: int = DEFAULT_WORKERS, task: str = "chain",
                  ) -> Iterator[tuple[dict[str, Any], Any, list[dict[str, Any]]]]:
     """(frame, its pixels as a 3 x H x W uint8 tensor, the cutter's boxes of score >= min_score and no bigger than
     MAX_SIGN_SIDE, best first) for every frame, in order. The frames are decoded by loader workers; the cutter sees
@@ -259,7 +259,7 @@ def mine_negatives(dataset_path: Path, split_path: Path, data_root: Path, cutter
                    per_frame: int = MINE_PER_FRAME, total_factor: float = MINE_TOTAL_FACTOR, seed: int = 0,
                    sign_score: float | None = MINE_SIGN_SCORE,
                    partitions: tuple[str, ...] = NEGATIVE_PARTITIONS, device_name: str = "cuda",
-                   batch_size: int = CUTTER_BATCH, num_workers: int = 4) -> dict[str, Any]:
+                   batch_size: int = CUTTER_BATCH, num_workers: int = DEFAULT_WORKERS) -> dict[str, Any]:
     """The cutter's false boxes of every partition (see the module), written to output (JSONL, header first).
     Returns the header."""
     if not 0 <= score_threshold <= 1:
@@ -494,7 +494,7 @@ def evaluate_chain(dataset_path: Path, split_path: Path, data_root: Path, cutter
                    dataset_kind: str = "gold", partition: str = "test",
                    score_thresholds: tuple[float, ...] = CHAIN_SCORE_THRESHOLDS,
                    main_score_threshold: float = CHAIN_MAIN_SCORE, iou_threshold: float = CHAIN_IOU_THRESHOLD,
-                   device_name: str = "cuda", batch_size: int = CUTTER_BATCH, num_workers: int = 4) -> dict[str, Any]:
+                   device_name: str = "cuda", batch_size: int = CUTTER_BATCH, num_workers: int = DEFAULT_WORKERS) -> dict[str, Any]:
     """The cutter and the classifier on every reviewed frame of a partition (see the module)."""
     from nnslr_tools.evaluation import per_frame_descriptor, per_frame_record
 
