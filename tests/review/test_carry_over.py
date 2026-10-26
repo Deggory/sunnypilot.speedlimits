@@ -60,6 +60,29 @@ def test_a_turn_slides_the_whole_view():
     assert result['matched'] == 2 and result['estimated'] == 0
 
 
+def test_a_sign_of_another_shape_is_not_the_same_sign():
+    # 34/45 -> 34/46 of a drive: a give way and a wide direction sign confirmed; the next frame has only a proposal
+    # on the tall pedestrian sign beside the give way. A slide of the view "explained" the direction sign there.
+    give_way = confirmed([1026, 264, 1047, 288], family='other_sign', value=None, sign_type='give_way')
+    direction = confirmed([690, 270, 744, 292], family='other_sign', value=None, sign_type='direction_right')
+    current = [proposal([1052, 249, 1102, 316], 'pedestrian')]
+    result = carry_over([give_way, direction], current, width=W, height=H, source_key='34/45', proposals=current)
+    boxes = {item['detection_id']: item for item in result['detections']}
+    assert result['matched'] == 0 and result['estimated'] == 2 and result['dropped'] == 0
+    assert 'sign_type' not in boxes['pedestrian'] and 'carried_from' not in boxes['pedestrian']
+    placed = [item for item in result['detections'] if item.get('check_position')]
+    assert sorted(item['sign_type'] for item in placed) == ['direction_right', 'give_way']
+    # The same shape, grown, is still found; a box cut by the edge is not held to its shape.
+    wide = box_at(400, 330, 40)
+    wide[1], wide[3] = 320, 340
+    grown = closer(wide, 1.4)
+    assert carry_over([confirmed(wide)], [proposal(grown, 'g')], width=W, height=H, source_key='1/1',
+                      proposals=[proposal(grown, 'g')])['matched'] == 1
+    edge = confirmed([1300, 300, 1340, 316])
+    cut = proposal([1320, 290, W, 330], 'cut')
+    assert carry_over([edge], [cut], width=W, height=H, source_key='1/1', proposals=[cut])['matched'] == 1
+
+
 def test_a_sign_not_found_is_placed_like_its_neighbour_and_must_be_checked():
     left = box_at(560, 330, 30)
     right = box_at(840, 330, 30)

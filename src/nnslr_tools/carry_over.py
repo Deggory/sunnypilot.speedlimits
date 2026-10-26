@@ -10,7 +10,8 @@ from the centre of the view. For every box confirmed on the previous frame:
   it carries ``check_position: true`` and no save accepts it until the reviewer has looked at it
   (moved it onto the sign, or removed it) and the flag is gone.
 
-Boxes of this frame that match nothing stay as they are. Boxes the reviewer already changed keep
+A box of this frame of another shape (MAX_SHAPE_CHANGE) is never the same sign. Boxes of this frame that match
+nothing stay as they are. Boxes the reviewer already changed keep
 their labels. Signs only grow and move outwards from the point the road runs to (``FOCUS``), which is
 what the matching expects; it was measured on 359 pairs of confirmed boxes one frame apart.
 
@@ -28,6 +29,13 @@ FOCUS = (0.52, 0.53)
 # How much a sign may grow from one frame to the next (the pairs: 1.0 to 2.0, a few up to 3).
 MIN_SCALE = 0.75
 MAX_SCALE = 3.5
+# A sign keeps its shape as it comes closer: a box of this frame whose width/height ratio is more than this many times
+# the old one's (or less than its inverse) is another sign. On 815 pairs of confirmed boxes one frame apart (26 October
+# 2026, boxes cut by the edge left out) the ratio changed by 1.04 times at the median, 1.44 at the 99th percentile,
+# once by 2.35; a wide direction sign "matched" to the tall pedestrian sign beside it changed by 3.3. A box touching the
+# left or right edge (EDGE pixels) is not checked: the edge cuts it.
+MAX_SHAPE_CHANGE = 2.0
+EDGE = 2
 # How far the whole view may slide in a turn, as a fraction of the width, and what a slide costs: a slide
 # of TURN_COST * width costs as much as one pair at the edge of its tolerance.
 MAX_TURN = 0.35
@@ -82,6 +90,14 @@ def _pair(old: list[float], new: list[float], focus: tuple[float, float]):
     expected = (focus[0] + scale * (old_center[0] - focus[0]), focus[1] + scale * (old_center[1] - focus[1]))
     shift = (new_center[0] - expected[0], new_center[1] - expected[1])
     return scale, shift, math.hypot(new_center[0] - old_center[0], new_center[1] - old_center[1])
+
+
+def _same_shape(old: list[float], new: list[float], width: float) -> bool:
+    """Whether ``new`` has about the shape of ``old`` (MAX_SHAPE_CHANGE), or is cut by the left or right edge."""
+    if width and (new[0] <= EDGE or new[2] >= width - EDGE):
+        return True
+    change = ((old[2] - old[0]) / (old[3] - old[1])) / ((new[2] - new[0]) / (new[3] - new[1]))
+    return max(change, 1 / change) <= MAX_SHAPE_CHANGE
 
 
 def _cost(pair, new: list[float], turn: tuple[float, float], unit: float) -> float | None:
@@ -165,7 +181,7 @@ def match_boxes(olds: list, news: list, *, width: float, height: float) -> dict:
             if new_box is None:
                 continue
             pair = _pair(old_box, new_box, focus)
-            if pair is not None:
+            if pair is not None and _same_shape(old_box, new_box, width):
                 candidates[(i, j)] = pair
     # In a turn the whole view slides: try no slide and the slide each candidate pair implies, keep the one
     # that explains most signs (then the smallest slide). One sign alone can always be explained by its slide:
