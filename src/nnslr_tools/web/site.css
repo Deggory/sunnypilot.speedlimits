@@ -241,3 +241,5 @@ border-radius:14px;background:var(--surface-2);cursor:pointer;transition:backgro
   .cards{border-radius:16px}
   .auth-card{margin:20px auto}
 }
+.ai-who-line{margin:12px 4px 0}
+.ai-who-line .link{margin-left:6px}

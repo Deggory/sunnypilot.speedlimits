@@ -152,6 +152,8 @@ def test_reviewer_choice_tests_and_removal(tmp_path):
     llm_providers.record_test(tmp_path, 'strata', {'ok': True, 'message': 'Sees images · 1.0 s', 'extra': 1})
     test = llm_providers.public_settings(tmp_path)['providers'][0]['last_test']
     assert test['ok'] is True and 'extra' not in test
+    # The first provider that passes reviews by itself.
+    assert llm_providers.public_settings(tmp_path)['reviewer'] == 'strata'
     llm_providers.set_reviewer(tmp_path, 'strata')
     state = llm_providers.ai_state(tmp_path)
     assert state['available'] is True and state['reason'] == ''
@@ -178,6 +180,23 @@ def test_reviewer_choice_tests_and_removal(tmp_path):
     llm_providers.delete_provider(tmp_path, 'strata')
     assert llm_providers.public_settings(tmp_path) == {'providers': [], 'reviewer': None}
     assert llm_providers.reviewer_provider(tmp_path) is None
+
+
+def test_dont_use_ai_stays_and_a_removed_reviewer_is_replaced(tmp_path):
+    add(tmp_path)
+    add(tmp_path, name='llama')
+    llm_providers.set_reviewer(tmp_path, None)
+    # "Don't use AI" chosen: a Test that passes does not turn the AI on.
+    llm_providers.record_test(tmp_path, 'strata', {'ok': True, 'message': 'Sees images · 1.0 s'})
+    assert llm_providers.public_settings(tmp_path)['reviewer'] is None
+    llm_providers.set_reviewer(tmp_path, 'strata')
+    llm_providers.record_test(tmp_path, 'llama', {'ok': True, 'message': 'Sees images · 2.0 s'})
+    assert llm_providers.public_settings(tmp_path)['reviewer'] == 'strata'
+    # The reviewer removed: the other one that passed reviews.
+    llm_providers.delete_provider(tmp_path, 'strata')
+    assert llm_providers.public_settings(tmp_path)['reviewer'] == 'llama'
+    llm_providers.delete_provider(tmp_path, 'llama')
+    assert llm_providers.public_settings(tmp_path)['reviewer'] is None
 
 
 def test_at_most_twenty_providers(tmp_path):

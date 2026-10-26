@@ -95,7 +95,7 @@ def providers_path(root: Path) -> Path:
 
 
 def _empty() -> dict:
-    return {'schema_version': SCHEMA_VERSION, 'reviewer': None, 'providers': []}
+    return {'schema_version': SCHEMA_VERSION, 'reviewer': None, 'reviewer_off': False, 'providers': []}
 
 
 def _load(root: Path) -> dict:
@@ -124,7 +124,9 @@ def _load(root: Path) -> dict:
     reviewer = data.get('reviewer')
     if not any(item['id'] == reviewer for item in providers):
         reviewer = None
-    return {'schema_version': SCHEMA_VERSION, 'reviewer': reviewer, 'providers': providers}
+    # "Don't use AI" chosen in Settings: a Test that passes then does not choose its provider by itself.
+    off = reviewer is None and data.get('reviewer_off') is True
+    return {'schema_version': SCHEMA_VERSION, 'reviewer': reviewer, 'reviewer_off': off, 'providers': providers}
 
 
 def _store(root: Path, data: dict) -> None:
@@ -360,7 +362,9 @@ def delete_provider(root: Path, provider_id) -> None:
             raise _unknown()
         data['providers'].remove(record)
         if data['reviewer'] == provider_id:
-            data['reviewer'] = None
+            # Another provider that passed its Test reviews instead, when there is one.
+            data['reviewer'] = next((item['id'] for item in data['providers']
+                                     if (item.get('last_test') or {}).get('ok') is True), None)
         _store(root, data)
 
 
@@ -375,17 +379,21 @@ def set_reviewer(root: Path, provider_id) -> None:
                 raise _unknown()
             check_can_review(record)
         data['reviewer'] = provider_id
+        data['reviewer_off'] = provider_id is None
         _store(root, data)
 
 
 def record_test(root: Path, provider_id: str, result: dict) -> None:
-    """Keep the last Test of a provider (gone with it if it was removed in the meantime)."""
+    """Keep the last Test of a provider (gone with it if it was removed in the meantime). One that passes reviews
+    when none does, unless "Don't use AI" was chosen: the first provider that works is the reviewer by itself."""
     with _LOCK:
         data = _load(root)
         record = _find(data, provider_id)
         if record is None:
             return
         record['last_test'] = {name: copy.deepcopy(result.get(name)) for name in TEST_FIELDS}
+        if result.get('ok') is True and data['reviewer'] is None and not data['reviewer_off']:
+            data['reviewer'] = provider_id
         _store(root, data)
 
 

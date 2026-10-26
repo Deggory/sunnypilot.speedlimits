@@ -34,10 +34,10 @@ def test_settings_lists_the_providers_and_never_reads_a_key_back():
     assert 'Remove key' in script and 'has_key' in script
     assert 'Not tested yet' in script
     # "Who reviews": a checkmark list of the providers and "Don't use AI", never a toggle that turns it off at a tap.
-    assert 'Who reviews' in script and 'Don’t use AI' in script and 'radiogroup' in script
+    assert 'Use for reviews' in script and 'Don’t use AI' in script and 'The AI reviews with ' in script
     assert 'Use to review' not in script and 'Press to stop' not in script
     # Only a provider that passed its Test can be chosen.
-    assert 'Only a provider that passed its Test can review.' in script and 'Test it first' in script
+    assert 'The first that passes reviews.' in script and 'press Use for reviews on a provider' in script
     # The local site hides the Administrator and password cards; the access token alone gets one read-only card.
     assert '.local' in script and '.signed_in' in script
     assert 'Nobody is signed in, so this page can only show the settings.' in script

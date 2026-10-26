@@ -1,10 +1,10 @@
 <script setup lang="ts">
 // "AI reviewer" in Settings: the LLM servers the site may ask to review signs (GET /api/settings/ai), as an iOS
 // grouped list. Each row: the name, the model, the host of its address, a dot for its key, what its last Test said,
-// and "Reviews" on the one the site asks (on the review page, and for a whole drive from the route list). A row
-// opens its sheet (ProviderSheet.vue); "Add a provider" opens an empty one. Test asks the model about one reviewed
-// frame and says whether it answered and sees images. "Who reviews" under it is a checkmark list: a provider that
-// passed its Test, or "Don't use AI" (the server refuses the others). Read-only when the browser may not change them.
+// and on the right "Reviews" on the one the site asks (on the review page, and for a whole drive from the route list),
+// "Use for reviews" on another that passed its Test, and Test. The first provider that passes its Test reviews by
+// itself (llm_providers.record_test). A line under the list says who reviews, with "Don't use AI". A row opens its
+// sheet (ProviderSheet.vue); "Add a provider" opens an empty one. Read-only when the browser may not change them.
 import {computed, nextTick, onMounted, ref} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import type {AiProvider, AiSettings, AiTestResult} from '../common/ai-types';
@@ -71,10 +71,9 @@ async function test(provider: AiProvider): Promise<void> {
   done.value = '';
   error.value = '';
   try {
-    const answer = await post<{ok: true; result: AiTestResult; provider: AiProvider}>('/api/settings/ai/test', {id: provider.id});
-    const list = settings.value?.providers;
-    const index = list?.findIndex((item) => item.id === provider.id) ?? -1;
-    if (list && index >= 0) list[index] = answer.provider;
+    const answer = await post<AiSettings & {ok: true; result: AiTestResult; provider: AiProvider}>('/api/settings/ai/test', {id: provider.id});
+    // The whole list: a Test that passes may have made its provider the reviewer.
+    take(answer);
   } catch (problem) {
     error.value = provider.name + ': ' + messageOf(problem);
   } finally {
@@ -87,15 +86,19 @@ function passed(provider: AiProvider): boolean {
   return provider.last_test?.ok === true;
 }
 
-/** Under a provider of "Who reviews": why it cannot be chosen, or why the one chosen cannot review now. */
-function pickNote(provider: AiProvider): string {
-  if (testing.value === provider.id) return 'Testing…';
-  if (passed(provider)) return provider.model;
-  if (provider.last_test === null) return 'Test it first';
-  return provider.is_reviewer ? 'Didn’t pass its last Test: it can’t review until it does' : 'Didn’t pass its last Test';
-}
+/** The line under the list: who reviews, or what to do so that one does. */
+const whoText = computed(() => {
+  const list = settings.value?.providers ?? [];
+  const chosen = list.find((provider) => provider.is_reviewer);
+  if (chosen) {
+    return passed(chosen) ? 'The AI reviews with ' + chosen.name + '.'
+      : chosen.name + ' reviews, but didn’t pass its last Test: it can’t review until it does.';
+  }
+  if (list.some(passed)) return 'No AI reviews: press Use for reviews on a provider.';
+  return list.length ? 'No AI reviews yet: press Test on a provider. The first that passes reviews.' : '';
+});
 
-/** "Who reviews": the site asks this provider (null: none). Choosing the one already chosen does nothing. */
+/** The site asks this provider (null: none, "Don't use AI"). Choosing the one already chosen does nothing. */
 async function choose(id: string | null): Promise<void> {
   if (choosing.value || (settings.value?.reviewer ?? null) === id) return;
   choosing.value = true;
@@ -144,6 +147,8 @@ onMounted(async () => {
           </component>
           <div class="ai-prov-actions">
             <span v-if="provider.is_reviewer" class="pill ok">Reviews</span>
+            <button v-else-if="canEdit && passed(provider)" type="button" class="btn small primary ai-use" :data-pick="provider.id"
+                    :disabled="choosing" @click="choose(provider.id)">Use for reviews</button>
             <button v-if="canEdit" type="button" class="btn small" :disabled="testing !== null" @click="test(provider)">{{ testing === provider.id ? 'Testing…' : 'Test' }}</button>
           </div>
         </li>
@@ -152,25 +157,9 @@ onMounted(async () => {
         </li>
         <li v-if="settings.providers.length === 0 && !canEdit" class="ai-prov"><span class="ai-prov-main">No AI provider yet.</span></li>
       </ul>
-      <template v-if="canEdit && settings.providers.length > 0">
-        <h3 class="ai-group-title" id="ai-who-title">Who reviews</h3>
-        <div class="ios-list ai-picks" id="ai-who" role="radiogroup" aria-labelledby="ai-who-title">
-          <button v-for="provider in settings.providers" :key="provider.id" type="button" role="radio" class="ai-model-row ai-pick"
-                  :data-pick="provider.id" :aria-checked="provider.is_reviewer"
-                  :disabled="choosing || (!provider.is_reviewer && !passed(provider))" @click="choose(provider.id)">
-            <span class="ai-check" aria-hidden="true"></span>
-            <span class="ai-pick-text"><span class="ai-model-id">{{ provider.name }}</span>
-              <span class="ai-pick-note" :class="{bad: provider.is_reviewer && !passed(provider) && testing !== provider.id}">{{ pickNote(provider) }}</span></span>
-          </button>
-          <button type="button" role="radio" class="ai-model-row ai-pick" data-pick="none" :aria-checked="settings.reviewer === null"
-                  :disabled="choosing" @click="choose(null)">
-            <span class="ai-check" aria-hidden="true"></span>
-            <span class="ai-pick-text"><span class="ai-model-id">Don’t use AI</span></span>
-          </button>
-        </div>
-        <p class="ai-help">Only a provider that passed its Test can review.</p>
-      </template>
-      <p v-if="!canEdit && settings.providers.length > 0 && settings.reviewer === null" class="note">No provider reviews the signs.</p>
+      <p v-if="whoText" class="ai-help ai-who-line" id="ai-who">{{ whoText }}
+        <button v-if="canEdit && settings.reviewer !== null" type="button" class="link" data-pick="none" :disabled="choosing"
+                @click="choose(null)">Don’t use AI</button></p>
       <p class="note">What the AI saves is recorded as <code>ai/&lt;provider&gt;/&lt;model&gt;</code> and is final: no person approves it
         again. Keys stay on the server, never sent back to a browser.</p>
     </template>

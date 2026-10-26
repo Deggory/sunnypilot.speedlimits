@@ -1192,7 +1192,8 @@ def make_handler(app: ReviewApp):
                           flush=True)
                     provider = next(item for item in llm_providers.public_settings(app.root)['providers']
                                     if item['id'] == chosen)
-                    self._json(200, {'ok': True, 'result': result, 'provider': provider})
+                    # The whole list too: a Test that passes may have made its provider the reviewer.
+                    self._json(200, {'ok': True, 'result': result, 'provider': provider, **self._ai_settings()})
             except ReviewRejected as exc:
                 raise self._masked(exc, typed, self._stored_key(body.get('id'))) from None
 
