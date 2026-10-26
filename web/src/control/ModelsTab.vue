@@ -4,7 +4,7 @@
 // compare: the numbers that judge that role in columns, the one in use marked; a row opens its whole card (ModelItem:
 // details, Use this one, the run). A role has no model in use until someone picks one: there is no default. The runs
 // themselves are on Evaluate. Under them, Publish: the three in use as one package on Hugging Face.
-import {computed, nextTick, ref} from 'vue';
+import {computed, nextTick, ref, watch} from 'vue';
 import {isoWhen} from '../common/format';
 import type {ActionName, ActionOptions, ActionState, Job, ModelRole, ModelVersion, PanelStatus, RoleModels} from '../common/panel-types';
 import {pct} from './evaluate';
@@ -25,14 +25,23 @@ const readOnly = computed(() => (props.status !== null && !props.status.actions_
 /** The version being put in use, so its button waits for the answer. */
 const busy = ref<string | null>(null);
 
-/** The role whose versions are listed. */
-const picked = ref<ModelRole>('cutter');
+const ROLES: readonly ModelRole[] = ['cutter', 'classifier', 'decider'];
+/** The role whose versions are listed: the address's (/models#role-classifier, Train's link), else the cutter. */
+const fromHash = ROLES.find((role) => location.hash === '#role-' + role) ?? null;
+const picked = ref<ModelRole>(fromHash ?? 'cutter');
 const pickedRole = computed(() => roles.value.find((role) => role.role === picked.value) ?? null);
 /** A tap on a card in use: its versions, scrolled to (below the cards on a phone). */
 function pick(role: ModelRole): void {
   picked.value = role;
   void nextTick(() => document.querySelector('.versions-card')?.scrollIntoView({behavior: 'smooth', block: 'nearest'}));
 }
+// Arrived from a link to a role: its versions, once they are drawn.
+let arrived = fromHash === null;
+watch(payload, (value) => {
+  if (arrived || value === null || fromHash === null) return;
+  arrived = true;
+  pick(fromHash);
+}, {immediate: true});
 const roleOptions = computed(() => roles.value.map((role) => ({key: role.role, label: role.label})));
 
 /** The version in use of a role, or null (none chosen, or its files are gone). */

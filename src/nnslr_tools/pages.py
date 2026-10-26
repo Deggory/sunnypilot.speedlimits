@@ -200,6 +200,14 @@ def simple_page(title: str, current: str, nonce: str, main: str) -> str:
     ])
 
 
+def review_percent(confirmed: int, total: int) -> int:
+    """The share of frames confirmed, as every page shows it: the nearest whole number, 100 only when all are
+    (web/src/common/format.ts reviewPercent says the same)."""
+    if not total:
+        return 0
+    return 100 if confirmed >= total else min(99, round(confirmed * 100 / total))
+
+
 def _plural(count: int, one: str, many: str) -> str:
     if count == 1:
         return '1 ' + one
@@ -292,7 +300,6 @@ def _review_overview(summaries: list[dict], grouped: dict[str, list[dict]]) -> s
     by_ai = sum(min(row.get('confirmed_by_ai') or 0, row['confirmed_count']) for row in summaries)
     waiting = sum(row.get('waiting_for_person') or 0 for row in summaries)
     suspicious = sum(row.get('suspicious_count') or 0 for row in summaries)
-    percent = confirmed * 100 / total if total else 0.0
     people = round((confirmed - by_ai) * 100 / total, 2) if total else 0
     ai = round(by_ai * 100 / total, 2) if total else 0
     notes = [f'{confirmed - by_ai:,} by you', f'{by_ai:,} by AI assistants'] if by_ai else []
@@ -308,7 +315,7 @@ def _review_overview(summaries: list[dict], grouped: dict[str, list[dict]]) -> s
                      + '</span><span class="rv-tile-n">' + str(len(rows)) + '</span><span class="rv-tile-sub">'
                      + (_group_sub(key, rows, short=True) if rows else 'none') + '</span></button>')
     return ('<section class="card rv-overview" aria-label="Review at a glance">'
-            '<p class="rv-big"><strong>' + f'{percent:.0f}' + '%</strong><span>of the frames confirmed · '
+            '<p class="rv-big"><strong>' + str(review_percent(confirmed, total)) + '%</strong><span>of the frames confirmed · '
             + f'{confirmed:,}' + ' of ' + f'{total:,}' + ' in ' + _plural(len(summaries), 'drive', 'drives') + '</span></p>'
             '<span class="rv-bar" aria-hidden="true"><span style="width:' + str(people) + '%"></span>'
             + ('<span class="ai" style="width:' + str(ai) + '%"></span>' if by_ai else '') + '</span>'

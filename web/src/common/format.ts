@@ -47,3 +47,10 @@ export function sentence(text: string): string {
   if (!trimmed) return '';
   return trimmed.charAt(0).toUpperCase() + trimmed.slice(1) + (/[.!?…]$/.test(trimmed) ? '' : '.');
 }
+
+/** The share of frames confirmed, as every page shows it: the nearest whole number, 100 only when all are
+ * (nnslr_tools.pages.review_percent says the same). */
+export function reviewPercent(confirmed: number, total: number): number {
+  if (!total) return 0;
+  return confirmed >= total ? 100 : Math.min(99, Math.round(confirmed * 100 / total));
+}

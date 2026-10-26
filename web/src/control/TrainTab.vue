@@ -14,8 +14,7 @@ import ActionList from './ActionList.vue';
 import JobProgress from './JobProgress.vue';
 import {CHARTED_ACTIONS, JOB_STATE, jobOf, PIPELINE_ACTIONS, startedWhen, terminalActivities} from './jobs';
 import {pct} from './evaluate';
-import ModelItem from './ModelItem.vue';
-import {putInUse, sizeText, useModels} from './models';
+import {sizeText, useModels} from './models';
 import Segmented from './Segmented.vue';
 import TerminalActivity from './TerminalActivity.vue';
 import TrainingCharts from './TrainingCharts.vue';
@@ -63,7 +62,7 @@ const importJob = computed(() => jobOf(props.status, ['dataset']));
 const importing = computed(() => importJob.value?.state === 'running');
 
 /** The networks by role: every version trained here, newest first (the Models tab's data). */
-const {payload: models, refresh: refreshModels} = useModels();
+const {payload: models} = useModels();
 const roleOf = (role: ModelRole) => models.value?.roles.find((item) => item.role === role) ?? null;
 /** The latest version of a role (newest weights), or null. */
 const latest = (role: ModelRole): ModelVersion | null => roleOf(role)?.versions[0] ?? null;
@@ -91,57 +90,9 @@ function headlineOf(version: ModelVersion): {value: string; text: string} | null
   return version.validation ? {value: pct(version.validation.other_road_recall), text: '“Another” found on validation'} : null;
 }
 const latestHeadline = computed(() => sectionLatest.value ? headlineOf(sectionLatest.value) : null);
-/** The headline number of a version, 0-1 (the same as headlineOf), to compare versions. */
-function headlineRatio(version: ModelVersion): number | null {
-  if (version.role === 'cutter') {
-    const cut = version.test ?? version.validation ?? null;
-    if (cut === null) return null;
-    const speed = version.families === 'all' ? cut.by_family?.['speed'] ?? null : null;
-    return speed ? speed.recall : cut.recall;
-  }
-  if (version.role === 'classifier') return version.chain?.recall ?? version.test?.accuracy ?? null;
-  return version.validation?.other_road_recall ?? null;
-}
-/** The versions before the latest one of the section, newest first, to compare and to put one back in use. */
-const earlier = computed((): ModelVersion[] => {
-  const role = section.value === 'cutter' || section.value === 'classifier' || section.value === 'decider' ? section.value : null;
-  return role ? (roleOf(role)?.versions ?? []).slice(1) : [];
-});
-/** What a version's headline measures, on which signs: equal keys compare. */
-function measureKey(version: ModelVersion): string {
-  if (version.role === 'cutter') {
-    const cut = version.test ?? version.validation ?? null;
-    const speed = version.families === 'all' ? cut?.by_family?.['speed'] ?? null : null;
-    return speed ? 'speed of ' + (speed.truth ?? '?') : 'all of ' + (cut?.truth_boxes ?? '?');
-  }
-  if (version.role === 'classifier') return version.chain ? 'chain of ' + (version.chain.truth ?? '?') : 'crops';
-  return 'decider';
-}
-
-/** "latest +4.3 points" against the latest when both have the same measure; else what its number counts. */
-function versusLatest(version: ModelVersion): string {
-  const now = sectionLatest.value ? headlineRatio(sectionLatest.value) : null;
-  const then = headlineRatio(version);
-  // Only the same measure on the same signs compares: a Reader of a whole pipeline has its crops read right, not the
-  // chain; a cutter or a chain measured on 80 test signs, before the drives added since, not one measured on 208.
-  const measure = headlineOf(version)?.text ?? '';
-  if (now === null || then === null || sectionLatest.value === null
-      || measureKey(version) !== measureKey(sectionLatest.value)) return measure;
-  const points = (now - then) * 100;
-  if (Math.abs(points) < 0.05) return 'same as the latest';
-  return 'latest ' + (points > 0 ? '+' : '−') + Math.abs(points).toFixed(1) + ' points';
-}
-const readOnly = computed(() => (props.status !== null && !props.status.actions_enabled) || Boolean(models.value?.active_problem));
-const busy = ref<string | null>(null);
-async function choose(version: ModelVersion): Promise<void> {
-  if (busy.value !== null) return;
-  busy.value = version.id;
-  try {
-    if (await putInUse(version, roleLabel(version.role))) await refreshModels();
-  } finally {
-    busy.value = null;
-  }
-}
+/** How many versions the section's network has: Models lists them, to compare and to choose. */
+const sectionVersions = computed(() => section.value === 'cutter' || section.value === 'classifier' || section.value === 'decider'
+  ? roleOf(section.value)?.versions.length ?? 0 : 0);
 
 /** The cutter: its input size and the signs it learns to find (status.cutter_options; these when the server is older). */
 const sizeOptions = computed(() => (props.status?.cutter_options?.sizes ?? ['640x360', '960x544', '1344x760'])
@@ -257,47 +208,19 @@ const numbers = computed(() => {
         <button type="button" class="link-button" @click="emit('details', job)">Details</button></p>
     </div>
 
-    <!-- The latest version in one row; open, its whole card (numbers by width, Use this one, the run). -->
-    <details v-if="sectionLatest" class="latest-row">
-      <summary>
-        <span class="latest-what"><span class="latest-kicker">{{ section === 'decider' ? 'Latest prototype' : 'Latest' }} ·
-          {{ sectionLatest.trained_at ? isoWhen(sectionLatest.trained_at) : sectionLatest.run }}<span
-          v-if="sectionLatest.in_use" class="latest-use">in use</span><span v-else-if="!sectionLatest.finished" class="latest-wait">not finished</span></span>
-          <span class="latest-name">{{ sectionLatest.label }}</span>
-          <span v-if="latestHeadline" class="latest-text">{{ latestHeadline.text }}</span></span>
-        <strong v-if="latestHeadline" class="latest-value">{{ latestHeadline.value }}</strong>
-        <span class="latest-chev" aria-hidden="true">›</span>
-      </summary>
-      <ul class="model-list">
-        <ModelItem :version="sectionLatest" :role-label="roleLabel(sectionLatest.role)" :score="models?.cutter_score_threshold ?? 0.1"
-                   :read-only="readOnly" :busy="busy" @use="choose"/>
-      </ul>
-    </details>
+    <!-- The latest version in one row, a link to Models: its versions there, to compare and to choose (the choice
+         is made only there). -->
+    <a v-if="sectionLatest" class="latest-row latest-link" :href="'/models#role-' + sectionLatest.role" id="latest-version">
+      <span class="latest-what"><span class="latest-kicker">{{ section === 'decider' ? 'Latest prototype' : 'Latest' }} ·
+        {{ sectionLatest.trained_at ? isoWhen(sectionLatest.trained_at) : sectionLatest.run }}<span
+        v-if="sectionLatest.in_use" class="latest-use">in use</span><span v-else-if="!sectionLatest.finished" class="latest-wait">not finished</span></span>
+        <span class="latest-name">{{ sectionLatest.label }}</span>
+        <span class="latest-text">{{ latestHeadline ? latestHeadline.text + ' · ' : '' }}{{ plural(sectionVersions, 'version', 'versions') }} in Models</span></span>
+      <strong v-if="latestHeadline" class="latest-value">{{ latestHeadline.value }}</strong>
+      <span class="latest-chev" aria-hidden="true">›</span>
+    </a>
     <p v-else-if="section === 'cutter' || section === 'classifier'" class="latest-none">{{ models === null ? 'Loading…'
       : 'None trained yet: the ' + (section === 'cutter' ? 'detector' : 'reader') + ' of a whole pipeline plays this role.' }}</p>
-    <!-- The versions before it: each in one row with its number and how the latest compares; open, its card with
-         Use this one. -->
-    <details v-if="sectionLatest && earlier.length" class="latest-row earlier-row" id="earlier-versions">
-      <summary><span class="latest-what"><span class="latest-name">Earlier versions</span>
-        <span class="latest-text">{{ earlier.length }} trained before: compare, or put one back in use</span></span>
-        <span class="latest-chev" aria-hidden="true">›</span></summary>
-      <div class="earlier-list">
-        <details v-for="version in earlier" :key="version.id" class="latest-row earlier-item" :data-version="version.id">
-          <summary>
-            <span class="latest-what"><span class="latest-kicker">{{ version.trained_at ? isoWhen(version.trained_at) : version.run }}<span
-              v-if="version.in_use" class="latest-use">in use</span><span v-else-if="!version.finished" class="latest-wait">not finished</span></span>
-              <span class="latest-name">{{ version.label }}</span>
-              <span v-if="versusLatest(version)" class="latest-text">{{ versusLatest(version) }}</span></span>
-            <strong v-if="headlineOf(version)" class="latest-value small">{{ headlineOf(version)?.value }}</strong>
-            <span class="latest-chev" aria-hidden="true">›</span>
-          </summary>
-          <ul class="model-list">
-            <ModelItem :version="version" :role-label="roleLabel(version.role)" :score="models?.cutter_score_threshold ?? 0.1"
-                       :read-only="readOnly" :busy="busy" @use="choose"/>
-          </ul>
-        </details>
-      </div>
-    </details>
 
     <TrainingCharts v-if="charted?.running" :progress="charted.progress" :running="true"/>
     <details v-else-if="charted" class="latest-row curves-row">

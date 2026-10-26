@@ -108,45 +108,44 @@ if (document.querySelector('span[data-live]') !== null) {
 }
 
 // The route list's groups (details[data-group]): the tiles of the overview (button[data-open-group]) choose the one
-// shown, one at a time (a closed group is not drawn, .groups-by-tile); its title closes it again. The choice is
-// remembered in this browser, and an address #group-doing shows that one.
+// shown, one at a time (a closed group is not drawn, .groups-by-tile), and one is always shown: the address
+// #group-doing, else the one this browser last chose, else the first with drives (In progress, To start, Done).
+// Its title, or its tile again, leaves it open: the list never empties.
 const OPEN_KEY = 'nnslr.routes.open';
 const groups = [...document.querySelectorAll<HTMLDetailsElement>('details[data-group]')];
 if (groups.length) {
   document.body.classList.add('groups-by-tile');
-  let remembered: string[] = [];
+  let remembered = '';
   try {
-    remembered = JSON.parse(localStorage.getItem(OPEN_KEY) ?? '[]') as string[];
+    const value: unknown = JSON.parse(localStorage.getItem(OPEN_KEY) ?? '[]');
+    remembered = Array.isArray(value) && typeof value[0] === 'string' ? value[0] : '';
   } catch {
-    remembered = [];
+    remembered = '';
   }
+  const keyOf = (group: HTMLDetailsElement): string => group.dataset['group'] ?? '';
   const fromHash = location.hash.startsWith('#group-') ? location.hash.slice(7) : '';
-  const tileOf = (key: string): HTMLButtonElement | null => document.querySelector<HTMLButtonElement>(`button[data-open-group="${key}"]`);
-  const mark = (): void => {
-    for (const group of groups) tileOf(group.dataset['group'] ?? '')?.setAttribute('aria-expanded', String(group.open));
+  const first = groups.find((group) => keyOf(group) === fromHash) ?? groups.find((group) => keyOf(group) === remembered) ?? groups[0] as HTMLDetailsElement;
+  const show = (chosen: HTMLDetailsElement): void => {
+    for (const group of groups) {
+      group.open = group === chosen;
+      document.querySelector(`button[data-open-group="${keyOf(group)}"]`)?.setAttribute('aria-pressed', String(group === chosen));
+    }
+    try {
+      localStorage.setItem(OPEN_KEY, JSON.stringify([keyOf(chosen)]));
+    } catch {
+      // Private browsing: it is only not remembered.
+    }
   };
-  for (const group of groups) {
-    const key = group.dataset['group'] ?? '';
-    group.open = fromHash ? key === fromHash : remembered[0] === key;
-    group.addEventListener('toggle', () => {
-      mark();
-      try {
-        localStorage.setItem(OPEN_KEY, JSON.stringify(groups.filter((item) => item.open).map((item) => item.dataset['group'])));
-      } catch {
-        // Private browsing: it is only not remembered.
-      }
-    });
-  }
-  mark();
-  if (fromHash) document.getElementById('group-' + fromHash)?.scrollIntoView({block: 'start'});
+  show(first);
+  if (fromHash) first.scrollIntoView({block: 'start'});
+  // The title does not fold its group: only another tile changes it.
+  for (const group of groups) group.querySelector('summary')?.addEventListener('click', (event) => event.preventDefault());
   for (const tile of document.querySelectorAll<HTMLButtonElement>('button[data-open-group]')) {
     tile.addEventListener('click', () => {
-      const group = document.getElementById('group-' + tile.dataset['openGroup']) as HTMLDetailsElement | null;
-      if (group === null) return;
-      const open = !group.open;
-      for (const other of groups) if (other !== group) other.open = false;
-      group.open = open;
-      if (group.open) group.scrollIntoView({behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'nearest'});
+      const group = groups.find((item) => keyOf(item) === tile.dataset['openGroup']);
+      if (group === undefined) return;
+      if (!group.open) show(group);
+      group.scrollIntoView({behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'nearest'});
     });
   }
 }

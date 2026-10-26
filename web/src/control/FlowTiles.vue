@@ -3,7 +3,7 @@
 // how much is confirmed, Resume review and the route list) and whether there are enough reviewed routes to
 // train (a link to Train). The one the next step points to is marked.
 import {computed} from 'vue';
-import {plural, thousands} from '../common/format';
+import {plural, reviewPercent, thousands} from '../common/format';
 import type {PanelStatus, RouteState} from '../common/panel-types';
 import Bar from '../components/Bar.vue';
 import Icon from '../components/Icon.vue';
@@ -47,7 +47,7 @@ const train = computed((): [string, string] => {
     </a>
     <section class="flow-tile flow-review k-review" :class="{attention: attention === 'review'}" id="review-card" aria-labelledby="review-card-title">
       <h2 class="flow-head" id="review-card-title"><span class="flow-num">2</span>Review</h2>
-      <span class="flow-big">{{ status && review.frames ? Math.floor(review.percent) + '%' : '–' }}</span>
+      <span class="flow-big">{{ status && review.frames ? reviewPercent(review.confirmed, review.frames) + '%' : '–' }}</span>
       <Bar :percent="review.percent" kind="ok"/>
       <span class="flow-note">{{ status && review.frames ? thousands(review.confirmed) + ' of ' + thousands(review.frames) + ' frames confirmed' : '' }}</span>
       <span class="flow-note" id="review-routes-line">{{ reviewLine }}</span>

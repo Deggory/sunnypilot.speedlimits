@@ -500,11 +500,9 @@ animation:seg-pulse 1.6s ease-in-out infinite}
 .latest-chev{flex:none;color:var(--muted);font-size:20px;transition:transform .2s}
 .latest-row[open] .latest-chev{transform:rotate(90deg)}
 .latest-row .model-list{padding:0 8px 8px}
-/* Earlier versions under the latest (TrainTab.vue): a row each, opened to its card. */
-.earlier-row{margin-top:8px}
-.earlier-list{display:flex;flex-direction:column;gap:6px;padding:0 8px 8px}
-.earlier-item{background:var(--surface)}
-.latest-value.small{font-size:18px}
+/* The latest version as a link to its versions in Models (TrainTab.vue). */
+a.latest-link{display:flex;align-items:center;gap:12px;padding:10px 14px;min-width:0;color:inherit;text-decoration:none;transition:background .15s}
+a.latest-link:hover{background:var(--surface-3)}
 .latest-none{margin:0;font-size:13px;color:var(--muted)}
 /* Publish (Models tab): the latest package of the networks, one row with its button. */
 .publish{margin-top:18px;display:flex;flex-direction:column;gap:10px}

@@ -44,9 +44,9 @@ const VIEWS: {key: View; label: string}[] = [
 const GOAL: Record<View, string> = {
   proposers: 'Who proposes the signs in Prepare, each run on the same reviewed test frames. What counts: of the speed '
     + 'signs, how many it proposes with the right number, and how many false proposals per frame you would have to delete.',
-  chain: 'The cutter and the classifier together, on the test roads no training saw. What counts: of the 80 speed '
+  chain: 'The cutter and the classifier together, on the test roads no training saw. What counts: of the test speed '
     + 'signs, how many are found and read right, and how many false boxes are left per frame.',
-  cutter: 'Finds every box that could be a sign. What counts: how many of the 80 test speed signs it finds. Many '
+  cutter: 'Finds every box that could be a sign. What counts: how many of the test speed signs it finds. Many '
     + 'boxes per frame are expected: the classifier drops them.',
   classifier: 'Says what each box is, or “not a sign”. What counts: the test signs read right, and the false boxes '
     + 'it throws away.',
