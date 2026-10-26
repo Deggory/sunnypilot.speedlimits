@@ -35,13 +35,11 @@ function hintsSwitched(event: Event): void {
 <template>
   <div class="stage-bar">
     <div class="nav">
-      <kbd class="nav-key" aria-hidden="true">⇧ ←</kbd>
       <button type="button" class="btn icon" id="prev" aria-label="Previous frame" title="Previous frame (Shift ←)"
-              :disabled="position.index <= 0" @click="step(-1)">‹</button>
+              :disabled="position.index <= 0" @click="step(-1)"><span class="nav-glyph">‹</span><kbd class="nav-key">⇧ ←</kbd></button>
       <span class="pos" id="pos">{{ thousands(position.index + 1) }} / {{ thousands(position.length) }}</span>
       <button type="button" class="btn icon" id="next" aria-label="Next frame" title="Next frame (Shift →)"
-              :disabled="position.index >= position.length - 1" @click="step(1)">›</button>
-      <kbd class="nav-key" aria-hidden="true">⇧ →</kbd>
+              :disabled="position.index >= position.length - 1" @click="step(1)"><span class="nav-glyph">›</span><kbd class="nav-key">⇧ →</kbd></button>
     </div>
     <ReviewFilters/>
     <span id="statePill" :class="pillClass">{{ statusLabel(row.frame_key) }}</span>
