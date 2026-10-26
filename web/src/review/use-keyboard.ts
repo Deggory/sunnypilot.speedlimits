@@ -1,5 +1,5 @@
 // Keyboard shortcuts: Shift ← → frame, Shift ↑ ↓ box (the arrows alone too on a box with a number or none selected), the speed typed
-// as it reads ("5 0" = 50, "1 2 0" = 120, "0" alone = not readable), O X U the road (ours, another, unclear), S other
+// with one key (2 = 20 … 9 = 90, 1 = 100, "1 2" = 120, 0 = not readable; typed whole, "5 0", it works too), O X U the road (ours, another, unclear), S other
 // sign for our road, V on a vehicle (not a sign), G give way, P stop, R roundabout, E something else, M main road, ← → ↑ ↓ the
 // direction (left, right, straight, several), Enter confirm, B or N new box, C fit (centre) the box picked with the AI
 // (every box of the frame when none was picked), A apply previous, I ask the AI, H second reading, D removes every
@@ -15,7 +15,8 @@ import {currentRow, workOf} from './frames';
 import {step} from './navigation';
 import {report, state} from './store';
 
-// A speed is typed as it reads: the digits wait this long for the next one, then the value is set.
+// A speed is one key (2 = 20 … 9 = 90); after a 1 the page waits this long for a second digit ("1 2" = 120, 1 alone
+// = 100), and a 0 that comes this soon after a speed set at once only ends it typed whole ("5 0", "1 2 0").
 const TYPING_MS = 900;
 
 // G P R E M: the kind of an other sign.
@@ -83,12 +84,19 @@ export function useKeyboard(): void {
     if (event.target !== pointerButton) pointerButton = null;
   };
   let typingTimer: number | undefined;
-  /** The digits typed so far become the value of the selected box: "0" alone = not readable; 10-250 a speed. */
+  /** A speed was just set at once: a 0 now is the end of it typed whole ("5 0", "1 2 0"), not "not readable". */
+  let justSet = false;
+  let justSetTimer: number | undefined;
+  /** The digits waiting (a 1, or 1 0) become the value of the selected box: 100. */
   const flushTyping = (): void => {
     window.clearTimeout(typingTimer);
     const typed = state.typing;
     state.typing = '';
     if (!typed || state.selected < 0) return;
+    if (typed === '1' || typed === '10') {
+      setValue(100);
+      return;
+    }
     if (typed === '0') {
       setValue(null);
       return;
@@ -99,7 +107,37 @@ export function useKeyboard(): void {
       return;
     }
     const key = state.currentKey ?? '';
-    state.notice = {key, text: 'Type the whole number: 5 0 for 50, 1 2 0 for 120 (0 alone: not readable).', error: true};
+    state.notice = {key, text: 'One key per speed: 2 for 20 … 9 for 90, 1 for 100, 1 2 for 120 (0: not readable).', error: true};
+  };
+  /** A digit typed on the selected box: 2-9 set 20-90 at once, 0 sets "not readable", 1 waits for a second digit
+   * (1 1 = 110, 1 2 = 120; 1 alone or 1 0 0 = 100). */
+  const typeDigit = (digit: string): void => {
+    window.clearTimeout(typingTimer);
+    window.clearTimeout(justSetTimer);
+    if (justSet && digit === '0') {
+      justSet = false;
+      return;
+    }
+    justSet = false;
+    const typed = state.typing + digit;
+    if (typed === '1' || typed === '10') {
+      state.typing = typed;
+      typingTimer = window.setTimeout(flushTyping, TYPING_MS);
+      return;
+    }
+    state.typing = '';
+    if (typed === '0') {
+      setValue(null);
+      return;
+    }
+    if (typed === '100') {
+      setValue(100);
+      return;
+    }
+    // "5" = 50, "1 2" = 120: a 0 right after is the end of the same number typed whole.
+    setValue(Number(typed) * 10);
+    justSet = true;
+    justSetTimer = window.setTimeout(() => { justSet = false; }, TYPING_MS);
   };
   const onKeyDown = (event: KeyboardEvent): void => {
     const target = event.target instanceof HTMLElement ? event.target : null;
@@ -112,7 +150,10 @@ export function useKeyboard(): void {
     }
     if (event.metaKey || event.ctrlKey || event.altKey) return;
     // Any key but a digit ends the number being typed first: Enter then confirms the value just typed.
-    if (state.typing && !/^[0-9]$/.test(event.key)) flushTyping();
+    if (!/^[0-9]$/.test(event.key)) {
+      justSet = false;
+      if (state.typing) flushTyping();
+    }
     // The same buttons reached with Tab keep their own Enter.
     const byPointer = target !== null && target === pointerButton;
     if (event.key === 'Enter' && byPointer && CONFIRM_ON_ENTER.has(target.id)) {
@@ -122,13 +163,10 @@ export function useKeyboard(): void {
     }
     // Enter on any other focused button or summary belongs to that control.
     if (event.key === 'Enter' && (tag === 'button' || tag === 'summary' || tag === 'a')) return;
-    // With a box selected: its speed typed as it reads, and its road (O X U).
+    // With a box selected: its speed (one key), and its road (O X U).
     if (state.selected >= 0 && !event.shiftKey && /^[0-9]$/.test(event.key)) {
       event.preventDefault();
-      state.typing += event.key;
-      window.clearTimeout(typingTimer);
-      if (state.typing.length >= 3) flushTyping();
-      else typingTimer = window.setTimeout(flushTyping, TYPING_MS);
+      typeDigit(event.key);
       return;
     }
     if (state.selected >= 0 && !event.shiftKey) {
