@@ -3,7 +3,8 @@
 // while drives are proposed again or reviewed by the AI, a live line under each of them (span[data-live]: who, how
 // far, the time left).
 import {createApp} from 'vue';
-import {api} from '../common/api';
+import {api, messageOf, post} from '../common/api';
+import {askConfirm} from '../composables/confirm';
 import type {AiLive, PanelStatus} from '../common/panel-types';
 import {durationText} from '../control/jobs';
 import {mountSiteParts} from '../common/mount';
@@ -44,11 +45,16 @@ async function showProposing(): Promise<void> {
   } catch {
     return;
   }
-  // One AI review at a time: while one runs, every "Review with AI" is grey and says why.
+  // One AI review at a time: while one runs, every other "Review with AI" is grey and says why; the drive at work
+  // has "Stop the AI" in its place.
   for (const button of document.querySelectorAll<HTMLButtonElement>('button[data-ai-route]')) {
-    button.disabled = live !== null;
-    button.title = live === null ? '' : live.route === button.dataset['aiRoute']
-      ? 'The AI is reviewing this drive now.' : 'The AI is reviewing another drive: one at a time.';
+    const here = live !== null && live.route === button.dataset['aiRoute'];
+    button.disabled = live !== null && !here;
+    button.title = live === null || here ? '' : 'The AI is reviewing another drive: one at a time.';
+    button.textContent = here ? 'Stop the AI' : 'Review with AI';
+    button.classList.toggle('danger', here);
+    if (here && live !== null) button.dataset['aiStop'] = live.job;
+    else delete button.dataset['aiStop'];
   }
   const routes = new Map((preparation?.again ? preparation.working : []).map((item) => [item.route, item]));
   for (const line of document.querySelectorAll<HTMLElement>('span[data-live]')) {
@@ -74,6 +80,28 @@ async function showProposing(): Promise<void> {
     }
   }
 }
+// "Stop the AI" on the drive the AI reviews: asked first; the frames it saved stay.
+document.addEventListener('click', (event) => {
+  const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>('button[data-ai-stop]') : null;
+  if (button === null) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  const job = button.dataset['aiStop'] ?? '';
+  void (async () => {
+    const ok = await askConfirm({title: 'Stop the AI review?', action: 'Stop', danger: true,
+      text: 'The frames it saved stay saved. Review with AI again carries on with the frames left.'});
+    if (!ok) return;
+    button.disabled = true;
+    button.textContent = 'Stopping…';
+    try {
+      await post('/api/panel/job/' + job + '/stop');
+    } catch (problem) {
+      button.disabled = false;
+      button.textContent = 'Stop the AI';
+      button.title = messageOf(problem);
+    }
+  })();
+}, true);
 if (document.querySelector('span[data-live]') !== null) {
   void showProposing();
   window.setInterval(() => void showProposing(), 5000);

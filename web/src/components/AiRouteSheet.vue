@@ -85,7 +85,8 @@ async function start(save: boolean): Promise<void> {
 
 function onClick(event: MouseEvent): void {
   const target = event.target instanceof Element ? event.target.closest<HTMLElement>('button[data-ai-route]') : null;
-  if (target === null) return;
+  // "Stop the AI" on the drive the AI reviews is the page script's (pages/site.ts).
+  if (target === null || target.dataset['aiStop']) return;
   event.preventDefault();
   void show(target);
 }
