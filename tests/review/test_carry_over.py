@@ -83,6 +83,19 @@ def test_a_sign_of_another_shape_is_not_the_same_sign():
     assert carry_over([edge], [cut], width=W, height=H, source_key='1/1', proposals=[cut])['matched'] == 1
 
 
+def test_a_slide_of_the_view_far_up_or_down_is_no_turn():
+    # 5/46 -> 5/47 of a drive: an "other danger" sign and, on the next frame, only a proposal far to the right and up;
+    # a slide of 417 px sideways and 110 px up "explained" it. Up or down the view moves little in a second.
+    danger = confirmed([736, 366, 756, 391], family='other_sign', value=None, sign_type='danger_other')
+    far = proposal([1204, 206, 1262, 259], 'far', family='cancellation')
+    result = carry_over([danger], [far], width=W, height=H, source_key='5/46', proposals=[far])
+    assert result['matched'] == 0 and result['estimated'] == 1
+    boxes = {item['detection_id']: item for item in result['detections']}
+    assert boxes['far']['family'] == 'cancellation' and 'carried_from' not in boxes['far']
+    # A turn sideways is still one.
+    assert test_a_turn_slides_the_whole_view() is None
+
+
 def test_a_sign_not_found_is_placed_like_its_neighbour_and_must_be_checked():
     left = box_at(560, 330, 30)
     right = box_at(840, 330, 30)

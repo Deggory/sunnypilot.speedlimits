@@ -41,6 +41,11 @@ EDGE = 2
 # of TURN_COST * width costs as much as one pair at the edge of its tolerance.
 MAX_TURN = 0.35
 TURN_COST = 0.3
+# A turn slides the view sideways; up or down it moves little in a second (a bump, a slope): at most this fraction of
+# the height. On 1,110 pairs of confirmed boxes one frame apart (26 October 2026) the vertical shift was 5 px at the
+# median, 64 at the 99th percentile, over 76 px (0.1 of 760) for 5; a danger sign "matched" to a proposal 470 px away
+# needed 110 px up.
+MAX_TURN_UP = 0.1
 # The labels a box takes from the previous frame. Visibility and occlusion belong to this picture.
 CARRIED_KEYS = ('family', 'value_kph', 'applicability', 'supplementary_panel', 'temporary', 'variable_display',
                 'sign_type', 'notes')
@@ -191,7 +196,7 @@ def match_boxes(olds: list, news: list, *, width: float, height: float) -> dict:
     best = None
     for turn in turns:
         slide = math.hypot(turn[0], turn[1])
-        if slide > MAX_TURN * width:
+        if slide > MAX_TURN * width or (height and abs(turn[1]) > MAX_TURN_UP * height):
             continue
         taken, total = _assign(olds, news, candidates, turn, unit)
         score = (len(taken), -(total + slide / (TURN_COST * width)))

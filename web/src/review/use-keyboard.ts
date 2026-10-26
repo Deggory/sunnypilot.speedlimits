@@ -186,8 +186,8 @@ export function useKeyboard(): void {
         setOnVehicle();
         return;
       }
-      // G give way, P stop, R roundabout, E something else, M main road, an arrow a direction: pressed again the kind stays (the button
-      // toggles it, the key does not).
+      // G give way, P stop, R roundabout, E something else, M main road, an arrow a direction: pressed again the kind
+      // stays, as with its button.
       const kind = KIND_KEYS[event.key.toLowerCase()]
         ?? (takesDirection() ? DIRECTION_KEYS[event.key] : undefined);
       if (kind) {

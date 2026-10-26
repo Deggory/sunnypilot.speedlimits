@@ -443,6 +443,7 @@
         "width_limit",
         "keep_right",
         "keep_left",
+        "ahead_only",
         "town_entry",
         "town_exit",
         "motorway_start",

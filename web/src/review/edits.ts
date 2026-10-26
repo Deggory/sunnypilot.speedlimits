@@ -69,14 +69,13 @@ export function setOnVehicle(): void {
 }
 
 /** A kind of "Other sign" (town entry, direction →...); pressed again, the kind goes and the sign stays. */
+/** The kind of the selected box, an other sign. Pressed again it stays: a press to make sure never takes it off. */
 export function setKind(id: string): void {
   editSelected((d) => {
-    const again = d.family === 'other_sign' && d.sign_type === id;
     d.family = 'other_sign';
     d.value_kph = null;
     d.value_state = 'unknown';
-    if (again) delete d.sign_type;
-    else d.sign_type = id;
+    d.sign_type = id;
     state.valueError = false;
   });
 }
