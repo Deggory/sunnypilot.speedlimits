@@ -86,7 +86,9 @@ def test_the_empty_route_list_says_what_to_do_in_words(tmp_path):
 def test_control_page_reads_the_panel_status(served):
     page = served.request('GET', '/')[2].decode()
     script = asset('js/control.js')
-    assert script in page and '/api/panel/status' in script and 'cores' in script and 'gpu-procs' in script
+    assert script in page and '/api/panel/status' in script and 'cores' in script and 'run-row' in script
+    # The processes on the GPU are in the server's panel of the top bar, on every page.
+    assert 'tm-gpu' in asset('js/site.js')
     # The classifier with "not a sign": its action on Train, its sections on Evaluate.
     assert 'train_classifier' in script and 'chain-eval' in script and 'classifier-eval' in script
     # The Train tab by role, one at a time: the cutter (its sizes and signs), the classifier, the decider, the pipeline.

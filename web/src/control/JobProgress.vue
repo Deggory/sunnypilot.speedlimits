@@ -9,7 +9,7 @@ import type {Job} from '../common/panel-types';
 import Icon from '../components/Icon.vue';
 import {useNow} from '../composables/now';
 import JobSteps from './JobSteps.vue';
-import {durationText, elapsedText, failedStep, JOB_STATE, PIPELINE_ACTIONS, roughText, startedAt, startedWhen} from './jobs';
+import {elapsedText, etaText, failedStep, JOB_STATE, PIPELINE_ACTIONS, startedAt, startedWhen} from './jobs';
 import {RESUME_JOB, RETRY_JOB} from './use-actions';
 
 const props = defineProps<{job: Job; heading?: string | undefined}>();
@@ -36,16 +36,8 @@ const elapsed = computed(() => {
   const start = startedAt(props.job);
   return start === null ? null : now.value - start.getTime();
 });
-/** The server's time left when it sends one (Propose again, from the pace of the drive at work: the only one shown);
- * otherwise from the time so far and the percent, only when the percent is known and past 3%, and only "about". */
-const eta = computed(() => {
-  if (!running.value) return '';
-  const server = props.job.progress.seconds_left;
-  if (server !== undefined) return server === null ? '' : durationText(server) + ' left';
-  const value = percent.value;
-  if (value === null || value <= 3 || value >= 100 || elapsed.value === null || elapsed.value <= 0) return '';
-  return 'about ' + roughText(elapsed.value * (100 - value) / value) + ' left';
-});
+/** About how long is left (jobs.ts etaText). */
+const eta = computed(() => etaText(props.job, now.value));
 /** When it started and, while it runs, for how long; the exit code of a failed job is in Details. */
 const when = computed(() => {
   const at = 'Started ' + startedWhen(props.job);

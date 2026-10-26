@@ -155,6 +155,24 @@ export function gpuProcessNames(status: PanelStatus | null): string[] {
   return list.map((process) => (unnamed(process.name) ? guess ?? 'A program the server cannot name' : process.name));
 }
 
+/** About how long a running job has left: the server's time when it sends one (Propose again), else from the time so
+ * far and the percent, only past 3% and only "about"; '' when unknown. now: the clock, in ms. */
+export function etaText(job: Job, now: number): string {
+  if (job.state !== 'running') return '';
+  const server = job.progress.seconds_left;
+  if (server !== undefined) return server === null ? '' : durationText(server) + ' left';
+  const percent = job.progress.percent;
+  const start = startedAt(job);
+  const elapsed = start === null ? null : now - start.getTime();
+  if (percent === null || percent <= 3 || percent >= 100 || elapsed === null || elapsed <= 0) return '';
+  return 'about ' + roughText(elapsed * (100 - percent) / percent) + ' left';
+}
+
+/** What a job does now, in words: its detail ("detector · epoch 5 of 20"), else its current step. */
+export function stepText(job: Job): string {
+  return job.progress.detail || job.progress.steps.find((step) => step.state === 'current')?.label || '';
+}
+
 /** The step a failed job stopped at, if the log said. */
 export function failedStep(job: Job): string {
   return job.progress.steps.find((step) => step.state === 'failed')?.label ?? '';

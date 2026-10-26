@@ -14,7 +14,7 @@ import {askConfirm} from '../composables/confirm';
 import {showConnection} from '../composables/connection';
 import {toast} from '../composables/toast';
 import type {ActionState, Activity, Job, PanelStatus, SystemInfo} from '../common/panel-types';
-import {ACTION_TAB, busyTabs} from '../control/jobs';
+import {ACTION_TAB, busyTabs, gpuProcessNames} from '../control/jobs';
 import {machineCells, machineNow, recordMachine, type MachineCell} from '../control/machine-history';
 
 const props = defineProps<{feed: string}>();
@@ -27,6 +27,8 @@ const cells = computed(() => machineNow.value ? machineCells(machineNow.value, 1
 const open = ref(false);
 /** The jobs running now and whether Update can start, read from /api/panel/status while the panel is open. */
 const running = ref<Job[]>([]);
+/** The processes on the GPU, named when the server can tell (jobs.ts gpuProcessNames), with their memory. */
+const gpuProcesses = ref<{name: string; memory: string}[]>([]);
 const updateState = ref<ActionState | null>(null);
 /** The tab where a job shows (jobs.ts ACTION_TAB, as its dot). */
 const tabOf = (job: Job): string => ACTION_TAB[job.action] ?? '/';
@@ -34,6 +36,9 @@ async function askRunning(): Promise<void> {
   try {
     const status = await poll<PanelStatus>('/api/panel/status');
     running.value = status.jobs.filter((job) => job.state === 'running');
+    const names = gpuProcessNames(status);
+    gpuProcesses.value = (status.system.gpu?.process_list ?? []).map((process, index) => ({name: names[index] ?? process.name,
+      memory: process.memory_mb === null ? '–' : (process.memory_mb / 1024).toFixed(1) + ' GB'}));
     updateState.value = status.actions.update ?? null;
   } catch {
     // The list stays as it was.
@@ -191,6 +196,12 @@ onBeforeUnmount(() => {
           <span class="tm-name">{{ job.label }}<small>{{ job.progress.detail || job.progress.last_line || 'running' }}</small></span>
           <span class="tm-value">{{ job.progress.percent === null ? '' : Math.floor(job.progress.percent) + '%' }}</span>
         </a>
+      </div>
+      <div v-if="gpuProcesses.length" class="tm-running" id="tm-gpu">
+        <h3>On the GPU</h3>
+        <div v-for="(process, index) in gpuProcesses" :key="index" class="tm-job">
+          <span class="tm-name">{{ process.name }}</span><span class="tm-value">{{ process.memory }}</span>
+        </div>
       </div>
       <div class="tm-update">
         <button type="button" class="btn small" :disabled="following || updateBlocked !== ''" @click="update">Update the site</button>

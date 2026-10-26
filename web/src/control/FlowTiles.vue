@@ -1,12 +1,11 @@
 <script setup lang="ts">
-// The three phases at a glance: what is left to prepare (a link to Prepare), the review (a card of its own:
-// how much is confirmed, Resume review and the route list) and whether there are enough reviewed routes to
-// train (a link to Train). The one the next step points to is marked.
+// Three summaries under the next step, each a link to where its work is done: the drives left to prepare
+// (Data › Drives), the frames left to review (Data › Review), and what the dataset holds with the reviews not imported
+// yet (Data › Dataset). The one the next step points to is marked; a dot on one with work running.
 import {computed} from 'vue';
 import {plural, reviewPercent, thousands} from '../common/format';
 import type {PanelStatus, RouteState} from '../common/panel-types';
 import Bar from '../components/Bar.vue';
-import Icon from '../components/Icon.vue';
 import type {StepName} from './next-step';
 import {reviewSummary} from './review-routes';
 import type {ControlTab} from './tabs';
@@ -17,49 +16,42 @@ const TO_PREPARE: RouteState[] = ['collegare', 'estrarre', 'preannotare'];
 const prepare = computed((): [string, string] => {
   if (!props.status) return ['–', ''];
   const count = props.status.routes.filter((row) => TO_PREPARE.includes(row.state)).length;
-  return count ? [plural(count, 'new drive'), 'to turn into frames'] : ['All prepared', 'no video waiting'];
+  return count ? [plural(count, 'drive'), 'waiting to be prepared'] : ['All prepared', 'no drive waiting'];
 });
 const review = computed(() => reviewSummary(props.status));
-/** "2 drives in progress · 4 to start", or how the review stands when nothing is left. */
-const reviewLine = computed(() => {
+const reviewNote = computed(() => {
   const value = review.value;
   if (!props.status) return '';
   if (!value.frames) return 'nothing to review yet';
-  const parts: string[] = [];
-  if (value.inProgress) parts.push(plural(value.inProgress, 'drive') + ' in progress');
-  if (value.toStart) parts.push((parts.length ? thousands(value.toStart) : plural(value.toStart, 'drive')) + ' to start');
-  return parts.length ? parts.join(' · ') : 'every drive reviewed';
+  const left = value.frames - value.confirmed;
+  return left ? thousands(left) + ' frames left' : 'every frame confirmed';
 });
-const train = computed((): [string, string] => {
-  if (!props.status) return ['–', ''];
-  const {reviewed_routes: reviewed, min_routes: needed, routes} = props.status;
-  const fresh = routes.reduce((total, row) => total + row.new_reviews, 0);
-  const figure = reviewed >= needed ? plural(reviewed, 'drive') + ' ready' : reviewed + ' of ' + needed + ' drives';
-  return [figure, fresh ? thousands(fresh) + ' frames to import' : reviewed >= needed ? 'ready to train' : needed + ' are needed to train'];
+const dataset = computed((): [string, string] => {
+  const status = props.status;
+  if (!status) return ['–', ''];
+  const fresh = status.routes.reduce((total, row) => total + row.new_reviews, 0);
+  const objects = status.dataset?.objects ?? status.routes.reduce((total, row) => total + row.objects, 0);
+  return [thousands(objects) + ' objects', fresh ? plural(fresh, 'review') + ' to import'
+    : status.reviewed_routes < status.min_routes ? status.reviewed_routes + ' of ' + status.min_routes + ' drives needed to train'
+    : 'up to date'];
 });
 </script>
 
 <template>
-  <nav class="flow" aria-label="The three phases">
-    <a class="flow-tile k-prepare" :class="{attention: attention === 'prepare'}" href="/prepare">
-      <span class="flow-head"><span class="flow-num">1</span>Data<span v-if="busy.has('prepare')" class="flow-busy">running</span></span>
+  <nav class="flow" aria-label="At a glance">
+    <a class="flow-tile k-prepare" :class="{attention: attention === 'prepare'}" href="/prepare" id="glance-drives">
+      <span class="flow-head">Drives<span v-if="busy.has('prepare')" class="flow-busy">running</span></span>
       <span class="flow-big">{{ prepare[0] }}</span><span class="flow-note">{{ prepare[1] }}</span>
     </a>
-    <section class="flow-tile flow-review k-review" :class="{attention: attention === 'review'}" id="review-card" aria-labelledby="review-card-title">
-      <h2 class="flow-head" id="review-card-title"><span class="flow-num">2</span>Review</h2>
-      <span class="flow-big">{{ status && review.frames ? reviewPercent(review.confirmed, review.frames) + '%' : '–' }}</span>
+    <a class="flow-tile k-review" :class="{attention: attention === 'review'}" href="/routes" id="glance-review">
+      <span class="flow-head">Review</span>
+      <span class="flow-big">{{ status && review.frames ? reviewPercent(review.confirmed, review.frames) + '% confirmed' : '–' }}</span>
       <Bar :percent="review.percent" kind="ok"/>
-      <span class="flow-note">{{ status && review.frames ? thousands(review.confirmed) + ' of ' + thousands(review.frames) + ' frames confirmed' : '' }}</span>
-      <span class="flow-note" id="review-routes-line">{{ reviewLine }}</span>
-      <div class="flow-actions">
-        <a v-if="review.resume" class="btn small primary" id="resume-review" :href="review.resume.href"
-           :title="review.resume.route + ' · ' + thousands(review.resume.left) + ' frames left'"><Icon name="resume"/>Resume review</a>
-        <a class="flow-link" id="all-routes" href="/routes"><Icon name="routes"/>All drives →</a>
-      </div>
-    </section>
-    <a class="flow-tile k-train" :class="{attention: attention === 'train'}" href="/train">
-      <span class="flow-head"><span class="flow-num">3</span>Train<span v-if="busy.has('train')" class="flow-busy">running</span></span>
-      <span class="flow-big">{{ train[0] }}</span><span class="flow-note">{{ train[1] }}</span>
+      <span class="flow-note">{{ reviewNote }}</span>
+    </a>
+    <a class="flow-tile k-train" :class="{attention: attention === 'train'}" href="/dataset" id="glance-dataset">
+      <span class="flow-head">Dataset<span v-if="busy.has('dataset')" class="flow-busy">running</span></span>
+      <span class="flow-big">{{ dataset[0] }}</span><span class="flow-note">{{ dataset[1] }}</span>
     </a>
   </nav>
 </template>
