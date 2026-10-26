@@ -1,4 +1,4 @@
-// Keyboard shortcuts: Shift ← → frame, Shift ↑ ↓ box (the arrows alone too, unless an "Other sign" is selected), the speed typed
+// Keyboard shortcuts: Shift ← → frame, Shift ↑ ↓ box (the arrows alone too on a box with a number or none selected), the speed typed
 // as it reads ("5 0" = 50, "1 2 0" = 120, "0" alone = not readable), O X U the road (ours, another, unclear), S other
 // sign for our road, V on a vehicle (not a sign), G give way, P stop, R roundabout, E something else, ← → ↑ ↓ the
 // direction (left, right, straight, several), Enter confirm, B or N new box, C fit (centre) the box picked with the AI
@@ -21,8 +21,9 @@ const TYPING_MS = 900;
 // G P R: the kind of an other sign.
 const KIND_KEYS: Record<string, string> = {g: 'give_way', p: 'stop', r: 'roundabout', e: 'other'};
 
-// The arrows with an "Other sign" box selected: its direction (↓ several directions). On any other box they keep their
-// moves: a speed limit never becomes a direction sign, its number lost, by an arrow pressed to change box.
+// The arrows with a box selected: its direction (↓ several directions), on an "Other sign" or any box without a number
+// (one just drawn, too). On a box with a number or "Not a sign" they keep their moves: a speed limit never becomes a
+// direction sign, its number lost, by an arrow pressed to change box.
 const DIRECTION_KEYS: Record<string, string> = {ArrowLeft: 'direction_left', ArrowRight: 'direction_right',
   ArrowUp: 'direction_straight', ArrowDown: 'direction_several'};
 
@@ -33,6 +34,12 @@ const ROAD_KEYS: Record<string, string> = {o: 'own_road', x: 'other_road', u: 'u
 function selectedBox() {
   const row = currentRow();
   return row ? workOf(row).detections[state.selected] : undefined;
+}
+
+/** Whether the arrows set the direction of the selected box (DIRECTION_KEYS). */
+function takesDirection(): boolean {
+  const d = selectedBox();
+  return d !== undefined && (d.family === 'other_sign' || (d.value_kph == null && d.family !== 'not_a_sign'));
 }
 
 /** The kind of the selected box when it is an other sign, else null. */
@@ -144,7 +151,7 @@ export function useKeyboard(): void {
       // G give way, P stop, R roundabout, E something else, an arrow a direction: pressed again the kind stays (the button
       // toggles it, the key does not).
       const kind = KIND_KEYS[event.key.toLowerCase()]
-        ?? (selectedBox()?.family === 'other_sign' ? DIRECTION_KEYS[event.key] : undefined);
+        ?? (takesDirection() ? DIRECTION_KEYS[event.key] : undefined);
       if (kind) {
         event.preventDefault();
         if (selectedKind() !== kind) setKind(kind);
