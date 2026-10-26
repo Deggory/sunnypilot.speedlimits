@@ -127,6 +127,63 @@ def _run_of(log: Path, action: str = 'train') -> str | None:
             return match.group(1)
     return None
 
+# The trainings whose log starts with how they were launched (scripts/run_detector_sizes.sh, run_classifier.sh,
+# run_experiment_b.sh): "sizes:        1344x760", "settings:     --epochs 20 --batch-size 8 ... --pretrained".
+SETTING_LINE = re.compile(r'^([a-z][a-z ]{1,20}):\s+(.+)$')
+FAMILY_TEXT = {'all': 'every sign', 'speed': 'speed signs only'}
+
+
+def _settings_of(log: Path, action: str) -> list[str]:
+    """How a training of the cutter, the classifier or the decider was launched, as short chips from the head of
+    its log: ["1344 × 760", "speed signs only", "20 epochs", "batch 8", "pretrained"]; [] for other jobs."""
+    if action not in ('train_cutter', 'train_classifier', 'train_decider'):
+        return []
+    try:
+        with log.open('rb') as handle:
+            head = handle.read(8192).decode('utf-8', 'replace')
+    except OSError:
+        return []
+    fields: dict[str, str] = {}
+    for line in head.splitlines()[1:40]:
+        if line.startswith('== ') and fields:
+            break
+        match = SETTING_LINE.match(line)
+        if match:
+            fields.setdefault(match.group(1).strip(), match.group(2).strip())
+    words = fields.get('settings', '').split()
+    flags = {word: (words[index + 1] if index + 1 < len(words) and not words[index + 1].startswith('--') else '')
+             for index, word in enumerate(words) if word.startswith('--')}
+    chips = []
+    if fields.get('sizes'):
+        chips += [size.replace('x', ' × ') for size in fields['sizes'].split()]
+    if flags.get('--cutter-families'):
+        chips.append(FAMILY_TEXT.get(flags['--cutter-families'], flags['--cutter-families']))
+    if flags.get('--classes'):
+        chips.append('classes ' + flags['--classes'])
+    epochs = flags.get('--epochs') or fields.get('epochs')
+    if epochs:
+        chips.append(epochs + ' epochs')
+    if flags.get('--patience'):
+        chips.append('patience ' + flags['--patience'])
+    if flags.get('--batch-size'):
+        chips.append('batch ' + flags['--batch-size'])
+    if flags.get('--num-workers'):
+        chips.append(flags['--num-workers'] + ' workers')
+    if flags.get('--anchor-min-ratio'):
+        chips.append('default box ' + flags['--anchor-min-ratio'])
+    if flags.get('--negative-frame-fraction'):
+        chips.append('sign-free ' + flags['--negative-frame-fraction'])
+    if fields.get('cutter'):
+        chips.append('cutter ' + fields['cutter'])
+    if '--pretrained' in flags:
+        chips.append('pretrained')
+    elif fields.get('init'):
+        chips.append('from ' + fields['init'])
+    if fields.get('dataset kind'):
+        chips.append(fields['dataset kind'] + ' dataset')
+    return chips
+
+
 ACTIONS = {
     # Every route still on the comma, over ssh with this machine's key (Host comma in ~/.ssh/config).
     'fetch': {'label': 'Download from the comma', 'group': 'fetch', 'command': ['helpers/fetch_comma_segments.sh']},
@@ -388,6 +445,7 @@ class Panel:
             result.append({'id': job_id, 'action': action, 'label': label,
                            'run': _run_of(path, action) if ACTIONS[action]['group'] == 'train' else None,
                            'proposer': proposer,
+                           'settings': _settings_of(path, action),
                            'started': started.strftime('%Y-%m-%d %H:%M:%S'),
                            # The same moment with the server's offset, for the elapsed time in the page.
                            'started_at': started.astimezone().isoformat(timespec='seconds'),

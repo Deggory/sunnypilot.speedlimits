@@ -247,6 +247,17 @@ def _human_share(value: Any) -> dict | None:
     return {'samples': count, 'accuracy': accuracy, 'correct': round(accuracy * count) if accuracy is not None else None}
 
 
+# The labels of speed signs (the family before ":"): the classifier's number on them alone is the one that matters.
+SPEED_LABEL_FAMILIES = ('maximum_speed', 'variable_display', 'zone', 'cancellation', 'road_marking')
+
+
+def _speed_share(labels: list[dict]) -> dict:
+    """Of the label table: the sign crops of a speed sign and how many it reads right."""
+    rows = [row for row in labels if row['label'].split(':', 1)[0] in SPEED_LABEL_FAMILIES]
+    count, correct = sum(row['count'] for row in rows), sum(row['correct'] for row in rows)
+    return {'samples': count, 'correct': correct, 'accuracy': _ratio(correct, count)}
+
+
 def _signs_digest(signs: Any, samples: list | None) -> dict | None:
     """The sign crops of a classifier evaluation (``signs``: every crop that is not "not a sign"): how many it reads
     right, also with the kinds of other signs folded (comparable with the old reader), how many it throws away as
@@ -274,6 +285,7 @@ def _signs_digest(signs: Any, samples: list | None) -> dict | None:
     return {
         'samples': count, 'correct': correct, 'accuracy': accuracy if accuracy is not None else _ratio(correct, count),
         'family_accuracy': _num(signs.get('family_accuracy')),
+        'speed': _speed_share(labels),
         'rejected': rejected,
         'rejected_rate': rejected_rate if rejected_rate is not None or rejected is None else _ratio(rejected, count),
         'human': _human_share(signs.get('human_reviewed')),
@@ -369,7 +381,8 @@ def reader_digest(report: Any) -> dict:
 
 def classifier_headline(digest: dict | None) -> dict:
     """The numbers that judge a classifier, from reader_digest: right answers on the sign crops (on every crop for
-    an old reader, which has no "not a sign"), on those a person confirmed, with the kinds of other signs folded;
+    an old reader, which has no "not a sign"), on the speed signs alone, on those a person confirmed, with the kinds
+    of other signs folded;
     the "not a sign" crops it rejects and the sign crops it throws away. Every value None without a report."""
     if digest is None:
         digest = {'samples': None, 'accuracy': None, 'human': None, 'signs': None, 'not_a_sign': None, 'class_scheme': None}
@@ -380,6 +393,9 @@ def classifier_headline(digest: dict | None) -> dict:
     return {'samples': measured['samples'], 'accuracy': measured['accuracy'],
             'human_samples': human.get('samples'), 'human_accuracy': human.get('accuracy'),
             'family_accuracy': (signs or {}).get('family_accuracy'),
+            'speed_samples': ((signs or {}).get('speed') or {}).get('samples'),
+            'speed_correct': ((signs or {}).get('speed') or {}).get('correct'),
+            'speed_accuracy': ((signs or {}).get('speed') or {}).get('accuracy'),
             'not_a_sign_crops': rejection.get('crops'), 'not_a_sign_rejected': rejection.get('rejected'),
             'rejection_rate': rejection.get('rejection_rate'),
             'signs_rejected': (signs or {}).get('rejected'), 'signs_rejected_rate': (signs or {}).get('rejected_rate'),

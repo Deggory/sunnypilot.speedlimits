@@ -42,7 +42,7 @@ const train = computed((): [string, string] => {
 <template>
   <nav class="flow" aria-label="The three phases">
     <a class="flow-tile k-prepare" :class="{attention: attention === 'prepare'}" href="/prepare">
-      <span class="flow-head"><span class="flow-num">1</span>Prepare<span v-if="busy.has('prepare')" class="flow-busy">running</span></span>
+      <span class="flow-head"><span class="flow-num">1</span>Data<span v-if="busy.has('prepare')" class="flow-busy">running</span></span>
       <span class="flow-big">{{ prepare[0] }}</span><span class="flow-note">{{ prepare[1] }}</span>
     </a>
     <section class="flow-tile flow-review k-review" :class="{attention: attention === 'review'}" id="review-card" aria-labelledby="review-card-title">

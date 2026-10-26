@@ -14,6 +14,7 @@ import JobProgress from './JobProgress.vue';
 import {JOB_STATE, jobOf, PREPARE_ACTIONS, startedWhen, terminalActivities} from './jobs';
 import PrepRoutes from './PrepRoutes.vue';
 import {reviewSummary} from './review-routes';
+import DatasetSection from './DatasetSection.vue';
 import RouteTable from './RouteTable.vue';
 import TerminalActivity from './TerminalActivity.vue';
 
@@ -141,7 +142,7 @@ function openComma(): void {
 </script>
 
 <template>
-  <h1 class="tab-title">Prepare</h1>
+  <h1 class="tab-title">Data</h1>
 
   <section class="card tab-card" aria-labelledby="prepare-title">
     <h2 class="sr-only" id="prepare-title">New drives</h2>
@@ -189,4 +190,7 @@ function openComma(): void {
   <RouteTable v-if="notReady.length" :routes="notReady"/>
   <p v-if="toReview" class="last-line"><a href="/routes">{{ plural(toReview, 'drive') }} to review ›</a></p>
   <p v-else-if="review.reviewed" class="last-line"><a href="/routes">Every drive is reviewed ›</a></p>
+
+  <!-- What the networks learn from: the reviews imported, by sign family, who confirmed them, the split. -->
+  <DatasetSection :dataset="status?.dataset ?? null" :loading="status === null"/>
 </template>

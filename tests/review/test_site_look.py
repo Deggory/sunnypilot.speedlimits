@@ -25,7 +25,7 @@ def served(tmp_path):
     server.close()
 
 
-PAGES = [('/', 'Overview'), ('/prepare', 'Prepare'), ('/train', 'Train'), ('/evaluate', 'Evaluate'), ('/models', 'Models'),
+PAGES = [('/', 'Overview'), ('/prepare', 'Data'), ('/train', 'Train'), ('/evaluate', 'Evaluate'), ('/models', 'Models'),
          ('/routes', 'Review'),
          ('/account', None), (f'/route/{ROUTE}/', None), ('/nonexistent', None)]
 
@@ -47,12 +47,12 @@ def test_every_page_has_the_shared_look_the_account_menu_and_its_script(served, 
     assert '__NNSLR_' not in page.replace('"server": false', '')
     tabs = re.search(r'<nav class="tabs".*?</nav>', page, re.S)
     if tab is not None:
-        assert tabs and re.findall(r'>([^<]+)</a>', tabs.group(0)) == ['Overview', 'Prepare', 'Review', 'Train', 'Evaluate',
+        assert tabs and re.findall(r'>([^<]+)</a>', tabs.group(0)) == ['Overview', 'Data', 'Review', 'Train', 'Evaluate',
                                                                        'Models']
         assert f'aria-current="page">{tab}</a>' in tabs.group(0)
 
 
-@pytest.mark.parametrize('path, title', [('/', 'Overview'), ('/prepare', 'Prepare'), ('/routes', 'Review'),
+@pytest.mark.parametrize('path, title', [('/', 'Overview'), ('/prepare', 'Data'), ('/routes', 'Review'),
                                          ('/account', 'Settings'), (f'/route/{ROUTE}/', 'Review'),
                                          ('/nonexistent', 'Page not found')])
 def test_every_page_title_names_the_page_as_the_bar_does(served, path, title):

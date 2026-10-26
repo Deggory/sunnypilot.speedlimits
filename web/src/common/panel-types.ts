@@ -137,6 +137,9 @@ export interface Job {
   ended_at?: string | null;
   /** Who proposes (a preparation) or is measured; null when the helpers' default was used. */
   proposer?: Proposer | null;
+  /** How a training of the cutter, classifier or decider was launched, from the head of its log:
+   * ["1344 × 760", "speed signs only", "20 epochs", "batch 8", …]; empty for the other jobs. */
+  settings?: string[];
   state: JobState;
   code: number | null;
   stoppable: boolean;
@@ -395,6 +398,10 @@ export interface ClassifierNumbers {
   human_accuracy: number | null;
   /** Null for an old reader (no “not a sign”). */
   family_accuracy?: number | null;
+  /** The sign crops of a speed sign alone (maximum speed, display, zone, end of limit, road marking). */
+  speed_samples?: number | null;
+  speed_correct?: number | null;
+  speed_accuracy?: number | null;
   not_a_sign_crops?: number | null;
   not_a_sign_rejected?: number | null;
   rejection_rate?: number | null;

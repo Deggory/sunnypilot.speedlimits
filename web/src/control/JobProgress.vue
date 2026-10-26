@@ -79,6 +79,9 @@ const barKind = computed(() => ({ok: 'ok', failed: 'bad', interrupted: 'warn', r
       </div>
       <span class="pill" :class="state[1]">{{ state[0] }}</span>
     </header>
+    <ul v-if="job.settings?.length" class="jp-settings" aria-label="Launched with">
+      <li v-for="setting in job.settings" :key="setting">{{ setting }}</li>
+    </ul>
 
     <div class="jp-body">
       <div class="jp-main">

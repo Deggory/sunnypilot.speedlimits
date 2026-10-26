@@ -11,7 +11,6 @@ import {isoWhen, plural, thousands} from '../common/format';
 import type {ActionName, ActionState, Activity, CutterFamilies, CutterOptions, Job, JobProgress as Progress, ModelRole, ModelVersion,
   PanelStatus, TrainingStart} from '../common/panel-types';
 import ActionList from './ActionList.vue';
-import DatasetSection from './DatasetSection.vue';
 import JobProgress from './JobProgress.vue';
 import {CHARTED_ACTIONS, JOB_STATE, jobOf, PIPELINE_ACTIONS, startedWhen, terminalActivities} from './jobs';
 import {pct} from './evaluate';
@@ -80,7 +79,8 @@ function headlineOf(version: ModelVersion): {value: string; text: string} | null
     const cut = version.test ?? version.validation ?? null;
     if (cut === null) return null;
     const speed = version.families === 'all' ? cut.by_family?.['speed'] ?? null : null;
-    if (speed) return {value: pct(speed.recall), text: 'speed signs found, ' + thousands(speed.found) + ' of ' + thousands(speed.truth ?? 0)};
+    if (speed) return {value: pct(speed.recall), text: 'speed signs found, ' + thousands(speed.found) + ' of ' + thousands(speed.truth ?? 0)
+      + ' · every sign ' + pct(cut.recall)};
     return {value: pct(cut.recall), text: 'signs found'};
   }
   if (version.role === 'classifier') {
@@ -203,12 +203,15 @@ const numbers = computed(() => {
 
 <template>
   <h1 class="tab-title">Train</h1>
+  <!-- Which network: first, under the title, as the segments of an iOS page. -->
+  <Segmented v-model="section" class="train-sections" :options="SECTIONS" :marked="runningSections" label="Network"/>
+
 
   <!-- What the networks learn from, in one line; the reviews not in yet, with their button. -->
   <section class="card data-strip" aria-label="What the networks learn from">
     <p class="data-line"><strong>{{ numbers ? thousands(numbers.objects) : '–' }}</strong> boxes on
       <strong>{{ numbers?.frames === null || !numbers ? '–' : thousands(numbers.frames) }}</strong> frames of
-      {{ numbers ? plural(numbers.inDataset, 'drive') : '–' }}<a v-if="status?.dataset" class="figure-link" href="#dataset">Details ›</a></p>
+      {{ numbers ? plural(numbers.inDataset, 'drive') : '–' }}<a v-if="status?.dataset" class="figure-link" href="/prepare#dataset">Details ›</a></p>
     <p v-if="importing" class="data-new">Adding your reviews… <strong>{{ importJob?.progress.percent === null || importJob?.progress.percent === undefined
       ? '' : Math.floor(importJob.progress.percent) + '%' }}</strong></p>
     <p v-else-if="numbers?.fresh" class="data-new"><span><strong>{{ thousands(numbers.fresh) }}</strong> new
@@ -220,8 +223,6 @@ const numbers = computed(() => {
     <p v-if="numbers && numbers.reviewed < numbers.needed" class="data-new warn">Training needs {{ numbers.needed }} reviewed drives
       (now {{ numbers.reviewed }}): some are kept apart to test on roads the network never saw.</p>
   </section>
-
-  <Segmented v-model="section" class="train-sections" :options="SECTIONS" :marked="runningSections" label="Network"/>
 
   <section class="card role-card train-section" :id="'train-' + section" :data-role="section" aria-live="polite">
     <p v-if="section === 'cutter'" class="role-what">Finds every box that could be a sign. It must miss nothing: the classifier drops its false boxes.</p>
@@ -306,6 +307,4 @@ const numbers = computed(() => {
     </details>
 
   </section>
-
-  <DatasetSection :dataset="status?.dataset ?? null" :loading="status === null"/>
 </template>

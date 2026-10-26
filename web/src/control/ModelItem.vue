@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // One trained version of a role: its run, what it is and when its weights were saved, the headline numbers that judge
-// that role (the cutter: the speed signs found at a low score, as on Evaluate, then every sign and by width, boxes per
-// frame, time per frame; the
-// classifier: right answers on the test, and for the classifier with “not a sign” the “not a sign” crops it rejects and
+// that role side by side (MetricTiles: the cutter: the speed signs and every sign found at a low score, as on Evaluate,
+// then by width, boxes per frame, time per frame; the
+// classifier: the speed signs and every sign read right on the test, and for the classifier with “not a sign” the “not a sign” crops it rejects and
 // the chain end to end at the cutter's score, the speed signs found and read right and the false boxes per frame that
 // survive it; the decider: the "Another" road found, on validation and test), the button that puts it in use and the
 // link to its run on Evaluate.
@@ -11,6 +11,7 @@ import {isoWhen, thousands} from '../common/format';
 import type {DeciderNumbers, ModelVersion} from '../common/panel-types';
 import {PARTITION_LABEL, pct} from './evaluate';
 import {ROLE_TEXT, epochText, evaluateHref, openRun, perFrame, sizeText} from './models';
+import MetricTiles, {type Metric} from './MetricTiles.vue';
 
 const props = defineProps<{version: ModelVersion; roleLabel: string; score: number; readOnly: boolean; busy: string | null}>();
 const emit = defineEmits<{use: [version: ModelVersion]}>();
@@ -22,14 +23,23 @@ const decider = computed(() => props.version.role === 'decider' ? props.version 
 const cut = computed(() => cutter.value?.test ?? cutter.value?.validation ?? null);
 /** A cutter of every sign: the speed signs alone, comparable with a cutter of the speed signs only. */
 const speedSigns = computed(() => cutter.value?.families === 'all' ? cut.value?.by_family?.['speed'] ?? null : null);
-/** The cutter's headline, as on Evaluate: the speed signs found at its score (every sign below it, for a cutter of
- * every sign); every sign only when its report does not count the speed signs apart. */
-const headline = computed(() => {
+const foundOf = (found: number | null, truth: number | null): string =>
+  truth === null ? '' : thousands(found ?? 0) + ' of ' + thousands(truth) + ' found';
+/** The cutter's numbers side by side, as on Evaluate: the speed signs found at its score, and every sign (speed and
+ * other); a cutter of the speed signs has no "every sign", a report that does not count the speed signs apart no
+ * "speed signs". */
+const cutterMetrics = computed((): Metric[] => {
   const numbers = cut.value;
-  if (numbers === null) return null;
-  if (speedSigns.value) return {speed: true, recall: speedSigns.value.recall, found: speedSigns.value.found, truth: speedSigns.value.truth as number | null};
-  return {speed: cutter.value?.families !== 'all', recall: numbers.recall, found: numbers.found ?? 0, truth: numbers.truth_boxes};
+  if (numbers === null) return [];
+  const every: Metric = {key: 'every', label: 'Every sign', value: numbers.recall, detail: foundOf(numbers.found, numbers.truth_boxes)};
+  if (speedSigns.value) {
+    return [{key: 'speed', label: 'Speed signs', value: speedSigns.value.recall, detail: foundOf(speedSigns.value.found, speedSigns.value.truth)}, every];
+  }
+  if (cutter.value?.families === 'all') return [every];
+  return [{...every, key: 'speed', label: 'Speed signs'}, {key: 'every', label: 'Every sign', value: null, detail: 'Trained on speed signs only'}];
 });
+const cutterCaption = computed(() => cut.value === null ? ''
+  : 'Found on the ' + (PARTITION_LABEL[cut.value.partition] ?? cut.value.partition).toLowerCase() + ' at score ' + (cut.value.score_threshold ?? '–'));
 const evaluated = computed(() => cut.value !== null || (classifier.value?.test ?? null) !== null || (classifier.value?.chain ?? null) !== null
   || decider.value?.validation != null || decider.value?.test != null);
 const epoch = computed(() => epochText(props.version.best_epoch, props.version.epochs_run ?? props.version.epochs));
@@ -37,7 +47,26 @@ const epoch = computed(() => epochText(props.version.best_epoch, props.version.e
 const rejects = computed(() => classifier.value?.class_scheme !== undefined);
 const chain = computed(() => classifier.value?.chain ?? null);
 const oldChain = computed(() => classifier.value?.chain_old_reader ?? null);
-
+const readOf = (correct: number | null | undefined, samples: number | null | undefined): string =>
+  samples ? thousands(correct ?? 0) + ' of ' + thousands(samples) + ' read right' : '';
+/** The classifier's numbers side by side: the speed-sign crops read right, every sign crop (the kind of an other
+ * sign aside, as the old reader reads them), and the chain with the cutter (the speed signs found and read right). */
+const classifierMetrics = computed((): Metric[] => {
+  const test = classifier.value?.test ?? null;
+  const metrics: Metric[] = [];
+  if (test) {
+    metrics.push({key: 'speed', label: 'Speed signs', value: test.speed_accuracy ?? null,
+      detail: test.speed_samples ? readOf(test.speed_correct, test.speed_samples) : 'Not counted apart in this report'});
+    const every = test.family_accuracy ?? test.accuracy;
+    metrics.push({key: 'every', label: 'Every sign', value: every,
+      detail: readOf(every === null || test.samples === null ? null : Math.round(every * test.samples), test.samples)});
+  }
+  if (chain.value) {
+    metrics.push({key: 'chain', label: 'With the cutter' + (chain.value.cutter_size ? ' ' + sizeText(chain.value.cutter_size) : ''),
+      value: chain.value.recall, detail: chain.value.truth ? thousands(chain.value.correct ?? 0) + ' of ' + thousands(chain.value.truth) + ' speed signs, end to end' : 'speed signs, end to end'});
+  }
+  return metrics;
+});
 /** Why the button is off, as its title. */
 const blocked = computed((): string => {
   if (props.readOnly) return 'Read-only: the choice is turned off on this server.';
@@ -75,13 +104,7 @@ const noOtherOnTest = computed(() => decider.value?.test?.other_road_support ===
 
     <template v-if="cutter">
       <template v-if="cut">
-        <div v-if="headline" class="model-big" :data-speed-recall="headline.speed ? headline.recall ?? undefined : undefined">
-          <strong>{{ pct(headline.recall) }}</strong>
-          <span>of the {{ headline.speed ? 'speed signs' : 'signs' }} found<template v-if="headline.truth !== null">: {{ thousands(headline.found) }}
-            of {{ thousands(headline.truth) }}</template> · {{ (PARTITION_LABEL[cut.partition] ?? cut.partition).toLowerCase() }}, score {{ cut.score_threshold ?? '–' }}</span>
-        </div>
-        <p v-if="speedSigns" class="note">Every sign, speed and other: <strong>{{ pct(cut.recall) }}</strong><template
-          v-if="cut.truth_boxes !== null"> ({{ thousands(cut.found ?? 0) }} of {{ thousands(cut.truth_boxes) }})</template>.</p>
+        <MetricTiles :metrics="cutterMetrics" :caption="cutterCaption"/>
         <details class="model-more"><summary>Details</summary>
         <ul v-if="cut.widths" class="model-widths" aria-label="Signs found by width in the frame">
           <li v-for="row in cut.widths" :key="row.key" :title="row.found + ' of ' + row.truth + ' signs ' + row.label + ' wide'">
@@ -106,12 +129,7 @@ const noOtherOnTest = computed(() => decider.value?.test?.other_road_support ===
 
     <template v-else-if="classifier && rejects">
       <template v-if="classifier.test || chain">
-        <div v-if="classifier.test" class="model-big">
-          <strong>{{ pct(classifier.test.accuracy) }}</strong>
-          <span>of the test signs read right<template v-if="classifier.test.samples !== null">: {{ thousands(classifier.test.samples) }} sign crops</template></span>
-        </div>
-        <p v-if="chain" class="model-line">With the cutter{{ chain.cutter_size ? ' ' + sizeText(chain.cutter_size) : '' }}:
-          <strong>{{ pct(chain.recall) }}</strong> of the speed signs found and read right.</p>
+        <MetricTiles :metrics="classifierMetrics" :caption="classifier.test ? 'Crops of the test signs; every sign without the kind of an other sign' : ''"/>
         <details class="model-more"><summary>Details</summary>
         <dl class="model-facts">
           <div v-if="classifier.test"><dt>Human-reviewed</dt><dd>{{ pct(classifier.test.human_accuracy) }}<span v-if="classifier.test.human_samples"
@@ -134,8 +152,8 @@ const noOtherOnTest = computed(() => decider.value?.test?.other_road_support ===
           of the speed signs<template v-if="chain.human_recall !== null">; on the frames a person confirmed, {{ pct(chain.human_recall) }} end to end</template>.</p>
         <p v-if="chain && oldChain" class="note">The old reader in the same chain: {{ pct(oldChain.recall) }} end to end, every false box
           let through ({{ perFrame(oldChain.surviving_false_per_frame) }} per frame).</p>
-        <p v-if="classifier.test?.family_accuracy != null" class="note">With the kinds of other signs folded, as the old reader reads them:
-          {{ pct(classifier.test.family_accuracy) }} right.</p>
+        <p v-if="classifier.test?.family_accuracy != null" class="note">Every sign with the kind of an other sign counted too:
+          {{ pct(classifier.test.accuracy) }} right.</p>
         </details>
       </template>
     </template>

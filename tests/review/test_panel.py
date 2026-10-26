@@ -356,7 +356,7 @@ def test_panel_page_status_and_run_over_http(served):
     assert f'<script nonce="{nonce}">' in data.decode()
     # The tabs are one page (Overview is the home page); the old addresses lead to them.
     # Each tab served with its own window title, as the bar names it.
-    for path, title in (('/', 'Overview'), ('/prepare', 'Prepare'), ('/train', 'Train'), ('/evaluate', 'Evaluate'),
+    for path, title in (('/', 'Overview'), ('/prepare', 'Data'), ('/train', 'Train'), ('/evaluate', 'Evaluate'),
                         ('/models', 'Models')):
         status, response, data = served.request('GET', path)
         assert status == 200 and f'<title>Speed limits · {title}</title>' in data.decode(), path

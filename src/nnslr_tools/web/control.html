@@ -92,6 +92,11 @@ animation:jp-scan 2.6s linear infinite}
 .jp-title h3{margin:0;font-size:17px;font-weight:600;letter-spacing:-.015em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .jp-kicker{font-size:11.5px;font-weight:600;letter-spacing:0;color:var(--muted)}
 .jp-when{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+/* How the training was launched (panel._settings_of): chips under its title. */
+.jp-settings{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px}
+.jp-settings li{padding:3px 10px;border-radius:999px;background:var(--surface-2);font-size:12.5px;color:var(--fg);
+font-variant-numeric:tabular-nums;white-space:nowrap}
+.jp-settings li:first-child{font-weight:600}
 .jp-body{display:grid;grid-template-columns:minmax(0,1fr);gap:18px 28px;align-items:start}
 .jp.has-steps .jp-body{grid-template-columns:minmax(0,1fr) minmax(250px,320px)}
 .jp-main{display:flex;flex-direction:column;gap:10px;min-width:0}
@@ -640,6 +645,22 @@ font-size:13.5px;color:var(--muted)}
 .model-name{font-size:15px;font-weight:600;letter-spacing:-.01em;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 .model-sub{font-size:12.5px;color:var(--muted)}
 .model-head .pill{flex:none}
+/* The headline numbers side by side (MetricTiles.vue): speed signs, every sign, the chain. */
+.metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.metrics.three{grid-template-columns:repeat(3,minmax(0,1fr))}
+@media (max-width:560px){.metrics.three{grid-template-columns:repeat(2,minmax(0,1fr))}.metrics.three .metric:last-child{grid-column:1/-1}}
+.metric{display:flex;flex-direction:column;gap:4px;min-width:0;padding:12px 14px;border-radius:14px;background:var(--surface);
+border:1px solid var(--line)}
+.metric-label{font-size:12px;font-weight:600;letter-spacing:.02em;color:var(--muted)}
+.metric-value{font-size:30px;font-weight:650;letter-spacing:-.03em;line-height:1.1;font-variant-numeric:tabular-nums}
+.metric.none .metric-value{color:var(--muted)}
+.metric-bar{display:block;height:6px;border-radius:3px;background:var(--line);overflow:hidden}
+.metric-bar>span{display:block;height:100%;border-radius:3px;background:var(--muted);transform-origin:left;animation:metric-grow .7s cubic-bezier(.2,.8,.2,1)}
+.metric.main .metric-bar>span{background:var(--accent)}
+.metric-detail{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.metric-caption{margin:-2px 0 0;font-size:12px;color:var(--muted)}
+@keyframes metric-grow{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+@media (prefers-reduced-motion:reduce){.metric-bar>span{animation:none}}
 .model-big{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 8px}
 .model-big strong{font-size:28px;font-weight:600;letter-spacing:-.03em;line-height:1.15;font-variant-numeric:tabular-nums}
 .model-line{margin:0;font-size:13.5px;color:var(--muted)}.model-line strong{color:var(--fg);font-weight:600}

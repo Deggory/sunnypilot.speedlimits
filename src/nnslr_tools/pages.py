@@ -49,7 +49,7 @@ COMMA_PILL = '<div class="tabs-machine" id="comma-pill"></div>'
 # The tabs of the site: (key of the current page, address, label). Account is the icon at the right.
 # In the order of the work: prepare the routes, review them, train on the reviews, evaluate the runs, then choose
 # the model in use for each network of the pipeline (cutter, classifier, decider).
-SITE_TABS = (('overview', '/', 'Overview'), ('prepare', '/prepare', 'Prepare'), ('review', '/routes', 'Review'),
+SITE_TABS = (('overview', '/', 'Overview'), ('prepare', '/prepare', 'Data'), ('review', '/routes', 'Review'),
              ('train', '/train', 'Train'), ('evaluate', '/evaluate', 'Evaluate'), ('models', '/models', 'Models'))
 # The tabs that are one Vue app (web/src/control), by address: the app shows the tab of the address. The
 # route list (/routes) is reached from the Overview.
@@ -285,7 +285,7 @@ def render_index(summaries: list[dict], database: Path, nonce: str = '', *, ai_r
                     '<a href="/account#ai-reviewer">Set up AI review ›</a></p>')
     if not summaries:
         main.append('<div class="card state-box"><h2>No drives to review yet</h2><p>Download the drives from the '
-                    'comma (the comma button at the top), then prepare them on the <a href="/prepare">Prepare</a> '
+                    'comma (the comma button at the top), then prepare them on the <a href="/prepare">Data</a> '
                     'tab. They show up here when they are ready.</p></div>')
     grouped: dict[str, list[dict]] = {key: [] for key, _ in ROUTE_GROUPS}
     for summary in summaries:

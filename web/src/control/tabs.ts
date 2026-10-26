@@ -1,7 +1,7 @@
 // Overview, Prepare, Train, Evaluate, Models: one page, the tab shown follows the address ("/", "/prepare", "/train",
 // "/evaluate", "/models"). The tab links of the top bar (rendered by pages.py) and the brand switch tab here without a
 // reload; the route list (/routes) and the review pages stay normal links.
-import {onBeforeUnmount, onMounted, ref} from 'vue';
+import {nextTick, onBeforeUnmount, onMounted, ref} from 'vue';
 
 export type ControlTab = 'overview' | 'prepare' | 'train' | 'evaluate' | 'models';
 
@@ -9,7 +9,7 @@ export const TAB_PATH: Record<ControlTab, string> = {
   overview: '/', prepare: '/prepare', train: '/train', evaluate: '/evaluate', models: '/models',
 };
 const TAB_TITLE: Record<ControlTab, string> = {
-  overview: 'Overview', prepare: 'Prepare', train: 'Train', evaluate: 'Evaluate', models: 'Models',
+  overview: 'Overview', prepare: 'Data', train: 'Train', evaluate: 'Evaluate', models: 'Models',
 };
 
 export function tabOf(path: string): ControlTab | null {
@@ -35,13 +35,17 @@ function markCurrent(tab: ControlTab): void {
   document.title = 'Speed limits · ' + TAB_TITLE[tab];
 }
 
-/** Shows a tab and puts its address in the history. */
-export function goTo(tab: ControlTab): void {
-  if (tab === currentTab.value) return;
+/** Shows a tab and puts its address in the history; with a hash ("#dataset"), scrolls to it once the tab is drawn. */
+export function goTo(tab: ControlTab, hash = ''): void {
+  if (tab === currentTab.value && !hash) return;
   currentTab.value = tab;
-  history.pushState({tab}, '', TAB_PATH[tab]);
+  history.pushState({tab}, '', TAB_PATH[tab] + hash);
   markCurrent(tab);
-  window.scrollTo({top: 0});
+  if (!hash) {
+    window.scrollTo({top: 0});
+    return;
+  }
+  void nextTick(() => document.getElementById(hash.slice(1))?.scrollIntoView({block: 'start'}));
 }
 
 /** Clicks on the tab links and the back button, for the life of the app. */
@@ -55,7 +59,7 @@ export function useTabRouting(): void {
     const tab = tabOf(link.pathname);
     if (tab === null) return;
     event.preventDefault();
-    goTo(tab);
+    goTo(tab, link.hash);
   }
   function onPop(): void {
     const tab = tabOf(location.pathname);

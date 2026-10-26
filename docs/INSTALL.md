@@ -84,7 +84,7 @@ Adds `transformers`, `accelerate` and `qwen-vl-utils` to `.venv-gpu` (no install
 
 On a slow line, download the four weight files elsewhere (`model-00001-of-00004.safetensors` … `model-00004-of-00004.safetensors` of that revision, 17.5 GB together) and copy them into `data/models/vlm/Qwen3-VL-8B-Instruct/`; then run the script: it checks the sha256 of each file, keeps the right ones and downloads only what is missing or wrong.
 
-The same is the button **Install Qwen3-VL** under **Found by** on the Prepare tab, shown until the model has been checked and tried on the GPU (the script leaves `.installed` in the model's folder). Once installed, it is the third choice of **Find the signs → Found by** on the Prepare tab (`nnslr preannotate --proposer qwen`); until then that choice says what is missing.
+The same is the button **Install Qwen3-VL** under **Found by** on the Data tab, shown until the model has been checked and tried on the GPU (the script leaves `.installed` in the model's folder). Once installed, it is the third choice of **Find the signs → Found by** on the Data tab (`nnslr preannotate --proposer qwen`); until then that choice says what is missing.
 
 ### An AI reviewer: any OpenAI-compatible server (optional)
 
