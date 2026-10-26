@@ -361,6 +361,12 @@ assert all(image.shape == frame.shape and float(image.min()) >= 0 and float(imag
 changed = [image for image in first if not torch.equal(image, frame)]
 assert 20 <= len(changed) < 40, len(changed)
 assert sum(float(image.mean()) for image in changed) / len(changed) < float(frame.mean())
+# Some frames blurred too: rain on the windscreen. Without the blur's keys a frame is never blurred.
+from nnslr_tools.training import DETECTOR_AUGMENTATION
+sharp = {k: v for k, v in DETECTOR_AUGMENTATION.items() if not k.startswith("blur")}
+plain = [detector_photometric(torch, TF, frame, torch.Generator().manual_seed(seed), sharp) for seed in range(40)]
+blurred = [index for index, (a, b) in enumerate(zip(first, plain)) if not torch.allclose(a, b)]
+assert 3 <= len(blurred) < len(changed), (len(blurred), len(changed))
 print("rebuild ok")
 """
 

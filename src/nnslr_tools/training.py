@@ -881,9 +881,6 @@ class TrainConfig:
 # The settings a reader run saved before they existed was trained with: resuming such a run compares against these.
 READER_CONFIG_BEFORE_SETTINGS = {"class_scheme": "v1", "augment": False}
 
-# The photometric augmentation of the classifier's training crops: the detector's (DETECTOR_AUGMENTATION, defined
-# below; darker frames, as the test route is mostly at dusk), with lower contrast too.
-CLASSIFIER_CONTRAST = (0.5, 1.3)
 # The box of a training crop moved and resized before the crop, as the cutter's boxes are never exact: each side
 # scaled by a factor in "scale", the centre moved by up to "shift" of the box's size, with this probability.
 CLASSIFIER_BOX_JITTER = {"probability": 0.8, "scale": (0.85, 1.2), "shift": 0.1}
@@ -1060,20 +1057,27 @@ def epoch_frame_indices(frames: list[dict[str, Any]], fraction: float, seed: Any
 DETECTOR_AUGMENTATION = {
     "probability": 0.8,
     "brightness": (0.35, 1.25),
-    "contrast": (0.7, 1.3),
+    # Down to half: mist, rain and spray wash a frame out.
+    "contrast": (0.5, 1.3),
     "gamma": (0.8, 1.6),
     "saturation": (0.7, 1.3),
     # A light colour cast: each of R, G and B multiplied by its own factor.
     "channel_gain": (0.92, 1.08),
+    # Drops and spray on the windscreen: a light Gaussian blur on this share of the frames changed, of a sigma (in
+    # pixels of the image changed) drawn in its range.
+    "blur_probability": 0.3,
+    "blur_sigma": (0.3, 1.2),
 }
-# The classifier's training crops: the same, with lower contrast too (CLASSIFIER_CONTRAST).
-CLASSIFIER_AUGMENTATION = {**DETECTOR_AUGMENTATION, "contrast": CLASSIFIER_CONTRAST}
+# The classifier's training crops: the same. Until 26 October 2026 only the crops went down to half the contrast,
+# and nothing was blurred.
+CLASSIFIER_AUGMENTATION = dict(DETECTOR_AUGMENTATION)
 
 
 def detector_photometric(torch, TF, image, generator, ranges=None):
     """A training frame (3 x H x W, values 0..1, on any device) with random gamma, brightness, contrast,
-    saturation and colour cast (DETECTOR_AUGMENTATION, or the ranges given: CLASSIFIER_AUGMENTATION for the
-    classifier's crops); the factors come from the CPU generator."""
+    saturation, colour cast and sometimes a light blur (DETECTOR_AUGMENTATION, or the ranges given:
+    CLASSIFIER_AUGMENTATION for the classifier's crops; ranges without the blur's keys never blur); the factors come
+    from the CPU generator."""
     ranges = DETECTOR_AUGMENTATION if ranges is None else ranges
 
     def draw(name, count=1):
@@ -1085,6 +1089,8 @@ def detector_photometric(torch, TF, image, generator, ranges=None):
     gamma, brightness, contrast, saturation = (draw(name)[0] for name in ("gamma", "brightness", "contrast",
                                                                            "saturation"))
     gains = draw("channel_gain", 3)
+    blur = float(torch.rand(1, generator=generator)) < ranges.get("blur_probability", 0.0)
+    sigma = draw("blur_sigma")[0] if "blur_sigma" in ranges else 0.0
     if not apply:
         return image
     image = TF.adjust_gamma(image, gamma)
@@ -1092,7 +1098,11 @@ def detector_photometric(torch, TF, image, generator, ranges=None):
     image = TF.adjust_contrast(image, contrast)
     image = TF.adjust_saturation(image, saturation)
     gains = torch.tensor(gains, dtype=image.dtype, device=image.device).view(3, 1, 1)
-    return (image * gains).clamp_(0.0, 1.0)
+    image = (image * gains).clamp_(0.0, 1.0)
+    if blur and sigma > 0:
+        side = 2 * math.ceil(3 * sigma) + 1
+        image = TF.gaussian_blur(image, [side, side], [sigma, sigma])
+    return image
 
 
 def _check_detector_config(config: "DetectorTrainConfig") -> None:

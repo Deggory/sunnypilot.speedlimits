@@ -571,8 +571,9 @@ and `result.json`, and evaluation, ONNX export (its contract's
 `model_internal_resize` and `default_boxes`) and replay rebuild the detector
 from the checkpoint; checkpoints without them are 320 x 320 with `0.2`.
 Training frames get a photometric augmentation (brightness leaning to darker,
-contrast, gamma, saturation and a light colour cast, never a flip: the side of
-the road matters); `--no-augment` turns it off, and `result.json` records the
+contrast down to half for mist and spray, gamma, saturation, a light colour cast
+and, on some frames, a light blur for rain on the windscreen; never a flip: the
+side of the road matters); `--no-augment` turns it off, and `result.json` records the
 ranges under `augmentation`.
 
 torchvision's SSD takes its negative boxes only inside frames with signs, so a
@@ -666,7 +667,7 @@ training refuses it on another dataset or split.
 The `v2` training crops are cut with a jittered box (each side scaled 0.85–1.2,
 the centre moved up to 10% of the box, `CLASSIFIER_BOX_JITTER`: the cutter's
 boxes are never exact) and photometrically augmented like the detector's
-frames, with lower contrast too (`CLASSIFIER_AUGMENTATION`); `--no-augment`
+frames (`CLASSIFIER_AUGMENTATION`); `--no-augment`
 trains without both. The `not_a_sign` crops together weigh at most as much as
 all the sign crops in the loss (`loss_weights`). The best epoch is the one with
 the highest validation balanced accuracy: the mean of the sign crops read right

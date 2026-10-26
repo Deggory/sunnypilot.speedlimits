@@ -503,10 +503,9 @@ images = [detector_photometric(torch, TF, crop, torch.Generator().manual_seed(se
 changed = [image for image in images if not torch.equal(image, crop)]
 assert 30 <= len(changed) < 60 and all(float(i.min()) >= 0 and float(i.max()) <= 1 for i in images)
 assert sum(float(image.mean()) for image in changed) / len(changed) < float(crop.mean())
-# Lower contrast than the detector's, the rest the same.
-assert CLASSIFIER_AUGMENTATION["contrast"][0] < DETECTOR_AUGMENTATION["contrast"][0]
-assert {k: v for k, v in CLASSIFIER_AUGMENTATION.items() if k != "contrast"} == {
-    k: v for k, v in DETECTOR_AUGMENTATION.items() if k != "contrast"}
+# The same as the detector's: contrast down to half, and the light blur of rain.
+assert CLASSIFIER_AUGMENTATION == DETECTOR_AUGMENTATION and DETECTOR_AUGMENTATION["contrast"][0] == 0.5
+assert DETECTOR_AUGMENTATION["blur_probability"] > 0
 print("augment ok")
 """
 
