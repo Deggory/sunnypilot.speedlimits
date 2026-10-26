@@ -106,3 +106,47 @@ if (document.querySelector('span[data-live]') !== null) {
   void showProposing();
   window.setInterval(() => void showProposing(), 5000);
 }
+
+// The route list's groups (details[data-group]): the tiles of the overview (button[data-open-group]) choose the one
+// shown, one at a time (a closed group is not drawn, .groups-by-tile); its title closes it again. The choice is
+// remembered in this browser, and an address #group-doing shows that one.
+const OPEN_KEY = 'nnslr.routes.open';
+const groups = [...document.querySelectorAll<HTMLDetailsElement>('details[data-group]')];
+if (groups.length) {
+  document.body.classList.add('groups-by-tile');
+  let remembered: string[] = [];
+  try {
+    remembered = JSON.parse(localStorage.getItem(OPEN_KEY) ?? '[]') as string[];
+  } catch {
+    remembered = [];
+  }
+  const fromHash = location.hash.startsWith('#group-') ? location.hash.slice(7) : '';
+  const tileOf = (key: string): HTMLButtonElement | null => document.querySelector<HTMLButtonElement>(`button[data-open-group="${key}"]`);
+  const mark = (): void => {
+    for (const group of groups) tileOf(group.dataset['group'] ?? '')?.setAttribute('aria-expanded', String(group.open));
+  };
+  for (const group of groups) {
+    const key = group.dataset['group'] ?? '';
+    group.open = fromHash ? key === fromHash : remembered[0] === key;
+    group.addEventListener('toggle', () => {
+      mark();
+      try {
+        localStorage.setItem(OPEN_KEY, JSON.stringify(groups.filter((item) => item.open).map((item) => item.dataset['group'])));
+      } catch {
+        // Private browsing: it is only not remembered.
+      }
+    });
+  }
+  mark();
+  if (fromHash) document.getElementById('group-' + fromHash)?.scrollIntoView({block: 'start'});
+  for (const tile of document.querySelectorAll<HTMLButtonElement>('button[data-open-group]')) {
+    tile.addEventListener('click', () => {
+      const group = document.getElementById('group-' + tile.dataset['openGroup']) as HTMLDetailsElement | null;
+      if (group === null) return;
+      const open = !group.open;
+      for (const other of groups) if (other !== group) other.open = false;
+      group.open = open;
+      if (group.open) group.scrollIntoView({behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'nearest'});
+    });
+  }
+}

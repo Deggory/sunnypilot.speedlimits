@@ -275,6 +275,47 @@ def _route_row(summary: dict, *, ai_reviewer: bool = True) -> str:
             + '<span class="row-live" data-live="' + route + '" hidden></span>' + ai + '</li>')
 
 
+def _group_sub(key: str, rows: list[dict], short: bool = False) -> str:
+    """What a group of the route list holds, in a few words: the frames left, or confirmed (short: for a tile)."""
+    total = sum(row['frame_count'] for row in rows)
+    confirmed = sum(min(row['confirmed_count'], row['frame_count']) for row in rows)
+    if key == 'done':
+        return f'{confirmed:,} frames' + ('' if short else ' confirmed')
+    return f'{total - confirmed:,}' + (' left' if short else ' frames left')
+
+
+def _review_overview(summaries: list[dict], grouped: dict[str, list[dict]]) -> str:
+    """The route list at a glance, before the groups: the frames confirmed of every drive (by people, then the AI
+    assistants' share hatched), what waits for a person, and a tile per group that opens it."""
+    total = sum(row['frame_count'] for row in summaries)
+    confirmed = sum(min(row['confirmed_count'], row['frame_count']) for row in summaries)
+    by_ai = sum(min(row.get('confirmed_by_ai') or 0, row['confirmed_count']) for row in summaries)
+    waiting = sum(row.get('waiting_for_person') or 0 for row in summaries)
+    suspicious = sum(row.get('suspicious_count') or 0 for row in summaries)
+    percent = confirmed * 100 / total if total else 0.0
+    people = round((confirmed - by_ai) * 100 / total, 2) if total else 0
+    ai = round(by_ai * 100 / total, 2) if total else 0
+    notes = [f'{confirmed - by_ai:,} by you', f'{by_ai:,} by AI assistants'] if by_ai else []
+    if waiting:
+        notes.append('<span class="sus">' + f'{waiting:,}' + ' by AI to confirm</span>')
+    if suspicious:
+        notes.append('<span class="sus">' + f'{suspicious:,}' + ' suspicious</span>')
+    tiles = []
+    for key, title in ROUTE_GROUPS:
+        rows = grouped[key]
+        tiles.append('<button type="button" class="rv-tile ' + key + '" data-open-group="' + key + '" aria-controls="group-'
+                     + key + '"' + (' disabled' if not rows else '') + '><span class="rv-tile-label">' + title
+                     + '</span><span class="rv-tile-n">' + str(len(rows)) + '</span><span class="rv-tile-sub">'
+                     + (_group_sub(key, rows, short=True) if rows else 'none') + '</span></button>')
+    return ('<section class="card rv-overview" aria-label="Review at a glance">'
+            '<p class="rv-big"><strong>' + f'{percent:.0f}' + '%</strong><span>of the frames confirmed · '
+            + f'{confirmed:,}' + ' of ' + f'{total:,}' + ' in ' + _plural(len(summaries), 'drive', 'drives') + '</span></p>'
+            '<span class="rv-bar" aria-hidden="true"><span style="width:' + str(people) + '%"></span>'
+            + ('<span class="ai" style="width:' + str(ai) + '%"></span>' if by_ai else '') + '</span>'
+            + ('<p class="rv-notes">' + ' · '.join(notes) + '</p>' if notes else '')
+            + '<div class="rv-tiles">' + ''.join(tiles) + '</div></section>')
+
+
 def render_index(summaries: list[dict], database: Path, nonce: str = '', *, ai_reviewer: bool = True) -> str:
     """The route list, grouped: in progress, to start, done. ai_reviewer: an AI reviewer is chosen in Settings
     (each drive left to review gets "Review with AI"); without one, a single link to set it up."""
@@ -290,14 +331,19 @@ def render_index(summaries: list[dict], database: Path, nonce: str = '', *, ai_r
     grouped: dict[str, list[dict]] = {key: [] for key, _ in ROUTE_GROUPS}
     for summary in summaries:
         grouped[route_state(summary['confirmed_count'], summary['frame_count'])].append(summary)
+    if summaries:
+        main.append(_review_overview(summaries, grouped))
+    # Each group folded under its title: the overview comes first, a group opens from its tile or its title (the
+    # page script remembers which are open, web/src/pages/site.ts).
     for key, title in ROUTE_GROUPS:
         if not grouped[key]:
             continue
-        main.append('<section class="group" aria-labelledby="group-' + key + '">'
-                    '<h2 class="group-title" id="group-' + key + '">' + title
-                    + ' <span class="n">' + str(len(grouped[key])) + '</span></h2><ul class="cards">')
+        main.append('<details class="group" id="group-' + key + '" data-group="' + key + '">'
+                    '<summary class="group-title"><span>' + title + '</span> <span class="n">' + str(len(grouped[key]))
+                    + '</span><span class="group-sub">' + _group_sub(key, grouped[key]) + '</span>'
+                    '<span class="group-chev" aria-hidden="true">›</span></summary><ul class="cards">')
         main.extend(_route_row(summary, ai_reviewer=ai_reviewer) for summary in grouped[key])
-        main.append('</ul></section>')
+        main.append('</ul></details>')
     main.append('<details class="foot"><summary>Technical details</summary>'
                 '<p>Review database: <code>' + html.escape(str(database)) + '</code></p></details>')
     main.append('</main>')

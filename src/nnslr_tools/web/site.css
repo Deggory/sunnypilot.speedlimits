@@ -4,6 +4,47 @@
 .group-title{display:flex;align-items:baseline;gap:8px;margin:10px 2px 0;font-size:20px;font-weight:600;letter-spacing:-.018em;
 color:var(--fg)}
 .group-title .n{color:var(--muted);font-weight:500;letter-spacing:0}
+/* The route list at a glance (pages._review_overview): the frames confirmed, then a tile per group that opens it. */
+.rv-overview{display:flex;flex-direction:column;gap:12px;padding:20px 22px}
+.rv-big{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;margin:0}
+.rv-big strong{font-size:44px;font-weight:700;letter-spacing:-.035em;line-height:1;font-variant-numeric:tabular-nums}
+.rv-big span{font-size:15px;color:var(--muted);font-variant-numeric:tabular-nums}
+.rv-bar{display:flex;height:8px;border-radius:4px;background:var(--surface-3);overflow:hidden}
+.rv-bar span{flex:none;height:100%;background:var(--accent);transform-origin:left;animation:rv-grow .8s cubic-bezier(.2,.8,.2,1)}
+.rv-bar .ai{background:repeating-linear-gradient(135deg,var(--accent) 0 2px,transparent 2px 4px),var(--accent-soft)}
+@keyframes rv-grow{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+.rv-notes{margin:0;font-size:13.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.rv-notes .sus{color:var(--sus);font-weight:600}
+.rv-tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:4px}
+.rv-tile{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:0;padding:12px 14px;border-radius:14px;
+border:1px solid var(--line);background:var(--surface-2);color:inherit;font:inherit;text-align:left;cursor:pointer;
+transition:background .15s,box-shadow .15s,transform .1s}
+.rv-tile:hover:not(:disabled){background:var(--surface-3)}
+.rv-tile:active:not(:disabled){transform:scale(.98)}
+.rv-tile:disabled{opacity:.5;cursor:default}
+.rv-tile[aria-expanded="true"]{box-shadow:inset 0 0 0 2px var(--accent);background:var(--surface)}
+.rv-tile.done[aria-expanded="true"]{box-shadow:inset 0 0 0 2px var(--ok)}
+.rv-tile-label{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:600;color:var(--muted)}
+.rv-tile-n{font-size:30px;font-weight:700;letter-spacing:-.03em;line-height:1.1;font-variant-numeric:tabular-nums}
+.rv-tile-sub{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+@media (max-width:560px){.rv-overview{padding:16px}.rv-tiles{gap:6px}.rv-tile{padding:10px 9px}.rv-tile-label{font-size:12px}.rv-tile-n{font-size:24px}.rv-big strong{font-size:38px}}
+@media (prefers-reduced-motion:reduce){.rv-bar span{animation:none}}
+/* A group of the route list, folded under its title. */
+details.group{display:flex;flex-direction:column;gap:10px;scroll-margin-top:104px}
+details.group>summary{cursor:pointer;list-style:none;border-radius:10px}
+details.group>summary::-webkit-details-marker{display:none}
+.group-sub{margin-left:auto;font-size:13.5px;font-weight:400;letter-spacing:0;color:var(--muted);font-variant-numeric:tabular-nums}
+.group-chev{flex:none;color:var(--muted);font-weight:500;transition:transform .2s}
+details.group[open] .group-chev{transform:rotate(90deg)}
+/* With the page script, the tiles choose the group shown: a closed one is not drawn, the open one has its title as a
+   header that closes it. */
+.groups-by-tile details.group:not([open]){display:none}
+.groups-by-tile details.group>summary{margin-top:0}
+.groups-by-tile .group-chev{transform:rotate(90deg)}
+.groups-by-tile details.group[open] .group-chev{transform:rotate(-90deg)}
+details.group[open]>.cards{animation:group-in .25s ease-out}
+@keyframes group-in{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){details.group[open]>.cards{animation:none}}
 /* Route list: one card per group, one row per route; the whole row is the link. A route with frames left to
    review has "Review with AI" beside it (AiRouteSheet.vue): at the right on a computer, under the row on a phone. */
 .cards{list-style:none;margin:0;padding:0;background:var(--surface);border:0;border-radius:18px;box-shadow:var(--shadow);overflow:hidden}
