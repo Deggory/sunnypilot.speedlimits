@@ -1,7 +1,7 @@
-// Keyboard shortcuts: Shift ← → frame (← → alone too when no box is selected), ↑ ↓ box, the speed typed as it reads
-// ("5 0" = 50, "1 2 0" = 120, "0" alone = not readable), O X U the road (ours, another, unclear), S other sign for our
-// road, V on a vehicle (not a sign), G give way, P stop, R roundabout, E something else, ← → direction left or right,
-// Enter confirm, B or N new box, C fit (centre) the box picked with the AI
+// Keyboard shortcuts: Shift ← → frame, Shift ↑ ↓ box (the arrows alone too when no box is selected), the speed typed
+// as it reads ("5 0" = 50, "1 2 0" = 120, "0" alone = not readable), O X U the road (ours, another, unclear), S other
+// sign for our road, V on a vehicle (not a sign), G give way, P stop, R roundabout, E something else, ← → ↑ ↓ the
+// direction (left, right, straight, several), Enter confirm, B or N new box, C fit (centre) the box picked with the AI
 // (every box of the frame when none was picked), A apply previous, I ask the AI, H second reading, D removes every
 // box of the frame, Del removes a box the reviewer selected (on the one the page opened on it says to click it
 // first), Esc cancel. While a menu or panel of the site's top bar is open, the keys are its own.
@@ -21,8 +21,9 @@ const TYPING_MS = 900;
 // G P R: the kind of an other sign.
 const KIND_KEYS: Record<string, string> = {g: 'give_way', p: 'stop', r: 'roundabout', e: 'other'};
 
-// ← → with a box selected: the direction of an other sign.
-const DIRECTION_KEYS: Record<string, string> = {ArrowLeft: 'direction_left', ArrowRight: 'direction_right'};
+// The arrows with a box selected: the direction of an other sign (↓ several directions).
+const DIRECTION_KEYS: Record<string, string> = {ArrowLeft: 'direction_left', ArrowRight: 'direction_right',
+  ArrowUp: 'direction_straight', ArrowDown: 'direction_several'};
 
 // O X U: the road of the selected box (A is Apply previous).
 const ROAD_KEYS: Record<string, string> = {o: 'own_road', x: 'other_road', u: 'unresolved'};
@@ -134,7 +135,7 @@ export function useKeyboard(): void {
         setOnVehicle();
         return;
       }
-      // G give way, P stop, R roundabout, E something else, ← → a direction: pressed again the kind stays (the button
+      // G give way, P stop, R roundabout, E something else, an arrow a direction: pressed again the kind stays (the button
       // toggles it, the key does not).
       const kind = KIND_KEYS[event.key.toLowerCase()] ?? DIRECTION_KEYS[event.key];
       if (kind) {
