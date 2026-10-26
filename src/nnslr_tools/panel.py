@@ -848,10 +848,16 @@ class Panel:
     def frames(self, name: str, model, partition, route=None, previews=None) -> dict:
         """The frames of one route of an evaluation of a run, with the boxes over each, for the Watch panel
         (nnslr_tools.runs.RunsIndex.frames)."""
+        from nnslr_tools.drives import drive_of
         try:
-            return self.runs_index.frames(name, model, partition, route, previews)
+            answer = self.runs_index.frames(name, model, partition, route, previews)
         except WatchError as exc:
             raise PanelError(exc.status, exc.reason, exc.message) from exc
+        # Each route as a drive ("Basel → Mumpf", when it was driven), for the Drive view of Results.
+        for item in answer.get('routes', []):
+            drive = drive_of(self.root, item['route']) or {}
+            item['title'], item['when'] = drive.get('title'), drive.get('when')
+        return answer
 
     # -- the networks by role, for the Models tab -----------------------------------------------------
     def proposers(self) -> dict:

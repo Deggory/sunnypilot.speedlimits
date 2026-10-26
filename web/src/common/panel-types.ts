@@ -889,6 +889,9 @@ export interface WatchFrame {
 
 export interface WatchRoute {
   route: string;
+  /** The drive ("Basel → Mumpf") and when it was driven, when known. */
+  title?: string | null;
+  when?: string | null;
   frames: number;
   signs: number;
   frames_with_signs: number;

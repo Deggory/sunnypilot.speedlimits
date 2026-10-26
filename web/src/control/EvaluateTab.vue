@@ -1,5 +1,6 @@
 <script setup lang="ts">
-// Evaluate, by network: choose what to judge (the whole chain, the cutter, the classifier, the decider); every
+// Results, in two views. Drive (DriveView.vue, the first): a test drive replayed as in the car, with the limit the
+// networks would show next to the signs'. Scores: by network, choose what to judge (the whole chain, the cutter, the classifier, the decider); every
 // version of it in one table, judged by the one number that matters for that network, next to the version in use;
 // the version chosen (or the one “Open the run ›” of Models and Train asks for, ?model=) played frame by frame on the
 // test (WatchSection), and all the numbers of its run folded below. Chains measured with another cutter are marked
@@ -23,6 +24,7 @@ import RunDetailView from './RunDetail.vue';
 import Segmented from './Segmented.vue';
 import WatchSection from './WatchSection.vue';
 import SectionHead from './SectionHead.vue';
+import DriveView from './DriveView.vue';
 
 const props = defineProps<{status: PanelStatus | null}>();
 const emit = defineEmits<{run: [name: ActionName, state: ActionState, start?: undefined, options?: ActionOptions]; stop: [job: Job];
@@ -35,6 +37,12 @@ const measureJob = computed(() => {
 });
 /** The words of a proposer or AI reviewer not measured yet: Measure is pressed only when no measure runs. */
 const notMeasured = computed(() => measureJob.value?.state === 'running' ? 'not measured yet' : 'not measured yet: press Measure');
+
+/** Drive (as in the car) or Scores (the numbers of every version), kept in this browser. */
+type Mode = 'drive' | 'scores';
+const MODES: {key: Mode; label: string}[] = [{key: 'drive', label: 'Drive'}, {key: 'scores', label: 'Scores'}];
+const mode = ref<Mode>(localStorage.getItem('nnslr-results-mode') === 'scores' ? 'scores' : 'drive');
+watch(mode, (value) => localStorage.setItem('nnslr-results-mode', value));
 
 type View = 'proposers' | 'chain' | 'cutter' | 'classifier' | 'decider' | 'ai';
 const VIEWS: {key: View; label: string}[] = [
@@ -78,6 +86,8 @@ interface Row {
   apart?: string | undefined;
   /** What the mark of the one in use says ("in use"; an AI reviewer: "reviews"). */
   badge?: string | undefined;
+  /** What its number is measured on ("classifier of 381"): only rows with the same basis are compared. */
+  basis?: string | undefined;
 }
 
 const storedView = localStorage.getItem('nnslr-evaluate-view');
@@ -205,7 +215,7 @@ const rows = computed((): Row[] => {
         mainText: speed ? ofText(speed.found, speed.truth, 'speed signs found')
           : ofText(test?.found, test?.truth_boxes, version.families === 'all' ? 'signs found' : 'speed signs found'),
         second: test ? perFrame(test.boxes_per_frame) + ' boxes per frame' : '', inUse: version.in_use, run: version.run,
-        watch: version.part});
+        watch: version.part, basis: speed ? 'speed of ' + speed.truth : 'all of ' + (test?.truth_boxes ?? '?')});
     }
   } else if (view.value === 'classifier') {
     const versions = versionsOf('classifier') as ClassifierModel[];
@@ -219,7 +229,9 @@ const rows = computed((): Row[] => {
         main: test?.accuracy ?? null,
         mainText: test?.accuracy == null ? 'not measured' : pct(test.accuracy) + ' of ' + thousands(test.samples ?? 0) + ' signs read right',
         second: test?.rejection_rate == null ? (old ? 'cannot say “not a sign”' : '') : pct(test.rejection_rate) + ' of the false boxes thrown away',
-        inUse: version.in_use, run: version.run, watch: old ? (chained ? 'chain-old-reader' : null) : 'chain', watchRun: chained?.run});
+        inUse: version.in_use, run: version.run, watch: old ? (chained ? 'chain-old-reader' : null) : 'chain', watchRun: chained?.run,
+        // The old reader reads only signs, never "not a sign": its share is not the classifier's.
+        basis: (old ? 'reader of ' : 'classifier of ') + (test?.samples ?? '?')});
     }
   } else {
     for (const version of versionsOf('decider') as DeciderModel[]) {
@@ -228,7 +240,7 @@ const rows = computed((): Row[] => {
         main: share(numbers?.other_road_found, numbers?.other_road_support),
         mainText: ofText(numbers?.other_road_found, numbers?.other_road_support, '“Another road” signs found'),
         second: numbers?.reading_accuracy == null ? '' : pct(numbers.reading_accuracy) + ' read right',
-        inUse: version.in_use, run: version.run, watch: null});
+        inUse: version.in_use, run: version.run, watch: null, basis: 'decider of ' + (numbers?.other_road_support ?? '?')});
     }
   }
   return list;
@@ -236,11 +248,16 @@ const rows = computed((): Row[] => {
 /** The version the others are compared with: the one in use, else the best. */
 const reference = computed(() => rows.value.find((row) => row.inUse)
   ?? [...rows.value].filter((row) => row.main !== null).sort((a, b) => (b.main ?? 0) - (a.main ?? 0))[0] ?? null);
-const best = computed(() => Math.max(...rows.value.filter((row) => !row.apart).map((row) => row.main ?? -1)));
+/** Two rows are compared only when measured the same way on the same test (a chain: with the same cutter). */
+const comparable = (row: Row, other: Row | null): boolean => other !== null && !row.apart && row.basis === other.basis;
+const best = computed(() => Math.max(...rows.value.filter((row) => comparable(row, reference.value)).map((row) => row.main ?? -1)));
 function versus(row: Row): {text: string; kind: string} {
   if (view.value === 'chain') return row.vs ?? {text: '', kind: ''};
   const ref0 = reference.value;
   if (row.main === null || !ref0 || ref0.main === null || ref0.id === row.id) return {text: '', kind: ''};
+  if (!comparable(row, ref0)) {
+    return {text: row.basis?.startsWith('reader') ? 'another kind of network: not comparable' : 'measured on another test: not comparable', kind: 'same'};
+  }
   const difference = row.main - ref0.main;
   return {text: points(difference) + ' vs ' + (ref0.inUse ? 'the one in use' : 'the best'),
     kind: Math.abs(difference) < 0.005 ? 'same' : difference > 0 ? 'better' : 'worse'};
@@ -269,6 +286,7 @@ function openWanted(): void {
   selectedModel.value = null;
   selectedRun.value = null;
   if (version === null) return;
+  mode.value = 'scores';
   if (view.value === ROLE_VIEW[version.role]) {
     picked.value = version.id;
   } else {
@@ -326,6 +344,7 @@ const nothingToPlay = computed((): string => {
 
 <template>
   <SectionHead tab="evaluate"/>
+  <Segmented v-model="mode" :options="MODES" label="Results as" class="results-mode"/>
 
   <section v-if="measureJob" class="live-section" :class="{now: measureJob.state === 'running'}" aria-labelledby="measure-job-title">
     <h2 class="section-title" id="measure-job-title">{{ measureJob.state === 'running' ? 'Running' : 'Last measure failed' }}</h2>
@@ -334,6 +353,8 @@ const nothingToPlay = computed((): string => {
     </div>
   </section>
 
+  <DriveView v-if="mode === 'drive'"/>
+  <template v-else>
   <section class="card ev-card" aria-labelledby="eval-title">
     <div class="ev-head">
       <h2 id="eval-title">What to judge</h2>
@@ -419,5 +440,6 @@ const nothingToPlay = computed((): string => {
       <summary>All the numbers of run {{ shown.run }}</summary>
       <RunDetailView :key="runSummary.name" :summary="runSummary" :detail="detail" :loading="loading" :error="error" no-watch/>
     </details>
+  </template>
   </template>
 </template>

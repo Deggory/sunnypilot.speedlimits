@@ -484,6 +484,75 @@ border-radius:8px;cursor:pointer;min-height:30px;opacity:.85;transition:backgrou
 .data-new.muted{color:var(--muted)}
 .data-new.warn{color:var(--warn);font-size:13px}
 .data-chev{color:var(--muted);font-size:20px;line-height:1}
+/* Results › Drive (DriveView.vue): a drive replayed as in the car, on one screen: the frame (as tall as the window
+   leaves), the drive at a glance at its side, the strip of the drive under it. */
+.results-mode{margin-top:-6px}
+.drive{display:flex;flex-direction:column;gap:10px;padding:16px 18px}
+.drive-bar{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px 14px}
+.drive-field{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1 1 220px;max-width:420px}
+.drive-field span{font-size:11.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.drive-field select{font:inherit;font-size:14px;padding:7px 10px;border-radius:10px;border:0;background:var(--surface-2);color:var(--fg);
+min-width:0;width:100%;min-height:36px}
+.drive-part{margin-left:auto}
+.drive-why{margin:0;font-size:13px;color:var(--muted)}
+.drive-main{display:grid;grid-template-columns:minmax(0,1fr) 230px;grid-template-areas:"stage side" "time time";gap:12px 16px;align-items:start}
+.drive-stage{grid-area:stage;position:relative;width:min(100%,calc((100dvh - 400px) * 1344 / 760));min-width:min(100%,420px);
+justify-self:center;border-radius:12px;overflow:hidden;background:#000;cursor:pointer;outline-offset:3px}
+.drive-stage img{position:absolute;inset:0;width:100%;height:100%;object-fit:fill;user-select:none}
+.drive-mark rect{fill:none}
+.drive-mark text{font-weight:800;paint-order:stroke;stroke:rgba(0,0,0,.75);font-family:inherit}
+.drive-mark.right rect{stroke:#30d158}.drive-mark.right text{fill:#30d158}
+.drive-mark.wrong rect{stroke:#ff9f0a}.drive-mark.wrong text{fill:#ff9f0a}
+.drive-mark.false rect{stroke:#ff453a}.drive-mark.false text{fill:#ff453a}
+.drive-mark.missed rect{stroke:#fff;opacity:.9}.drive-mark.missed text{fill:#fff}
+/* The limit as the car shows it: a round sign, red ring on white; under it what the signs say. */
+.drive-hud{position:absolute;top:12px;left:12px;display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 10px 8px;
+border-radius:16px;background:rgba(0,0,0,.55);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);
+box-shadow:0 0 0 2px transparent;transition:box-shadow .2s}
+.drive-hud.right{box-shadow:0 0 0 2px #30d158}.drive-hud.wrong{box-shadow:0 0 0 2px #ff453a}
+.drive-sign{width:64px;height:64px;border-radius:50%;display:grid;place-items:center;background:#fff;color:#111;
+border:7px solid #e0242b;font-size:26px;font-weight:800;letter-spacing:-.04em;font-variant-numeric:tabular-nums}
+.drive-sign.end{border-color:#888;font-size:16px;background:linear-gradient(135deg,#fff 44%,#555 44%,#555 56%,#fff 56%)}
+.drive-sign.empty{border-color:#666;color:#666}
+.drive-truth{font-size:12px;color:rgba(255,255,255,.8)}.drive-truth b{color:#fff;font-variant-numeric:tabular-nums}
+.drive-side{grid-area:side;display:flex;flex-direction:column;gap:14px}
+.drive-big{display:flex;flex-direction:column;gap:2px}
+.drive-big strong{font-size:44px;font-weight:750;letter-spacing:-.03em;line-height:1;font-variant-numeric:tabular-nums}
+.drive-big span{font-size:13px;color:var(--muted)}
+.drive-facts{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;font-size:13.5px}
+.drive-facts b{font-variant-numeric:tabular-nums;color:var(--ok)}
+.drive-facts-head{color:var(--muted);font-size:12.5px}
+.drive-facts .wrong b{color:var(--warn)}.drive-facts .missed b{color:var(--muted)}.drive-facts .false b{color:var(--bad)}
+.drive-now{margin:0;font-size:13.5px;color:var(--muted)}
+.drive-now.right b{color:var(--ok)}.drive-now.wrong b{color:var(--bad)}
+.drive-legend{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:1fr 1fr;gap:4px 8px;font-size:12px;color:var(--muted)}
+.drive-legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px;border:2px solid}
+.drive-legend .right{border-color:#30d158}.drive-legend .wrong{border-color:#ff9f0a}.drive-legend .false{border-color:#ff453a}
+.drive-legend .missed{border-color:var(--muted);border-style:dashed}
+.drive-time{grid-area:time;display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"play strip speed" ". pos .";
+align-items:center;gap:4px 12px}
+.drive-play{grid-area:play;min-width:96px;justify-content:center}
+.drive-strip{grid-area:strip;width:100%;height:30px;cursor:pointer;touch-action:none;display:block}
+.drive-strip .right{fill:var(--ok)}.drive-strip .wrong{fill:var(--bad)}.drive-strip .none{fill:var(--surface-3)}
+.drive-strip .tick-model{stroke:var(--fg);stroke-width:.6;opacity:.7}.drive-strip .tick-truth{stroke:var(--muted);stroke-width:.6}
+.drive-strip .head{fill:var(--accent)}
+.drive-speed{grid-area:speed}
+.drive-pos{grid-area:pos;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;text-align:center;white-space:nowrap}
+@media (max-width:860px){
+  .drive-main{grid-template-columns:1fr;grid-template-areas:"stage" "time" "side"}
+  .drive-stage{width:100%;min-width:0}
+  .drive-part{margin-left:0}
+  .drive-time{grid-template-columns:auto minmax(0,1fr);grid-template-areas:"pos pos" "strip strip" "play speed";gap:6px 10px}
+  .drive-play{min-width:0}
+  .drive-pos{text-align:right}
+  .drive-speed{justify-self:end}
+  .drive-side{gap:12px}
+  .drive-big{flex-direction:row;align-items:baseline;gap:10px}
+  .drive-facts{display:grid;grid-template-columns:1fr 1fr;gap:6px 12px}
+  .drive-facts-head{grid-column:1/-1}
+}
+@media (max-width:480px){.drive-sign{width:48px;height:48px;font-size:19px;border-width:5px}.drive-hud{top:8px;left:8px;padding:7px}}
+@media (prefers-reduced-motion:reduce){.drive-hud{transition:none}}
 /* Data › Dataset (DatasetTab.vue): the reviews to import, one row with its button, or the import running. */
 .import-card{display:flex;flex-direction:column;gap:10px}
 .import-row{display:flex;align-items:center;gap:14px}
