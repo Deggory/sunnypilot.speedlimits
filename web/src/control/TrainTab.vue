@@ -114,7 +114,7 @@ function measureKey(version: ModelVersion): string {
     const speed = version.families === 'all' ? cut?.by_family?.['speed'] ?? null : null;
     return speed ? 'speed of ' + (speed.truth ?? '?') : 'all of ' + (cut?.truth_boxes ?? '?');
   }
-  if (version.role === 'classifier') return version.chain ? 'chain' : 'crops';
+  if (version.role === 'classifier') return version.chain ? 'chain of ' + (version.chain.truth ?? '?') : 'crops';
   return 'decider';
 }
 
@@ -123,7 +123,7 @@ function versusLatest(version: ModelVersion): string {
   const now = sectionLatest.value ? headlineRatio(sectionLatest.value) : null;
   const then = headlineRatio(version);
   // Only the same measure on the same signs compares: a Reader of a whole pipeline has its crops read right, not the
-  // chain; a cutter measured on 80 test signs, before the drives added since, not one measured on 208.
+  // chain; a cutter or a chain measured on 80 test signs, before the drives added since, not one measured on 208.
   const measure = headlineOf(version)?.text ?? '';
   if (now === null || then === null || sectionLatest.value === null
       || measureKey(version) !== measureKey(sectionLatest.value)) return measure;
