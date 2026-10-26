@@ -482,6 +482,9 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
 /* Keyboard shortcuts, right under Confirm; hidden on touch screens. */
 .keys { margin: 4px 0 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 12px; font-size: 12px; color: var(--muted); line-height: 1.9; }
 .keys span { white-space: nowrap; }
+/* Keys ?: opens the list of the keys under Confirm, closed at first (ConfirmArea.vue). */
+.keys-toggle { display: block; margin: 6px auto 0; font-size: 12px; color: var(--muted); }
+.keys-toggle kbd { font-size: 10.5px; margin-left: 4px; }
 .state-box {
   background: var(--card-grad), var(--surface); border: 1px solid var(--line); border-radius: 18px; box-shadow: var(--shadow);
   padding: 24px 28px; max-width: 720px; margin: 32px auto; display: flex; flex-direction: column; gap: 12px;
@@ -584,7 +587,7 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
   .signs { grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 6px; }
   /* The confirm button is in the bottom bar: the section under the inspector shows only messages and links. */
   .panel .confirm-section.quiet { display: none; }
-  .confirm-area .btn.primary, .keys { display: none; }
+  .confirm-area .btn.primary, .keys, .keys-toggle { display: none; }
   .mobilebar {
     display: flex; flex-direction: column; gap: 6px; position: fixed; left: 0; right: 0; bottom: 0; z-index: 6;
     background: var(--topbar-bg); -webkit-backdrop-filter: saturate(160%) blur(16px); backdrop-filter: saturate(160%) blur(16px);
@@ -668,7 +671,7 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
 }
 /* Key caps and shortcuts only where there is a keyboard: hidden on touch screens. */
 @media (pointer: coarse) {
-  .keys, .keycap { display: none; }
+  .keys, .keycap, .keys-toggle { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }

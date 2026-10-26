@@ -2,12 +2,15 @@
 // offline report), the working copies of the frames, what is on screen. The modules change this state; the
 // components of ReviewApp.vue follow it.
 import {reactive, shallowReactive} from 'vue';
-import {readLocal} from './dom';
+import {readLocal, writeLocal} from './dom';
 import {isFilter} from './frames';
 import type {
   Busy, Drag, Filter, FrameEdit, FrameRow, Hint, HintStats, LastSave, Notice, Payload, RouteLink, ServerState,
   Suspicious,
 } from './types';
+
+// Whether the list of keys under Confirm is open, in this browser.
+const KEYS_SHOWN = 'nnslr-review-keys-shown';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -98,6 +101,8 @@ export interface ReviewState {
   server: ServerState;
   /** How the drive is now for Propose again (asked again while the page is read only); null: not busy (any more). */
   busy: Busy | null;
+  /** The list of keys under Confirm is open (Keys, or ?): kept per browser, closed at first. */
+  showKeys: boolean;
 }
 
 export const state: ReviewState = reactive({
@@ -131,7 +136,14 @@ export const state: ReviewState = reactive({
   lastSave: null,
   server: 'offline',
   busy: null,
+  showKeys: readLocal(KEYS_SHOWN, '0') === '1',
 });
+
+/** Opens or closes the list of keys under Confirm, for this browser. */
+export function toggleKeys(): void {
+  state.showKeys = !state.showKeys;
+  writeLocal(KEYS_SHOWN, state.showKeys ? '1' : '0');
+}
 
 /** The payload of the page (<script id="payload">), read once before the app mounts. */
 export function initStore(raw: Partial<Payload>): void {

@@ -4,7 +4,7 @@
 // direction (left, right, straight, several), Enter confirm, B or N new box, C fit (centre) the box picked with the AI
 // (every box of the frame when none was picked), A apply previous, I ask the AI, H second reading, D removes every
 // box of the frame, Del removes a box the reviewer selected (on the one the page opened on it says to click it
-// first), Esc cancel. While a menu or panel of the site's top bar is open, the keys are its own.
+// first), Esc cancel, ? shows or hides the list of the keys. While a menu or panel of the site's top bar is open, the keys are its own.
 import {onBeforeUnmount, onMounted} from 'vue';
 import {askAi, fitBox} from './ai';
 import {applyPrevious} from './carry';
@@ -13,7 +13,7 @@ import {cancelAll, removeAllBoxes, removeSelected, selectBox, setField, setKind,
   toggleHints} from './edits';
 import {currentRow, workOf} from './frames';
 import {step} from './navigation';
-import {report, state} from './store';
+import {report, state, toggleKeys} from './store';
 
 // A speed is one key (2 = 20 … 9 = 90); after a 1 the page waits this long for a second digit ("1 2" = 120, 1 alone
 // = 100), and a 0 that comes this soon after a speed set at once only ends it typed whole ("5 0", "1 2 0").
@@ -271,6 +271,10 @@ export function useKeyboard(): void {
         break;
       case 'Escape':
         cancelAll();
+        break;
+      case '?':
+        event.preventDefault();
+        toggleKeys();
         break;
     }
   };
