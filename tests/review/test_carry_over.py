@@ -184,6 +184,28 @@ def test_the_page_carries_the_previous_frame_and_the_save_waits_for_the_check(se
     assert status == 409 and answer['error'] == 'stale_report'
 
 
+def test_a_frame_confirmed_before_takes_the_labels_of_the_frame_before(server):
+    # A drive reviewed again: 0/1 was confirmed with a box drawn by hand, "unreadable"; 0/0 is now an end of limit.
+    running, rows = server
+    old = page_body(rows['0/1'], drop_proposals=True)
+    old['detections'] = [{'bbox_xyxy': [18, 2, 30, 14], 'family': 'unreadable', 'value_kph': None,
+                          'applicability': 'own_road', 'detection_id': 'manual-7'}]
+    status, response, data = running.post_frame(ROUTE, '0/1', old)
+    assert status == 200
+    saved = json_of(data)['review']['detections']
+    first = page_body(rows['0/0'], drop_proposals=True)
+    first['detections'] = [{'bbox_xyxy': [19, 3, 29, 13], 'family': 'cancellation', 'value_kph': None,
+                            'applicability': 'own_road', 'detection_id': 'manual-6'}]
+    assert running.post_frame(ROUTE, '0/0', first)[0] == 200
+    status, answer = apply_on_page(running, '0/1', {'run_id': RUN_ID, 'detections': saved})
+    assert status == 200 and answer['matched'] == 1 and answer['kept'] == 0
+    assert [item['family'] for item in answer['detections']] == ['cancellation']
+    # The same box changed on screen first keeps what the reviewer set.
+    changed = [dict(saved[0], family='zone', value_kph=30)]
+    status, answer = apply_on_page(running, '0/1', {'run_id': RUN_ID, 'detections': changed})
+    assert status == 200 and answer['kept'] == 1 and answer['detections'][0]['family'] == 'zone'
+
+
 def test_rest_and_mcp_offer_it_too(server):
     running, rows = server
     path = f'/api/v1/routes/{ROUTE}/frames/0/1/apply-previous'

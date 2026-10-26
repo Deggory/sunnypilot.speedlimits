@@ -639,6 +639,8 @@ class ReviewService:
         ``body`` may hold ``run_id`` (checked when given) and ``detections``, the boxes of this frame as
         they are now (default: the model proposals). See :mod:`nnslr_tools.carry_over`: a box placed
         where the sign should be has ``check_position: true`` and no save accepts it until that is gone.
+        A box keeps its labels only when the reviewer changed it on screen: one as the model proposed it, or as
+        this frame was confirmed before (a drive reviewed again), takes those of the previous frame.
         """
         key = frame_key_of(frame_key)
         if body is None:
@@ -670,10 +672,14 @@ class ReviewService:
         for item in current:
             if not isinstance(item, dict):
                 raise ReviewRejected(400, 'invalid_schema', 'Every box must be a JSON object.')
-        result = carry_over(source['payload'].get('detections', []), current, width=row.get('width') or 0,
-                            height=row.get('height') or 0, source_key=source_key, proposals=proposals)
-        to_check = unchecked_boxes(result['detections'])
         review = snapshot.reviews.get(key)
+        # What the boxes were before the reviewer touched them: the proposals, then this frame's saved review.
+        untouched = list(proposals)
+        if review is not None and review['confirmed']:
+            untouched = untouched + [item for item in review['payload'].get('detections', []) if isinstance(item, dict)]
+        result = carry_over(source['payload'].get('detections', []), current, width=row.get('width') or 0,
+                            height=row.get('height') or 0, source_key=source_key, proposals=untouched)
+        to_check = unchecked_boxes(result['detections'])
         return {
             'route_id': snapshot.route,
             'run_id': snapshot.run_id,

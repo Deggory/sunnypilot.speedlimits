@@ -11,8 +11,9 @@ from the centre of the view. For every box confirmed on the previous frame:
   (moved it onto the sign, or removed it) and the flag is gone.
 
 A box of this frame of another shape (MAX_SHAPE_CHANGE) is never the same sign. Boxes of this frame that match
-nothing stay as they are. Boxes the reviewer already changed keep
-their labels. Signs only grow and move outwards from the point the road runs to (``FOCUS``), which is
+nothing stay as they are. Boxes the reviewer already changed keep their labels: changed from ``proposals``, which
+holds the model's proposals and, on a frame confirmed before, its saved boxes (a drive reviewed again takes the
+labels of the frame before, as one never reviewed does). Signs only grow and move outwards from the point the road runs to (``FOCUS``), which is
 what the matching expects; it was measured on 359 pairs of confirmed boxes one frame apart.
 
 The page, the REST API and the MCP server all call :func:`carry_over` through
