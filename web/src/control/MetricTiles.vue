@@ -3,13 +3,7 @@
 // classifier the chain with the cutter. Each tile: what it counts, the percentage, a bar that fills, how many of how
 // many. A tile without a number (a cutter trained on speed signs only has no "every sign") says why instead.
 import {pct} from './evaluate';
-
-export interface Metric {
-  key: string;
-  label: string;
-  value: number | null;
-  detail: string;
-}
+import type {Metric} from './models';
 
 defineProps<{metrics: Metric[]; caption?: string}>();
 </script>

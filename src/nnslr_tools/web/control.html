@@ -623,6 +623,62 @@ background:rgba(5,7,11,.55);color:#fff;pointer-events:none}
 /* Models: a column per role of the pipeline (cutter, classifier, decider), its versions newest first, the one in use
    outlined green. */
 .roles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;align-items:start}
+/* Models (ModelsTab.vue): the three in use, one card each; tap one to list its versions in the table below. */
+.inuse-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.inuse-card{display:flex;flex-direction:column;align-items:flex-start;gap:4px;min-width:0;padding:16px 18px;border-radius:18px;
+border:0;background:var(--surface);box-shadow:var(--shadow);color:inherit;font:inherit;text-align:left;cursor:pointer;
+transition:box-shadow .15s,transform .1s}
+.inuse-card:hover{box-shadow:var(--shadow),inset 0 0 0 1px var(--line-strong)}
+.inuse-card:active{transform:scale(.99)}
+.inuse-card.picked{box-shadow:var(--shadow),inset 0 0 0 2px var(--accent)}
+.inuse-role{display:flex;align-items:center;gap:8px;width:100%;font-size:13px;font-weight:600;color:var(--muted)}
+.inuse-tag{margin-left:auto;padding:2px 8px;border-radius:999px;background:var(--ok-soft);color:var(--ok);font-size:11.5px;font-weight:600}
+.inuse-tag.none{background:var(--surface-2);color:var(--muted)}
+.inuse-name{font-size:17px;font-weight:650;letter-spacing:-.015em;overflow-wrap:anywhere}
+.inuse-name.muted{color:var(--muted);font-weight:600}
+.inuse-when{font-size:12.5px;color:var(--muted)}
+.inuse-figs{display:flex;gap:18px;margin-top:6px}
+.inuse-fig{display:flex;flex-direction:column}
+.inuse-fig b{font-size:26px;font-weight:700;letter-spacing:-.03em;line-height:1.1;font-variant-numeric:tabular-nums}
+.inuse-fig small{font-size:12px;color:var(--muted)}
+.inuse-more{margin-top:auto;padding-top:8px;font-size:13px;font-weight:500;color:var(--accent)}
+.versions-card{display:flex;flex-direction:column;gap:12px}
+.versions-seg{align-self:center;width:100%;max-width:480px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
+/* The table of the versions: a row per version, its numbers in columns with a thin bar; a row opens its card. */
+.vt{display:flex;flex-direction:column;--vt-num:118px}
+.vt-head,.vt-row>summary{display:grid;grid-template-columns:minmax(0,1fr) repeat(var(--vt-cols),var(--vt-num)) 14px;column-gap:16px;align-items:center}
+.vt-head{padding:0 12px 6px;font-size:11.5px;font-weight:600;letter-spacing:.02em;color:var(--muted);border-bottom:.5px solid var(--line-strong)}
+.vt-row{border-bottom:.5px solid var(--line)}
+.vt-row:last-child{border-bottom:0}
+.vt-row>summary{list-style:none;padding:10px 12px;cursor:pointer;border-radius:12px;transition:background .15s}
+.vt-row>summary::-webkit-details-marker{display:none}
+.vt-row>summary:hover{background:var(--surface-2)}
+.vt-row.in-use>summary{background:color-mix(in srgb,var(--ok) 9%,transparent)}
+.vt-row[open]>summary{background:var(--surface-2)}
+.vt-name{display:flex;flex-direction:column;min-width:0}
+.vt-name b{font-size:14.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vt-name small{font-size:12px;color:var(--muted)}
+.vt-name em{font-style:normal;font-weight:600}
+.vt-use{color:var(--ok)}.vt-wait{color:var(--warn)}
+.vt-num{display:flex;flex-direction:column;gap:3px;min-width:0}
+.vt-num b{font-size:17px;font-weight:650;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.1}
+.vt-num.none b{color:var(--muted);font-weight:500}
+.vt-num small{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vt-bar{display:block;height:4px;border-radius:2px;background:var(--line);overflow:hidden}
+.vt-bar>span{display:block;height:100%;border-radius:2px;background:var(--muted);transform-origin:left;animation:metric-grow .6s cubic-bezier(.2,.8,.2,1)}
+.vt-c-speed .vt-bar>span{background:var(--accent)}
+.vt-chev{color:var(--muted);transition:transform .2s}
+.vt-row[open] .vt-chev{transform:rotate(90deg)}
+.vt-row .model-list{padding:6px 0 12px}
+@media (max-width:900px){.inuse-grid{grid-template-columns:minmax(0,1fr);gap:10px}}
+@media (max-width:560px){.inuse-card{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"role role" "name figs";
+align-items:center;gap:2px 12px;padding:12px 14px}.inuse-role{grid-area:role}.inuse-name{grid-area:name;font-size:15px}
+.inuse-figs{grid-area:figs;margin:0;gap:12px}.inuse-fig b{font-size:19px}.inuse-fig small{font-size:11px}.inuse-when,.inuse-more{display:none}
+.versions-card{scroll-margin-top:72px}}
+@media (max-width:560px){.vt{--vt-num:64px}.vt-head,.vt-row>summary{column-gap:10px}.vt-c-chain,.vt-num small{display:none}
+.vt-head{grid-template-columns:minmax(0,1fr) repeat(min(var(--vt-cols),2),var(--vt-num)) 14px}
+.vt-row>summary{grid-template-columns:minmax(0,1fr) repeat(min(var(--vt-cols),2),var(--vt-num)) 14px;padding:10px 6px}
+.vt-head{padding:0 6px 6px}.vt-num b{font-size:15px}.vt-name b{white-space:normal;overflow-wrap:anywhere;font-size:14px}}
 .role-card{display:flex;flex-direction:column;gap:12px}
 .role-card .count-badge{margin-left:8px;vertical-align:1px}
 .role-what{margin:0;font-size:13.5px;line-height:1.45}

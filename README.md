@@ -156,7 +156,7 @@ The chain card answers the question that matters: how many of the test's speed s
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/models-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="docs/images/models-light.png">
-  <img src="docs/images/models-light.png" alt="Models tab: for the cutter, the classifier and the decider, the version in use and every trained version with its test numbers and a button to pick it.">
+  <img src="docs/images/models-light.png" alt="Models tab: the cutter, the classifier and the decider in use with their numbers; below, the versions of one of them as a table to compare (speed signs, every sign, the chain), each row opening its card with Use this one.">
 </picture>
 
 For each network (cutter, classifier and decider), this tab lists every version trained here, each with its main test number and the rest under **Details**, and the one in use. **Use this one** records the choice, with who made it and when. Other steps then use that version: for example, the classifier training learns from the false boxes of the cutter in use. Choosing copies, exports or installs nothing.

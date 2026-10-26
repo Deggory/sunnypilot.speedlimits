@@ -10,8 +10,8 @@ import {computed} from 'vue';
 import {isoWhen, thousands} from '../common/format';
 import type {DeciderNumbers, ModelVersion} from '../common/panel-types';
 import {PARTITION_LABEL, pct} from './evaluate';
-import {ROLE_TEXT, epochText, evaluateHref, openRun, perFrame, sizeText} from './models';
-import MetricTiles, {type Metric} from './MetricTiles.vue';
+import {ROLE_TEXT, epochText, evaluateHref, metricsOf, openRun, perFrame, sizeText, type Metric} from './models';
+import MetricTiles from './MetricTiles.vue';
 
 const props = defineProps<{version: ModelVersion; roleLabel: string; score: number; readOnly: boolean; busy: string | null}>();
 const emit = defineEmits<{use: [version: ModelVersion]}>();
@@ -21,23 +21,7 @@ const classifier = computed(() => props.version.role === 'classifier' ? props.ve
 const decider = computed(() => props.version.role === 'decider' ? props.version : null);
 /** The cutter's numbers: on the test, else on validation (a size compared before its test was measured). */
 const cut = computed(() => cutter.value?.test ?? cutter.value?.validation ?? null);
-/** A cutter of every sign: the speed signs alone, comparable with a cutter of the speed signs only. */
-const speedSigns = computed(() => cutter.value?.families === 'all' ? cut.value?.by_family?.['speed'] ?? null : null);
-const foundOf = (found: number | null, truth: number | null): string =>
-  truth === null ? '' : thousands(found ?? 0) + ' of ' + thousands(truth) + ' found';
-/** The cutter's numbers side by side, as on Evaluate: the speed signs found at its score, and every sign (speed and
- * other); a cutter of the speed signs has no "every sign", a report that does not count the speed signs apart no
- * "speed signs". */
-const cutterMetrics = computed((): Metric[] => {
-  const numbers = cut.value;
-  if (numbers === null) return [];
-  const every: Metric = {key: 'every', label: 'Every sign', value: numbers.recall, detail: foundOf(numbers.found, numbers.truth_boxes)};
-  if (speedSigns.value) {
-    return [{key: 'speed', label: 'Speed signs', value: speedSigns.value.recall, detail: foundOf(speedSigns.value.found, speedSigns.value.truth)}, every];
-  }
-  if (cutter.value?.families === 'all') return [every];
-  return [{...every, key: 'speed', label: 'Speed signs'}, {key: 'every', label: 'Every sign', value: null, detail: 'Trained on speed signs only'}];
-});
+const cutterMetrics = computed((): Metric[] => cutter.value ? metricsOf(cutter.value) : []);
 const cutterCaption = computed(() => cut.value === null ? ''
   : 'Found on the ' + (PARTITION_LABEL[cut.value.partition] ?? cut.value.partition).toLowerCase() + ' at score ' + (cut.value.score_threshold ?? '–'));
 const evaluated = computed(() => cut.value !== null || (classifier.value?.test ?? null) !== null || (classifier.value?.chain ?? null) !== null
@@ -47,26 +31,7 @@ const epoch = computed(() => epochText(props.version.best_epoch, props.version.e
 const rejects = computed(() => classifier.value?.class_scheme !== undefined);
 const chain = computed(() => classifier.value?.chain ?? null);
 const oldChain = computed(() => classifier.value?.chain_old_reader ?? null);
-const readOf = (correct: number | null | undefined, samples: number | null | undefined): string =>
-  samples ? thousands(correct ?? 0) + ' of ' + thousands(samples) + ' read right' : '';
-/** The classifier's numbers side by side: the speed-sign crops read right, every sign crop (the kind of an other
- * sign aside, as the old reader reads them), and the chain with the cutter (the speed signs found and read right). */
-const classifierMetrics = computed((): Metric[] => {
-  const test = classifier.value?.test ?? null;
-  const metrics: Metric[] = [];
-  if (test) {
-    metrics.push({key: 'speed', label: 'Speed signs', value: test.speed_accuracy ?? null,
-      detail: test.speed_samples ? readOf(test.speed_correct, test.speed_samples) : 'Not counted apart in this report'});
-    const every = test.family_accuracy ?? test.accuracy;
-    metrics.push({key: 'every', label: 'Every sign', value: every,
-      detail: readOf(every === null || test.samples === null ? null : Math.round(every * test.samples), test.samples)});
-  }
-  if (chain.value) {
-    metrics.push({key: 'chain', label: 'With the cutter' + (chain.value.cutter_size ? ' ' + sizeText(chain.value.cutter_size) : ''),
-      value: chain.value.recall, detail: chain.value.truth ? thousands(chain.value.correct ?? 0) + ' of ' + thousands(chain.value.truth) + ' speed signs, end to end' : 'speed signs, end to end'});
-  }
-  return metrics;
-});
+const classifierMetrics = computed((): Metric[] => classifier.value ? metricsOf(classifier.value) : []);
 /** Why the button is off, as its title. */
 const blocked = computed((): string => {
   if (props.readOnly) return 'Read-only: the choice is turned off on this server.';

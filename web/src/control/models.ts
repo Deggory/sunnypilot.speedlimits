@@ -3,7 +3,7 @@
 // role (POST /api/panel/models/active, asked first in the confirm dialog), and the words the tab shows.
 import {onBeforeUnmount, onMounted, ref, shallowRef} from 'vue';
 import {api, messageOf, post} from '../common/api';
-import {isoWhen} from '../common/format';
+import {isoWhen, thousands} from '../common/format';
 import type {ActiveChosen, ActiveModel, ModelRole, ModelVersion, ModelsPayload} from '../common/panel-types';
 import {askConfirm} from '../composables/confirm';
 import {toast} from '../composables/toast';
@@ -131,4 +131,67 @@ export function initText(initialization: string | null): string {
   if (initialization === 'imagenet1k_v1') return 'ImageNet';
   if (initialization === 'random') return 'random weights';
   return initialization ?? '–';
+}
+
+/** A headline number of a version: what it counts, the share (0-1, null: not measured or not trained for it), the
+ * count it is of ("145 of 208") and a line under it. */
+export interface Metric {
+  key: string;
+  label: string;
+  value: number | null;
+  count: string;
+  detail: string;
+}
+
+/** The numbers that judge a version, side by side (MetricTiles, the Models table): the cutter: the speed signs and
+ * every sign found on the test at its score; the classifier with “not a sign”: the speed-sign crops and every sign
+ * crop read right (the kind of an other sign aside), and the chain with the cutter; an old reader: its crops read
+ * right; the decider: the “Another” signs found on validation and on the test. */
+export function metricsOf(version: ModelVersion): Metric[] {
+  const of = (part: number | null | undefined, whole: number | null | undefined): string =>
+    whole ? thousands(part ?? 0) + ' of ' + thousands(whole) : '';
+  if (version.role === 'cutter') {
+    const cut = version.test ?? version.validation ?? null;
+    if (cut === null) return [];
+    const every: Metric = {key: 'every', label: 'Every sign', value: cut.recall, count: of(cut.found, cut.truth_boxes),
+      detail: cut.truth_boxes === null ? '' : of(cut.found, cut.truth_boxes) + ' found'};
+    const speed = version.families === 'all' ? cut.by_family?.['speed'] ?? null : null;
+    if (speed) {
+      return [{key: 'speed', label: 'Speed signs', value: speed.recall, count: of(speed.found, speed.truth),
+        detail: of(speed.found, speed.truth) + ' found'}, every];
+    }
+    if (version.families === 'all') return [every];
+    return [{...every, key: 'speed', label: 'Speed signs'},
+      {key: 'every', label: 'Every sign', value: null, count: 'speed only', detail: 'Trained on speed signs only'}];
+  }
+  if (version.role === 'classifier') {
+    const test = version.test;
+    const metrics: Metric[] = [];
+    if (version.class_scheme === undefined) {
+      if (test) metrics.push({key: 'every', label: 'Read right', value: test.accuracy, count: of(test.accuracy === null || test.samples === null
+        ? null : Math.round(test.accuracy * test.samples), test.samples), detail: 'right answers on ' + thousands(test.samples ?? 0) + ' test crops'});
+      return metrics;
+    }
+    if (test) {
+      metrics.push({key: 'speed', label: 'Speed signs', value: test.speed_accuracy ?? null, count: of(test.speed_correct, test.speed_samples),
+        detail: test.speed_samples ? of(test.speed_correct, test.speed_samples) + ' read right' : 'Not counted apart in this report'});
+      const every = test.family_accuracy ?? test.accuracy;
+      const right = every === null || test.samples === null ? null : Math.round(every * test.samples);
+      metrics.push({key: 'every', label: 'Every sign', value: every, count: of(right, test.samples), detail: of(right, test.samples) + ' read right'});
+    }
+    const chain = version.chain;
+    if (chain) {
+      metrics.push({key: 'chain', label: 'With the cutter' + (chain.cutter_size ? ' ' + sizeText(chain.cutter_size) : ''), value: chain.recall,
+        count: of(chain.correct, chain.truth), detail: chain.truth ? of(chain.correct, chain.truth) + ' speed signs, end to end' : 'speed signs, end to end'});
+    }
+    return metrics;
+  }
+  const another = (numbers: typeof version.validation): Metric['count'] =>
+    numbers?.other_road_support ? of(numbers.other_road_found, numbers.other_road_support) : '';
+  return [
+    {key: 'validation', label: '“Another” found', value: version.validation?.other_road_recall ?? null, count: another(version.validation),
+      detail: another(version.validation) + ' on validation'},
+    {key: 'test', label: 'On the test', value: version.test?.other_road_support ? version.test.other_road_recall : null,
+      count: version.test?.other_road_support ? another(version.test) : 'no case', detail: version.test?.other_road_support ? another(version.test) + ' on the test' : 'The test has no “Another” sign yet'},
+  ];
 }
