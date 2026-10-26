@@ -10,6 +10,7 @@ import {isoWhen, plural, thousands} from '../common/format';
 import type {ClassifierModel, WatchPartition, WatchRoute} from '../common/panel-types';
 import {type DriveFrame, limitText, replayDrive, stateRuns} from './drive';
 import {sizeText, useModels} from './models';
+import PickerSheet, {type PickerOption} from '../components/PickerSheet.vue';
 import Segmented from './Segmented.vue';
 import {SPEEDS, type Speed, useWatchFrames} from './watch';
 
@@ -30,8 +31,10 @@ const sourceId = computed({
   get: (): string => source.value?.id ?? '',
   set: (value: string) => { pickedSource.value = value; },
 });
-const sourceText = (version: ClassifierModel): string => 'Classifier ' + isoWhen(version.trained_at)
-  + (version.chain?.cutter_size ? ' · cutter ' + sizeText(version.chain.cutter_size) : '') + (version.in_use ? ' · in use' : '');
+/** Each version as the picker shows it: when it was trained, with which cutter it was measured. */
+const sourceOptions = computed((): PickerOption[] => sources.value.map((version) => ({key: version.id,
+  title: 'Classifier ' + isoWhen(version.trained_at), short: isoWhen(version.trained_at), badge: version.in_use ? 'In use' : undefined,
+  sub: version.chain?.cutter_size ? 'with the cutter ' + sizeText(version.chain.cutter_size) : undefined})));
 
 const PARTITIONS = [{key: 'test' as WatchPartition, label: 'Test drives'}, {key: 'validation' as WatchPartition, label: 'Validation drives'}];
 const partition = ref<WatchPartition>('test');
@@ -44,8 +47,9 @@ const route = computed({
   get: (): string => payload.value?.route ?? '',
   set: (value: string) => { wantedRoute.value = value; },
 });
-const routeText = (item: WatchRoute): string => (item.title || item.route) + (item.when ? ' · ' + item.when : '')
-  + ' · ' + plural(item.frames, 'frame');
+/** Each drive as the picker shows it: where, then when and how long. */
+const routeOptions = computed((): PickerOption[] => routes.value.map((item) => ({key: item.route, title: item.title || item.route,
+  sub: [item.when, plural(item.frames, 'frame'), plural(item.signs, 'sign')].filter(Boolean).join(' · ')})));
 
 // -- the drive replayed -------------------------------------------------------------------------------------------------
 const frames = computed(() => payload.value?.frames ?? []);
@@ -189,16 +193,8 @@ const stateWords = {right: 'Right', wrong: 'Wrong', none: 'No limit yet'} as con
   <section ref="root" class="card drive" id="drive" aria-labelledby="drive-title">
     <h2 id="drive-title" class="sr-only">Drive</h2>
     <div class="drive-bar">
-      <label class="drive-field"><span>Drive</span>
-        <select v-model="route" id="drive-route" :disabled="routes.length < 2">
-          <option v-for="item in routes" :key="item.route" :value="item.route">{{ routeText(item) }}</option>
-        </select>
-      </label>
-      <label class="drive-field"><span>Networks</span>
-        <select v-model="sourceId" id="drive-source" :disabled="sources.length < 2">
-          <option v-for="version in sources" :key="version.id" :value="version.id">{{ sourceText(version) }}</option>
-        </select>
-      </label>
+      <PickerSheet v-model="route" :options="routeOptions" label="Drive" id="drive-route"/>
+      <PickerSheet v-model="sourceId" :options="sourceOptions" label="Classifier" id="drive-source"/>
       <Segmented v-model="partition" :options="PARTITIONS" label="Which drives" class="drive-part"/>
     </div>
     <p class="drive-why">{{ partition === 'test'

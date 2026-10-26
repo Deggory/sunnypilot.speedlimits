@@ -488,12 +488,7 @@ border-radius:8px;cursor:pointer;min-height:30px;opacity:.85;transition:backgrou
    leaves), the drive at a glance at its side, the strip of the drive under it. */
 .results-mode{margin-top:-6px}
 .drive{display:flex;flex-direction:column;gap:10px;padding:16px 18px}
-.drive-bar{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px 14px}
-.drive-field{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1 1 220px;max-width:420px}
-.drive-field span{font-size:11.5px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
-.drive-field select{font:inherit;font-size:14px;padding:7px 10px;border-radius:10px;border:0;background:var(--surface-2);color:var(--fg);
-min-width:0;width:100%;min-height:36px}
-.drive-part{margin-left:auto}
+.drive-bar{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr) auto;align-items:center;gap:10px}
 .drive-why{margin:0;font-size:13px;color:var(--muted)}
 .drive-main{display:grid;grid-template-columns:minmax(0,1fr) 230px;grid-template-areas:"stage side" "time time";gap:12px 16px;align-items:start}
 .drive-stage{grid-area:stage;position:relative;width:min(100%,calc((100dvh - 400px) * 1344 / 760));min-width:min(100%,420px);
@@ -541,7 +536,15 @@ align-items:center;gap:4px 12px}
 @media (max-width:860px){
   .drive-main{grid-template-columns:1fr;grid-template-areas:"stage" "time" "side"}
   .drive-stage{width:100%;min-width:0}
-  .drive-part{margin-left:0}
+  .drive-bar{grid-template-columns:minmax(0,1fr) auto}
+  /* The classifier's button only its time (and In use): the drive gets the width; its cutter is in the sheet. */
+  #drive-source .picker-sub{display:none}
+  .drive-bar{align-items:stretch}
+  .drive{padding:14px}
+  .drive-bar .picker{padding:7px 24px 7px 11px}
+  .drive-bar .picker-chev{right:8px}
+  .drive-bar .picker-title{font-size:14.5px}
+  .drive-part{grid-column:1/-1;width:100%;display:grid;grid-template-columns:1fr 1fr}
   .drive-time{grid-template-columns:auto minmax(0,1fr);grid-template-areas:"pos pos" "strip strip" "play speed";gap:6px 10px}
   .drive-play{min-width:0}
   .drive-pos{text-align:right}
