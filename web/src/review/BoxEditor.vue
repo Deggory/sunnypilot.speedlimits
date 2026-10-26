@@ -54,7 +54,7 @@ const noValue = computed(() => hasValueField.value
 const road = computed(() => props.detection?.applicability || 'unresolved');
 // O X U, G P R on a keyboard (use-keyboard.ts).
 const ROAD_KEYS: Record<string, string> = {own_road: 'O', other_road: 'X', unresolved: 'U'};
-const KIND_KEYS: Record<string, string> = {give_way: 'G', stop: 'P', roundabout: 'R', other: 'E', direction_left: '←',
+const KIND_KEYS: Record<string, string> = {give_way: 'G', stop: 'P', roundabout: 'R', other: 'E', main_road: 'M', direction_left: '←',
   direction_right: '→', direction_straight: '↑', direction_several: '↓'};
 const canFit = computed(() => props.detection !== null && aiBlocker() === '');
 const fittingThis = computed(() => fitting.key === props.row.frame_key && fitting.index === state.selected);

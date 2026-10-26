@@ -1,6 +1,6 @@
 // Keyboard shortcuts: Shift ← → frame, Shift ↑ ↓ box (the arrows alone too on a box with a number or none selected), the speed typed
 // as it reads ("5 0" = 50, "1 2 0" = 120, "0" alone = not readable), O X U the road (ours, another, unclear), S other
-// sign for our road, V on a vehicle (not a sign), G give way, P stop, R roundabout, E something else, ← → ↑ ↓ the
+// sign for our road, V on a vehicle (not a sign), G give way, P stop, R roundabout, E something else, M main road, ← → ↑ ↓ the
 // direction (left, right, straight, several), Enter confirm, B or N new box, C fit (centre) the box picked with the AI
 // (every box of the frame when none was picked), A apply previous, I ask the AI, H second reading, D removes every
 // box of the frame, Del removes a box the reviewer selected (on the one the page opened on it says to click it
@@ -18,8 +18,8 @@ import {report, state} from './store';
 // A speed is typed as it reads: the digits wait this long for the next one, then the value is set.
 const TYPING_MS = 900;
 
-// G P R: the kind of an other sign.
-const KIND_KEYS: Record<string, string> = {g: 'give_way', p: 'stop', r: 'roundabout', e: 'other'};
+// G P R E M: the kind of an other sign.
+const KIND_KEYS: Record<string, string> = {g: 'give_way', p: 'stop', r: 'roundabout', e: 'other', m: 'main_road'};
 
 // The arrows with a box selected: its direction (↓ several directions), on an "Other sign" or any box without a number
 // (one just drawn, too). On a box with a number or "Not a sign" they keep their moves: a speed limit never becomes a
@@ -148,7 +148,7 @@ export function useKeyboard(): void {
         setOnVehicle();
         return;
       }
-      // G give way, P stop, R roundabout, E something else, an arrow a direction: pressed again the kind stays (the button
+      // G give way, P stop, R roundabout, E something else, M main road, an arrow a direction: pressed again the kind stays (the button
       // toggles it, the key does not).
       const kind = KIND_KEYS[event.key.toLowerCase()]
         ?? (takesDirection() ? DIRECTION_KEYS[event.key] : undefined);
