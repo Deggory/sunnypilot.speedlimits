@@ -132,6 +132,25 @@ def _without_unseen_validation(records: list[dict[str, Any]], unseen: list[str],
     return kept, skipped
 
 
+# Reviewers whose frames a training leaves out of its train partition (comma-separated starts of their names, e.g.
+# "ai/llama,ai/strata"): to measure what their reviews do to a network. Validation and test stay whole.
+TRAIN_WITHOUT_ENV = "NNSLR_TRAIN_WITHOUT_REVIEWERS"
+
+
+def _without_reviewers(records: list[dict[str, Any]], rows: list[dict[str, Any]],
+                       skipped: Counter) -> tuple[list[dict[str, Any]], list[str]]:
+    """The records without the train crops (signs and not-a-sign) of the frames a reviewer of TRAIN_WITHOUT_ENV
+    reviewed, and those reviewers; the records as they are when it is not set."""
+    without = [item.strip() for item in os.environ.get(TRAIN_WITHOUT_ENV, "").split(",") if item.strip()]
+    if not without:
+        return records, []
+    frames = {row.get("image_path") for row in rows
+              if isinstance(row.get("reviewer"), str) and row["reviewer"].startswith(tuple(without))}
+    kept = [r for r in records if not (r["split"] == TRAIN_SPLIT and r["image_path"] in frames)]
+    skipped["train_frames_of_reviewers_left_out"] += len(records) - len(kept)
+    return kept, without
+
+
 def _classifier_label(row: dict[str, Any]) -> str | None:
     """The v2 label of a reviewed box: the v1 label, the kind of an other sign (``other_sign:<kind>`` when the
     review gives one, else ``other_sign``), and ``not_a_sign`` for a kept box a reviewer marked so (none for one on
@@ -597,6 +616,7 @@ def _prepare_classifier(loaded: dict[str, Any], dataset_path: Path, split_path: 
     if negatives_path is not None:
         mined, negatives_file = _mined_negatives(Path(negatives_path), loaded, frames, data_root)
         records += mined
+    records, without = _without_reviewers(records, rows, skipped)
     for path in sorted({record["image_path"] for record in records}):
         if not _safe_image_path(data_root, path).is_file():
             raise ValueError(f"missing_image: {path}")
@@ -676,6 +696,7 @@ def _prepare_classifier(loaded: dict[str, Any], dataset_path: Path, split_path: 
         "negative_max_iou": NEGATIVE_MAX_IOU,
         "other_sign_rule_at": OTHER_SIGN_RULE_AT,
         "skipped": dict(sorted(skipped.items())),
+        "train_without_reviewers": without,
         "unseen_validation_labels": unseen_validation,
         "trainable": trainable,
         "limitations": limitations,

@@ -142,6 +142,22 @@ def test_a_label_only_in_validation_is_left_out_not_a_stop():
     assert _without_unseen_validation(records, [], Counter()) == (records, Counter())
 
 
+def test_a_training_can_leave_out_the_frames_of_some_reviewers(monkeypatch):
+    from collections import Counter
+    from nnslr_tools.training import TRAIN_WITHOUT_ENV, _without_reviewers
+    rows = [{"image_path": "a.png", "reviewer": "ai/llama-v100/qwen"}, {"image_path": "b.png", "reviewer": "cristianku"}]
+    records = [{"split": "train", "image_path": "a.png"}, {"split": "train", "image_path": "b.png"},
+               {"split": "validation", "image_path": "a.png"}, {"split": "test", "image_path": "a.png"}]
+    monkeypatch.delenv(TRAIN_WITHOUT_ENV, raising=False)
+    assert _without_reviewers(records, rows, Counter()) == (records, [])
+    monkeypatch.setenv(TRAIN_WITHOUT_ENV, "ai/llama, ai/strata")
+    skipped = Counter()
+    kept, without = _without_reviewers(records, rows, skipped)
+    # Only the train crops of their frames go: validation and test stay whole.
+    assert kept == records[1:] and without == ["ai/llama", "ai/strata"]
+    assert skipped == {"train_frames_of_reviewers_left_out": 1}
+
+
 def test_review_tiers_follow_the_other_sign_rule():
     assert review_tier("human_review", BEFORE_RULE) == "human"
     assert review_tier("ai_review", BEFORE_RULE) == "ai_before_rule"
