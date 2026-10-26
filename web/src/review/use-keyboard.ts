@@ -1,6 +1,6 @@
 // Keyboard shortcuts: ← → frame (with Shift: the frame before or after in the filter), ↑ ↓ box, the speed typed
 // as it reads ("5 0" = 50, "1 2 0" = 120, "0" alone = not readable), O X U the road (ours, another, unclear), S other
-// sign for our road, V on a vehicle (not a sign), G give way, P stop, R roundabout, Enter confirm, B or N new box, C fit (centre) the box picked with the AI
+// sign for our road, V on a vehicle (not a sign), G give way, P stop, R roundabout, E something else, Enter confirm, B or N new box, C fit (centre) the box picked with the AI
 // (every box of the frame when none was picked), A apply previous, I ask the AI, H second reading, D removes every
 // box of the frame, Del removes a box the reviewer selected (on the one the page opened on it says to click it
 // first), Esc cancel. While a menu or panel of the site's top bar is open, the keys are its own.
@@ -18,7 +18,7 @@ import {report, state} from './store';
 const TYPING_MS = 900;
 
 // G P R: the kind of an other sign.
-const KIND_KEYS: Record<string, string> = {g: 'give_way', p: 'stop', r: 'roundabout'};
+const KIND_KEYS: Record<string, string> = {g: 'give_way', p: 'stop', r: 'roundabout', e: 'other'};
 
 // O X U: the road of the selected box (A is Apply previous).
 const ROAD_KEYS: Record<string, string> = {o: 'own_road', x: 'other_road', u: 'unresolved'};
@@ -130,7 +130,7 @@ export function useKeyboard(): void {
         setOnVehicle();
         return;
       }
-      // G give way, P stop, R roundabout: pressed again the kind stays (the button toggles it, the key does not).
+      // G give way, P stop, R roundabout, E something else: pressed again the kind stays (the button toggles it, the key does not).
       const kind = KIND_KEYS[event.key.toLowerCase()];
       if (kind) {
         event.preventDefault();

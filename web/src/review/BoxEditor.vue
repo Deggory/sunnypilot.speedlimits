@@ -54,7 +54,7 @@ const noValue = computed(() => hasValueField.value
 const road = computed(() => props.detection?.applicability || 'unresolved');
 // O X U, G P R on a keyboard (use-keyboard.ts).
 const ROAD_KEYS: Record<string, string> = {own_road: 'O', other_road: 'X', unresolved: 'U'};
-const KIND_KEYS: Record<string, string> = {give_way: 'G', stop: 'P', roundabout: 'R'};
+const KIND_KEYS: Record<string, string> = {give_way: 'G', stop: 'P', roundabout: 'R', other: 'E'};
 const canFit = computed(() => props.detection !== null && aiBlocker() === '');
 const fittingThis = computed(() => fitting.key === props.row.frame_key && fitting.index === state.selected);
 // Where the box comes from: the model's proposal, else who added it (the reviewer by hand, or an AI reviewer).
