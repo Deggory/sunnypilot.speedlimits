@@ -91,6 +91,31 @@ function headlineOf(version: ModelVersion): {value: string; text: string} | null
   return version.validation ? {value: pct(version.validation.other_road_recall), text: '“Another” found on validation'} : null;
 }
 const latestHeadline = computed(() => sectionLatest.value ? headlineOf(sectionLatest.value) : null);
+/** The headline number of a version, 0-1 (the same as headlineOf), to compare versions. */
+function headlineRatio(version: ModelVersion): number | null {
+  if (version.role === 'cutter') {
+    const cut = version.test ?? version.validation ?? null;
+    if (cut === null) return null;
+    const speed = version.families === 'all' ? cut.by_family?.['speed'] ?? null : null;
+    return speed ? speed.recall : cut.recall;
+  }
+  if (version.role === 'classifier') return version.chain?.recall ?? version.test?.accuracy ?? null;
+  return version.validation?.other_road_recall ?? null;
+}
+/** The versions before the latest one of the section, newest first, to compare and to put one back in use. */
+const earlier = computed((): ModelVersion[] => {
+  const role = section.value === 'cutter' || section.value === 'classifier' || section.value === 'decider' ? section.value : null;
+  return role ? (roleOf(role)?.versions ?? []).slice(1) : [];
+});
+/** "+4.3 points" / "−1.2 points" against the latest, or ''. */
+function versusLatest(version: ModelVersion): string {
+  const now = sectionLatest.value ? headlineRatio(sectionLatest.value) : null;
+  const then = headlineRatio(version);
+  if (now === null || then === null) return '';
+  const points = (now - then) * 100;
+  if (Math.abs(points) < 0.05) return 'same as the latest';
+  return 'latest ' + (points > 0 ? '+' : '−') + Math.abs(points).toFixed(1) + ' points';
+}
 const readOnly = computed(() => (props.status !== null && !props.status.actions_enabled) || Boolean(models.value?.active_problem));
 const busy = ref<string | null>(null);
 async function choose(version: ModelVersion): Promise<void> {
@@ -207,6 +232,29 @@ const numbers = computed(() => {
     </details>
     <p v-else-if="section === 'cutter' || section === 'classifier'" class="latest-none">{{ models === null ? 'Loading…'
       : 'None trained yet: the ' + (section === 'cutter' ? 'detector' : 'reader') + ' of a whole pipeline plays this role.' }}</p>
+    <!-- The versions before it: each in one row with its number and how the latest compares; open, its card with
+         Use this one. -->
+    <details v-if="sectionLatest && earlier.length" class="latest-row earlier-row" id="earlier-versions">
+      <summary><span class="latest-what"><span class="latest-name">Earlier versions</span>
+        <span class="latest-text">{{ earlier.length }} trained before: compare, or put one back in use</span></span>
+        <span class="latest-chev" aria-hidden="true">›</span></summary>
+      <div class="earlier-list">
+        <details v-for="version in earlier" :key="version.id" class="latest-row earlier-item" :data-version="version.id">
+          <summary>
+            <span class="latest-what"><span class="latest-kicker">{{ version.trained_at ? isoWhen(version.trained_at) : version.run }}<span
+              v-if="version.in_use" class="latest-use">in use</span><span v-else-if="!version.finished" class="latest-wait">not finished</span></span>
+              <span class="latest-name">{{ version.label }}</span>
+              <span v-if="versusLatest(version)" class="latest-text">{{ versusLatest(version) }}</span></span>
+            <strong v-if="headlineOf(version)" class="latest-value small">{{ headlineOf(version)?.value }}</strong>
+            <span class="latest-chev" aria-hidden="true">›</span>
+          </summary>
+          <ul class="model-list">
+            <ModelItem :version="version" :role-label="roleLabel(version.role)" :score="models?.cutter_score_threshold ?? 0.1"
+                       :read-only="readOnly" :busy="busy" @use="choose"/>
+          </ul>
+        </details>
+      </div>
+    </details>
 
     <!-- The slot of the work: the training running (or failed) in place of its button. -->
     <div class="train-slot">
