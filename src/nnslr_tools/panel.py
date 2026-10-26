@@ -77,7 +77,7 @@ RUN_LINES = {
 # The cutter's training: one input size of the detector (scripts/run_detector_sizes.sh NAME SIZE), and the boxes it
 # learns to find (NNSLR_CUTTER_FAMILIES): every sign (the speed signs and the other signs) or the speed signs only.
 CUTTER_SIZES = ('640x360', '960x544', '1344x760')
-CUTTER_SIZE = '960x544'
+CUTTER_SIZE = '1344x760'
 CUTTER_FAMILIES = ('all', 'speed')
 CUTTER_FAMILY = 'all'
 # The options an action takes, besides a training's start and the run to resume (checked by Panel.start).

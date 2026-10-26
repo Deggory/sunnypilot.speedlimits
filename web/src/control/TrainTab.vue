@@ -110,7 +110,7 @@ const FAMILY_OPTIONS: {key: CutterFamilies; label: string}[] = [{key: 'all', lab
 const pickedSize = ref<string | null>(null);
 const pickedFamilies = ref<CutterFamilies | null>(null);
 const cutterSize = computed({
-  get: (): string => pickedSize.value ?? props.status?.cutter_options?.size ?? '960x544',
+  get: (): string => pickedSize.value ?? props.status?.cutter_options?.size ?? '1344x760',
   set: (value: string) => { pickedSize.value = value; },
 });
 const cutterFamilies = computed({

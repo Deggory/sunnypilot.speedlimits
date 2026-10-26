@@ -305,12 +305,12 @@ def test_the_cutter_training_follows_the_rules_of_a_training(root, checkout):
     assert panel._action_states(ready_payload(gpu_processes=2), [])['train_cutter']['reason'] == 'the GPU is busy with another process'
     assert panel._action_states({**ready_payload(), 'reviewed_routes': 1}, [])['train_cutter']['reason'] == '3 reviewed drives are needed, now 1'
     status = panel.status()
-    assert status['cutter_options'] == {'sizes': ['640x360', '960x544', '1344x760'], 'size': '960x544',
+    assert status['cutter_options'] == {'sizes': ['640x360', '960x544', '1344x760'], 'size': '1344x760',
                                         'families': ['all', 'speed'], 'family': 'all'}
 
 
 @pytest.mark.parametrize('options, expected', [
-    (None, '960x544 families=all'), ({'size': '640x360'}, '640x360 families=all'),
+    (None, '1344x760 families=all'), ({'size': '640x360'}, '640x360 families=all'),
     ({'size': '1344x760', 'families': 'speed'}, '1344x760 families=speed')])
 def test_the_cutter_training_runs_one_size_on_a_new_run(root, checkout, monkeypatch, options, expected):
     from nnslr_tools.panel import _run_of
