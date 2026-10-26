@@ -75,6 +75,7 @@ export function fromServer(item: ConfirmedCopy): FrameEdit {
     detections: clone(item.detections ?? []),
     reviewer: item.reviewer,
     reviewer_kind: item.reviewer_kind || 'human',
+    needs_person: item.needs_person === true,
     channel: item.channel,
     review_timestamp: item.review_timestamp,
     site_group: item.site_group,
@@ -117,6 +118,8 @@ export function frameStatus(key: string): FrameStatus {
   if (!s) return 'todo';
   if (s.review_state === 'reviewed') {
     if (!report.apiBase) return 'done';
+    // Saved by the site's AI reviewer and not changed here: still to confirm, by a person.
+    if (s.needs_person && s.saved === true && s.server_confirmed === true && sameAsServer(s)) return 'todo';
     if (s.saved === true && s.server_confirmed === true) return 'done';
     return 'error';
   }
@@ -135,6 +138,7 @@ export function statusLabel(key: string): string {
   const status = frameStatus(key);
   const s = state.edits[key];
   if (status === 'done' && aiConfirmed(key)) return 'Confirmed · AI';
+  if (status === 'todo' && s?.needs_person) return 'AI · to confirm';
   if (status === 'done') return 'Confirmed';
   if (status === 'saving') return 'Saving…';
   if (status === 'error') return s && s.error ? 'Not saved' : 'Waiting';

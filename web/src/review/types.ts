@@ -152,6 +152,8 @@ export interface ServerReview {
   /** web, rest or mcp. */
   channel: string;
   updated_at: string;
+  /** Saved by the site's AI reviewer (Review with AI): shown to confirm, left out of training until a person does. */
+  needs_person?: boolean;
   review_timestamp: string | null;
   detections: Detection[];
   site_group: string | null;
@@ -211,6 +213,8 @@ export interface FrameEdit {
   review_state: 'pending' | 'reviewed';
   detections: Detection[];
   /** false: changed here, or confirmed here and not yet on the server. */
+  /** The server's copy was saved by the site's AI reviewer: a person still has to confirm it. */
+  needs_person?: boolean;
   saved?: boolean | undefined;
   /** The server revision these edits are based on (0: not on the server). */
   revision?: number | undefined;

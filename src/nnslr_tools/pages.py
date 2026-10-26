@@ -235,6 +235,10 @@ def _route_row(summary: dict, *, ai_reviewer: bool = True) -> str:
         stats.append('<span>' + f"{summary['frames_with_proposals']:,}" + ' with proposals</span>')
     if suspicious:
         stats.append('<span class="sus">' + _plural(suspicious, 'suspicious', 'suspicious') + '</span>')
+    waiting = summary.get('waiting_for_person') or 0
+    if waiting:
+        # Saved by the site's AI reviewer: a person confirms them before they count (review_db.SITE_AI_REVIEWER).
+        stats.append('<span class="sus">' + f'{waiting:,}' + ' by AI to confirm</span>')
     from nnslr_tools.preannotate import PROPOSER_NAMES
     # Mid-sentence, "our networks" in lower case ("signs by our networks"); the other names are names.
     proposer = summary.get('proposer') or 'vietnam'

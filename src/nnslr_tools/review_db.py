@@ -72,6 +72,19 @@ REVIEWER_KINDS = ('human', 'ai')
 # REVIEW_CHANNELS and AI_REVIEWER_PREFIX (the stored name of an AI review is "ai/<name>",
 # so it never reads as a person) come from annotations, which checks them in the dataset.
 AI_LABEL_BASIS = 'ai_review'
+# What the site's own AI reviewer saves (Settings › AI reviewer, Review with AI: an LLM server such as llama or strata,
+# reviewer "ai/<provider>/<model>") waits for a person: the page shows it to confirm, and the import leaves it out until
+# a person confirms it. The AI assistants that review through the REST API or MCP (ai/Claude Code, ai/Codex,
+# ai/ChatGPT) count as confirmed, as before.
+SITE_AI_REVIEWER = re.compile(r'ai/[^/]+/.+')
+# The same in SQL: confirmed frames that count as confirmed leave these out.
+NOT_WAITING_SQL = " AND NOT (reviewer_kind = 'ai' AND reviewer GLOB 'ai/*/*')"
+
+
+def waits_for_a_person(review: dict) -> bool:
+    """A confirmed frame the site's own AI reviewer saved, not a person since (SITE_AI_REVIEWER)."""
+    return bool(review.get('confirmed')) and review.get('reviewer_kind') == 'ai' \
+        and isinstance(review.get('reviewer'), str) and SITE_AI_REVIEWER.fullmatch(review['reviewer']) is not None
 
 SCHEMA_STATEMENTS = (
     """CREATE TABLE IF NOT EXISTS schema_version (
@@ -415,8 +428,9 @@ class ReviewStore:
         return result
 
     def confirmed_count(self, route_id: str, run_id: str, *, reviewer_kind: str | None = None) -> int:
-        """Confirmed frames of a run; with reviewer_kind ('human' or 'ai'), only those of that kind of reviewer."""
-        query = 'SELECT COUNT(*) FROM frame_reviews WHERE route_id = ? AND run_id = ? AND confirmed = 1'
+        """Confirmed frames of a run; with reviewer_kind ('human' or 'ai'), only those of that kind of reviewer. The
+        frames the site's AI reviewer saved wait for a person (waiting_count) and are not counted."""
+        query = 'SELECT COUNT(*) FROM frame_reviews WHERE route_id = ? AND run_id = ? AND confirmed = 1' + NOT_WAITING_SQL
         values: tuple = (route_id, run_id)
         if reviewer_kind is not None:
             query += ' AND reviewer_kind = ?'
@@ -424,6 +438,16 @@ class ReviewStore:
         connection = self._connect()
         try:
             return connection.execute(query, values).fetchone()[0]
+        finally:
+            connection.close()
+
+    def waiting_count(self, route_id: str, run_id: str) -> int:
+        """The frames of a run the site's AI reviewer saved, waiting for a person to confirm them."""
+        connection = self._connect()
+        try:
+            return connection.execute(
+                "SELECT COUNT(*) FROM frame_reviews WHERE route_id = ? AND run_id = ? AND confirmed = 1 "
+                "AND reviewer_kind = 'ai' AND reviewer GLOB 'ai/*/*'", (route_id, run_id)).fetchone()[0]
         finally:
             connection.close()
 
@@ -569,6 +593,7 @@ def public_review(review: dict) -> dict:
         'reviewer_kind': review['reviewer_kind'],
         'channel': review['channel'],
         'updated_at': review['updated_at'],
+        'needs_person': waits_for_a_person(review),
         'review_timestamp': payload.get('review_timestamp'),
         'detections': payload.get('detections', []),
         'site_group': payload.get('site_group'),
@@ -953,6 +978,8 @@ def import_from_db(root: Path, output: Path, *, route: str | None = None, datase
     warnings = []
     selected = []
     withdrawn = []
+    waiting = []
+    unconfirmed_out = 0
     for route_id in routes:
         try:
             run_id = latest_report(root, route_id).name
@@ -960,7 +987,11 @@ def import_from_db(root: Path, output: Path, *, route: str | None = None, datase
             warnings.append(f'{route_id}: no current pre-annotation report ({exc}); its reviews were not imported')
             continue
         for review in store.reviews(route_id, run_id):
-            if review['confirmed']:
+            if waits_for_a_person(review):
+                # Saved by the site's AI reviewer: out of the dataset until a person confirms it (and out of it again
+                # when it was imported before this rule).
+                waiting.append(review)
+            elif review['confirmed']:
                 selected.append(review)
             else:
                 withdrawn.append(review)
@@ -969,10 +1000,10 @@ def import_from_db(root: Path, output: Path, *, route: str | None = None, datase
             warnings.append(f'{route_id}: {older} confirmed frames belong to older pre-annotation runs '
                             f'and were not imported')
     existing = _existing_frames(output)
-    # Frame identities whose rows leave the dataset: replaced by a changed review, or withdrawn.
+    # Frame identities whose rows leave the dataset: replaced by a changed review, withdrawn, or waiting for a person.
     drop = set()
     removed = []
-    for review in withdrawn:
+    for review in withdrawn + waiting:
         identity = _review_identity(review)
         old_rows = existing.get(identity)
         if old_rows is None:
@@ -984,8 +1015,12 @@ def import_from_db(root: Path, output: Path, *, route: str | None = None, datase
             # Imported from an older run of the route: this withdrawal did not put them there.
             continue
         drop.add(identity)
-        removed.append(_frame_summary(review))
-    require(bool(selected) or bool(removed), 'empty_dataset', 'no confirmed reviews in the review database')
+        if review in withdrawn:
+            removed.append(_frame_summary(review))
+        else:
+            unconfirmed_out = unconfirmed_out + 1
+    require(bool(selected) or bool(removed) or bool(unconfirmed_out), 'empty_dataset',
+            'no confirmed reviews in the review database')
     new_frames = []
     new_count = 0
     new_ai_frames = 0
@@ -1010,6 +1045,7 @@ def import_from_db(root: Path, output: Path, *, route: str | None = None, datase
             drop.add(frame_identity(rows[0]))
             changed.append(_frame_summary(review))
     counts = {'imported_frame_count': new_count, 'imported_ai_frame_count': new_ai_frames,
+              'waiting_for_a_person_frame_count': len(waiting), 'waiting_removed_frame_count': unconfirmed_out,
               'already_imported_frame_count': already_imported,
               'replaced_frame_count': len(changed), 'changed_after_import': changed,
               'removed_withdrawn_frame_count': len(removed), 'removed_withdrawn': removed}

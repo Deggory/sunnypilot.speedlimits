@@ -61,8 +61,8 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
   }
   if (name === 'ai_review' && options?.save === 'yes') {
     return {title: 'Review and save with the AI?', action: 'Review and save', danger: true,
-      text: 'AI saves are final: nobody approves them again, and the next import puts them into training. Frames a '
-        + 'person confirmed are never touched.'};
+      text: 'What it saves waits for you: each frame goes into training only once you confirm it on the review page. '
+        + 'Frames a person confirmed are never touched.'};
   }
   if (name === 'ai_review') {
     return {title: 'Try the AI reviewer?', action: 'Try',

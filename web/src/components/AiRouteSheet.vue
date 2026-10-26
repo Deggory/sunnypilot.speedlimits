@@ -3,7 +3,7 @@
 // the server) opens this sheet. It reads the AI reviewer of Settings (GET /api/ai/state) and starts the panel job
 // ai_review on the drive (POST /api/panel/run/ai_review): "Try without saving" suggests the boxes of 20 frames,
 // which the review page of the drive shows (its "AI trial" filter); "Review and save" saves what the AI says, after
-// a question, because AI saves are final. Only a reviewer that passed its Test in Settings can do either.
+// a question; what it saves waits for a person to confirm it before it goes into training. Only a reviewer that passed its Test in Settings can do either.
 import {computed, onBeforeUnmount, onMounted, ref, useTemplateRef} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import type {AiState} from '../common/ai-types';
@@ -67,8 +67,8 @@ async function start(save: boolean): Promise<void> {
   error.value = '';
   if (save) {
     const ok = await askConfirm({title: 'Review and save with the AI?', action: 'Review and save', danger: true,
-      text: 'AI saves are final: nobody approves them again, and the next import puts them into training. They are '
-        + 'recorded as ' + recordedAs.value + '. Frames a person confirmed are never touched.'});
+      text: 'What it saves is recorded as ' + recordedAs.value + ' and waits for you: each frame goes into training only '
+        + 'once you confirm it on the review page. Frames a person confirmed are never touched.'});
     if (!ok || drive.value !== value) return;
   }
   busy.value = true;
@@ -132,7 +132,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onClick));
           <button type="button" class="ai-choice save" id="ai-route-save" :disabled="busy" @click="start(true)">
             <span class="ai-choice-icon"><Icon name="ai"/></span>
             <span class="ai-choice-body"><strong>Review and save</strong>
-              <span>Every frame left to review. What the AI says is saved, final, and goes into training at the next import.</span></span>
+              <span>Every frame left to review. What the AI says is saved for you to confirm: only then does it go into training.</span></span>
           </button>
         </div>
       </template>

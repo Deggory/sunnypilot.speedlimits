@@ -81,7 +81,7 @@ async function test(provider: AiProvider): Promise<void> {
   }
 }
 
-/** Only a provider whose last Test passed may review: its saves are final. */
+/** Only a provider whose last Test passed may review. */
 function passed(provider: AiProvider): boolean {
   return provider.last_test?.ok === true;
 }
@@ -160,8 +160,8 @@ onMounted(async () => {
       <p v-if="whoText" class="ai-help ai-who-line" id="ai-who">{{ whoText }}
         <button v-if="canEdit && settings.reviewer !== null" type="button" class="link" data-pick="none" :disabled="choosing"
                 @click="choose(null)">Don’t use AI</button></p>
-      <p class="note">What the AI saves is recorded as <code>ai/&lt;provider&gt;/&lt;model&gt;</code> and is final: no person approves it
-        again. Keys stay on the server, never sent back to a browser.</p>
+      <p class="note">What the AI saves is recorded as <code>ai/&lt;provider&gt;/&lt;model&gt;</code> and waits for you: a frame goes into
+        training only once you confirm it. Keys stay on the server, never sent back to a browser.</p>
     </template>
     <div class="auth-error" role="alert">{{ error }}</div>
     <div class="auth-ok" role="status">{{ done }}</div>

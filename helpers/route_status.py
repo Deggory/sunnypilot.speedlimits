@@ -111,7 +111,9 @@ def review_counts(root: Path, since: str | None) -> tuple[Counter, Counter]:
     connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
     try:
         rows = connection.execute(
-            "SELECT route_id, run_id, updated_at FROM frame_reviews WHERE confirmed = 1").fetchall()
+            # The frames the site's AI reviewer saved wait for a person (nnslr_tools.review_db.SITE_AI_REVIEWER).
+            "SELECT route_id, run_id, updated_at FROM frame_reviews WHERE confirmed = 1 "
+            "AND NOT (reviewer_kind = 'ai' AND reviewer GLOB 'ai/*/*')").fetchall()
     except sqlite3.Error:
         rows = []
     finally:

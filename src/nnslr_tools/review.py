@@ -343,6 +343,8 @@ class ReviewApp(ReviewService):
                 'confirmed_count': self.store.confirmed_count(route, directory.name),
                 # Of those, the frames an AI reviewer confirmed (REST API, MCP, Review with AI).
                 'confirmed_by_ai': self.store.confirmed_count(route, directory.name, reviewer_kind='ai'),
+                # Saved by the site's AI reviewer, for a person to confirm (review_db.SITE_AI_REVIEWER).
+                'waiting_for_person': self.store.waiting_count(route, directory.name),
                 'suspicious_count': len(suspicious),
                 'hint_frames': hint_stats['frames'],
                 'url': '/route/' + route + '/',
