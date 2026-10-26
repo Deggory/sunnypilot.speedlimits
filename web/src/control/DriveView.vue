@@ -315,7 +315,8 @@ const stateWords = {right: 'Right', wrong: 'Wrong', none: 'No limit yet'} as con
         </svg>
         <!-- As the car would show it: the limit now, and under it what the signs say. -->
         <div class="drive-hud" :class="now?.state">
-          <span class="drive-sign" :class="{end: now?.model === 'end', empty: now?.model === null}">{{ limitText(now?.model ?? null) }}</span>
+          <span class="drive-sign" :class="{empty: now?.model == null}">{{ limitText(now?.model ?? null) }}</span>
+          <span v-if="now?.modelGeneral" class="drive-general">general limit</span>
           <span class="drive-truth">signs: <b>{{ limitText(now?.truth ?? null) }}</b></span>
         </div>
         <span v-if="video && (video.state === 'waiting' || video.state === 'making')" class="drive-making">Making the video of this
@@ -326,12 +327,12 @@ const stateWords = {right: 'Right', wrong: 'Wrong', none: 'No limit yet'} as con
       <aside class="drive-side" aria-label="The drive at a glance">
         <div class="drive-big"><strong>{{ rightShare === null ? '–' : rightShare + '%' }}</strong>
           <span>of the drive with the right limit</span></div>
-        <ul class="drive-facts" :aria-label="'A speed sign on ' + plural(summary.signs, 'frame')">
-          <li class="drive-facts-head">A speed sign on {{ plural(summary.signs, 'frame') }}:</li>
+        <ul class="drive-facts" :aria-label="'A sign that sets the limit on ' + plural(summary.signs, 'frame')">
+          <li class="drive-facts-head">A sign that sets the limit on {{ plural(summary.signs, 'frame') }}:</li>
           <li><b>{{ summary.read }}</b> read right</li>
           <li class="wrong"><b>{{ summary.misread }}</b> read as another limit</li>
           <li class="missed"><b>{{ summary.missed }}</b> missed</li>
-          <li class="false"><b>{{ summary.invented }}</b> {{ summary.invented === 1 ? 'limit' : 'limits' }} read where there is no sign</li>
+          <li class="false"><b>{{ summary.invented }}</b> read where there is no sign</li>
         </ul>
         <p class="drive-now" :class="now?.state">Now: <b>{{ stateWords[now?.state ?? 'none'] }}</b></p>
         <ul class="drive-legend" aria-label="Legend">
