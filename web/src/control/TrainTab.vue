@@ -107,11 +107,26 @@ const earlier = computed((): ModelVersion[] => {
   const role = section.value === 'cutter' || section.value === 'classifier' || section.value === 'decider' ? section.value : null;
   return role ? (roleOf(role)?.versions ?? []).slice(1) : [];
 });
-/** "+4.3 points" / "−1.2 points" against the latest, or ''. */
+/** What a version's headline measures, on which signs: equal keys compare. */
+function measureKey(version: ModelVersion): string {
+  if (version.role === 'cutter') {
+    const cut = version.test ?? version.validation ?? null;
+    const speed = version.families === 'all' ? cut?.by_family?.['speed'] ?? null : null;
+    return speed ? 'speed of ' + (speed.truth ?? '?') : 'all of ' + (cut?.truth_boxes ?? '?');
+  }
+  if (version.role === 'classifier') return version.chain ? 'chain' : 'crops';
+  return 'decider';
+}
+
+/** "latest +4.3 points" against the latest when both have the same measure; else what its number counts. */
 function versusLatest(version: ModelVersion): string {
   const now = sectionLatest.value ? headlineRatio(sectionLatest.value) : null;
   const then = headlineRatio(version);
-  if (now === null || then === null) return '';
+  // Only the same measure on the same signs compares: a Reader of a whole pipeline has its crops read right, not the
+  // chain; a cutter measured on 80 test signs, before the drives added since, not one measured on 208.
+  const measure = headlineOf(version)?.text ?? '';
+  if (now === null || then === null || sectionLatest.value === null
+      || measureKey(version) !== measureKey(sectionLatest.value)) return measure;
   const points = (now - then) * 100;
   if (Math.abs(points) < 0.05) return 'same as the latest';
   return 'latest ' + (points > 0 ? '+' : '−') + Math.abs(points).toFixed(1) + ' points';
