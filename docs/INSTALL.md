@@ -84,7 +84,7 @@ Adds `transformers`, `accelerate` and `qwen-vl-utils` to `.venv-gpu` (no install
 
 On a slow line, download the four weight files elsewhere (`model-00001-of-00004.safetensors` … `model-00004-of-00004.safetensors` of that revision, 17.5 GB together) and copy them into `data/models/vlm/Qwen3-VL-8B-Instruct/`; then run the script: it checks the sha256 of each file, keeps the right ones and downloads only what is missing or wrong.
 
-The same is the button **Install Qwen3-VL** under **Found by** on the Data tab, shown until the model has been checked and tried on the GPU (the script leaves `.installed` in the model's folder). Once installed, it is the third choice of **Find the signs → Found by** on the Data tab (`nnslr preannotate --proposer qwen`); until then that choice says what is missing.
+The same is the button **Install Qwen3-VL** under **Found by** in Data › Drives, shown until the model has been checked and tried on the GPU (the script leaves `.installed` in the model's folder). Once installed, it is the third choice of **Find the signs → Found by** in Data › Drives (`nnslr preannotate --proposer qwen`); until then that choice says what is missing.
 
 ### An AI reviewer: any OpenAI-compatible server (optional)
 
@@ -102,7 +102,7 @@ The providers and their keys are kept in `data/web/private/llm-providers.json`, 
 
 ### Publishing a model on Hugging Face
 
-Nothing to install: `scripts/publish_model.sh` and `scripts/publish_networks.sh` (our three networks, the Publish card of the Models tab) run the Hugging Face library through `uvx`.
+Nothing to install: `scripts/publish_model.sh` and `scripts/publish_networks.sh` (our three networks, Models › Publish) run the Hugging Face library through `uvx`.
 
 From the portal: **Settings → Hugging Face** is a three-step wizard. It opens Hugging Face's page for a new token with Write access, takes the pasted token, asks Hugging Face whose it is and whether it can write, and keeps it in `data/web/private/huggingface.json` (mode 600, outside git). The token never goes back to a browser or into a log. **Publish on Hugging Face** passes it to its job in the environment (`HF_TOKEN`).
 

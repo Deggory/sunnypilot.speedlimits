@@ -388,7 +388,7 @@ def test_runs_over_http_with_the_sign_in(tmp_path):
         for path in ('/api/panel/runs/..%2F..%2Fsplits', '/api/panel/runs/../splits', '/api/panel/runs/r1/x', '/api/panel/runs/%2e%2e'):
             assert server.request('GET', path, headers=cookie)[0] == 404, path
         status, response, data = server.request('GET', '/evaluate?run=r1', headers=cookie)
-        assert status == 200 and 'aria-current="page">Evaluate</a>' in data.decode()
+        assert status == 200 and 'aria-current="page">Models</a>' in data.decode()
     finally:
         server.close()
 

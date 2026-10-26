@@ -14,9 +14,9 @@ import JobProgress from './JobProgress.vue';
 import {JOB_STATE, jobOf, PREPARE_ACTIONS, startedWhen, terminalActivities} from './jobs';
 import PrepRoutes from './PrepRoutes.vue';
 import {reviewSummary} from './review-routes';
-import DatasetSection from './DatasetSection.vue';
 import RouteTable from './RouteTable.vue';
 import TerminalActivity from './TerminalActivity.vue';
+import SectionHead from './SectionHead.vue';
 
 const props = defineProps<{status: PanelStatus | null}>();
 const emit = defineEmits<{run: [name: ActionName, state: ActionState, start?: undefined, options?: ActionOptions]; stop: [job: Job];
@@ -142,7 +142,7 @@ function openComma(): void {
 </script>
 
 <template>
-  <h1 class="tab-title">Data</h1>
+  <SectionHead tab="prepare"/>
 
   <section class="card tab-card" aria-labelledby="prepare-title">
     <h2 class="sr-only" id="prepare-title">New drives</h2>
@@ -192,5 +192,4 @@ function openComma(): void {
   <p v-else-if="review.reviewed" class="last-line"><a href="/routes">Every drive is reviewed ›</a></p>
 
   <!-- What the networks learn from: the reviews imported, by sign family, who confirmed them, the split. -->
-  <DatasetSection :dataset="status?.dataset ?? null" :loading="status === null"/>
 </template>

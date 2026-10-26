@@ -1,16 +1,42 @@
-// Overview, Prepare, Train, Evaluate, Models: one page, the tab shown follows the address ("/", "/prepare", "/train",
-// "/evaluate", "/models"). The tab links of the top bar (rendered by pages.py) and the brand switch tab here without a
-// reload; the route list (/routes) and the review pages stay normal links.
+// Every page of the site but the route list and the review pages is one Vue app: the tab shown follows the address
+// ("/", "/prepare", "/dataset", "/train", "/evaluate", "/models", "/publish"). The pages are grouped in four sections
+// (pages.SECTIONS): Overview, Data (Drives, Review, Dataset), Training, Models (Versions, Results, Publish); the
+// section links of the top bar and the phone's tab bar (rendered by pages.py), the pages under a section's title
+// (SectionHead.vue) and the brand switch tab here without a reload; the route list (/routes) and the review pages stay
+// normal links.
 import {nextTick, onBeforeUnmount, onMounted, ref} from 'vue';
 
-export type ControlTab = 'overview' | 'prepare' | 'train' | 'evaluate' | 'models';
+export type ControlTab = 'overview' | 'prepare' | 'dataset' | 'train' | 'evaluate' | 'models' | 'publish';
+export type Section = 'overview' | 'data' | 'train' | 'models';
 
 export const TAB_PATH: Record<ControlTab, string> = {
-  overview: '/', prepare: '/prepare', train: '/train', evaluate: '/evaluate', models: '/models',
+  overview: '/', prepare: '/prepare', dataset: '/dataset', train: '/train', evaluate: '/evaluate', models: '/models',
+  publish: '/publish',
 };
+/** The name of each page, in the window title and under its section's title. */
 const TAB_TITLE: Record<ControlTab, string> = {
-  overview: 'Overview', prepare: 'Data', train: 'Train', evaluate: 'Evaluate', models: 'Models',
+  overview: 'Overview', prepare: 'Drives', dataset: 'Dataset', train: 'Training', evaluate: 'Results', models: 'Versions',
+  publish: 'Publish',
 };
+/** A page of a section: its address and name; the route list (/routes) is Data's, outside this app. */
+export interface SectionPage {
+  key: ControlTab | 'review';
+  href: string;
+  label: string;
+}
+/** The sections, as pages.SECTIONS: their title, and their pages under it. */
+export const SECTIONS: Record<Section, {title: string; pages: SectionPage[]}> = {
+  overview: {title: 'Overview', pages: []},
+  data: {title: 'Data', pages: [{key: 'prepare', href: '/prepare', label: 'Drives'}, {key: 'review', href: '/routes', label: 'Review'},
+    {key: 'dataset', href: '/dataset', label: 'Dataset'}]},
+  train: {title: 'Training', pages: []},
+  models: {title: 'Models', pages: [{key: 'models', href: '/models', label: 'Versions'}, {key: 'evaluate', href: '/evaluate', label: 'Results'},
+    {key: 'publish', href: '/publish', label: 'Publish'}]},
+};
+export function sectionOf(tab: ControlTab): Section {
+  return (Object.keys(SECTIONS) as Section[]).find((key) => SECTIONS[key].pages.some((page) => page.key === tab))
+    ?? (tab === 'train' ? 'train' : 'overview');
+}
 
 export function tabOf(path: string): ControlTab | null {
   const clean = path.replace(/\/+$/, '') || '/';
@@ -20,16 +46,11 @@ export function tabOf(path: string): ControlTab | null {
 /** The tab shown. */
 export const currentTab = ref<ControlTab>(tabOf(location.pathname) ?? 'overview');
 
-function tabLinks(): [HTMLAnchorElement, ControlTab][] {
-  return [...document.querySelectorAll<HTMLAnchorElement>('.tabs a')]
-    .map((link): [HTMLAnchorElement, ControlTab | null] => [link, tabOf(link.pathname)])
-    .filter((pair): pair is [HTMLAnchorElement, ControlTab] => pair[1] !== null);
-}
-
-/** aria-current on the server's tab link of the tab shown, and the page title. */
+/** aria-current on the server's section links (top bar, tab bar) of the tab shown, and the page title. */
 function markCurrent(tab: ControlTab): void {
-  for (const [link, linkTab] of tabLinks()) {
-    if (linkTab === tab) link.setAttribute('aria-current', 'page');
+  const section = sectionOf(tab);
+  for (const link of document.querySelectorAll<HTMLAnchorElement>('nav.tabs a, nav.tabbar a')) {
+    if (link.dataset['section'] === section) link.setAttribute('aria-current', 'page');
     else link.removeAttribute('aria-current');
   }
   document.title = 'Speed limits · ' + TAB_TITLE[tab];

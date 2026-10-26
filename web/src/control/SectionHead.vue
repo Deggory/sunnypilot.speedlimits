@@ -1,0 +1,21 @@
+<script setup lang="ts">
+// The head of a page: its section's title, large as on iOS, and under it the section's pages as a segmented control
+// (Data: Drives, Review, Dataset; Models: Versions, Results, Publish), the page shown marked and a dot on a page with
+// work running. pages.sub_nav draws the same on the route list.
+import {computed} from 'vue';
+import {busyPaths} from '../composables/busy';
+import {SECTIONS, sectionOf, type ControlTab} from './tabs';
+
+const props = defineProps<{tab: ControlTab}>();
+const section = computed(() => SECTIONS[sectionOf(props.tab)]);
+</script>
+
+<template>
+  <header class="section-head">
+    <h1 class="head-title">{{ section.title }}</h1>
+    <nav v-if="section.pages.length" class="subnav" :aria-label="section.title">
+      <a v-for="page in section.pages" :key="page.key" :href="page.href" :aria-current="page.key === tab ? 'page' : undefined"
+         :data-busy="busyPaths.has(page.href) ? 'true' : undefined">{{ page.label }}</a>
+    </nav>
+  </header>
+</template>

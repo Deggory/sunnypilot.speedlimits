@@ -46,18 +46,38 @@ TABS_MACHINE = '<div class="tabs-machine" id="tabs-machine" data-feed="{feed}"><
 # The comma before the server: reachable or not, and Download new drives (web/src/components/TopComma.vue).
 COMMA_PILL = '<div class="tabs-machine" id="comma-pill"></div>'
 
-# The tabs of the site: (key of the current page, address, label). Account is the icon at the right.
-# In the order of the work: prepare the routes, review them, train on the reviews, evaluate the runs, then choose
-# the model in use for each network of the pipeline (cutter, classifier, decider).
-SITE_TABS = (('overview', '/', 'Overview'), ('prepare', '/prepare', 'Data'), ('review', '/routes', 'Review'),
-             ('train', '/train', 'Train'), ('evaluate', '/evaluate', 'Evaluate'), ('models', '/models', 'Models'))
+# The four sections of the site, in the order of the work: (key, address, label, its pages). A section with pages
+# shows them under its title (sub_nav; web/src/control/SubNav.vue draws the same): Data holds the drives, their review
+# and the dataset; Models the versions to choose, their results and the package to publish. Account is the icon at the
+# right. A page is (key of the current page, address, label).
+SECTIONS = (
+    ('overview', '/', 'Overview', ()),
+    ('data', '/prepare', 'Data', (('prepare', '/prepare', 'Drives'), ('review', '/routes', 'Review'),
+                                  ('dataset', '/dataset', 'Dataset'))),
+    ('train', '/train', 'Training', ()),
+    ('models', '/models', 'Models', (('models', '/models', 'Versions'), ('evaluate', '/evaluate', 'Results'),
+                                     ('publish', '/publish', 'Publish'))),
+)
+# Every page of the site: (key, address, label), the page label for a page of a section ("Drives").
+SITE_TABS = tuple(page for key, href, label, pages in SECTIONS for page in (pages or ((key, href, label),)))
+# The section of each page ("review" → "data").
+SECTION_OF = {page[0]: key for key, _, _, pages in SECTIONS for page in (pages or ((key, '', ''),))}
 # The tabs that are one Vue app (web/src/control), by address: the app shows the tab of the address. The
-# route list (/routes) is reached from the Overview.
-CONTROL_TABS = {'/': 'overview', '/prepare': 'prepare', '/train': 'train', '/evaluate': 'evaluate', '/models': 'models'}
+# route list (/routes) is a page of its own.
+CONTROL_TABS = {'/': 'overview', '/prepare': 'prepare', '/dataset': 'dataset', '/train': 'train', '/evaluate': 'evaluate',
+                '/models': 'models', '/publish': 'publish'}
+# The icons of the sections in the phone's tab bar (24 × 24, stroked like web/src/components/icons).
+SECTION_ICONS = {
+    'overview': '<path d="M4 11.5 12 5l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5h-5v5H5a1 1 0 0 1-1-1z"/>',
+    'data': '<ellipse cx="12" cy="6" rx="7" ry="2.6"/><path d="M5 6v6c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6V6"/>'
+            '<path d="M5 12v6c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6v-6"/>',
+    'train': '<path d="M4 19h16"/><path d="M5 16l4.5-5 3.5 3 6-7"/><path d="M15 7h4v4"/>',
+    'models': '<path d="M12 3.5 19.5 7.7v8.6L12 20.5l-7.5-4.2V7.7z"/><path d="M4.8 7.9 12 12l7.2-4.1M12 12v8.3"/>',
+}
 # Earlier addresses of these pages, kept working, and the names of the bar typed as addresses (Settings, Review).
 OLD_ADDRESSES = {'/panoramica': '/', '/pannello': '/', '/stato': '/', '/prepara': '/prepare', '/allena': '/train',
                  '/settings': '/account', '/review': '/routes'}
-# The name of each control tab in the window title, as in the bar.
+# The name of each page in the window title.
 TAB_TITLES = {key: label for key, _, label in SITE_TABS}
 # Dark (the default) or the choice kept in this browser, applied before the first paint
 # (web/src/common/theme.ts changes it).
@@ -100,22 +120,48 @@ def bar_end(current: str = '') -> str:
     return ACCOUNT_MENU.format(current='true' if current == 'account' else 'false')
 
 
-def top_bar(current: str = '', *, live: bool = False, signed_in: bool = True) -> str:
-    """Brand, tabs, then the server pill, the live state and the Account menu, in one row (the tabs in a second
-    one on a narrow screen). current: the key of the tab to mark, or 'account'. The sign-in page
-    (signed_in=False) shows only the brand."""
+def section_paths(pages: tuple, href: str) -> str:
+    """The addresses of a section, for the busy dot of its tab (web/src/composables/busy.ts)."""
+    return ' '.join(page[1] for page in pages) or href
+
+
+def top_bar(current: str = '', *, live: bool = False, signed_in: bool = True, tab_bar: bool = True) -> str:
+    """Brand, the four sections, then the comma and server pills, the live state and the Account menu, in one row
+    (the sections in a second one on a narrow screen). On a phone the sections are a tab bar at the bottom instead
+    (tab_bar; not on the review page of a drive, whose controls are at the bottom). current: the key of the page to
+    mark (its section is marked), or 'account'. The sign-in page (signed_in=False) shows only the brand."""
     brand = ('<a class="brand" href="/" title="Overview">' + BRAND_MARK
              + '<span class="brand-name">Speed limits</span></a>')
     if not signed_in:
         return '<header class="topbar"><div class="topbar-inner">' + brand + '</div></header>'
-    tabs = ''.join('<a href="' + href + '"' + (' aria-current="page"' if key == current else '') + '>'
-                   + label + '</a>' for key, href, label in SITE_TABS)
+    section = SECTION_OF.get(current, '')
+    tabs = ''.join('<a href="' + href + '" data-section="' + key + '" data-paths="' + section_paths(pages, href) + '"'
+                   + (' aria-current="page"' if key == section else '') + '>' + label + '</a>'
+                   for key, href, label, pages in SECTIONS)
+    bar = ''
+    if tab_bar:
+        bar = ('<nav class="tabbar" aria-label="Sections">' + ''.join(
+            '<a href="' + href + '" data-section="' + key + '" data-paths="' + section_paths(pages, href) + '"'
+            + (' aria-current="page"' if key == section else '') + '><svg viewBox="0 0 24 24" aria-hidden="true">'
+            + SECTION_ICONS[key] + '</svg><span>' + label + '</span></a>' for key, href, label, pages in SECTIONS)
+            + '</nav>')
     # The connection state on every page (web/src/composables/connection.ts): fed by the status of the control pages
     # (live), by the server pill elsewhere.
     return ('<header class="topbar"><div class="topbar-inner site-bar">' + brand
             + '<nav class="tabs" aria-label="Sections">' + tabs + '</nav>'
             + '<div class="bar-end">' + LIVE + COMMA_PILL
-            + TABS_MACHINE.format(feed='status' if live else 'system') + bar_end(current) + '</div></div></header>')
+            + TABS_MACHINE.format(feed='status' if live else 'system') + bar_end(current) + '</div></div></header>' + bar)
+
+
+def sub_nav(current: str) -> str:
+    """The pages of the current page's section, under its title, as an iOS segmented control (SubNav.vue draws the
+    same on the control pages); '' for a section without pages."""
+    for key, _, label, pages in SECTIONS:
+        if pages and any(page[0] == current for page in pages):
+            return ('<nav class="subnav" aria-label="' + label + '">' + ''.join(
+                '<a href="' + href + '"' + (' aria-current="page"' if page == current else '') + '>' + name + '</a>'
+                for page, href, name in pages) + '</nav>')
+    return ''
 
 
 def fill(template: str, nonce: str, page: str, current: str = '', *, live: bool = False,
@@ -126,7 +172,7 @@ def fill(template: str, nonce: str, page: str, current: str = '', *, live: bool 
         '__NNSLR_TITLE__': html.escape('Speed limits · ' + title if title else 'Speed limits'),
         '__NNSLR_SHARED_CSS__': asset('shared.css'),
         '__NNSLR_SITE_CSS__': asset('site.css'),
-        '__NNSLR_TOPBAR__': top_bar(current, live=live, signed_in=signed_in),
+        '__NNSLR_TOPBAR__': top_bar(current, live=live, signed_in=signed_in, tab_bar=page != 'review'),
         '__NNSLR_BAR_END__': bar_end(current),
         '__NNSLR_SCRIPT__': page_script(page, nonce),
         '__NNSLR_NONCE__': nonce,
@@ -327,14 +373,14 @@ def render_index(summaries: list[dict], database: Path, nonce: str = '', *, ai_r
     """The route list, grouped: in progress, to start, done. ai_reviewer: an AI reviewer is chosen in Settings
     (each drive left to review gets "Review with AI"); without one, a single link to set it up."""
     main = ['<main class="page">',
-            '<h1 class="sr-only">Review</h1>']
+            '<header class="section-head"><h1 class="head-title">Data</h1>' + sub_nav('review') + '</header>']
     if not ai_reviewer and any(s['confirmed_count'] < s['frame_count'] for s in summaries):
         main.append('<p class="ai-setup">An AI can review the drives for you. '
                     '<a href="/account#ai-reviewer">Set up AI review ›</a></p>')
     if not summaries:
         main.append('<div class="card state-box"><h2>No drives to review yet</h2><p>Download the drives from the '
-                    'comma (the comma button at the top), then prepare them on the <a href="/prepare">Data</a> '
-                    'tab. They show up here when they are ready.</p></div>')
+                    'comma (the comma button at the top), then prepare them in <a href="/prepare">Data › Drives</a>'
+                    '. They show up here when they are ready.</p></div>')
     grouped: dict[str, list[dict]] = {key: [] for key, _ in ROUTE_GROUPS}
     for summary in summaries:
         grouped[route_state(summary['confirmed_count'], summary['frame_count'])].append(summary)

@@ -1,11 +1,11 @@
 <script setup lang="ts">
-// Train: from the reviews to a model, as an app on the phone. One line says what the networks learn from (boxes, frames,
-// drives; the reviews not added yet, with Add: helpers/3_train.sh --dataset-only). Then one network at a time, chosen
+// Training: from the reviews to a model, as an app on the phone. One line says what the networks learn from (objects,
+// frames, drives; the reviews not imported yet), a link to Data › Dataset, where they are imported. Then one network at a time, chosen
 // in a switcher with a dot on the one training: the cutter (scripts/run_detector_sizes.sh, its input size and the
 // signs it finds), the classifier with "not a sign" (scripts/run_classifier.sh), the decider (in preparation:
 // experiment B), the whole pipeline (helpers/3_train.sh, with where it starts). Each has the same place for its work:
 // the Train button, or its training running (or failed) with its steps, then its curves and its latest version
-// (GET /api/panel/models, as the Models tab). The page does not move while work runs. What the dataset holds is below.
+// (GET /api/panel/models, a link to its versions in Models). The page does not move while work runs.
 import {computed, ref} from 'vue';
 import {isoWhen, plural, thousands} from '../common/format';
 import type {ActionName, ActionState, Activity, CutterFamilies, CutterOptions, Job, JobProgress as Progress, ModelRole, ModelVersion,
@@ -19,6 +19,7 @@ import Segmented from './Segmented.vue';
 import TerminalActivity from './TerminalActivity.vue';
 import TrainingCharts from './TrainingCharts.vue';
 import TrainStart from './TrainStart.vue';
+import SectionHead from './SectionHead.vue';
 
 const props = defineProps<{status: PanelStatus | null}>();
 const emit = defineEmits<{run: [name: ActionName, state: ActionState, start?: TrainingStart, options?: CutterOptions]; stop: [job: Job];
@@ -57,9 +58,8 @@ const section = computed({
 const job = computed(() => jobFor(section.value));
 /** The job of the section in its slot: running or failed; one done or stopped by hand is a line. */
 const bigJob = computed(() => job.value && (job.value.state === 'running' || job.value.state === 'failed') ? job.value : null);
-/** Adding the reviews (Import reviews): shown in the line of data. */
-const importJob = computed(() => jobOf(props.status, ['dataset']));
-const importing = computed(() => importJob.value?.state === 'running');
+/** Importing the reviews (Data › Dataset): said in the line of data. */
+const importing = computed(() => jobOf(props.status, ['dataset'])?.state === 'running');
 
 /** The networks by role: every version trained here, newest first (the Models tab's data). */
 const {payload: models} = useModels();
@@ -143,7 +143,6 @@ const numbers = computed(() => {
     reviewed: status.reviewed_routes,
     needed: status.min_routes,
     fresh: routes.reduce((total, row) => total + row.new_reviews, 0),
-    freshRoutes: routes.filter((row) => row.new_reviews > 0).length,
     // What the dataset file holds (status.dataset), else what the routes say they put there.
     objects: dataset ? dataset.objects : routes.reduce((total, row) => total + row.objects, 0),
     frames: dataset ? dataset.frames : null,
@@ -153,27 +152,24 @@ const numbers = computed(() => {
 </script>
 
 <template>
-  <h1 class="tab-title">Train</h1>
+  <SectionHead tab="train"/>
   <!-- Which network: first, under the title, as the segments of an iOS page. -->
   <Segmented v-model="section" class="train-sections" :options="SECTIONS" :marked="runningSections" label="Network"/>
 
 
-  <!-- What the networks learn from, in one line; the reviews not in yet, with their button. -->
-  <section class="card data-strip" aria-label="What the networks learn from">
-    <p class="data-line"><strong>{{ numbers ? thousands(numbers.objects) : '–' }}</strong> boxes on
+  <!-- What the networks learn from, in one line; the reviews not imported yet lead to Data › Dataset, where they are
+       imported. -->
+  <a class="card data-strip" href="/dataset" aria-label="What the networks learn from: open the dataset">
+    <span class="data-texts"><span class="data-line"><strong>{{ numbers ? thousands(numbers.objects) : '–' }}</strong> objects on
       <strong>{{ numbers?.frames === null || !numbers ? '–' : thousands(numbers.frames) }}</strong> frames of
-      {{ numbers ? plural(numbers.inDataset, 'drive') : '–' }}<a v-if="status?.dataset" class="figure-link" href="/prepare#dataset">Details ›</a></p>
-    <p v-if="importing" class="data-new">Adding your reviews… <strong>{{ importJob?.progress.percent === null || importJob?.progress.percent === undefined
-      ? '' : Math.floor(importJob.progress.percent) + '%' }}</strong></p>
-    <p v-else-if="numbers?.fresh" class="data-new"><span><strong>{{ thousands(numbers.fresh) }}</strong> new
-      {{ numbers.fresh === 1 ? 'review' : 'reviews' }} to add</span>
-      <button type="button" class="btn small primary" :disabled="!status?.actions.dataset?.allowed"
-              :title="status?.actions.dataset?.allowed ? 'A few minutes' : status?.actions.dataset?.reason"
-              @click="status && emit('run', 'dataset', status.actions.dataset)">Add</button></p>
-    <p v-else-if="numbers" class="data-new muted">All your reviews are in.</p>
-    <p v-if="numbers && numbers.reviewed < numbers.needed" class="data-new warn">Training needs {{ numbers.needed }} reviewed drives
-      (now {{ numbers.reviewed }}): some are kept apart to test on roads the network never saw.</p>
-  </section>
+      {{ numbers ? plural(numbers.inDataset, 'drive') : '–' }}</span>
+    <span v-if="importing" class="data-new">Importing your reviews…</span>
+    <span v-else-if="numbers?.fresh" class="data-new"><strong>{{ plural(numbers.fresh, 'review') }}</strong> not imported</span>
+    <span v-else-if="numbers" class="data-new muted">Dataset is up to date</span>
+    <span v-if="numbers && numbers.reviewed < numbers.needed" class="data-new warn">Training needs {{ numbers.needed }} reviewed
+      drives (now {{ numbers.reviewed }})</span></span>
+    <span class="data-chev" aria-hidden="true">›</span>
+  </a>
 
   <section class="card role-card train-section" :id="'train-' + section" :data-role="section" aria-live="polite">
     <p v-if="section === 'cutter'" class="role-what">Finds every box that could be a sign. It must miss nothing: the classifier drops its false boxes.</p>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Overview, Prepare, Train, Evaluate, Models: one app, the tab shown follows the address (tabs.ts). One status for all
+// Overview, Drives, Dataset, Training, Results, Versions, Publish: one app, the tab shown follows the address (tabs.ts). One status for all
 // tabs (/api/panel/status every 4 s, which also feeds the machine's history), the actions, and the sheet with the
 // details of a job. Evaluate reads the training runs itself (/api/panel/runs), Models the networks by role
 // (/api/panel/models).
@@ -10,10 +10,12 @@ import {usePanelStatus} from '../composables/panel-status';
 import {busyTabs} from './jobs';
 import LogSheet from './LogSheet.vue';
 import {recordMachine} from './machine-history';
+import DatasetTab from './DatasetTab.vue';
 import EvaluateTab from './EvaluateTab.vue';
 import ModelsTab from './ModelsTab.vue';
 import OverviewTab from './OverviewTab.vue';
 import PrepareTab from './PrepareTab.vue';
+import PublishTab from './PublishTab.vue';
 import {currentTab, tabOf, useTabRouting, type ControlTab} from './tabs';
 import TrainTab from './TrainTab.vue';
 import {RESUME_JOB, RETRY_ACTIONS, RETRY_JOB, usePanelActions} from './use-actions';
@@ -55,7 +57,9 @@ watch(busyPaths, markBusy);
     <PrepareTab v-else-if="currentTab === 'prepare'" :status="status" @run="run" @stop="stop" @details="details"/>
     <TrainTab v-else-if="currentTab === 'train'" :status="status" @run="run" @stop="stop" @details="details"/>
     <EvaluateTab v-else-if="currentTab === 'evaluate'" :status="status" @run="run" @stop="stop" @details="details"/>
-    <ModelsTab v-else :status="status" @run="run" @stop="stop" @details="details"/>
+    <DatasetTab v-else-if="currentTab === 'dataset'" :status="status" @run="run" @stop="stop" @details="details"/>
+    <PublishTab v-else-if="currentTab === 'publish'" :status="status" @run="run" @stop="stop" @details="details"/>
+    <ModelsTab v-else :status="status"/>
   </main>
   <LogSheet :job="shownJob" @close="shownId = null" @stop="stop"/>
 </template>

@@ -7,7 +7,7 @@ import {computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef} fro
 import {api, messageOf, post} from '../common/api';
 import type {AuthState} from '../common/auth-types';
 import {onThemeChange, setTheme, storedTheme, type Theme} from '../common/theme';
-import {busyPaths} from '../composables/busy';
+import {busyPaths, linkBusy} from '../composables/busy';
 import {askConfirm} from '../composables/confirm';
 
 const props = defineProps<{current?: boolean}>();
@@ -19,7 +19,7 @@ const links = [...document.querySelectorAll<HTMLAnchorElement>('nav.tabs a')];
 const currentHref = ref('');
 /** The pages of the phone menu: the current one marked, a dot on those with work running (composables/busy.ts). */
 const pages = computed(() => links.map((link) => ({href: link.getAttribute('href') ?? '/', label: link.textContent ?? '',
-  current: link.getAttribute('href') === currentHref.value, busy: busyPaths.value.has(link.pathname)})));
+  current: link.getAttribute('href') === currentHref.value, busy: linkBusy(link, busyPaths.value)})));
 function readCurrent(): void {
   currentHref.value = links.find((link) => link.getAttribute('aria-current') === 'page')?.getAttribute('href') ?? '';
 }

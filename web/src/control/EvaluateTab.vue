@@ -22,6 +22,7 @@ import {perFrame, sizeText, useModels} from './models';
 import RunDetailView from './RunDetail.vue';
 import Segmented from './Segmented.vue';
 import WatchSection from './WatchSection.vue';
+import SectionHead from './SectionHead.vue';
 
 const props = defineProps<{status: PanelStatus | null}>();
 const emit = defineEmits<{run: [name: ActionName, state: ActionState, start?: undefined, options?: ActionOptions]; stop: [job: Job];
@@ -324,7 +325,7 @@ const nothingToPlay = computed((): string => {
 </script>
 
 <template>
-  <h1 class="tab-title">Evaluate</h1>
+  <SectionHead tab="evaluate"/>
 
   <section v-if="measureJob" class="live-section" :class="{now: measureJob.state === 'running'}" aria-labelledby="measure-job-title">
     <h2 class="section-title" id="measure-job-title">{{ measureJob.state === 'running' ? 'Running' : 'Last measure failed' }}</h2>

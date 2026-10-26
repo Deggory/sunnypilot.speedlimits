@@ -29,10 +29,10 @@ export const ACTION_ICON: Record<ActionName, IconName> = {
  */
 export const ACTION_TAB: Record<ActionName, string | null> = {
   fetch: '/prepare', prepare: '/prepare', prepare_again: '/prepare', setup_vlm: '/prepare',
-  dataset: '/train', train: '/train', train_continue: '/train', train_resume: '/train', train_classifier: '/train',
+  dataset: '/dataset', train: '/train', train_continue: '/train', train_resume: '/train', train_classifier: '/train',
   train_cutter: '/train', train_decider: '/train', ai_review: '/train',
   measure_proposer: '/evaluate', measure_ai_reviewer: '/evaluate',
-  networks_prepare: '/models', networks_publish: '/models',
+  networks_prepare: '/publish', networks_publish: '/publish',
   update: null,
 };
 const actionsOf = (tab: string): ActionName[] => (Object.keys(ACTION_TAB) as ActionName[]).filter((name) => ACTION_TAB[name] === tab);
@@ -44,7 +44,7 @@ export const EVALUATE_ACTIONS: ActionName[] = actionsOf('/evaluate');
 /** The tab of work started from a terminal, by its group (nnslr_tools.panel.ACTIVITIES); a measure is Evaluate's. */
 export function activityTab(activity: Pick<Activity, 'group' | 'label'>): string | null {
   if (activity.group === 'ai') return activity.label.includes('measure') ? '/evaluate' : '/train';
-  if (activity.group === 'publish') return '/models';
+  if (activity.group === 'publish') return '/publish';
   return activity.group === 'fetch' || activity.group === 'prepare' ? '/prepare' : activity.group === 'train' ? '/train' : null;
 }
 

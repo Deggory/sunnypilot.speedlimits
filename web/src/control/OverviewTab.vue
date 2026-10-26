@@ -15,6 +15,7 @@ import PrepRoutes from './PrepRoutes.vue';
 import {reviewSummary} from './review-routes';
 import type {ControlTab} from './tabs';
 import TerminalActivity from './TerminalActivity.vue';
+import SectionHead from './SectionHead.vue';
 
 const props = defineProps<{status: PanelStatus | null; busy: ReadonlySet<ControlTab>}>();
 defineEmits<{run: [name: ActionName, state: ActionState]; stop: [job: Job]; details: [job: Job]}>();
@@ -36,7 +37,7 @@ const gpuNames = computed(() => gpuProcessNames(props.status));
 </script>
 
 <template>
-  <h1 class="tab-title">Overview</h1>
+  <SectionHead tab="overview"/>
   <NextStepCard :next="next" :actions="status?.actions ?? null" :review-href="reviewHref" @run="(name, state) => $emit('run', name, state)"/>
   <FlowTiles :status="status" :attention="next.attention" :busy="busy"/>
 
