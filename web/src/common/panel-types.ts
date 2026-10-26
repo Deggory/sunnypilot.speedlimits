@@ -292,6 +292,18 @@ export interface TrainingStart {
   default: boolean;
 }
 
+/** Review with AI at work (panel.Panel.ai_live): its drive, whether it saves, how far it is, the frame it did last
+ * and about how long is left. */
+export interface AiLive {
+  job: string;
+  route: string;
+  saving: boolean;
+  done: number;
+  total: number | null;
+  frame_key: string | null;
+  seconds_left: number | null;
+}
+
 export interface PanelStatus {
   available: boolean;
   actions_enabled: boolean;
@@ -310,6 +322,8 @@ export interface PanelStatus {
   system: SystemInfo;
   actions: Record<ActionName, ActionState>;
   preparation: Preparation | null;
+  /** Review with AI at work, or null. */
+  ai_live?: AiLive | null;
   dataset: DatasetSummary | null;
   training_starts: TrainingStart[];
   /** The choices of “Train the cutter”: its input sizes and the default one, what it finds and the default. */

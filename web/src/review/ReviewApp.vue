@@ -6,6 +6,7 @@
 // confirm, server, export) and the components below draw it.
 import {computed, nextTick, onBeforeUnmount, onMounted, watchEffect} from 'vue';
 import {aiPhase, loadAiState} from './ai';
+import {watchAiLive} from './ai-live';
 import {watchBusy} from './busy';
 import {ensureCurrentFrame, row, status, work} from './current';
 import {unsavedKeys, workOf} from './frames';
@@ -68,6 +69,7 @@ onMounted(() => {
   // A confirmed frame gets its boxes from the server: then its first box is selected too.
   void loadServer().then(() => {
     startAtWork();
+    watchAiLive();
     const shown = row.value;
     if (shown !== null && state.selected < 0 && workOf(shown).detections.length > 0) state.selected = 0;
   });

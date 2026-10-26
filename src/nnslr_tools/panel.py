@@ -102,6 +102,10 @@ PROPOSER_FILE = 'web/proposer.json'
 DEFAULT_PROPOSER = 'vietnam'
 # The actions that take a proposer, and the two that prepare routes (their progress is the preparation's).
 PROPOSER_ACTIONS = ('prepare', 'prepare_again', 'measure_proposer')
+# The log of Review with AI (helpers/ai_review.sh, nnslr ai-review): its first line names the drive and whether it
+# saves, then a line per frame done, "[37/1390] 2/71: 3 signs (3 added) · 15.2 s · saved".
+AI_LIVE_ROUTE = re.compile(r'^Reviewing the route ([0-9a-f]{8}--[0-9a-f]{10}) with the AI, (saving|a trial)', re.M)
+AI_LIVE_STEP = re.compile(r'^\[(\d+)/(\d+)\] (\d+/\d+): ', re.M)
 PREPARING = ('prepare', 'prepare_again')
 # A proposer in the log of a job started before the panel kept its options (<job id>.json): "Measuring the proposer
 # qwen" (helpers/measure_proposer.sh), "proposing the signs (again) (qwen)" (helpers/1_prepare.sh).
@@ -455,6 +459,35 @@ class Panel:
                                'processes': len(process_list), 'process_list': process_list}
         return info
 
+    def ai_live(self, jobs: list[dict] | None = None) -> dict | None:
+        """The Review with AI at work (one at a time, group ai), for the route list and the drive's page, from its
+        log: the drive, whether it saves, how many frames of how many it has done, the frame it did last and about
+        how long is left (from its pace so far). None when none runs."""
+        if jobs is None:
+            jobs = self.jobs()
+        job = next((item for item in jobs if item['action'] == 'ai_review' and item['state'] == 'running'), None)
+        if job is None:
+            return None
+        path = self.logs / (job['id'] + '.log')
+        try:
+            with path.open('rb') as handle:
+                head = handle.read(4096).decode('utf-8', 'replace')
+                handle.seek(max(0, path.stat().st_size - 16384))
+                tail = handle.read().decode('utf-8', 'replace')
+        except OSError:
+            return None
+        found = AI_LIVE_ROUTE.search(head)
+        if found is None:
+            return None
+        steps = AI_LIVE_STEP.findall(tail)
+        done, total, frame = (int(steps[-1][0]), int(steps[-1][1]), steps[-1][2]) if steps else (0, None, None)
+        started = datetime.strptime(job['id'][:15], '%Y%m%d-%H%M%S').timestamp()
+        left = None
+        if done and total:
+            left = round((time.time() - started) / done * (total - done))
+        return {'job': job['id'], 'route': found.group(1), 'saving': found.group(2) == 'saving', 'done': done,
+                'total': total, 'frame_key': frame, 'seconds_left': left}
+
     # -- everything for the page ---------------------------------------------------------------
     def status(self) -> dict:
         activities = self.activities()
@@ -463,6 +496,7 @@ class Panel:
                    'routes': [], 'next_step': '', 'next_action': None, 'reviewed_routes': 0, 'min_routes': 3,
                    'activities': activities, 'jobs': self.jobs(activities), 'system': system, 'actions': {},
                    'preparation': None}
+        payload['ai_live'] = self.ai_live(payload['jobs'])
         if payload['available']:
             module = self._route_status()
             rows = module.route_rows(self.root, module.videos_dir())

@@ -126,6 +126,7 @@ export async function loadServer(): Promise<void> {
     const onServer = new Set<string>();
     for (const item of body.reviews) {
       onServer.add(item.frame_key);
+      if (state.newestSave === null || item.updated_at > state.newestSave) state.newestSave = item.updated_at;
       const local = state.edits[item.frame_key];
       // Unsaved local edits survive only if they were made on top of the version the server still has.
       if (local && local.saved === false && (local.revision || 0) === item.revision) {

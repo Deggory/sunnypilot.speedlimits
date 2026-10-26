@@ -103,6 +103,8 @@ export interface ReviewState {
   busy: Busy | null;
   /** The list of keys under Confirm is open (Keys, or ?): kept per browser, closed at first. */
   showKeys: boolean;
+  /** The newest updated_at of the saves the page has read (review/ai-live.ts asks for those after it). */
+  newestSave: string | null;
 }
 
 export const state: ReviewState = reactive({
@@ -137,6 +139,7 @@ export const state: ReviewState = reactive({
   server: 'offline',
   busy: null,
   showKeys: readLocal(KEYS_SHOWN, '0') === '1',
+  newestSave: null,
 });
 
 /** Opens or closes the list of keys under Confirm, for this browser. */

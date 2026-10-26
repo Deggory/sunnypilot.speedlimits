@@ -299,3 +299,45 @@ def test_a_session_starts_an_ai_review_and_options_are_strings(lan, root):
     assert status == 200 and KEY.encode() not in data
     status, response, data = lan.request('GET', '/api/panel/status', headers={'X-Review-Token': TOKEN})
     assert status == 200 and KEY.encode() not in data and json_of(data)['ai_reviewer']['available'] is True
+
+
+AI_LOG = '''Reviewing the route {route} with the AI, saving its reviews...
+Salvato: {route} fotogramma 0/0, revisione 1 (ai/fake/model, ai, web)
+[1/3] 0/0: 1 sign (1 added) · 15.0 s · saved
+[2/3] 0/1: no sign · 14.0 s · saved
+'''
+
+
+def test_the_ai_review_at_work_shows_on_the_drive_page_live(root, monkeypatch):
+    from review_helpers import RUN_ID, page_body
+    job = '20261026-111717-ai_review'
+    (root / 'logs/panel').mkdir(parents=True)
+    (root / 'logs/panel' / (job + '.log')).write_text(AI_LOG.format(route=ROUTE))
+    running = [{'id': job, 'action': 'ai_review', 'state': 'running'}]
+    monkeypatch.setattr(Panel, 'jobs', lambda self, activities=None: running)
+    live = Panel(root).ai_live()
+    assert {key: live[key] for key in ('job', 'route', 'saving', 'done', 'total', 'frame_key')} == {
+        'job': job, 'route': ROUTE, 'saving': True, 'done': 2, 'total': 3, 'frame_key': '0/1'}
+    assert live['seconds_left'] is not None and live['seconds_left'] >= 0
+    server = RunningServer(root)
+    try:
+        status, response, data = server.request('GET', f'/api/route/{ROUTE}/live')
+        answer = json_of(data)
+        assert status == 200 and answer['run_id'] == RUN_ID and answer['reviews'] == []
+        assert answer['ai']['route'] == ROUTE and answer['ai']['done'] == 2
+        import json
+        report = root / 'derived/preannotations' / ROUTE / RUN_ID / 'preannotations.jsonl'
+        rows = [json.loads(line) for line in report.read_text().splitlines()]
+        assert server.post_frame(ROUTE, '0/0', page_body(rows[0]))[0] == 200
+        answer = json_of(server.request('GET', f'/api/route/{ROUTE}/live')[2])
+        [first] = answer['reviews']
+        assert first['frame_key'] == '0/0' and first['confirmed']
+        # Only the saves after the newest one the page has.
+        answer = json_of(server.request('GET', f'/api/route/{ROUTE}/live?since=' + first['updated_at'])[2])
+        assert answer['reviews'] == []
+        assert server.request('GET', f'/api/route/{ROUTE}/live?since=1%20OR%201')[0] == 400
+        # Done: nothing at work any more.
+        running.clear()
+        assert json_of(server.request('GET', f'/api/route/{ROUTE}/live')[2])['ai'] is None
+    finally:
+        server.close()

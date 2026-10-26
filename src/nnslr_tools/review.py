@@ -668,6 +668,12 @@ def make_handler(app: ReviewApp):
             if match:
                 self._send_reviews(match.group(1))
                 return
+            # While Review with AI works on a drive, its page asks every few seconds: how far the AI is, and the frames
+            # saved since the newest saved time the page has seen (?since=, an updated_at).
+            match = re.fullmatch(r'/api/route/([^/]+)/live', path)
+            if match:
+                self._send_live(match.group(1), parse_qs(urlsplit(self.path).query).get('since', [None])[0])
+                return
             # Is the drive read only now (Propose again works on it)? The review page asks while it is. With
             # /<after>, the drive at work also sends its new proposals after the first <after> frames (run: theirs).
             match = re.fullmatch(r'/api/route/([^/]+)/busy(?:/([0-9]{1,7}))?', path)
@@ -920,6 +926,20 @@ def make_handler(app: ReviewApp):
             self._json(200, {'route_id': route, 'run_id': run_id, 'frame_count': len(rows),
                              'confirmed_count': confirmed, 'reviews': reviews, 'suspicious': suspicious,
                              'busy': busy})
+
+        def _send_live(self, route, since):
+            try:
+                directory, run_id, rows, busy, proposer = app.view(route)
+            except (PreannotationError, ValueError, OSError):
+                self._problem(404, 'unknown_route', 'Unknown route, or route without a pre-annotation report.', True)
+                return
+            if since is not None and not re.fullmatch(r'[0-9T:.+Z-]{10,40}', since):
+                self._problem(400, 'invalid_since', 'since must be the updated_at of a review.', True)
+                return
+            live = app.panel.ai_live()
+            reviews = [public_review(review) for review in app.store.reviews(route, run_id, since=since)]
+            self._json(200, {'route_id': route, 'run_id': run_id, 'reviews': reviews,
+                             'ai': live if live is not None and live['route'] == route else None})
 
         def _post(self, path):
             # [site-login] - START

@@ -393,14 +393,20 @@ class ReviewStore:
         finally:
             connection.close()
 
-    def reviews(self, route_id: str, run_id: str, *, confirmed_only: bool = False) -> list[dict]:
+    def reviews(self, route_id: str, run_id: str, *, confirmed_only: bool = False,
+                since: str | None = None) -> list[dict]:
+        """The reviews of a route's run; with ``since`` (an updated_at) only those saved after it."""
         query = 'SELECT * FROM frame_reviews WHERE route_id = ? AND run_id = ?'
+        values: tuple = (route_id, run_id)
         if confirmed_only:
             query = query + ' AND confirmed = 1'
+        if since is not None:
+            query = query + ' AND updated_at > ?'
+            values = values + (since,)
         query = query + ' ORDER BY segment_index, output_index'
         connection = self._connect()
         try:
-            rows = connection.execute(query, (route_id, run_id)).fetchall()
+            rows = connection.execute(query, values).fetchall()
         finally:
             connection.close()
         result = []
