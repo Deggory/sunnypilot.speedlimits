@@ -21,6 +21,11 @@ def proposal_of(label: str) -> tuple[str, int | None] | None:
     return family, int(value) if value.isdigit() else None
 
 
+def dataset_family(family: str) -> str:
+    """The family of a proposal as the dataset (and the decider) calls it: road_marking for road_marking_candidate."""
+    return {'road_marking_candidate': 'road_marking'}.get(family, family)
+
+
 def car_speed(root: Path, positions: dict, frame: dict, route: str) -> float | None:
     """The speed (m/s) of the car at a frame from its route's positions (nnslr gps), None without them. positions
     keeps each route's, read once; the frames of a measure of the proposers come from several routes."""
@@ -92,7 +97,7 @@ def run(request: dict) -> None:
             detections = suppress_overlaps(detections)
             # Whom each speed sign applies to: all the boxes of the frame in one call. The other families keep
             # unresolved: the decider learnt ownership only on the speed families.
-            ruled = [item for item in detections if item['family'] in decider.families]
+            ruled = [item for item in detections if dataset_family(item['family']) in decider.families]
             if ruled:
                 speed = car_speed(root, positions, frame, request['route_id'])
                 for item, (applicability, probability) in zip(ruled, decider.decide(

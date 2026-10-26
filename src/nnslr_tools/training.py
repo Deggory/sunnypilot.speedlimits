@@ -662,17 +662,19 @@ def _prepare_classifier(loaded: dict[str, Any], dataset_path: Path, split_path: 
     }
 
 
+# The speed families: what every cutter finds. A number painted on the road ("30", "30 ZONE") is a speed limit too.
 DETECTOR_FAMILIES = frozenset({
     "maximum_speed",
     "cancellation",
     "zone",
     "variable_display",
     "unreadable",
+    "road_marking",
 })
 # What the cutter (the detector) learns to cut, its "families" (recorded in the plan, the configuration, the checkpoint
 # and result.json): "speed", the speed-sign families above (every detector before this setting), or "all", those and
-# the other traffic signs, so that the classifier sees them and says what they are. Never road markings, never the
-# boxes marked "not a sign". The detector keeps one class (its name stays "speed_sign" for the checkpoints).
+# the other traffic signs, so that the classifier sees them and says what they are. Both with the speed limits painted
+# on the road; never the boxes marked "not a sign". The detector keeps one class (its name stays "speed_sign" for the checkpoints).
 CUTTER_FAMILIES = {"speed": DETECTOR_FAMILIES, "all": DETECTOR_FAMILIES | {"other_sign"}}
 DEFAULT_CUTTER_FAMILIES = "all"
 # A detector checkpoint, plan or report that does not say was trained on the speed signs only.
@@ -700,7 +702,7 @@ def prepare_detector_training(
     The boxes of the families chosen (CUTTER_FAMILIES: the speed signs, or those and the other signs) are the
     positive detector boxes; every frame keeps the family of each box (box_families). A frame is a
     detector negative only when it has an explicit whole-frame not_a_sign
-    review. other_sign/road_marking rows alone are not silently promoted to
+    review. other_sign rows alone are not silently promoted to
     whole-frame negatives.
     """
     if families not in CUTTER_FAMILIES:
@@ -808,7 +810,6 @@ def prepare_detector_training(
     limitations = [
         "single_class_vertical_speed_sign_detector" if families == "speed"
         else "single_class_sign_detector_speed_and_other_signs",
-        "road_markings_excluded",
         "other_sign_not_assumed_whole_frame_negative",
         "no_runtime_bundle",
     ]

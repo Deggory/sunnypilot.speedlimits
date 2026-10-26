@@ -76,7 +76,7 @@ PARTITIONS = (TRAIN_SPLIT, VALIDATION_SPLIT, TEST_SPLIT)
 OWNERSHIP_CLASSES = ("own_road", "other_road", "unresolved")
 ABSTAIN = "unresolved"
 # Ownership is learned and measured only on these families; other rows have no ownership loss.
-OWNERSHIP_FAMILIES = ("cancellation", "maximum_speed", "variable_display", "zone")
+OWNERSHIP_FAMILIES = ("cancellation", "maximum_speed", "variable_display", "zone", "road_marking")
 # A "not a sign" box on a vehicle (nnslr_tools.sign_types.NOT_A_SIGN_TYPES): read as not_a_sign, not ours.
 ON_VEHICLE = "on_vehicle"
 VEHICLE_READING = "not_a_sign"

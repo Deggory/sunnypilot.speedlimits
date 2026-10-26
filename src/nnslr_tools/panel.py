@@ -1348,7 +1348,7 @@ def _qwen_gpu_reason(gpu: dict | None) -> str:
 FAMILY_LABELS = {'maximum_speed': 'Speed limit', 'variable_display': 'Variable display', 'zone': 'Zone',
                  'cancellation': 'End of limit', 'other_sign': 'Other sign', 'not_a_sign': 'Not a sign',
                  'unreadable': 'Unreadable', 'road_marking': 'Road marking'}
-SPEED_FAMILIES = ('maximum_speed', 'variable_display', 'zone', 'cancellation')
+SPEED_FAMILIES = ('maximum_speed', 'variable_display', 'zone', 'cancellation', 'road_marking')
 
 
 def _dataset_summary(root: Path) -> dict:
