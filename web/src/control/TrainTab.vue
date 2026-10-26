@@ -214,6 +214,33 @@ const numbers = computed(() => {
     <p v-else-if="section === 'decider'" class="role-what">Says whom each sign applies to: our road, another road, or abstain.</p>
     <p v-else class="role-what">The detector and the reader together, from the reviews to a package: the way every model was trained so far.</p>
 
+    <!-- The slot of the work: the training running (or failed) in place of its button, first: what runs and what to start come before the versions. -->
+    <div class="train-slot">
+      <template v-if="bigJob || sectionActivities.length">
+        <JobProgress v-if="bigJob" :job="bigJob" @details="emit('details', $event)" @stop="emit('stop', $event)"/>
+        <TerminalActivity v-for="activity in sectionActivities" :key="activity.pid + activity.label" :activity="activity" :preparation="null"/>
+      </template>
+      <template v-else-if="section === 'cutter'">
+        <div class="seg-row">
+          <Segmented v-model="cutterSize" :options="sizeOptions" label="Input size of the cutter"/>
+          <Segmented v-model="cutterFamilies" :options="FAMILY_OPTIONS" label="Signs the cutter finds"/>
+        </div>
+        <ActionList :items="CUTTER_ACTIONS" :actions="status?.actions ?? null"
+                    @run="(name, state) => emit('run', name, state, undefined, {size: cutterSize, families: cutterFamilies})"/>
+      </template>
+      <ActionList v-else-if="section === 'classifier'" :items="CLASSIFIER_ACTIONS" :actions="status?.actions ?? null"
+                  @run="(name, state) => emit('run', name, state)"/>
+      <template v-else-if="section === 'decider'">
+        <ActionList :items="DECIDER_ACTIONS" :actions="status?.actions ?? null" @run="(name, state) => emit('run', name, state)"/>
+        <p class="latest-none" id="train-decider-note">The one in use (Models) sets OURS or another on the speed signs Our networks propose.</p>
+      </template>
+      <TrainStart v-else :starts="status ? status.training_starts ?? [] : null" :state="status?.actions.train ?? null"
+                  @start="(start) => status && emit('run', 'train', status.actions.train, start)"/>
+      <p v-if="job && !bigJob && !sectionActivities.length" class="last-line">Last: {{ job.label }}, {{ startedWhen(job) }} ·
+        {{ job.state === 'interrupted' ? 'stopped' : JOB_STATE[job.state][0] }} ·
+        <button type="button" class="link-button" @click="emit('details', job)">Details</button></p>
+    </div>
+
     <!-- The latest version in one row; open, its whole card (numbers by width, Use this one, the run). -->
     <details v-if="sectionLatest" class="latest-row">
       <summary>
@@ -255,33 +282,6 @@ const numbers = computed(() => {
         </details>
       </div>
     </details>
-
-    <!-- The slot of the work: the training running (or failed) in place of its button. -->
-    <div class="train-slot">
-      <template v-if="bigJob || sectionActivities.length">
-        <JobProgress v-if="bigJob" :job="bigJob" @details="emit('details', $event)" @stop="emit('stop', $event)"/>
-        <TerminalActivity v-for="activity in sectionActivities" :key="activity.pid + activity.label" :activity="activity" :preparation="null"/>
-      </template>
-      <template v-else-if="section === 'cutter'">
-        <div class="seg-row">
-          <Segmented v-model="cutterSize" :options="sizeOptions" label="Input size of the cutter"/>
-          <Segmented v-model="cutterFamilies" :options="FAMILY_OPTIONS" label="Signs the cutter finds"/>
-        </div>
-        <ActionList :items="CUTTER_ACTIONS" :actions="status?.actions ?? null"
-                    @run="(name, state) => emit('run', name, state, undefined, {size: cutterSize, families: cutterFamilies})"/>
-      </template>
-      <ActionList v-else-if="section === 'classifier'" :items="CLASSIFIER_ACTIONS" :actions="status?.actions ?? null"
-                  @run="(name, state) => emit('run', name, state)"/>
-      <template v-else-if="section === 'decider'">
-        <ActionList :items="DECIDER_ACTIONS" :actions="status?.actions ?? null" @run="(name, state) => emit('run', name, state)"/>
-        <p class="latest-none" id="train-decider-note">The one in use (Models) sets OURS or another on the speed signs Our networks propose.</p>
-      </template>
-      <TrainStart v-else :starts="status ? status.training_starts ?? [] : null" :state="status?.actions.train ?? null"
-                  @start="(start) => status && emit('run', 'train', status.actions.train, start)"/>
-      <p v-if="job && !bigJob && !sectionActivities.length" class="last-line">Last: {{ job.label }}, {{ startedWhen(job) }} ·
-        {{ job.state === 'interrupted' ? 'stopped' : JOB_STATE[job.state][0] }} ·
-        <button type="button" class="link-button" @click="emit('details', job)">Details</button></p>
-    </div>
 
     <TrainingCharts v-if="charted?.running" :progress="charted.progress" :running="true"/>
     <details v-else-if="charted" class="latest-row curves-row">
