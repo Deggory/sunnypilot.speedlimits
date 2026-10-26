@@ -112,6 +112,19 @@ def _reader_label(row: dict[str, Any]) -> str | None:
     return None
 
 
+def _without_unseen_validation(records: list[dict[str, Any]], unseen: list[str],
+                               skipped: Counter) -> tuple[list[dict[str, Any]], Counter]:
+    """The records without the validation crops of a label no training crop has: the network cannot learn it, so they
+    cannot measure it. Left out (counted in skipped, named in unseen_validation_labels) instead of stopping the
+    training: on 26 October 2026 one AI review of a tram's 45 plate, the only 45 of the dataset, stopped a pipeline."""
+    if not unseen:
+        return records, skipped
+    left = set(unseen)
+    kept = [r for r in records if not (r["split"] == VALIDATION_SPLIT and r["label"] in left)]
+    skipped["validation_label_not_in_train"] += len(records) - len(kept)
+    return kept, skipped
+
+
 def _classifier_label(row: dict[str, Any]) -> str | None:
     """The v2 label of a reviewed box: the v1 label, the kind of an other sign (``other_sign:<kind>`` when the
     review gives one, else ``other_sign``), and ``not_a_sign`` for a kept box a reviewer marked so (none for one on
@@ -421,6 +434,7 @@ def prepare_reader_training(
     train_labels = sorted({r["label"] for r in records if r["split"] == TRAIN_SPLIT})
     val_labels = sorted({r["label"] for r in records if r["split"] == VALIDATION_SPLIT})
     unseen_validation = sorted(set(val_labels) - set(train_labels))
+    records, skipped = _without_unseen_validation(records, unseen_validation, skipped)
     counts_by_split = Counter(r["split"] for r in records)
     counts_by_class = Counter(r["label"] for r in records if r["split"] == TRAIN_SPLIT)
 
@@ -428,7 +442,6 @@ def prepare_reader_training(
         counts_by_split[TRAIN_SPLIT] > 0
         and counts_by_split[VALIDATION_SPLIT] > 0
         and len(train_labels) >= 2
-        and not unseen_validation
     )
 
     limitations = [
@@ -593,6 +606,7 @@ def _prepare_classifier(loaded: dict[str, Any], dataset_path: Path, split_path: 
     train_labels = sorted({r["label"] for r in records if r["split"] == TRAIN_SPLIT})
     val_labels = sorted({r["label"] for r in records if r["split"] == VALIDATION_SPLIT})
     unseen_validation = sorted(set(val_labels) - set(train_labels))
+    records, skipped = _without_unseen_validation(records, unseen_validation, skipped)
     counts_by_split = Counter(r["split"] for r in records)
     counts_by_class = Counter(r["label"] for r in records if r["split"] == TRAIN_SPLIT)
     positives = Counter(r["split"] for r in records if r["label"] != NOT_A_SIGN)
@@ -617,7 +631,6 @@ def _prepare_classifier(loaded: dict[str, Any], dataset_path: Path, split_path: 
         and counts_by_split[VALIDATION_SPLIT] > 0
         and len(train_labels) >= 2
         and NOT_A_SIGN in train_labels
-        and not unseen_validation
     )
     limitations = [
         "classifier_on_reviewed_boxes_and_negatives",

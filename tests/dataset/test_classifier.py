@@ -132,6 +132,16 @@ def test_v2_labels_add_kinds_and_not_a_sign_and_keep_the_rest():
     assert family_label("other_sign:give_way") == "other_sign" and family_label("maximum_speed:60") == "maximum_speed:60"
 
 
+def test_a_label_only_in_validation_is_left_out_not_a_stop():
+    from collections import Counter
+    from nnslr_tools.training import _without_unseen_validation
+    records = [{"split": "train", "label": "maximum_speed:40"}, {"split": "validation", "label": "maximum_speed:40"},
+               {"split": "validation", "label": "maximum_speed:45"}, {"split": "test", "label": "maximum_speed:45"}]
+    kept, skipped = _without_unseen_validation(records, ["maximum_speed:45"], Counter())
+    assert kept == [records[0], records[1], records[3]] and skipped == {"validation_label_not_in_train": 1}
+    assert _without_unseen_validation(records, [], Counter()) == (records, Counter())
+
+
 def test_review_tiers_follow_the_other_sign_rule():
     assert review_tier("human_review", BEFORE_RULE) == "human"
     assert review_tier("ai_review", BEFORE_RULE) == "ai_before_rule"
