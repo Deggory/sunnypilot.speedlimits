@@ -127,7 +127,8 @@ ACTIONS = {
     # Every route still on the comma, over ssh with this machine's key (Host comma in ~/.ssh/config).
     'fetch': {'label': 'Download from the comma', 'group': 'fetch', 'command': ['helpers/fetch_comma_segments.sh']},
     'prepare': {'label': 'Prepare new drives', 'group': 'prepare', 'command': ['helpers/1_prepare.sh']},
-    # The routes nobody has reviewed a frame of, proposed again (after choosing another proposer).
+    # The frames still to confirm of every route, proposed again (after choosing another proposer); the confirmed
+    # frames stay (nnslr preannotate --keep-reviews).
     'prepare_again': {'label': 'Propose again', 'group': 'prepare', 'command': ['helpers/1_prepare.sh', '--again']},
     'dataset': {'label': 'Import reviews', 'group': 'train',
                 'command': ['helpers/3_train.sh', '--dataset-only']},

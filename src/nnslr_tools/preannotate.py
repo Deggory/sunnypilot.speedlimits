@@ -346,7 +346,11 @@ def run_proposer_worker(setup: dict, root: Path, frames: list[dict], output: Pat
 
 
 def run_preannotation(route: str, *, data_root: Path | None = None, confidence: float | None = None,
-                      python_executable: str | None = None, proposer: str = 'vietnam') -> dict:
+                      python_executable: str | None = None, proposer: str = 'vietnam',
+                      keep_reviews: bool = False) -> dict:
+    """A new report of a route's proposals, made the current one. keep_reviews (Propose again on a drive in review):
+    the frames confirmed on the current report stay confirmed on the new one (ReviewStore.carry_confirmed), copied
+    before the switch: when the copy fails the current report stays."""
     root=resolve_data_root(data_root)
     # The frames first: a route without frames downloads no model.
     frames=discover_frames(root,route)
@@ -373,6 +377,16 @@ def run_preannotation(route: str, *, data_root: Path | None = None, confidence: 
              'review_state':'pending','ground_truth':False,'capture_time_established':False}
     (pending/'run.json').write_text(json.dumps(summary,indent=2,allow_nan=False))
     destination=base/run_id; pending.rename(destination)
+    carried=0
+    if keep_reviews and (base/'latest.json').is_file():
+        from nnslr_tools.review import latest_report
+        from nnslr_tools.review_db import ReviewStore, db_path
+        if db_path(root).is_file():
+            carried=ReviewStore(db_path(root)).carry_confirmed(
+                route_id=route, from_run=latest_report(root,route).name, to_run=run_id,
+                frame_keys=[row['frame_key'] for row in rows], client='propose-again')
+    summary['carried_reviews']=carried
+    (destination/'run.json').write_text(json.dumps(summary,indent=2,allow_nan=False))
     pointer=base/('.latest-'+uuid.uuid4().hex+'.json')
     pointer.write_text(json.dumps({'run_id':run_id})); pointer.replace(base/'latest.json')
     return {**summary,'output':str(destination),'report':str(destination/'index.html'),

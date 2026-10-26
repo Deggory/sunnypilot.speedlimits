@@ -76,8 +76,9 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
   }
   if (name === 'prepare_again') {
     return {title: 'Propose the signs again?', action: 'Propose again',
-      text: 'The drives nobody has reviewed a frame of get new proposals from ' + proposerName(options?.proposer)
-        + '. Drives already in review are left as they are.'};
+      text: 'The frames not confirmed yet get new proposals from ' + proposerName(options?.proposer)
+        + ', on every drive. The frames already confirmed stay as they are. Each drive is read only until its new '
+        + 'proposals are in.'};
   }
   if (name === 'fetch') {
     return {title: state.label + '?', action: 'Download',
@@ -96,7 +97,7 @@ const STOP_TEXT: Partial<Record<ActionName, string>> = {
   fetch: 'The drives already copied stay: downloading again carries on from there.',
   prepare: 'The drives already prepared stay. The one being prepared now starts again from its first picture next time.',
   prepare_again: 'The drives already done keep their new signs; the one at work keeps its old ones. Propose again '
-    + 'starts over on every drive nobody has reviewed, those done now included.',
+    + 'starts over on every drive with frames not confirmed, those done now included.',
   measure_proposer: 'The measurement is lost: measuring again starts from the first frame.',
   measure_ai_reviewer: 'The measurement is lost: measuring again starts from the first frame.',
   setup_vlm: 'The files already downloaded stay: installing again carries on from there.',

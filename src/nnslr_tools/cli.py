@@ -1362,6 +1362,9 @@ def build_parser() -> argparse.ArgumentParser:
                        help="vietnam: the Vietnamese traffic-sign YOLO of Hugging Face; ours: the cutter and the "
                             "classifier trained here; qwen: Qwen3-VL-8B (scripts/setup_vlm.sh); ours and qwen use the "
                             "GPU environment. Default: NNSLR_PROPOSER or vietnam")
+    p_pre.add_argument("--keep-reviews", action="store_true",
+                       help="Propose again on a route in review: the frames confirmed on its current report stay "
+                            "confirmed on the new one (copied before it becomes the current one)")
     p_pre.set_defaults(func=_cmd_preannotate)
     p_review = sub.add_parser("review", help="serve the review pages; confirmed frames are saved in <data-root>/annotations/review.sqlite")
     p_review.add_argument("--route", help="open this route directly; default: the index of every route with a report")
@@ -1865,7 +1868,7 @@ def _cmd_dataset(args: argparse.Namespace) -> int:
 def _cmd_preannotate(args: argparse.Namespace) -> int:
     from nnslr_tools.preannotate import run_preannotation
     result = run_preannotation(args.route, data_root=Path(args.data_root) if args.data_root else None,
-                               confidence=args.confidence, proposer=args.proposer)
+                               confidence=args.confidence, proposer=args.proposer, keep_reviews=args.keep_reviews)
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 

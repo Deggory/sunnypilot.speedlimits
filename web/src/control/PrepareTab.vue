@@ -99,10 +99,11 @@ const prepareActions = computed((): PanelStatus['actions'] | null => {
   const blocked = (state: ActionState): ActionState => state.allowed ? {...state, allowed: false, reason: why} : state;
   return {...actions, prepare: blocked(actions.prepare), prepare_again: blocked(actions.prepare_again)};
 });
-/** Routes with proposals and nothing confirmed yet: those "Propose again" can redo. */
-const unstarted = computed(() => (props.status?.routes ?? []).filter((row) => row.state === 'revisionare' && row.confirmed === 0).length);
+/** Routes with proposals and frames still to confirm: "Propose again" redoes those frames, the confirmed ones stay. */
+const unstarted = computed(() => (props.status?.routes ?? []).filter((row) => row.state === 'revisionare').length);
 const PROPOSE_ACTIONS = computed((): [ActionName, string][] => unstarted.value ? [['prepare_again',
-  'New proposals for the ' + plural(unstarted.value, 'drive') + ' nobody has started to review.']] : []);
+  'New proposals for the frames not confirmed yet of ' + plural(unstarted.value, 'drive')
+  + '. The confirmed frames stay as they are.']] : []);
 
 /** The frames and the proposals, with the proposer chosen above them (the drives come from the comma pill of the
  * top bar). */

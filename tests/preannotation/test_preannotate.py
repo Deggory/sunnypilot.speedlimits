@@ -147,6 +147,42 @@ def test_incomplete_worker_keeps_previous_report(tmp_path,monkeypatch):
     assert (base/'latest.json').read_text()==previous
 
 
+def test_propose_again_keeps_the_confirmed_frames_or_the_old_report(tmp_path,monkeypatch):
+    import sqlite3
+    from nnslr_tools import preannotate
+    frames(tmp_path)
+    base=tmp_path/'derived/preannotations'/ROUTE;base.mkdir(parents=True)
+    old='20261020T100000Z-00000000'
+    (base/'latest.json').write_text(json.dumps({'run_id':old}))
+    monkeypatch.setattr(preannotate,'proposer_setup',
+                        lambda *a,**k:{'confidence':.25,'model':None,'road_model':None,'ocr':None})
+    monkeypatch.setattr(preannotate,'run_proposer_worker',
+                        lambda setup,root,found,output,run_id,route:[{'frame_key':'0/0','detections':[]}])
+    monkeypatch.setattr('nnslr_tools.review.latest_report',lambda root,route:base/old)
+    calls=[]
+    class Store:
+        def __init__(self,path):
+            pass
+        def carry_confirmed(self,**kwargs):
+            calls.append(kwargs)
+            return 1
+    monkeypatch.setattr('nnslr_tools.review_db.ReviewStore',Store)
+    database=tmp_path/'annotations/review.sqlite';database.parent.mkdir(parents=True);database.write_bytes(b'')
+    result=preannotate.run_preannotation(ROUTE,data_root=tmp_path,keep_reviews=True)
+    assert result['carried_reviews']==1 and calls==[{'route_id':ROUTE,'from_run':old,'to_run':result['run_id'],
+                                                     'frame_keys':['0/0'],'client':'propose-again'}]
+    assert json.loads((base/'latest.json').read_text())['run_id']==result['run_id']
+    assert json.loads((base/result['run_id']/'run.json').read_text())['carried_reviews']==1
+    # The copy fails: the old report stays the current one, its reviews with it.
+    (base/'latest.json').write_text(json.dumps({'run_id':old}))
+    def broken(self,**kwargs):
+        raise sqlite3.OperationalError('database is locked')
+    monkeypatch.setattr(Store,'carry_confirmed',broken)
+    with pytest.raises(sqlite3.OperationalError):
+        preannotate.run_preannotation(ROUTE,data_root=tmp_path,keep_reviews=True)
+    assert json.loads((base/'latest.json').read_text())['run_id']==old
+
+
 def test_report_escapes_embedded_json_and_is_self_contained(tmp_path):
     from nnslr_tools.review import write_review
     write_review(tmp_path,[{'model_label':'</script><script>bad()</script>'}],'run')

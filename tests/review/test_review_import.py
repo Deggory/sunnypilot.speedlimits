@@ -227,6 +227,46 @@ def test_withdrawn_frame_imported_from_an_older_run_stays(tmp_path, capsys):
     assert not replaced_archives(tmp_path)
 
 
+def test_propose_again_carries_the_confirmed_frames_onto_the_new_run(tmp_path, capsys):
+    old_run = '20261020T100000Z-00000000'
+    rows = make_report(tmp_path, run_id=old_run)
+    store = ReviewStore(db_path(tmp_path))
+    for row in rows[:2]:
+        save_frame_review(store, tmp_path, route_id=ROUTE, run_id=old_run, report_row=row,
+                          body=page_body(row, run_id=old_run), client='test')
+    store.withdraw_review(route_id=ROUTE, run_id=old_run, frame_key='0/1', reviewer='Cristian', client='test')
+    save_frame_review(store, tmp_path, route_id=ROUTE, run_id=old_run, report_row=rows[1],
+                      body=page_body(rows[1], run_id=old_run), client='test')
+    code, out = invoke(capsys, 'import-annotations', '--from-db', '--data-root', str(tmp_path))
+    assert code == 0, out.out + out.err
+    dataset = tmp_path / 'annotations/objects.jsonl'
+    before = dataset.read_bytes()
+    # Propose again: a new report of the same frames; the confirmed frames are copied onto it, once.
+    make_report(tmp_path)
+    keys = [row['frame_key'] for row in rows]
+    assert store.carry_confirmed(route_id=ROUTE, from_run=old_run, to_run=RUN_ID, frame_keys=keys, client='t') == 2
+    assert store.carry_confirmed(route_id=ROUTE, from_run=old_run, to_run=RUN_ID, frame_keys=keys, client='t') == 0
+    old = {review['frame_key']: review for review in store.reviews(ROUTE, old_run)}
+    new = {review['frame_key']: review for review in store.reviews(ROUTE, RUN_ID)}
+    assert sorted(new) == ['0/0', '0/1'] and all(review['confirmed'] for review in new.values())
+    for key, review in new.items():
+        assert review['payload'] == old[key]['payload'] and review['reviewer'] == old[key]['reviewer']
+        assert review['updated_at'] == old[key]['updated_at'] and review['revision'] == 1
+        assert [line['client'] for line in store.history(ROUTE, RUN_ID, key)] == ['t']
+    assert store.confirmed_count_in_other_runs(ROUTE, RUN_ID) == 0
+    # Already in the dataset: nothing new, no warning about older runs.
+    code, out = invoke(capsys, 'import-annotations', '--from-db', '--data-root', str(tmp_path))
+    report = json.loads(out.out)
+    assert code == 0 and report['imported_frame_count'] == 0 and report['already_imported_frame_count'] == 2
+    assert not [w for w in report['warnings'] if 'older pre-annotation runs' in w] and dataset.read_bytes() == before
+    # A carried frame withdrawn on the new run leaves the dataset.
+    store.withdraw_review(route_id=ROUTE, run_id=RUN_ID, frame_key='0/1', reviewer='Cristian', client='test')
+    code, out = invoke(capsys, 'import-annotations', '--from-db', '--data-root', str(tmp_path))
+    report = json.loads(out.out)
+    assert code == 0 and report['removed_withdrawn_frame_count'] == 1
+    assert sorted({record['output_index'] for record in canonical(dataset)}) == [0]
+
+
 def test_from_db_dry_run_reports_and_writes_nothing(tmp_path, capsys):
     rows = make_report(tmp_path)
     store = ReviewStore(db_path(tmp_path))

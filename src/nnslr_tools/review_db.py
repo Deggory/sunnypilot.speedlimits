@@ -422,13 +422,55 @@ class ReviewStore:
             connection.close()
 
     def confirmed_count_in_other_runs(self, route_id: str, run_id: str) -> int:
+        """The frames confirmed on older runs of a route only: one Propose again carried onto ``run_id``
+        (carry_confirmed) is reviewed there, and counts there."""
         connection = self._connect()
         try:
             return connection.execute(
-                'SELECT COUNT(*) FROM frame_reviews WHERE route_id = ? AND run_id <> ? AND confirmed = 1',
-                (route_id, run_id)).fetchone()[0]
+                'SELECT COUNT(DISTINCT frame_key) FROM frame_reviews WHERE route_id = ? AND run_id <> ? '
+                'AND confirmed = 1 AND frame_key NOT IN '
+                '(SELECT frame_key FROM frame_reviews WHERE route_id = ? AND run_id = ?)',
+                (route_id, run_id, route_id, run_id)).fetchone()[0]
         finally:
             connection.close()
+
+    def carry_confirmed(self, *, route_id: str, from_run: str, to_run: str, frame_keys, client: str) -> int:
+        """Propose again on a drive in review: the frames confirmed on ``from_run`` stay confirmed on ``to_run``, its
+        new report. Each is copied as it is (its boxes, who confirmed it and how, when), for the frames ``to_run``
+        has (``frame_keys``) and holds no review of yet, with its line of history; the payload keeps the run it was
+        reviewed on, so the dataset's provenance stays true. One transaction: every frame or none. Returns how many
+        were copied."""
+        keys = set(frame_keys)
+        now = utc_now()
+        with self._write_lock:
+            connection = self._connect()
+            try:
+                connection.execute('BEGIN IMMEDIATE')
+                try:
+                    copied = 0
+                    rows = connection.execute(
+                        'SELECT * FROM frame_reviews WHERE route_id = ? AND run_id = ? AND confirmed = 1 '
+                        'ORDER BY segment_index, output_index', (route_id, from_run)).fetchall()
+                    for row in rows:
+                        if row['frame_key'] not in keys or _select_review(connection, route_id, to_run,
+                                                                          row['frame_key']) is not None:
+                            continue
+                        connection.execute(
+                            'INSERT INTO frame_reviews (route_id, run_id, frame_key, segment_index, output_index, '
+                            'payload, reviewer, confirmed, revision, updated_at, reviewer_kind, channel) '
+                            'VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?)',
+                            (route_id, to_run, row['frame_key'], row['segment_index'], row['output_index'],
+                             row['payload'], row['reviewer'], row['updated_at'], row['reviewer_kind'], row['channel']))
+                        _append_history(connection, route_id, to_run, row['frame_key'], 1, row['payload'],
+                                        row['reviewer'], 1, now, client, row['reviewer_kind'], row['channel'])
+                        copied = copied + 1
+                    connection.execute('COMMIT')
+                except BaseException:
+                    connection.execute('ROLLBACK')
+                    raise
+            finally:
+                connection.close()
+        return copied
 
     def route_ids(self) -> list[str]:
         connection = self._connect()
@@ -929,7 +971,10 @@ def import_from_db(root: Path, output: Path, *, route: str | None = None, datase
         old_rows = existing.get(identity)
         if old_rows is None:
             continue
-        if not _imported_from_run(old_rows, review['run_id']):
+        # A frame carried onto this run by Propose again (carry_confirmed) keeps the run it was reviewed on.
+        reviewed_on = review['payload'].get('run_id') if isinstance(review['payload'], dict) else None
+        if not _imported_from_run(old_rows, review['run_id']) and not (
+                reviewed_on and _imported_from_run(old_rows, reviewed_on)):
             # Imported from an older run of the route: this withdrawal did not put them there.
             continue
         drop.add(identity)

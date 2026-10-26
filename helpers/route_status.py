@@ -6,7 +6,8 @@ Standard library only, read-only: it never writes in the data root or in the rev
   python -m helpers.route_status                    (table + next step)
   python -m helpers.route_status --todo=extract     (one route per line: still to extract)
   python -m helpers.route_status --todo=preannotate (extracted, without a pre-annotation report)
-  python -m helpers.route_status --todo=repropose   (with a report, but no frame ever reviewed: safe to propose again)
+  python -m helpers.route_status --todo=repropose   (with a report and frames still to confirm: Propose again gives
+                                                    those new proposals, the confirmed ones stay)
 """
 from __future__ import annotations
 
@@ -175,9 +176,8 @@ def route_rows(root: Path, videos: Path) -> list[dict]:
 
 
 def route_state(row: dict) -> str:
-    # A pre-annotated route is never processed again: a new report would leave its
-    # reviews on an older run, which import-annotations --from-db does not import.
-    # Segments that show up later stay unused (see print_table).
+    # A pre-annotated route is prepared again only by Propose again (helpers/1_prepare.sh --again), which copies
+    # its confirmed frames onto the new report. Segments that show up later stay unused (see print_table).
     if row["run_id"] is not None:
         if row["confirmed"] < row["report_frames"]:
             return "revisionare"
@@ -228,9 +228,11 @@ def main() -> int:
     args = parser.parse_args()
     rows = route_rows(data_root(), videos_dir())
     if args.todo == "repropose":
+        # A drive with frames still to confirm (its confirmed frames stay, nnslr preannotate --keep-reviews); none
+        # when the review database cannot be read, so that nothing is proposed again on a guess.
         reviewed = reviewed_routes(data_root())
         for row in rows:
-            if reviewed is not None and row["run_id"] and row["route"] not in reviewed:
+            if reviewed is not None and row["run_id"] and row["confirmed"] < row["report_frames"]:
                 print(row["route"])
     elif args.todo:
         wanted = "estrarre" if args.todo == "extract" else "preannotare"

@@ -8,16 +8,18 @@
 # Already done work is skipped, so it can be run after every fetch. Next: helpers/2_review.sh.
 #
 # Usage: helpers/1_prepare.sh [--jobs=<n>] [--background] [--again] [<route> ...]
-#   helpers/1_prepare.sh --again             (proposes again the routes nobody has reviewed a frame of yet,
-#                                             e.g. after choosing another proposer)
+#   helpers/1_prepare.sh --again             (proposes again the frames still to confirm of every route, e.g.
+#                                             after choosing another proposer: the confirmed frames stay as they
+#                                             are; a route all confirmed is left out)
 #   helpers/1_prepare.sh                     (every new route, one at a time)
 #   helpers/1_prepare.sh --jobs=4            (4 routes at once: more cores, faster)
 #   helpers/1_prepare.sh --background        (goes on after the ssh session is closed)
 #   helpers/1_prepare.sh 0000011e--0c8825628a
 #
-# A route that already has a pre-annotation report is never processed again: a new report
-# would leave its reviews on the old one, and they would no longer be imported. Segments of
-# it that arrive later stay unused (helpers/status.sh shows them).
+# Without --again a route that already has a pre-annotation report is never processed again. With it,
+# the new report gets the confirmed frames of the old one (nnslr preannotate --keep-reviews), copied
+# before it becomes the current one. Segments of a route that arrive later stay unused (helpers/status.sh
+# shows them).
 # Every route writes its own log in data/logs/prepare/<route>.log.
 # Who proposes the signs: NNSLR_PROPOSER=vietnam (the Vietnamese YOLO of Hugging Face, default) or ours (our
 # cutter and classifier, on the GPU), the choice of the Prepare tab.
@@ -68,10 +70,10 @@ prepare_route() {
   local log="$LOG_DIR/$route.log"
   local worked=0
   if [ "${PREPARE_AGAIN:-0}" = 1 ]; then
-    # Only a route nobody has reviewed a frame of: a new report would leave reviews on the old one.
-    todo repropose | grep -qx "$route" || { echo "$route: already in review, left as it is"; return 0; }
+    # A route with frames still to confirm: the confirmed ones are copied onto the new report.
+    todo repropose | grep -qx "$route" || { echo "$route: every frame confirmed, left as it is"; return 0; }
     echo "$route: proposing the signs again (${NNSLR_PROPOSER:-vietnam})..."
-    "$NN" preannotate --route "$route" < /dev/null >> "$log" 2>&1 \
+    "$NN" preannotate --route "$route" --keep-reviews < /dev/null >> "$log" 2>&1 \
       || { echo "$route: proposing failed (see $log)"; return 1; }
     echo "$route: ready to review"
     return 0
