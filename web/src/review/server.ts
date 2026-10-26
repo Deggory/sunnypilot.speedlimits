@@ -1,6 +1,7 @@
 // The review server: reading the saved reviews of the route, sending each confirmation, retrying the ones that
 // did not reach it. Not used offline (the static report, apiBase null).
 import {messageOf} from '../common/api';
+import {dropStaleKind} from './catalog';
 import {clone} from './dom';
 import {countryOf, fromServer, unsavedKeys} from './frames';
 import {report, rowOf, state, store} from './store';
@@ -62,6 +63,8 @@ export async function send(key: string): Promise<boolean> {
   state.inFlight.add(key);
   state.lastSave = {key, result: 'saving', revision: s.revision || 0};
   let ok = false;
+  // A frame edited before the kind was dropped with the family (it would be refused at every retry).
+  s.detections.forEach(dropStaleKind);
   try {
     const result = await call<SaveAnswer>('POST', apiBase + '/frame/' + key, {
       run_id: report.runId,

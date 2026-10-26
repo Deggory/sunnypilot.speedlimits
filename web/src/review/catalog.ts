@@ -27,6 +27,14 @@ export const QUICK_VALUES: readonly number[] = [20, 30, 40, 50, 60, 70, 80, 100,
  * vehicle, such as the top-speed sticker on the back of a truck. */
 export const ON_VEHICLE = 'on_vehicle';
 
+/** Drops a kind the box's family cannot have: one left from an "Other sign" (a direction, say) whose number was then
+ * typed, which made it a speed limit. The server refuses such a box, so it goes before every save too. */
+export function dropStaleKind(d: Detection): void {
+  if (d.sign_type == null) return;
+  if (d.family === 'other_sign' || (d.family === 'not_a_sign' && d.sign_type === ON_VEHICLE)) return;
+  delete d.sign_type;
+}
+
 export interface SignKind {
   id: string;
   /** In the list of the boxes: "Danger: children". */

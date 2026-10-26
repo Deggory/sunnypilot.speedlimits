@@ -1,7 +1,7 @@
 // Changes to the frame on screen: type, value, road and details of the selected box, boxes added (drawn or
 // taken from the second reading) and removed, drawing mode and second reading on or off.
 import {nextTick} from 'vue';
-import {ON_VEHICLE, familyForHint, familyHasValue} from './catalog';
+import {ON_VEHICLE, dropStaleKind, familyForHint, familyHasValue} from './catalog';
 import {writeLocal} from './dom';
 import {currentRow, selectedDetection, workOf} from './frames';
 import {isBox} from './geometry';
@@ -28,6 +28,7 @@ function editSelected(change: (d: Detection) => void): void {
   const row = currentRow();
   if (!d || !row || refuseChange()) return;
   change(d);
+  dropStaleKind(d);
   changed(row);
 }
 
