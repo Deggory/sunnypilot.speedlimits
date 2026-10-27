@@ -5,7 +5,8 @@
 
 Reads every ``derived/gps/<route>/positions.jsonl`` of the data root and keeps the OSM ways with a road
 ``highway`` tag that have a node within about --margin-m of a position. Writes ``derived/osm/roads.jsonl``:
-one line per way, ``{"id", "highway", "oneway", "name", "ref", "lanes", "maxspeed", "nodes": [[lat, lon], ...]}``.
+one line per way, ``{"id", "highway", "oneway", "name", "ref", "lanes", "maxspeed", "maxspeed_type", "motorroad",
+"nodes": [[lat, lon], ...]}``. Used by nnslr map-candidates and nnslr road-types.
 
 The map: ``raw/osm/switzerland-latest.osm.pbf`` (Geofabrik extract of OpenStreetMap, © OpenStreetMap
 contributors, ODbL). It is read here, offline: no position of the drives leaves the server. osmium (pyosmium)
@@ -86,9 +87,13 @@ def main() -> int:
                     near = True
             if near and len(nodes) >= 2:
                 tags = way.tags
+                # maxspeed_type: the kind of limit when the map says it (CH:urban, CH:rural, CH:zone30...), from
+                # maxspeed:type, else source:maxspeed (nnslr_tools.road_types).
                 self.ways.append({'id': way.id, 'highway': kind, 'oneway': tags.get('oneway'),
                                   'name': tags.get('name'), 'ref': tags.get('ref'), 'lanes': tags.get('lanes'),
-                                  'maxspeed': tags.get('maxspeed'), 'nodes': nodes})
+                                  'maxspeed': tags.get('maxspeed'),
+                                  'maxspeed_type': tags.get('maxspeed:type') or tags.get('source:maxspeed'),
+                                  'motorroad': tags.get('motorroad'), 'nodes': nodes})
 
     handler = Roads()
     # Node locations kept in a file index: a whole country does not fit comfortably in memory otherwise.

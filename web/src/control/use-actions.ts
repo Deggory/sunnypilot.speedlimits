@@ -13,9 +13,9 @@ export const RESUME_JOB: InjectionKey<(job: Job) => Promise<void>> = Symbol('res
 export const RETRY_JOB: InjectionKey<{can: (job: Job) => boolean; run: (job: Job) => void}> = Symbol('retry-job');
 /** The actions whose failed job can simply run again: no option but the proposer (a training has Resume). */
 export const RETRY_ACTIONS: ActionName[] = ['fetch', 'prepare', 'prepare_again', 'setup_vlm', 'dataset', 'measure_proposer',
-  'networks_prepare'];
+  'networks_prepare', 'road_types'];
 
-/** The question before an action; null: it starts at the click (preparing, importing the reviews). */
+/** The question before an action; null: it starts at the click (preparing, importing the reviews, the road types). */
 /** The proposer as the Prepare tab names it. */
 function proposerName(proposer: string | undefined): string {
   return proposer === 'ours' ? 'our cutter and classifier' : proposer === 'qwen' ? 'Qwen3-VL' : 'the Vietnamese YOLO of Hugging Face';
@@ -110,6 +110,7 @@ const STOP_TEXT: Partial<Record<ActionName, string>> = {
   ai_review: 'The frames already saved stay saved; the others are left to review.',
   networks_prepare: 'Nothing is kept: preparing again starts over.',
   networks_publish: 'What Hugging Face already received may stay there.',
+  road_types: 'The drives done stay; the next run does them all again in a minute.',
 };
 
 /** run() and stop() for the buttons; refresh reads /api/panel/status again. */

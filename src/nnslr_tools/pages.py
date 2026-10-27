@@ -47,13 +47,13 @@ TABS_MACHINE = '<div class="tabs-machine" id="tabs-machine" data-feed="{feed}"><
 COMMA_PILL = '<div class="tabs-machine" id="comma-pill"></div>'
 
 # The four sections of the site, in the order of the work: (key, address, label, its pages). A section with pages
-# shows them under its title (sub_nav; web/src/control/SubNav.vue draws the same): Data holds the drives, their review
-# and the dataset; Models the versions to choose, their results and the package to publish. Account is the icon at the
-# right. A page is (key of the current page, address, label).
+# shows them under its title (sub_nav; web/src/control/SubNav.vue draws the same): Data holds the drives, their review,
+# the dataset and the road types from the map; Models the versions to choose, their results and the package to publish.
+# Account is the icon at the right. A page is (key of the current page, address, label).
 SECTIONS = (
     ('overview', '/', 'Overview', ()),
     ('data', '/prepare', 'Data', (('prepare', '/prepare', 'Drives'), ('review', '/routes', 'Review'),
-                                  ('dataset', '/dataset', 'Dataset'))),
+                                  ('dataset', '/dataset', 'Dataset'), ('roads', '/roads', 'Roads'))),
     ('train', '/train', 'Training', ()),
     ('models', '/models', 'Models', (('models', '/models', 'Versions'), ('evaluate', '/evaluate', 'Results'),
                                      ('publish', '/publish', 'Publish'))),
@@ -64,8 +64,8 @@ SITE_TABS = tuple(page for key, href, label, pages in SECTIONS for page in (page
 SECTION_OF = {page[0]: key for key, _, _, pages in SECTIONS for page in (pages or ((key, '', ''),))}
 # The tabs that are one Vue app (web/src/control), by address: the app shows the tab of the address. The
 # route list (/routes) is a page of its own.
-CONTROL_TABS = {'/': 'overview', '/prepare': 'prepare', '/dataset': 'dataset', '/train': 'train', '/evaluate': 'evaluate',
-                '/models': 'models', '/publish': 'publish'}
+CONTROL_TABS = {'/': 'overview', '/prepare': 'prepare', '/dataset': 'dataset', '/roads': 'roads', '/train': 'train',
+                '/evaluate': 'evaluate', '/models': 'models', '/publish': 'publish'}
 # The icons of the sections in the phone's tab bar (24 × 24, stroked like web/src/components/icons).
 SECTION_ICONS = {
     'overview': '<path d="M4 11.5 12 5l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5h-5v5H5a1 1 0 0 1-1-1z"/>',

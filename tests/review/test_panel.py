@@ -281,6 +281,32 @@ def test_fetch_never_runs_together_with_a_preparation_or_an_update(root, checkou
     finished(panel, prepare['id'])
 
 
+
+def test_the_road_types_need_no_confirmed_frame_and_are_no_preparation(root, checkout, monkeypatch, tmp_path):
+    panel = Panel(root, repo=checkout)
+    assert panel.status()['actions']['road_types']['reason'] == 'helpers/road_types.sh is missing in this installation'
+    with pytest.raises(PanelError) as missing:
+        panel.start('road_types')
+    assert missing.value.status == 403
+    script = checkout / 'helpers/road_types.sh'
+    script.write_text('#!/usr/bin/env bash\necho "== a. GPS of the drives"\nsleep "${FAKE_SLEEP:-0}"\n')
+    script.chmod(0o755)
+    # Nothing confirmed yet: the GPS and the map are enough. A server without a prepared drive has nothing to read.
+    assert panel.status()['actions']['road_types'] == {'label': 'Find the road types', 'allowed': True, 'reason': ''}
+    assert Panel(tmp_path / 'empty', repo=checkout).status()['actions']['road_types']['reason'] == 'no prepared drive'
+    monkeypatch.setenv('FAKE_SLEEP', '30')
+    job = panel.start('road_types')
+    try:
+        status = panel.status()
+        assert status['actions']['prepare']['reason'] == 'A search for the road types is running'
+        # It shares the group of the preparation, but the Prepare page shows no drive being prepared.
+        assert status['preparation'] is None
+        steps = next(item for item in status['jobs'] if item['id'] == job['id'])['progress']['steps']
+        assert [step['key'] for step in steps] == ['gps', 'map_roads', 'road_types'] and steps[0]['state'] == 'current'
+    finally:
+        panel.stop(job['id'])
+        finished(panel, job['id'])
+
 def make_route(root, route, segments, extracted, frames_per_segment=4):
     for index in range(segments):
         (root / 'raw/routes' / route / str(index)).mkdir(parents=True)

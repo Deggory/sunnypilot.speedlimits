@@ -570,6 +570,27 @@ background:var(--ok-soft);color:var(--ok)}
 .import-why,.import-last{margin:0;font-size:13px;color:var(--muted)}
 .import-why.warn{color:var(--warn)}
 @media (max-width:480px){.import-row{flex-wrap:wrap}.import-row .btn{width:100%;justify-content:center}}
+/* Data › Roads (RoadsTab.vue): the same action card, then each drive as a thin strip of its whole length coloured by
+   the road type of its pictures. Four slots of the reference categorical palette, checked in both themes on every pair
+   (any type can follow any other): amber town, green rural, magenta expressway, blue motorway; unknown is the muted grey,
+   half see-through so it reads as "nothing known" in both themes. */
+:root{--rt-rural:#008300}
+.rt-town{background:var(--split-4)}.rt-rural{background:var(--rt-rural)}.rt-expressway{background:var(--split-5)}
+.rt-motorway{background:var(--c-train)}.rt-unknown{background:var(--muted);opacity:.5}
+.rt-drives{display:flex;flex-direction:column;gap:14px}
+.rt-legend{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px 18px;font-size:13px;color:var(--muted)}
+.rt-legend li{display:inline-flex;align-items:center;gap:7px}
+.rt-key{width:10px;height:10px;border-radius:3px;flex:none}
+.rt-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.rt-drive{display:flex;flex-direction:column;gap:7px;padding:14px 0;border-top:1px solid var(--line)}
+.rt-drive:last-child{padding-bottom:0}
+.rt-name{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:2px 12px;min-width:0}
+.rt-name strong{font-size:15px;font-weight:600;letter-spacing:-.01em}
+.rt-name span{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.rt-strip{display:flex;gap:2px;height:10px;border-radius:5px;overflow:hidden}
+.rt-strip span{flex-basis:0;min-width:2px}
+.rt-shares{margin:0;display:flex;flex-wrap:wrap;gap:2px 14px;font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.rt-frames{margin-left:auto}
 .train-sections{width:100%;max-width:560px;margin:0 auto;display:grid;grid-template-columns:repeat(4,minmax(0,1fr))}
 .train-sections button{position:relative;padding:7px 4px;white-space:nowrap}
 .train-sections .seg-dot{position:absolute;top:5px;right:5px;margin:0}

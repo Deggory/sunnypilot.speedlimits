@@ -11,7 +11,7 @@ import {toast} from '../composables/toast';
 import Segmented from './Segmented.vue';
 import ActionList from './ActionList.vue';
 import JobProgress from './JobProgress.vue';
-import {JOB_STATE, jobOf, PREPARE_ACTIONS, startedWhen, terminalActivities} from './jobs';
+import {activityTab, JOB_STATE, jobOf, PREPARE_ACTIONS, startedWhen, terminalActivities} from './jobs';
 import PrepRoutes from './PrepRoutes.vue';
 import {reviewSummary} from './review-routes';
 import RouteTable from './RouteTable.vue';
@@ -120,7 +120,9 @@ const COUNTS: [RouteState, string][] = [['collegare', 'waiting for their videos'
   ['preannotare', 'waiting for their signs']];
 
 const job = computed(() => jobOf(props.status, PREPARE_ACTIONS));
-const activities = computed(() => terminalActivities(props.status, ['fetch', 'prepare']));
+// The road types share the group of the preparation: they are on Roads.
+const activities = computed(() => terminalActivities(props.status, ['fetch', 'prepare'])
+  .filter((activity) => activityTab(activity) === '/prepare'));
 const counts = computed(() => COUNTS.map(([state, label]) => ({state, label,
   count: (props.status?.routes ?? []).filter((row) => row.state === state).length})));
 const total = computed(() => counts.value.reduce((sum, item) => sum + item.count, 0));

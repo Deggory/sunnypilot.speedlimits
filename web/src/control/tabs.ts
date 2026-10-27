@@ -1,22 +1,22 @@
 // Every page of the site but the route list and the review pages is one Vue app: the tab shown follows the address
-// ("/", "/prepare", "/dataset", "/train", "/evaluate", "/models", "/publish"). The pages are grouped in four sections
-// (pages.SECTIONS): Overview, Data (Drives, Review, Dataset), Training, Models (Versions, Results, Publish); the
-// section links of the top bar and the phone's tab bar (rendered by pages.py), the pages under a section's title
+// ("/", "/prepare", "/dataset", "/roads", "/train", "/evaluate", "/models", "/publish"). The pages are grouped in four
+// sections (pages.SECTIONS): Overview, Data (Drives, Review, Dataset, Roads), Training, Models (Versions, Results,
+// Publish); the section links of the top bar and the phone's tab bar (rendered by pages.py), the pages under a section's title
 // (SectionHead.vue) and the brand switch tab here without a reload; the route list (/routes) and the review pages stay
 // normal links.
 import {nextTick, onBeforeUnmount, onMounted, ref} from 'vue';
 
-export type ControlTab = 'overview' | 'prepare' | 'dataset' | 'train' | 'evaluate' | 'models' | 'publish';
+export type ControlTab = 'overview' | 'prepare' | 'dataset' | 'roads' | 'train' | 'evaluate' | 'models' | 'publish';
 export type Section = 'overview' | 'data' | 'train' | 'models';
 
 export const TAB_PATH: Record<ControlTab, string> = {
-  overview: '/', prepare: '/prepare', dataset: '/dataset', train: '/train', evaluate: '/evaluate', models: '/models',
-  publish: '/publish',
+  overview: '/', prepare: '/prepare', dataset: '/dataset', roads: '/roads', train: '/train', evaluate: '/evaluate',
+  models: '/models', publish: '/publish',
 };
 /** The name of each page, in the window title and under its section's title. */
 const TAB_TITLE: Record<ControlTab, string> = {
-  overview: 'Overview', prepare: 'Drives', dataset: 'Dataset', train: 'Training', evaluate: 'Results', models: 'Versions',
-  publish: 'Publish',
+  overview: 'Overview', prepare: 'Drives', dataset: 'Dataset', roads: 'Roads', train: 'Training', evaluate: 'Results',
+  models: 'Versions', publish: 'Publish',
 };
 /** A page of a section: its address and name; the route list (/routes) is Data's, outside this app. */
 export interface SectionPage {
@@ -28,7 +28,7 @@ export interface SectionPage {
 export const SECTIONS: Record<Section, {title: string; pages: SectionPage[]}> = {
   overview: {title: 'Overview', pages: []},
   data: {title: 'Data', pages: [{key: 'prepare', href: '/prepare', label: 'Drives'}, {key: 'review', href: '/routes', label: 'Review'},
-    {key: 'dataset', href: '/dataset', label: 'Dataset'}]},
+    {key: 'dataset', href: '/dataset', label: 'Dataset'}, {key: 'roads', href: '/roads', label: 'Roads'}]},
   train: {title: 'Training', pages: []},
   models: {title: 'Models', pages: [{key: 'models', href: '/models', label: 'Versions'}, {key: 'evaluate', href: '/evaluate', label: 'Results'},
     {key: 'publish', href: '/publish', label: 'Publish'}]},

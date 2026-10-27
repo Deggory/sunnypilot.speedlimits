@@ -54,7 +54,7 @@ LOGIN_MESSAGE = 'Sign-in required: reload the page and sign in with your name an
 PUBLIC_AUTH_ROUTES = ('/api/auth/login', '/api/auth/setup/check', '/api/auth/setup')
 AUTH_ROUTES = PUBLIC_AUTH_ROUTES + ('/api/auth/logout', '/api/auth/logout-all', '/api/auth/password')
 # The pages a browser opens: without a session they show the sign-in page instead.
-PAGE_RE = re.compile(r'/(index\.html|routes|prepare|train|evaluate|models|panoramica|prepara|allena|pannello|stato|account|'
+PAGE_RE = re.compile(r'/(index\.html|routes|prepare|dataset|roads|train|evaluate|models|publish|panoramica|prepara|allena|pannello|stato|account|'
                      r'settings|review|route/[^/]+(/(index\.html)?)?)?')
 # [site-login] - END
 # A drive page whose route has no report (or an id that is no route), in words.
@@ -637,6 +637,11 @@ def make_handler(app: ReviewApp):
             # The proposers of Prepare as measured on the test frames, for the Evaluate tab.
             if path == '/api/panel/proposers':
                 self._json(200, app.panel.proposers())
+                return
+            # The road type of every frame of the drives, from the map (nnslr road-types), for Data › Roads.
+            if path == '/api/panel/road-types':
+                from nnslr_tools import road_types
+                self._json(200, road_types.summary(app.root))
                 return
             if path == '/api/panel/models/active':
                 self._problem(405, 'method_not_allowed', 'Use POST, with {"role", "id"}.', True)

@@ -2,7 +2,8 @@
 import type {AiState} from './ai-types';
 
 export type ActionName = 'fetch' | 'prepare' | 'prepare_again' | 'measure_proposer' | 'setup_vlm' | 'dataset' | 'train' | 'train_continue' | 'train_resume' | 'train_classifier'
-  | 'train_cutter' | 'train_decider' | 'update' | 'ai_review' | 'measure_ai_reviewer' | 'networks_prepare' | 'networks_publish';
+  | 'train_cutter' | 'train_decider' | 'update' | 'ai_review' | 'measure_ai_reviewer' | 'networks_prepare' | 'networks_publish'
+  | 'road_types';
 /** What a cutter learns to find: every sign (the speed signs and the other signs) or the speed signs only. */
 export type CutterFamilies = 'all' | 'speed';
 /** The options of “Train the cutter” (POST /api/panel/run/train_cutter {"size", "families"}). */
@@ -1101,6 +1102,38 @@ export interface ModelsPayload {
   active_file: string;
   runs_dir_exists: boolean;
   cutter_score_threshold: number;
+}
+
+/** The type of road of a frame, from the map (nnslr_tools.road_types); null: the map does not say. */
+export type RoadType = 'town' | 'rural' | 'expressway' | 'motorway';
+/** A stretch of a drive on one type of road, from and to frame keys. */
+export interface RoadStretch {
+  type: RoadType | null;
+  from: string;
+  to: string;
+  frames: number;
+}
+/** A drive with the road type of its frames. */
+export interface RoadDrive {
+  route: string;
+  /** "Herznach → Zürich", "around Olten", or null when unknown (nnslr_tools.drives.drive_of). */
+  title: string | null;
+  /** "Thu 23 Oct 2026 · 08:11", or null. */
+  when: string | null;
+  minutes: number | null;
+  frames: number;
+  types: Record<RoadType | 'unknown', number>;
+  /** In the order of the drive. */
+  stretches: RoadStretch[];
+}
+/** GET /api/panel/road-types (nnslr_tools.road_types.summary), for Data › Roads. */
+export interface RoadTypesPayload {
+  /** Newest drive first. */
+  routes: RoadDrive[];
+  /** When the newest road types were written; null before the first. */
+  made_at: string | null;
+  /** Prepared drives (with their signs proposed) without road types yet. */
+  drives_without: number;
 }
 
 /** POST /api/panel/models/active */

@@ -64,6 +64,8 @@ CUTTER_SCRIPT = 'scripts/run_detector_sizes.sh'
 # The decider: experiment B, its three variants (the crop alone; with position and speed; with the scene), on a run of
 # its own (start() adds <time>-decider).
 DECIDER_SCRIPT = 'scripts/run_experiment_b.sh'
+# The road type of every frame from the map (Data › Roads): the GPS of the drives, the map roads near them, the types.
+ROAD_TYPES_SCRIPT = 'helpers/road_types.sh'
 # Our three networks in use as one package (ONNX, model card), and that package on Hugging Face.
 NETWORKS_SCRIPT = 'scripts/publish_networks.sh'
 NETWORKS_REPO = os.environ.get('HF_REPO', 'cristianku/sunnypilot-speedlimits-models')
@@ -191,6 +193,9 @@ ACTIONS = {
     # The frames still to confirm of every route, proposed again (after choosing another proposer); the confirmed
     # frames stay (nnslr preannotate --keep-reviews).
     'prepare_again': {'label': 'Propose again', 'group': 'prepare', 'command': ['helpers/1_prepare.sh', '--again']},
+    # The road type of every frame of the prepared drives (town, rural, expressway, motorway) from their GPS and the
+    # map, read offline (Data › Roads); in the prepare group: it reads the reports a preparation writes.
+    'road_types': {'label': 'Find the road types', 'group': 'prepare', 'command': [ROAD_TYPES_SCRIPT]},
     'dataset': {'label': 'Import reviews', 'group': 'train',
                 'command': ['helpers/3_train.sh', '--dataset-only']},
     # The whole pipeline: import, split, the detector and the reader, evaluation, export, bundle.
@@ -235,6 +240,7 @@ ACTIVITIES = (
     ('prepare', 'preparation', 'helpers/1_prepare.sh'),
     ('prepare', 'frame extraction', 'nnslr extract-frames'),
     ('prepare', 'pre-annotation', 'nnslr preannotate'),
+    ('prepare', 'road types', ROAD_TYPES_SCRIPT),
     ('train', 'dataset and training', 'helpers/3_train.sh'),
     ('train', 'GPU training', 'run_v100_baseline.sh'),
     ('train', 'classifier training', 'run_classifier.sh'),
@@ -262,14 +268,14 @@ RUNNING_NAMES = {'fetch': 'a download from the comma', 'prepare': 'a preparation
                  'train_cutter': 'a cutter training', 'train_decider': 'a decider training', 'update': 'a code update',
                  'networks_prepare': 'the preparation of a package', 'networks_publish': 'a publication',
                  'ai_review': 'an AI review',
-                 'measure_ai_reviewer': 'an AI reviewer measurement'}
+                 'measure_ai_reviewer': 'an AI reviewer measurement', 'road_types': 'a search for the road types'}
 ACTIVITY_NAMES = {'download from the comma': 'a download from the comma', 'preparation': 'a preparation',
                   'frame extraction': 'a preparation', 'pre-annotation': 'a preparation',
                   'dataset and training': 'an import or a training', 'GPU training': 'a training',
                   'classifier training': 'a classifier training', 'cutter training': 'a cutter training',
                   'code update': 'a code update', 'AI review': 'an AI review',
                   'package of the networks': 'a package of the networks',
-                  'AI reviewer measure': 'an AI reviewer measurement'}
+                  'AI reviewer measure': 'an AI reviewer measurement', 'road types': 'a search for the road types'}
 # Groups that never run together with a group, besides itself. The download and the preparation
 # both write the links of data/raw/routes; the update rewrites the helpers under a running bash
 # and restarts this server; a preparation replaces the report an AI review is working on.
@@ -719,6 +725,13 @@ class Panel:
                 pass
             elif name == 'prepare' and not to_prepare:
                 reason = 'no new drive to prepare'
+            elif name == 'road_types' and not (self.repo / ROAD_TYPES_SCRIPT).is_file():
+                reason = ROAD_TYPES_SCRIPT + ' is missing in this installation'
+            elif name == 'road_types' and not any(row.get('run_id') for row in rows):
+                reason = 'no prepared drive'
+            elif name == 'road_types':
+                # It reads the GPS and the map: it needs no confirmed frame.
+                pass
             elif name == 'train_classifier' and not (self.repo / CLASSIFIER_SCRIPT).is_file():
                 reason = CLASSIFIER_SCRIPT + ' is missing in this installation'
             elif name == 'train_cutter' and not (self.repo / CUTTER_SCRIPT).is_file():
@@ -982,7 +995,8 @@ class Panel:
         """
         running = False
         for item in activities:
-            if item['group'] == 'prepare':
+            # The road types share the group (one at a time with a preparation) but prepare no drive.
+            if item['group'] == 'prepare' and item['label'] != 'road types':
                 running = True
         if not running:
             return None
@@ -1255,6 +1269,8 @@ class Panel:
             raise PanelError(403, 'actions_disabled', DECIDER_SCRIPT + ' is missing in this installation.')
         if action in ('networks_prepare', 'networks_publish') and not (self.repo / NETWORKS_SCRIPT).is_file():
             raise PanelError(403, 'actions_disabled', NETWORKS_SCRIPT + ' is missing in this installation.')
+        if action == 'road_types' and not (self.repo / ROAD_TYPES_SCRIPT).is_file():
+            raise PanelError(403, 'actions_disabled', ROAD_TYPES_SCRIPT + ' is missing in this installation.')
         # [ai-reviewer] - START
         if action in AI_ACTIONS and not (self.repo / ACTIONS[action]['command'][0]).is_file():
             raise PanelError(403, 'actions_disabled', ACTIONS[action]['command'][0] + ' is missing in this installation.')

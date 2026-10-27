@@ -2,7 +2,8 @@
 
 The helpers write a line per phase (``== a. ...`` in helpers/3_train.sh, ``== 4/10 Train detector`` in
 scripts/run_v100_baseline.sh, ``== 3/7 Mine the cutter's false boxes ==`` in scripts/run_classifier.sh,
-``== 3/4 Train the detector at 960x544 ==`` in scripts/run_detector_sizes.sh, ``== b+c. ...`` in helpers/1_prepare.sh) and the training one line per epoch (``detector epoch 3/20 ...``,
+``== 3/4 Train the detector at 960x544 ==`` in scripts/run_detector_sizes.sh, ``== b+c. ...`` in helpers/1_prepare.sh,
+``== b. Map roads near the drives`` in helpers/road_types.sh) and the training one line per epoch (``detector epoch 3/20 ...``,
 ``classifier epoch 3/20 ...``, nnslr_tools.training). Nothing here guesses a time: a percent comes only from
 steps and epochs actually written, or from the preparation's own count of finished routes.
 """
@@ -53,6 +54,10 @@ NETWORKS_PREPARE_STEPS = (('cutter', 'Export the cutter', 40), ('classifier', 'E
 NETWORKS_PUBLISH_STEPS = (('check', 'Check the package', 10), ('catalog', 'Read the catalog', 10),
                           ('upload', 'Upload to Hugging Face', 80))
 FETCH_STEPS = (('fetch', 'Download the drives from the comma', 100),)
+# helpers/road_types.sh: the GPS of the drives prepared without it, the map roads near the drives (minutes when the map
+# is read again), the road type of every frame.
+ROAD_TYPES_STEPS = (('gps', 'Read the GPS of the drives', 10), ('map_roads', 'Read the map roads near the drives', 70),
+                    ('road_types', 'Find the road type of every picture', 20))
 UPDATE_STEPS = (('update', 'Update the code and restart the site', 100),)
 # [ai-reviewer] - START
 # One step each: nnslr ai-review and nnslr measure-ai-reviewer report their frames (nnslr_tools.progress).
@@ -63,10 +68,10 @@ STEPS = {'fetch': FETCH_STEPS, 'prepare': PREPARE_STEPS, 'dataset': DATASET_STEP
          'train_continue': TRAIN_STEPS, 'train_resume': TRAIN_STEPS, 'train_classifier': CLASSIFIER_STEPS,
          'train_cutter': CUTTER_STEPS, 'train_decider': DECIDER_STEPS, 'update': UPDATE_STEPS, 'ai_review': AI_REVIEW_STEPS,
          'measure_ai_reviewer': AI_MEASURE_STEPS, 'networks_prepare': NETWORKS_PREPARE_STEPS,
-         'networks_publish': NETWORKS_PUBLISH_STEPS}
+         'networks_publish': NETWORKS_PUBLISH_STEPS, 'road_types': ROAD_TYPES_STEPS}
 # The actions whose percent is the weighted sum of their steps (the AI's: its frames done, from its reports).
 WEIGHTED = ('train', 'train_continue', 'train_resume', 'train_classifier', 'train_cutter', 'train_decider', 'dataset', 'ai_review',
-            'measure_ai_reviewer', 'networks_prepare', 'networks_publish')
+            'measure_ai_reviewer', 'networks_prepare', 'networks_publish', 'road_types')
 
 # The sub-steps of scripts/run_v100_baseline.sh ("== 4/10 ...") and the step they belong to.
 PIPELINE = {1: 'checks', 2: 'checks', 3: 'checks', 4: 'detector', 5: 'reader', 6: 'evaluate', 7: 'export',
@@ -94,6 +99,11 @@ MARKERS = (
     (re.compile(r'^== c\. '), 'gpu_env', ()),
     (re.compile(r'^== a\. (?:linking|collego)'), 'link', ()),
     (re.compile(r'^== b\+c\. '), 'frames', ()),
+    # helpers/road_types.sh, by the words after its letters (a marker counts only for an action with that step: the
+    # "== b. " of the import above is not one of its steps).
+    (re.compile(r'^== a\. GPS of the drives'), 'gps', ()),
+    (re.compile(r'^== b\. Map roads'), 'map_roads', ()),
+    (re.compile(r'^== c\. Road type'), 'road_types', ()),
 )
 SUBSTEP = re.compile(r'^== (\d+)/(\d+) ')
 EPOCH = re.compile(r'^(detector|reader|classifier|experiment_b_crop_geom|experiment_b_crop|experiment_b_full) epoch (\d+)/(\d+)\b')

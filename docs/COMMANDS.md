@@ -38,6 +38,7 @@ Inside the data root:
 | `derived/tracks/<route>/tracks.jsonl` | the same sign followed across confirmed frames |
 | `derived/hints/<route>/` | second readings shown on the review page |
 | `derived/osm/` | OpenStreetMap roads near the drives |
+| `derived/road_types/<route>.jsonl` | the road type of every frame from the map (town, rural, expressway, motorway or unknown), and why |
 | `annotations/review.sqlite` | every review, with its history |
 | `annotations/objects.jsonl` | the dataset, written by the import |
 | `annotations/replaced/` | dataset rows replaced by a newer review |
@@ -78,6 +79,7 @@ These helpers are the daily flow, and the portal's buttons run them. Each one sk
 |---|---|---|
 | `helpers/fetch_comma_segments.sh [--host=...] [<route> ...]` | Copies drives from the comma over SSH into `COMMA_VIDEOS_DIR` and links them into the data root. Without arguments it takes every route still on the comma, drops trips under 300 s, the first and last two segments of each trip, and any segment with reverse gear. Explicit routes and segments can also be given. Needs `.[log-reader]` in `.venv`; the log schema of the comma is downloaded once into `~/.cache/comma-fetch-log` and checked by SHA-256 (`NNSLR_OPENPILOT_ROOT` / `NNSLR_OPENDBC_ROOT` choose other schemas). Portal: **Download from the comma**. | network, writes data |
 | `helpers/1_prepare.sh [--jobs=N] [--background] [<route> ...]` | For every new route, it links the videos, extracts one frame per second, has the models propose signs, and reads the GPS position and country of every frame. A route that already has proposals is never processed again. Portal: **Prepare new drives**. | CPU-heavy, writes data |
+| `helpers/road_types.sh [--again]` | The road type of every frame of the prepared drives (town, rural, expressway, motorway), from the GPS of the comma and the OpenStreetMap roads, read offline: a. `nnslr gps --all --missing`, b. `scripts/osm_roads.py` when a drive or the map is newer (`--again`: always), c. `nnslr road-types --all`. No review is needed first, and the reviews of the signs are not touched. Needs the Geofabrik extract in `raw/osm/`; about 4 minutes when the map is read, seconds otherwise. Portal: **Find the road types** in Data › Roads. | writes data |
 | `helpers/2_review.sh [--local] [--foreground] [--stop]` | Starts the portal on port 8765, on the LAN with sign-in, or with `--local` on 127.0.0.1 only. Creates the token in `.env` the first time. When the systemd service is running, it only prints its address. | opens a port, writes `.env` |
 | `helpers/3_train.sh [--dataset-only] [--background] [--continue \| --resume=<run>]` | Imports the confirmed reviews, validates the dataset and freezes the split. Without `--dataset-only` it also creates `.venv-gpu` the first time and runs `scripts/run_v100_baseline.sh`, the older detector-and-reader baseline. It refuses a busy GPU (`--force` to share it). Portal: **Import reviews** (`--dataset-only`), **Whole pipeline**. | writes data; GPU and installs without `--dataset-only` |
 | `helpers/status.sh` | Shows, for each route, its segments, frames, reviewed frames and objects in the dataset, then what is running, the GPU, the disk, and the next command. | read-only |
@@ -119,6 +121,7 @@ These helpers are the daily flow, and the portal's buttons run them. Each one sk
 | `preannotate --route R` | proposes sign boxes on every frame of a route. Downloads the models on first use and checks their SHA-256. | network on first use, CPU-heavy (GPU with `.[preannotate-gpu]`), writes data |
 | `gps --all --missing` | GPS position and country of every frame (`derived/gps/`). The review page proposes that country. | writes data |
 | `gps --all --countries` | The country of every frame again, from the positions already read and the borders now (after `make_country_borders.py --gisco`); the logs are not read | writes data |
+| `road-types --all` (or `--route R`) | the road type of every frame from its GPS position and heading and the map roads (`derived/osm/roads.jsonl`): `derived/road_types/<route>.jsonl`. A proposal of the map, corrected later by a person. Data › Roads shows it drive by drive. | writes data |
 | `tracks --all` | follows the same sign across consecutive confirmed frames (`derived/tracks/`) | writes data |
 | `review [--host H] [--port P] [--route R]` | serves the portal. By default it listens on 127.0.0.1:8765 with no sign-in. `--host 0.0.0.0` opens it to the LAN and requires the token. | serves the portal, writes reviews |
 | `mcp [--read-only]` | the MCP server of the review, over stdio | writes reviews unless `--read-only` |

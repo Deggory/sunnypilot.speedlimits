@@ -1418,6 +1418,13 @@ def build_parser() -> argparse.ArgumentParser:
                             "now (after scripts/make_country_borders.py --gisco); the logs are not read")
     p_gps.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_gps.set_defaults(func=_cmd_gps)
+    p_road = sub.add_parser("road-types", help="the type of road of every frame (town, rural, expressway, motorway) "
+                                               "from its GPS position and the OpenStreetMap roads, "
+                                               "derived/road_types/<route>.jsonl: the labels of the road-type head")
+    p_road.add_argument("--route", action="append", help="route id; repeat for more")
+    p_road.add_argument("--all", action="store_true", help="every route with GPS positions (nnslr gps)")
+    p_road.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+    p_road.set_defaults(func=_cmd_road_types)
     p_tracks = sub.add_parser("tracks", help="the same sign followed across consecutive confirmed frames "
                                              "(derived/tracks/<route>/tracks.jsonl), with the matching of Apply previous")
     p_tracks.add_argument("--route", action="append", help="route id; repeat for more")
@@ -1946,6 +1953,38 @@ def _cmd_gps(args: argparse.Namespace) -> int:
             else:
                 result = build_positions(root, route, report_rows(latest_report(root, route)))
         except (GpsError, ValueError, OSError) as exc:
+            failed += 1
+            result = {"route_id": route, "error": str(exc)}
+        print(json.dumps(result, sort_keys=True), flush=True)
+    return 1 if failed else 0
+
+
+def _cmd_road_types(args: argparse.Namespace) -> int:
+    from nnslr_tools.gps import GPS_RELATIVE_DIR, positions_path
+    from nnslr_tools.map_context import RoadMap
+    from nnslr_tools.preannotate import resolve_data_root
+    from nnslr_tools.road_types import build_road_types
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    routes = list(args.route or [])
+    if args.all:
+        routes += sorted(path.parent.name for path in (root / GPS_RELATIVE_DIR).glob('*/positions.jsonl'))
+    if not routes:
+        print("nnslr road-types: name a --route or use --all (routes with GPS positions: nnslr gps)", file=sys.stderr)
+        return 2
+    road_map = RoadMap.load(root)
+    if road_map is None:
+        print("nnslr road-types: no map of the roads yet: uv run --no-project --with osmium python "
+              "scripts/osm_roads.py", file=sys.stderr)
+        return 2
+    failed = 0
+    for route in routes:
+        try:
+            path = positions_path(root, route)
+            if not path.is_file():
+                raise ValueError(f"no GPS positions yet: nnslr gps --route {route}")
+            positions = [line for line in _read_jsonl(path) if isinstance(line, dict) and "frame_key" in line]
+            result = build_road_types(root, route, positions, road_map)
+        except (ValueError, OSError) as exc:
             failed += 1
             result = {"route_id": route, "error": str(exc)}
         print(json.dumps(result, sort_keys=True), flush=True)

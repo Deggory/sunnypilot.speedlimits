@@ -130,16 +130,22 @@ def _road_name(way: dict) -> str:
     return word + (' ' + label if label else '')
 
 
-def other_roads(road_map: RoadMap, lat: float, lon: float, heading: float) -> list[dict]:
-    """The roads near us that a sign could be meant for: [{'kind', 'side', 'distance', 'text'}]. Empty when
-    no road matches our position and heading."""
-    near = road_map.nearest(lat, lon, max(RAMP_M, PARALLEL_M, SIDE_M))
+def our_road(near: dict[int, dict], heading: float) -> int | None:
+    """The way we drive on among ``near`` (RoadMap.nearest): the closest within OUR_ROAD_M along our heading."""
     ours = None
     for w, item in near.items():
         aligned = min(_angle(item['bearing'], heading), _angle(item['bearing'] + 180.0, heading))
         if item['distance'] <= OUR_ROAD_M and aligned <= OUR_ROAD_ANGLE:
             if ours is None or item['distance'] < near[ours]['distance']:
                 ours = w
+    return ours
+
+
+def other_roads(road_map: RoadMap, lat: float, lon: float, heading: float) -> list[dict]:
+    """The roads near us that a sign could be meant for: [{'kind', 'side', 'distance', 'text'}]. Empty when
+    no road matches our position and heading."""
+    near = road_map.nearest(lat, lon, max(RAMP_M, PARALLEL_M, SIDE_M))
+    ours = our_road(near, heading)
     if ours is None:
         return []
     # Our road goes on in other OSM ways (split at bridges, junctions): those in our direction are still ours.
