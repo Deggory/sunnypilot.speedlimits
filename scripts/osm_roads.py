@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """The OpenStreetMap roads near the drives, for the "another road" candidates (nnslr_tools.map_context).
 
-  uv run --no-project --with osmium python scripts/osm_roads.py [--data-root DIR] [--pbf FILE] [--margin-m 300]
+  uv run --no-project --with osmium python scripts/osm_roads.py [--data-root DIR] [--pbf FILE ...] [--margin-m 300]
 
 Reads every ``derived/gps/<route>/positions.jsonl`` of the data root and keeps the OSM ways with a road
 ``highway`` tag that have a node within about --margin-m of a position. Writes ``derived/osm/roads.jsonl``:
 one line per way, ``{"id", "highway", "oneway", "name", "ref", "lanes", "maxspeed", "maxspeed_type", "motorroad",
 "nodes": [[lat, lon], ...]}``. Used by nnslr map-candidates and nnslr road-types.
 
-The map: ``raw/osm/switzerland-latest.osm.pbf`` (Geofabrik extract of OpenStreetMap, © OpenStreetMap
-contributors, ODbL). It is read here, offline: no position of the drives leaves the server. osmium (pyosmium)
+The map: every ``raw/osm/*.osm.pbf`` (Geofabrik extracts of OpenStreetMap, © OpenStreetMap contributors, ODbL):
+Switzerland, and Baden-Württemberg for the drives across the Rhine. A road crossing the border is in both extracts:
+it is kept once, by its id. It is read here, offline: no position of the drives leaves the server. osmium (pyosmium)
 comes from uv's cache for this run only; the environments of the site and of the training stay as they are.
 """
 from __future__ import annotations
@@ -52,13 +53,14 @@ def cells_near(root: Path, margin_m: float) -> set[tuple[int, int]]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('--data-root', default=os.environ.get('NNSLR_DATA_ROOT') or str(Path(__file__).resolve().parents[1] / 'data'))
-    parser.add_argument('--pbf', help='default: <data root>/raw/osm/switzerland-latest.osm.pbf')
+    parser.add_argument('--pbf', nargs='+', help='default: every <data root>/raw/osm/*.osm.pbf')
     parser.add_argument('--margin-m', type=float, default=300.0)
     args = parser.parse_args()
     root = Path(args.data_root).resolve()
-    pbf = Path(args.pbf) if args.pbf else root / 'raw' / 'osm' / 'switzerland-latest.osm.pbf'
-    if not pbf.is_file():
-        print(f'osm_roads: missing {pbf}', file=sys.stderr)
+    pbfs = [Path(name) for name in args.pbf] if args.pbf else sorted((root / 'raw' / 'osm').glob('*.osm.pbf'))
+    missing = [str(pbf) for pbf in pbfs if not pbf.is_file()]
+    if not pbfs or missing:
+        print(f'osm_roads: missing {", ".join(missing) or root / "raw" / "osm" / "*.osm.pbf"}', file=sys.stderr)
         return 2
     import osmium
 
@@ -71,10 +73,11 @@ def main() -> int:
         def __init__(self):
             super().__init__()
             self.ways = []
+            self.seen = set()
 
         def way(self, way):
             kind = way.tags.get('highway')
-            if kind not in ROAD_TYPES:
+            if kind not in ROAD_TYPES or way.id in self.seen:
                 return
             nodes = []
             near = False
@@ -86,6 +89,7 @@ def main() -> int:
                 if not near and (int(lat // CELL_DEGREES), int(lon // CELL_DEGREES)) in cells:
                     near = True
             if near and len(nodes) >= 2:
+                self.seen.add(way.id)
                 tags = way.tags
                 # maxspeed_type: the kind of limit when the map says it (CH:urban, CH:rural, CH:zone30...), from
                 # maxspeed:type, else source:maxspeed (nnslr_tools.road_types).
@@ -98,8 +102,8 @@ def main() -> int:
     handler = Roads()
     # Node locations kept in a file index: a whole country does not fit comfortably in memory otherwise.
     with tempfile.TemporaryDirectory(dir=root / 'tmp' if (root / 'tmp').is_dir() else None) as scratch:
-        index = f'sparse_file_array,{scratch}/nodes.idx'
-        handler.apply_file(str(pbf), locations=True, idx=index)
+        for number, pbf in enumerate(pbfs):
+            handler.apply_file(str(pbf), locations=True, idx=f'sparse_file_array,{scratch}/nodes-{number}.idx')
     target = root / 'derived' / 'osm' / 'roads.jsonl'
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_suffix('.jsonl.tmp')

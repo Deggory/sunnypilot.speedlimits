@@ -22,10 +22,10 @@ for argument in "$@"; do
         *) echo "usage: helpers/road_types.sh [--again]" >&2; exit 2 ;;
     esac
 done
-PBF="$DATA/raw/osm/switzerland-latest.osm.pbf"
+MAPS="$DATA/raw/osm"
 ROADS="$DATA/derived/osm/roads.jsonl"
-if [ ! -f "$PBF" ]; then
-    echo "The map is missing: $PBF (the Geofabrik extract of Switzerland, see docs/COMMANDS.md)" >&2
+if [ -z "$(find "$MAPS" -maxdepth 1 -name '*.osm.pbf' -print -quit 2>/dev/null)" ]; then
+    echo "The map is missing: no $MAPS/*.osm.pbf (the Geofabrik extracts, see docs/COMMANDS.md)" >&2
     exit 2
 fi
 
@@ -36,7 +36,10 @@ echo "== a. GPS of the drives"
 
 echo "== b. Map roads near the drives"
 newer=no
-if [ "$again" = yes ] || [ ! -f "$ROADS" ] || [ "$PBF" -nt "$ROADS" ]; then
+if [ "$again" = yes ] || [ ! -f "$ROADS" ]; then
+    newer=yes
+elif [ -n "$(find "$MAPS" -maxdepth 1 -name '*.osm.pbf' -newer "$ROADS" -print -quit)" ]; then
+    # A map added or downloaded again.
     newer=yes
 elif [ -n "$(find "$DATA/derived/gps" -name positions.jsonl -newer "$ROADS" -print -quit)" ]; then
     newer=yes

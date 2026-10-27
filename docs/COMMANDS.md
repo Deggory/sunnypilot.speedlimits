@@ -40,6 +40,7 @@ Inside the data root:
 | `derived/osm/` | OpenStreetMap roads near the drives |
 | `derived/road_types/<route>.jsonl` | the road type of every frame from the map (town, rural, expressway, motorway or unknown), and why |
 | `annotations/review.sqlite` | every review, with its history |
+| `annotations/road_types/<route>.jsonl` | a person's road types (Data › Roads, a drive opened): one line per correction, `{from, to, road_type, reviewer, at}`, the last one covering a frame wins; kept apart from `derived/road_types/`, so a new `nnslr road-types` keeps them |
 | `annotations/objects.jsonl` | the dataset, written by the import |
 | `annotations/replaced/` | dataset rows replaced by a newer review |
 | `splits/` | the frozen splits (`latest.json` names the current one) |
@@ -121,7 +122,7 @@ These helpers are the daily flow, and the portal's buttons run them. Each one sk
 | `preannotate --route R` | proposes sign boxes on every frame of a route. Downloads the models on first use and checks their SHA-256. | network on first use, CPU-heavy (GPU with `.[preannotate-gpu]`), writes data |
 | `gps --all --missing` | GPS position and country of every frame (`derived/gps/`). The review page proposes that country. | writes data |
 | `gps --all --countries` | The country of every frame again, from the positions already read and the borders now (after `make_country_borders.py --gisco`); the logs are not read | writes data |
-| `road-types --all` (or `--route R`) | the road type of every frame from its GPS position and heading and the map roads (`derived/osm/roads.jsonl`): `derived/road_types/<route>.jsonl`. A proposal of the map, corrected later by a person. Data › Roads shows it drive by drive. | writes data |
+| `road-types --all` (or `--route R`) | the road type of every frame from its GPS position and heading and the map roads (`derived/osm/roads.jsonl`): `derived/road_types/<route>.jsonl`. A proposal of the map, corrected by a person in Data › Roads (a drive opened; the corrections stay in `annotations/road_types/`, never touched here). Data › Roads shows it drive by drive. | writes data |
 | `tracks --all` | follows the same sign across consecutive confirmed frames (`derived/tracks/`) | writes data |
 | `review [--host H] [--port P] [--route R]` | serves the portal. By default it listens on 127.0.0.1:8765 with no sign-in. `--host 0.0.0.0` opens it to the LAN and requires the token. | serves the portal, writes reviews |
 | `mcp [--read-only]` | the MCP server of the review, over stdio | writes reviews unless `--read-only` |

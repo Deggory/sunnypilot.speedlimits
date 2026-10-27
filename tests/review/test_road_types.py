@@ -131,3 +131,156 @@ def test_weak_reasons_are_not_sure(tmp_path):
     build_road_types(tmp_path, ROUTE, positions, RoadMap.load(tmp_path))
     lines = load_road_types(tmp_path, ROUTE)
     assert [(line['road_type'], line['sure']) for line in lines] == [('rural', False), ('motorway', False)]
+
+
+# -- a person's corrections (Data › Roads, a drive opened) -----------------------------------------------------------
+def _drive_of(tmp_path, count=6):
+    """A drive of `count` frames on the motorway of _map, the last two without GPS."""
+    positions = [{'frame_key': f'0/{index}', 'segment_index': 0, 'output_index': index, 'latitude': 47.0005,
+                  'longitude': 8.0, 'bearing_deg': 0.0} for index in range(count - 2)]
+    positions += [{'frame_key': f'0/{index}', 'segment_index': 0, 'output_index': index, 'latitude': None,
+                   'longitude': None, 'bearing_deg': None} for index in range(count - 2, count)]
+    road_map = _map(tmp_path)
+    build_road_types(tmp_path, ROUTE, positions, road_map)
+    return positions, road_map
+
+
+def test_corrections_over_the_map_the_last_wins_and_a_new_map_keeps_them(tmp_path):
+    from nnslr_tools.road_types import corrections_path, correct, map_road_types, summary, undo_correction
+    positions, road_map = _drive_of(tmp_path)
+    assert [line['road_type'] for line in load_road_types(tmp_path, ROUTE)] == ['motorway'] * 4 + [None] * 2
+    # From the end to the start works too; the last correction covering a frame wins.
+    correct(tmp_path, ROUTE, '0/5', '0/3', 'town', 'admin')
+    correct(tmp_path, ROUTE, '0/4', '0/4', None, 'admin')
+    lines = load_road_types(tmp_path, ROUTE)
+    assert [line['road_type'] for line in lines] == ['motorway'] * 3 + ['town', None, 'town']
+    assert [line.get('reviewed', False) for line in lines] == [False] * 3 + [True] * 3
+    assert (lines[3]['basis'], lines[3]['sure'], lines[3]['reviewer']) == ('reviewed', True, 'admin')
+    # The map stays as it was, the corrections apart, one line each.
+    assert [line['road_type'] for line in map_road_types(tmp_path, ROUTE)] == ['motorway'] * 4 + [None] * 2
+    kept = [json.loads(line) for line in corrections_path(tmp_path, ROUTE).read_text().splitlines()]
+    assert [(line['from'], line['to'], line['road_type']) for line in kept] == [('0/5', '0/3', 'town'), ('0/4', '0/4', None)]
+    assert all(line['reviewer'] == 'admin' and line['at'] for line in kept)
+    drive = summary(tmp_path)['routes'][0]
+    assert drive['reviewed'] == 3 and drive['types'] == {'town': 2, 'rural': 0, 'expressway': 0, 'motorway': 3, 'unknown': 1}
+
+    # Find again: the map is written anew, the corrections are not touched and still win.
+    build_road_types(tmp_path, ROUTE, positions, road_map)
+    assert [line['road_type'] for line in load_road_types(tmp_path, ROUTE)] == ['motorway'] * 3 + ['town', None, 'town']
+    assert len(corrections_path(tmp_path, ROUTE).read_text().splitlines()) == 2
+
+    # Undo drops the last one; the summary follows.
+    assert undo_correction(tmp_path, ROUTE)
+    assert [line['road_type'] for line in load_road_types(tmp_path, ROUTE)] == ['motorway'] * 3 + ['town'] * 3
+    assert summary(tmp_path)['routes'][0]['types']['unknown'] == 0
+    assert undo_correction(tmp_path, ROUTE) and not undo_correction(tmp_path, ROUTE)
+    assert load_road_types(tmp_path, ROUTE) == map_road_types(tmp_path, ROUTE)
+    # A correction whose frames left the drive (a shorter map) is skipped, not applied elsewhere.
+    correct(tmp_path, ROUTE, '0/0', '0/5', 'rural', 'admin')
+    build_road_types(tmp_path, ROUTE, positions[:4], road_map)
+    assert [line['road_type'] for line in load_road_types(tmp_path, ROUTE)] == ['motorway'] * 4
+
+
+def test_a_correction_names_frames_of_the_drive_and_a_type(tmp_path):
+    import pytest
+
+    from nnslr_tools.road_types import CorrectionError, corrections_path, correct
+    _drive_of(tmp_path)
+    for start, end, kind in (('0/9', '0/1', 'town'), ('0/0', '1/0', 'town'), (0, '0/1', 'town'), ('0/0', None, 'town'),
+                             ('../0', '0/1', 'town'), ('0/0', '0/1', 'highway'), ('0/0', '0/1', 'unknown'),
+                             ('0/0', '0/1', 3)):
+        with pytest.raises(CorrectionError):
+            correct(tmp_path, ROUTE, start, end, kind, 'admin')
+    with pytest.raises(ValueError):
+        correct(tmp_path, '../etc', '0/0', '0/1', 'town', 'admin')
+    # A drive without road types has no frame to correct.
+    with pytest.raises(CorrectionError):
+        correct(tmp_path, '0000002b--0123456789', '0/0', '0/0', 'town', 'admin')
+    assert not corrections_path(tmp_path, ROUTE).exists()
+
+
+def test_the_drive_over_http(tmp_path):
+    from review_helpers import TOKEN, RunningServer, json_of, make_report, sign_in
+
+    from nnslr_tools.road_types import corrections_path
+    make_report(tmp_path, ROUTE, count=6)
+    _drive_of(tmp_path)
+    server = RunningServer(tmp_path, token=TOKEN, require_token=True)
+    address = f'/api/panel/road-types/{ROUTE}'
+    body = {'from': '0/1', 'to': '0/2', 'road_type': 'rural'}
+    try:
+        # Signed out: 401, nothing written.
+        assert server.request('GET', address)[0] == 401
+        assert server.request('POST', address, body=body)[0] == 401
+        assert not corrections_path(tmp_path, ROUTE).exists()
+
+        cookie = sign_in(server)
+        status, response, data = server.request('GET', address, headers=cookie)
+        drive = json_of(data)
+        assert status == 200 and drive['route'] == ROUTE and drive['corrections'] == 0
+        # The picture of each frame: the preview of its row in the report, by frame key.
+        assert [(frame['key'], frame['image']) for frame in drive['frames'][:2]] == [
+            ('0/0', f'/route/{ROUTE}/images/00000000.jpg'), ('0/1', f'/route/{ROUTE}/images/00000001.jpg')]
+        assert server.request('GET', drive['frames'][1]['image'], headers=cookie)[0] == 200
+        assert [frame['road_type'] for frame in drive['frames']] == ['motorway'] * 4 + [None] * 2
+        assert drive['frames'][4]['basis'] == 'no gps' and not drive['frames'][4]['sure']
+        # Not a prepared drive, or no route at all: 404.
+        for other in ('0000002b--0123456789', 'not-a-route', '..'):
+            status, response, data = server.request('GET', f'/api/panel/road-types/{other}', headers=cookie)
+            assert status == 404 and json_of(data)['error'] in ('unknown_route', 'not_found')
+            assert server.request('POST', f'/api/panel/road-types/{other}', body=body, headers=cookie)[0] == 404
+
+        # Same origin and JSON only, as the actions of the panel; then the body is checked.
+        status, response, data = server.request('POST', address, body=body, headers={**cookie, 'Origin': 'http://evil.example'})
+        assert status == 403 and json_of(data)['error'] == 'cross_origin'
+        status, response, data = server.request('POST', address, body=b'from=0/1',
+                                                headers={**cookie, 'Content-Type': 'application/x-www-form-urlencoded'})
+        assert status == 415
+        for bad in ([], {'from': '0/1', 'to': '0/2'}, {**body, 'road_type': 'highway'}, {**body, 'from': '7/7'},
+                    {**body, 'reviewer': 'someone'}):
+            status, response, data = server.request('POST', address, body=bad, headers=cookie)
+            assert status == 400, bad
+        assert server.request('POST', address, body=b'{"from":', headers=cookie)[0] == 400
+        assert server.request('GET', address + '/undo', headers=cookie)[0] == 405
+        assert not corrections_path(tmp_path, ROUTE).exists()
+
+        # Saved: the drive again, with the stretch reviewed; recorded with the name of the signed-in person.
+        status, response, data = server.request('POST', address, body=body,
+                                                headers={**cookie, 'Origin': f'http://127.0.0.1:{server.port}'})
+        drive = json_of(data)
+        assert status == 200 and drive['ok'] and drive['corrections'] == 1 and drive['reviewed'] == 2
+        assert [(frame['road_type'], frame['reviewed']) for frame in drive['frames'][:3]] == [
+            ('motorway', False), ('rural', True), ('rural', True)]
+        assert json.loads(corrections_path(tmp_path, ROUTE).read_text())['reviewer'] == 'admin'
+        # Can't tell, by an agent with the token.
+        status, response, data = server.request('POST', address, body={'from': '0/5', 'to': '0/4', 'road_type': None},
+                                                headers={'X-Review-Token': TOKEN})
+        assert status == 200 and [frame['reviewed'] for frame in json_of(data)['frames']][4:] == [True, True]
+        list_row = json_of(server.request('GET', '/api/panel/road-types', headers=cookie)[2])['routes'][0]
+        assert list_row['reviewed'] == 4
+
+        # Undo, twice, then nothing left to undo.
+        for left in (1, 0):
+            status, response, data = server.request('POST', address + '/undo', body={}, headers=cookie)
+            assert status == 200 and json_of(data)['corrections'] == left
+        assert server.request('POST', address + '/undo', body={}, headers=cookie)[0] == 409
+    finally:
+        server.close()
+
+
+def test_a_read_only_panel_refuses_a_correction(tmp_path):
+    from review_helpers import RunningServer, json_of, make_report
+
+    from nnslr_tools.road_types import corrections_path
+    make_report(tmp_path, ROUTE, count=6)
+    _drive_of(tmp_path)
+    server = RunningServer(tmp_path)
+    server.app.panel.actions_enabled = False
+    try:
+        address = f'/api/panel/road-types/{ROUTE}'
+        assert server.request('GET', address)[0] == 200
+        status, response, data = server.request('POST', address, body={'from': '0/0', 'to': '0/0', 'road_type': 'town'})
+        assert status == 403 and json_of(data)['error'] == 'actions_disabled'
+        assert not corrections_path(tmp_path, ROUTE).exists()
+    finally:
+        server.close()

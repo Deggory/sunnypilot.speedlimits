@@ -3,7 +3,7 @@
 // sections (pages.SECTIONS): Overview, Data (Drives, Review, Dataset, Roads), Training, Models (Versions, Results,
 // Publish); the section links of the top bar and the phone's tab bar (rendered by pages.py), the pages under a section's title
 // (SectionHead.vue) and the brand switch tab here without a reload; the route list (/routes) and the review pages stay
-// normal links.
+// normal links. A drive opened on Roads is "/roads?drive=<route>": an address of its own, Back returns to the list.
 import {nextTick, onBeforeUnmount, onMounted, ref} from 'vue';
 
 export type ControlTab = 'overview' | 'prepare' | 'dataset' | 'roads' | 'train' | 'evaluate' | 'models' | 'publish';
@@ -46,6 +46,13 @@ export function tabOf(path: string): ControlTab | null {
 /** The tab shown. */
 export const currentTab = ref<ControlTab>(tabOf(location.pathname) ?? 'overview');
 
+/** The drive of an address on Roads ("/roads?drive=<route>"), or null (the list, or another tab). */
+function driveOf(path: string, search: string): string | null {
+  return tabOf(path) === 'roads' ? new URLSearchParams(search).get('drive') || null : null;
+}
+/** The drive opened on Roads, null for the list. */
+export const roadsDrive = ref<string | null>(driveOf(location.pathname, location.search));
+
 /** aria-current on the server's section links (top bar, tab bar) of the tab shown, and the page title. */
 function markCurrent(tab: ControlTab): void {
   const section = sectionOf(tab);
@@ -56,11 +63,15 @@ function markCurrent(tab: ControlTab): void {
   document.title = 'Speed limits · ' + TAB_TITLE[tab];
 }
 
-/** Shows a tab and puts its address in the history; with a hash ("#dataset"), scrolls to it once the tab is drawn. */
-export function goTo(tab: ControlTab, hash = ''): void {
-  if (tab === currentTab.value && !hash) return;
+/** Shows a tab and puts its address in the history; with a hash ("#dataset"), scrolls to it once the tab is drawn; with
+ * a drive, that drive of Roads. */
+export function goTo(tab: ControlTab, hash = '', drive: string | null = null): void {
+  if (tab === currentTab.value && !hash && drive === roadsDrive.value) return;
+  // A drive opened from its list: its Back control goes back in the history, to the list as it was.
+  const fromList = drive !== null && currentTab.value === 'roads' && roadsDrive.value === null;
   currentTab.value = tab;
-  history.pushState({tab}, '', TAB_PATH[tab] + hash);
+  roadsDrive.value = drive;
+  history.pushState({tab, fromList}, '', TAB_PATH[tab] + (drive === null ? '' : '?drive=' + encodeURIComponent(drive)) + hash);
   markCurrent(tab);
   if (!hash) {
     window.scrollTo({top: 0});
@@ -80,12 +91,13 @@ export function useTabRouting(): void {
     const tab = tabOf(link.pathname);
     if (tab === null) return;
     event.preventDefault();
-    goTo(tab, link.hash);
+    goTo(tab, link.hash, driveOf(link.pathname, link.search));
   }
   function onPop(): void {
     const tab = tabOf(location.pathname);
     if (tab === null) return;
     currentTab.value = tab;
+    roadsDrive.value = driveOf(location.pathname, location.search);
     markCurrent(tab);
   }
   onMounted(() => {

@@ -643,6 +643,17 @@ def make_handler(app: ReviewApp):
                 from nnslr_tools import road_types
                 self._json(200, road_types.summary(app.root))
                 return
+            # One drive of Data › Roads opened: every frame with its picture and its road type, the map's or a person's.
+            match = re.fullmatch(r'/api/panel/road-types/([^/]+)', path)
+            if match:
+                from nnslr_tools import road_types
+                by_key = self._prepared_drive(match.group(1))
+                if by_key is not None:
+                    self._json(200, road_types.drive_view(app.root, match.group(1), by_key))
+                return
+            if re.fullmatch(r'/api/panel/road-types/[^/]+/undo', path):
+                self._problem(405, 'method_not_allowed', 'Use POST.', True)
+                return
             if path == '/api/panel/models/active':
                 self._problem(405, 'method_not_allowed', 'Use POST, with {"role", "id"}.', True)
                 return
@@ -895,6 +906,45 @@ def make_handler(app: ReviewApp):
                 return None
             return route
 
+        def _prepared_drive(self, route):
+            """The rows of a prepared drive's report by frame key; None (answered 404) for a drive that is not prepared,
+            a malformed id or a path outside the data root."""
+            try:
+                parse_route_id(route)
+                return app.report(route)[2]
+            except (PreannotationError, ValueError, OSError):
+                self._problem(404, 'unknown_route', UNKNOWN_DRIVE_MESSAGE, True)
+                return None
+
+        def _road_type_post(self, route, undo, body):
+            """Data › Roads: a person's road type for the frames from/to of a drive ({"from", "to", "road_type"}, null
+            when they cannot tell), or Undo of the last one; the drive again. A read-only panel refuses it, as it refuses
+            the actions."""
+            from nnslr_tools import road_types
+            if not app.panel.actions_enabled:
+                raise PanelError(403, 'actions_disabled', 'The panel is read-only on this server.')
+            if not isinstance(body, dict):
+                raise ReviewRejected(400, 'invalid_json', 'A JSON object is required.')
+            by_key = self._prepared_drive(route)
+            if by_key is None:
+                return
+            who, via = self._who()
+            if undo:
+                if not road_types.undo_correction(app.root, route):
+                    raise ReviewRejected(409, 'nothing_to_undo', 'This drive has no correction to undo.')
+                print(f'Roads: {route} last correction undone ({terminal_text(who or via)})', flush=True)
+            else:
+                if set(body) != {'from', 'to', 'road_type'}:
+                    raise ReviewRejected(400, 'invalid_correction', 'Send {"from", "to", "road_type"}: two frame keys '
+                                                                    'of the drive and the type (null: cannot tell).')
+                try:
+                    line = road_types.correct(app.root, route, body['from'], body['to'], body['road_type'], who or via)
+                except road_types.CorrectionError as exc:
+                    raise ReviewRejected(400, 'invalid_correction', str(exc)) from None
+                print(f'Roads: {route} {line["from"]} to {line["to"]} is {line["road_type"] or "cannot tell"} '
+                      f'({terminal_text(who or via)})', flush=True)
+            self._json(200, {'ok': True, **road_types.drive_view(app.root, route, by_key)})
+
         def _send_route_page(self, route):
             try:
                 directory, run_id, rows, busy, proposer = app.view(route)
@@ -1050,7 +1100,9 @@ def make_handler(app: ReviewApp):
             active = path == '/api/panel/models/active'
             # Who proposes the signs in Prepare ({"proposer"}), kept for every browser.
             chosen = path == '/api/panel/proposer'
-            if run or stop or active or chosen:
+            # A person's road type for a stretch of a drive of Data › Roads ({"from", "to", "road_type"}), or /undo.
+            road = re.fullmatch(r'/api/panel/road-types/([^/]+)(/undo)?', path)
+            if run or stop or active or chosen or road:
                 # Same protections as saving a frame: same origin, JSON only (no form can send it).
                 if not self._same_origin():
                     self._problem(403, 'cross_origin', 'Request from another origin refused.', True)
@@ -1090,6 +1142,8 @@ def make_handler(app: ReviewApp):
                     self._json(200, {'ok': True, 'role': role, 'active': entry})
                 elif chosen:
                     self._json(200, {'ok': True, **app.panel.set_proposer(body)})
+                elif road:
+                    self._road_type_post(road.group(1), road.group(2) is not None, body)
                 else:
                     self._json(200, {'ok': True, **app.panel.stop(stop.group(1))})
                 return

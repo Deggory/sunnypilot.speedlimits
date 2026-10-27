@@ -1012,6 +1012,82 @@ border-top:1px solid var(--line)}
 .proposer .figure-note{flex:1 0 100%}
 .proposer .proposer-missing{color:var(--bad)}
 @media (max-width:800px){.proposer .seg{display:grid;grid-template-columns:repeat(3,auto);width:100%}.proposer .seg button{padding-left:6px;padding-right:6px}}
+/* Data › Roads, a drive opened (RoadDrive.vue): its row of the list a link; the picture as large as the window leaves,
+   the strip of the drive under it (a dark line under the stretches a person set, the marked stretch over it), the type
+   here and its correction at the side; on an iPad or a phone all in one column. */
+.rt-open{position:relative;display:flex;flex-direction:column;gap:7px;margin:-8px -10px;padding:8px 32px 8px 10px;border-radius:12px;
+color:inherit;text-decoration:none;transition:background .15s}
+.rt-open:hover{background:var(--surface-2)}
+.rt-open:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.rt-go{position:absolute;right:10px;top:50%;transform:translateY(-50%)}
+.rt-reviewed{color:var(--ok)}
+.rt-view{display:flex;flex-direction:column;gap:14px;padding:16px 18px}
+.rt-view-head{display:flex;flex-direction:column;align-items:flex-start;gap:6px;min-width:0}
+.rt-back{display:inline-flex;align-items:center;gap:4px;font-size:15px}
+.rt-back span{font-size:24px;line-height:.7;margin-top:-3px}
+.rt-view-name{display:flex;flex-direction:column;gap:2px;min-width:0}
+.rt-view .rt-view-name h2{margin:0;font-size:22px;font-weight:700;letter-spacing:-.02em}
+.rt-view-name span{font-size:13.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.rt-view-main{display:grid;grid-template-columns:minmax(0,1fr) 300px;grid-template-areas:"stage side" "time side";gap:12px 20px;
+align-items:start}
+.rt-stage{grid-area:stage;position:relative;aspect-ratio:1344/760;width:min(100%,calc((100dvh - 330px) * 1344 / 760));
+min-width:min(100%,420px);justify-self:center;border-radius:12px;overflow:hidden;background:var(--stage);cursor:pointer;outline-offset:3px}
+.rt-stage img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;user-select:none;display:block}
+.rt-time{grid-area:time;display:flex;flex-direction:column;gap:8px;min-width:0}
+.rt-track{width:100%;height:30px;cursor:pointer;touch-action:none;display:block}
+.rt-track .rt-town{fill:var(--split-4)}.rt-track .rt-rural{fill:var(--rt-rural)}.rt-track .rt-expressway{fill:var(--split-5)}
+.rt-track .rt-motorway{fill:var(--c-train)}.rt-track .rt-unknown{fill:var(--muted)}
+.rt-track .rt-done{fill:var(--fg)}.rt-track .rt-marked{fill:var(--accent)}.rt-track .rt-head{fill:var(--fg)}
+.rt-controls{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px}
+.rt-play{min-width:92px;justify-content:center}
+.rt-step{padding:5px 10px}
+.rt-step .icon{margin:0}
+.rt-pos{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.rt-pos b{color:var(--fg);font-weight:600}
+.rt-speed{margin-left:auto}
+.rt-side{grid-area:side;display:flex;flex-direction:column;gap:12px;min-width:0}
+.rt-now{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.rt-chip{display:inline-flex;align-items:center;gap:8px;padding:6px 14px 6px 11px;border-radius:999px;background:var(--surface-2);
+font-size:17px;font-weight:650;letter-spacing:-.01em}
+.rt-chip .rt-key{width:14px;height:14px;border-radius:4px}
+.rt-flag{padding:2px 9px;border-radius:999px;font-size:12px;font-weight:600}
+.rt-flag.done{background:var(--ok-soft);color:var(--ok)}.rt-flag.unsure{background:var(--todo-soft);color:var(--todo)}
+.rt-basis{margin:-4px 0 0;font-size:13px;color:var(--muted);overflow-wrap:anywhere}
+.rt-fix{display:flex;flex-direction:column;gap:10px;padding-top:12px;border-top:1px solid var(--line)}
+.rt-fix-head{margin:0;display:flex;flex-direction:column;gap:2px}
+.rt-fix-head strong{font-size:15px;font-weight:600}
+.rt-fix-head span{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.rt-pick{display:grid;grid-template-columns:1fr 1fr;width:100%}
+.rt-pick button{display:inline-flex;align-items:center;gap:7px;padding:8px 10px;min-height:38px;white-space:nowrap}
+.rt-pick button:last-child{grid-column:1/-1}
+.rt-pick .rt-key{width:10px;height:10px;border-radius:3px}
+.rt-pick button.rt-map{opacity:1;outline:1.5px dashed var(--muted);outline-offset:-4px}
+.rt-fix-row{display:flex;flex-wrap:wrap;gap:8px}
+.rt-hint{margin:0;font-size:12.5px;color:var(--muted)}
+.rt-next{justify-content:center}
+.rt-left{margin-left:8px;padding:0 7px;border-radius:999px;background:var(--todo-soft);color:var(--todo);font-size:12.5px;font-weight:650;
+font-variant-numeric:tabular-nums}
+@media (max-width:860px){
+  .rt-view{padding:14px}
+  .rt-view-main{grid-template-columns:minmax(0,1fr);grid-template-areas:"stage" "time" "side"}
+  .rt-stage{width:100%;min-width:0}
+  .rt-pick{grid-template-columns:repeat(5,minmax(0,1fr))}
+  .rt-pick button{justify-content:center;padding:8px 6px}
+  .rt-pick button:last-child{grid-column:auto}
+}
+@media (max-width:560px){
+  .rt-view .rt-view-name h2{font-size:19px}
+  .rt-track{height:36px}
+  .rt-play{min-width:0}
+  .rt-step{padding:5px 9px}
+  .rt-pos{margin-left:auto}
+  .rt-count{display:none}
+  .rt-pick{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .rt-pick button{flex-direction:column;gap:4px;padding:7px 2px;font-size:12.5px}
+  .rt-pick button:last-child{grid-column:1/-1;flex-direction:row;gap:7px}
+  .rt-speed{margin-left:0}
+}
+@media (prefers-reduced-motion:reduce){.rt-open{transition:none}}
 </style>
 </head>
 <body>

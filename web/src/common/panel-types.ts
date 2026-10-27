@@ -1123,6 +1123,8 @@ export interface RoadDrive {
   minutes: number | null;
   frames: number;
   types: Record<RoadType | 'unknown', number>;
+  /** The frames whose type a person set (Data › Roads, the drive opened). */
+  reviewed: number;
   /** In the order of the drive. */
   stretches: RoadStretch[];
 }
@@ -1134,6 +1136,29 @@ export interface RoadTypesPayload {
   made_at: string | null;
   /** Prepared drives (with their signs proposed) without road types yet. */
   drives_without: number;
+}
+
+/** A frame of a drive opened on Data › Roads: its picture and its road type, the map's or a person's. */
+export interface RoadFrame {
+  /** "segment/image". */
+  key: string;
+  /** /route/<route>/images/<8 digits>.jpg, or null without a picture. */
+  image: string | null;
+  /** null: unknown (the map says nothing, or a person cannot tell). */
+  road_type: RoadType | null;
+  /** Why: "maxspeed 50", "no gps", "filled (no gps)"..., "reviewed" when a person set it. */
+  basis: string;
+  /** False where the map is often wrong. */
+  sure: boolean;
+  reviewed: boolean;
+}
+/** GET /api/panel/road-types/<route> (nnslr_tools.road_types.drive_view), and the answer of a correction. */
+export interface RoadDriveView extends Omit<RoadDrive, 'frames'> {
+  /** When the drive started (ISO), or null. */
+  start: string | null;
+  frames: RoadFrame[];
+  /** The corrections kept for this drive: Undo drops the last. */
+  corrections: number;
 }
 
 /** POST /api/panel/models/active */
