@@ -62,7 +62,7 @@ These models only propose boxes for human review; they are not part of the train
 uv pip install --python .venv/bin/python -e ".[log-reader]"
 ```
 
-Adds `pycapnp` and `zstandard` for `nnslr log-metadata` and `nnslr align-route`.
+Adds `pycapnp` and `zstandard` for `nnslr log-metadata`, `nnslr align-route` and the comma download (`helpers/fetch_comma_segments.sh`), which without it drops every trip.
 
 ### Training on a GPU (`.venv-gpu`)
 
