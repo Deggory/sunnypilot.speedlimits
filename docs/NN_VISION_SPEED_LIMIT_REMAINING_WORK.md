@@ -953,3 +953,19 @@ alone used it at about 40 % (49 W, 52–55 °C, 27 ms a frame).
 To do before the car: export the cutter without its post-processing and the decider with the plain RoIAlign in
 `nnslr_tools.exporting` (both were test scripts); feed the cutter uint8 and normalise on the GPU (the 12 MB float32
 upload over USB is likely most of the 119 ms); then the memory, and one ONNX (or one JIT) for the chain.
+
+### Together with the driving model, and on the comma's own GPU (27 Oct 2026, evening)
+
+- **Chestnut, one process with the driving model** (Mountain Dew Model v3 loaded as modeld loads it, run at 20 Hz on
+  its warmup inputs; our chain on real frames, the cutter every 3 frames): the driving model alone ran at 40 ms
+  median (2.5 % of frames over 50 ms); with our chain only 52 frames ran in 60 s instead of 1,200 and 36 % were late
+  (cutter 400 ms median there). Taking the picture to the Chestnut over USB costs 115–160 ms (float32 160, uint8 115).
+  Not viable as it is: the Chestnut stays the driving model's. Inside modeld, using the frame already on the
+  Chestnut, would avoid the upload but ties us to every driving-model release and to its 10–13 ms of spare time.
+- **Adreno (the comma's own GPU, tinygrad `DEV=QCOM`, a process of its own like dmonitoringmodeld)**, outputs
+  identical to the server: classifier 5.8 ms a crop, decider 213 ms for 8 boxes (fine when a sign appears, not every
+  frame), **cutter 1,697 ms a frame at 1344 × 760**: too slow.
+
+Next: a cutter made for the Adreno: lower input (e.g. 672 × 380) and/or only the part of the picture where signs
+stand, a lighter backbone, at 2–5 frames a second (a sign stays in view 1–3 s); measured on the Adreno before training
+it fully.
