@@ -864,3 +864,27 @@ segment 0 and the independent ten-point synchronization audit remain unresolved.
 No reviewed Swiss corpus, baseline training, export bundle or runtime model is
 claimed by this local increment.
 <!-- [reviewed-dataset] - END -->
+
+## Proposal (27 Oct 2026): the model as a plugin, memory inside the ONNX
+
+Decided direction, not built yet. Sunnypilot gets one fixed runner, written once; everything that reads
+signs or applies rules is in the ONNX bundle downloaded from the Hugging Face catalog (`speed_models.json`).
+A new network, a new rule or a new country is a new bundle, never a sunnypilot change.
+
+The bundle: cutter (with a road-type head on its backbone) + sign classifier + memory, exported as one ONNX.
+The memory is plain tensor operations (`Where`, `Max`, ...; no `If` or `Loop`, so tinygrad compiles it),
+with its state fed back by the runner, as openpilot already does for the driving model.
+
+Contract between runner and bundle (fixed; `state` has spare room for future rules):
+
+| name | dir | shape | meaning |
+|---|---|---|---|
+| `frame` | in | road camera frame, as the cutter takes it today | |
+| `state_in` | in | `[16]` float | `state_out` of the previous frame; zeros at start |
+| `general_limits` | in | `[4]` float | town, rural, expressway, motorway of the current country (the runner picks them from GPS and a borders file) |
+| `limit_kph` | out | `[1]` float | limit in force; 0 when none is known |
+| `is_guess` | out | `[1]` float | 1 when the limit is the road's general limit, from the road-type head and not from a sign read |
+| `state_out` | out | `[16]` float | to pass back as `state_in` |
+
+The runner does only: camera → ONNX → `speedVisionState`; `state_out` → `state_in`; the 4 general limits.
+The invariants of section 1 still hold (advisory only, no control path, Chestnut not initialised by a second process).
