@@ -910,8 +910,11 @@ From master `db27a433` (synced with sunnypilot/sunnypilot master on 27 Oct 2026)
   Car (default, as before), Network, or Car, then Network. The five policies stay as they are.
 - `speedVisionSP` (in `customReserved10 @136`): `speedLimit` m/s, 0 when not sure; `modelName`.
 - `SpeedLimitResolver`: source `vision`, skipped at 0 like the car; a stale `speedVisionSP` is never used.
-- Missing: `speedvisiond` (camera → ONNX → `speedVisionSP`), the model download from the Hugging Face catalog and its
-  compilation for tinygrad. Until then Network is always 0, so the map.
+- The models: the public repo `cristianku/speed-limits-models` as a submodule at
+  `openpilot/sunnypilot/speed_limits/models` (commit `2f2700fb`), the way sunnypilot takes its lateral models from
+  `neural_network_data`, not a Hugging Face download. A new model is a commit there and a move of the pointer.
+- Missing: `speedvisiond` (camera → ONNX → `speedVisionSP`) and the tinygrad compile of the ONNX in the build
+  (SConscript, as modeld does). Until then Network is always 0, so the map.
 
 The old branch `nn-speed-limit-vision` (September, 277 commits behind master) is not carried over: it published only
 an "unavailable" state, had no inference, and its tests forbade the resolver source decided now.
