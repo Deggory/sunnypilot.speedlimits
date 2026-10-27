@@ -201,12 +201,26 @@ function stripMove(event: PointerEvent): void {
 const kind = computed(() => frame.value?.road_type ?? 'unknown');
 /** Why the frame has its type, in a driver's words ('' when the map's reason has none). */
 const reason = computed(() => frame.value ? reasonOf(frame.value) : '');
-/** The frames a correction covers: from the mark to here, else the stretch shown (stretchAt: of one kind, as sure, not
- * set by a person when this frame is not). */
+/** The stretch shown (stretchAt: of one kind, as sure, not set by a person when this frame is not). */
+const stretch = computed((): [number, number] | null => frames.value.length ? stretchAt(frames.value, shown.value) : null);
+/** Which part of the stretch a tap sets: all of it, its start up to the picture shown, or from it to its end, so a
+ * long stretch (183 pictures without GPS: a garage, then the streets) is split where the picture shows the change. */
+type Part = 'all' | 'before' | 'after';
+const part = ref<Part>('all');
+// Another stretch: the whole of it again.
+watch(() => stretch.value?.[0], () => { part.value = 'all'; });
+/** The part can be chosen when the picture shown is inside its stretch, not at one of its ends. */
+const splittable = computed(() => mark.value === null && stretch.value !== null && shown.value > stretch.value[0]
+  && shown.value < stretch.value[1]);
+const partOptions = computed((): {key: Part; label: string}[] => [{key: 'all', label: 'Whole'},
+  {key: 'before', label: 'Up to here'}, {key: 'after', label: 'From here'}]);
+/** The frames a correction covers: from the mark to here, else the part chosen of the stretch shown. */
 const span = computed((): [number, number] | null => {
   if (!frames.value.length) return null;
   if (mark.value !== null) return [Math.min(mark.value, shown.value), Math.max(mark.value, shown.value)];
-  return stretchAt(frames.value, shown.value);
+  const whole = stretch.value;
+  if (whole === null || !splittable.value || part.value === 'all') return whole;
+  return part.value === 'before' ? [whole[0], shown.value] : [shown.value, whole[1]];
 });
 /** The times of the stretch a correction covers: "16:13:34 – 16:21:38". */
 const spanTimes = computed((): string => {
@@ -240,6 +254,7 @@ async function setType(type: RoadType | null): Promise<void> {
     payload.value = await post<RoadDriveView>('/api/panel/road-types/' + encodeURIComponent(props.route),
       {from: from.key, to: to.key, road_type: type});
     mark.value = null;
+    part.value = 'all';
     toast(label + ' · ' + plural(count, 'picture') + ' saved');
   } catch (problem) {
     toast(messageOf(problem), true);
@@ -318,7 +333,9 @@ async function undo(): Promise<void> {
         <p v-if="reason" class="rt-basis">{{ reason }}</p>
 
         <div class="rt-fix">
-          <p class="rt-fix-head"><strong>{{ mark === null ? 'This stretch' : 'From the mark to here' }}</strong>
+          <!-- Inside a stretch the choice of its part is the title: one row less, so the loop still fits a phone. -->
+          <Segmented v-if="splittable" v-model="part" :options="partOptions" label="Part of the stretch" class="rt-part"/>
+          <p class="rt-fix-head"><strong v-if="!splittable">{{ mark !== null ? 'From the mark to here' : 'This stretch' }}</strong>
             <span>{{ spanText }}</span></p>
           <div class="seg rt-pick" role="radiogroup" aria-label="Type of road">
             <button v-for="[key, label] in CHOICES" :key="key ?? 'none'" type="button" role="radio"
@@ -339,7 +356,7 @@ async function undo(): Promise<void> {
             <button v-if="payload.corrections > 0" type="button" class="btn small" :disabled="saving || readOnly" @click="undo">Undo last change</button>
           </div>
           <p class="rt-hint">{{ readOnly ? 'Read-only: corrections are turned off on this server.'
-            : mark === null ? 'Tap the right type: the stretch marked in blue on the strip is saved at once, a long one after a question. Mark start to choose where a stretch begins.'
+            : mark === null ? 'Tap the right type: the stretch marked in blue on the strip is saved at once, a long one after a question. Up to here or From here split it at the picture shown; Mark start chooses any start.'
               : 'Now go to the end of the stretch, then tap its type.' }}</p>
           <ul class="rt-legend rt-marks" aria-label="The strip">
             <li v-for="[key, label] in ROAD_TYPES" :key="key"><span class="rt-key" :class="'rt-' + key" aria-hidden="true"></span>{{ label }}</li>
