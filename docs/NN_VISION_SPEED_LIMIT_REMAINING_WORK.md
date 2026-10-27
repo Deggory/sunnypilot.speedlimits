@@ -32,7 +32,8 @@ Permanent invariants:
 
 - never write `CarStateSP.speedLimit`;
 - never write or impersonate `LiveMapDataSP`;
-- do not add Vision as an operational `SpeedLimitResolver` source in the first release;
+- Vision reaches `SpeedLimitResolver` only as its own source `vision`, opt-in (Signs Read By, 27 Oct 2026: see the
+  last section); it never writes `carStateSP` or the map;
 - no CAN, acceleration, steering, torque, radar, safety, or cruise-button output;
 - do not change the driving model just to make NNSLR work;
 - do not initialize Chestnut from a second process;
@@ -882,9 +883,35 @@ Contract between runner and bundle (fixed; `state` has spare room for future rul
 | `frame` | in | road camera frame, as the cutter takes it today | |
 | `state_in` | in | `[16]` float | `state_out` of the previous frame; zeros at start |
 | `general_limits` | in | `[4]` float | town, rural, expressway, motorway of the current country (the runner picks them from GPS and a borders file) |
-| `limit_kph` | out | `[1]` float | limit in force; 0 when none is known |
-| `is_guess` | out | `[1]` float | 1 when the limit is the road's general limit, from the road-type head and not from a sign read |
+| `limit_kph` | out | `[1]` float | limit in force; 0 when the model is not sure (sunnypilot then takes the map) |
 | `state_out` | out | `[16]` float | to pass back as `state_in` |
 
-The runner does only: camera → ONNX → `speedVisionState`; `state_out` → `state_in`; the 4 general limits.
-The invariants of section 1 still hold (advisory only, no control path, Chestnut not initialised by a second process).
+The runner does only: camera → ONNX → `speedVisionSP`; `state_out` → `state_in`; the 4 general limits.
+
+### What the model returns (decided 27 Oct 2026)
+
+- A speed sign read → that limit, held until the next sign (the memory inside the ONNX).
+- The sign that starts a general limit read (CH: "50 generell", the motorway or expressway start; DE: the town
+  entry), and no speed sign since, with the road type sure → that general limit of the country.
+- Anything else → 0: a side road joined without any sign, an unclear picture, the start of a drive. The road-type
+  head alone never gives a limit: a sure motorway is 120 only half of the time on our drives (OSM: 266 stretches at
+  120, 187 at 100, 79 at 80), a sure town can be a Zona 30. The map knows those, so 0 lets sunnypilot use it.
+- The value must be steady: a limit that drops to 0 and back makes sunnypilot jump between the network and the map.
+
+Open: the memory across drives (parked inside a Zona 30, the sign is not seen again when leaving): sunnypilot saves
+`state_out` and the parking position at the end of a drive; at the next start the model gets it back only near the
+same place, and the limit counts as from the previous drive.
+
+### sunnypilot side: branch `speed-limits` of cristianku/sunnypilot
+
+From master `db27a433` (synced with sunnypilot/sunnypilot master on 27 Oct 2026), commit `638211d6`:
+
+- `SpeedLimitSignReader` (device settings and sunnylink): who reads the signs for "Car" in Speed Limit Source:
+  Car (default, as before), Network, or Car, then Network. The five policies stay as they are.
+- `speedVisionSP` (in `customReserved10 @136`): `speedLimit` m/s, 0 when not sure; `modelName`.
+- `SpeedLimitResolver`: source `vision`, skipped at 0 like the car; a stale `speedVisionSP` is never used.
+- Missing: `speedvisiond` (camera → ONNX → `speedVisionSP`), the model download from the Hugging Face catalog and its
+  compilation for tinygrad. Until then Network is always 0, so the map.
+
+The old branch `nn-speed-limit-vision` (September, 277 commits behind master) is not carried over: it published only
+an "unavailable" state, had no inference, and its tests forbade the resolver source decided now.
