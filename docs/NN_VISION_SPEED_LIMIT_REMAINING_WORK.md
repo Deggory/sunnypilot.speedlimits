@@ -900,17 +900,19 @@ The runner does only: camera → ONNX → `speedVisionSP`; `state_out` → `stat
 
 The order, strongest first:
 
-1. a speed sign read now (also inside a car park: 10, 20) → that limit;
-2. a car park recognised (the road-type head says parking for a few seconds) → 0, and the limit remembered from the
-   road before is dropped, not suspended: leaving the car park the model gives 0 until it reads a sign, because the
-   road and the direction it re-enters are not known;
+1. a speed sign read now → that limit (inside a car park see 2);
+2. a car park recognised (the road-type head says parking for a few seconds) → **15 km/h**, a sign read there
+   only when lower (10 stays 10, 20 becomes 15); the limit remembered from the road before is dropped, not
+   suspended: leaving the car park the model gives 0 until it reads a sign, because the road and the direction it
+   re-enters are not known;
 3. the limit remembered from the last sign → that limit;
 4. the general limit after the sign that starts it, no speed sign since, road type sure → 50 / 80 / 100 / 120;
 5. anything else → 0, the map decides.
 
-Road types of the head: town, rural, expressway, motorway, parking. A car park has no general limit: without a sign
-the model returns 0 there (decided 27 Oct 2026; a fixed value such as 20 was not chosen, it would not be a legal
-limit and sunnypilot would treat it as one).
+Road types of the head: town, rural, expressway, motorway, parking. A car park has no legal general limit, but the
+model returns 15 km/h there (decided by Cristian on 27 Oct 2026, replacing 0): with 0 sunnypilot takes the map, which
+often has no limit in a car park or the limit of the road next to it, and the car could speed up where one must drive
+at walking pace.
 
 Open: the memory across drives (parked inside a Zona 30, the sign is not seen again when leaving): sunnypilot saves
 `state_out` and the parking position at the end of a drive; at the next start the model gets it back only near the

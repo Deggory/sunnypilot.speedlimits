@@ -1143,6 +1143,14 @@ font-variant-numeric:tabular-nums}
 /* The part of a stretch a tap sets (RoadDrive.vue): the whole stretch, up to the picture shown, or from it. */
 .rt-part{display:flex;width:100%;margin:2px 0 8px}.rt-part button{flex:1 1 0;min-width:0;white-space:nowrap}
 @media (max-width:860px),(pointer:coarse){.rt-part button{min-height:44px}}
+/* The type buttons of a correction (RoadDrive.vue): pills one can see are buttons, not a legend; the type the map
+   proposes has a dashed ring, the one a person set a solid one. */
+.rt-pick{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding:0;background:none}
+.rt-pick .rt-type{justify-content:center;gap:7px;min-height:44px;padding:8px 10px;font-size:14.5px;white-space:nowrap}
+.rt-pick .rt-type[aria-pressed="true"]{box-shadow:0 0 0 2px var(--fg) inset}
+.rt-pick button.rt-map{outline:1.5px dashed var(--muted);outline-offset:-5px}
+.rt-fix-head strong{font-size:15px}
+@media (max-width:860px){.rt-pick{grid-template-columns:repeat(3,minmax(0,1fr))}.rt-pick .rt-type{padding:8px 6px}}
 </style>
 </head>
 <body>

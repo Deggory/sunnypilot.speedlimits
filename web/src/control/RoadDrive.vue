@@ -231,9 +231,11 @@ const spanTimes = computed((): string => {
   if (!from || !to) return '';
   return frameTime(from.key, start) + (last > first ? ' – ' + frameTime(to.key, start) : '');
 });
-const spanText = computed((): string => {
+/** "these 84 pictures", "this picture": what a tap sets, in the title of the buttons. */
+const spanCount = computed((): string => {
   const [first, last] = span.value ?? [0, -1];
-  return spanTimes.value ? plural(last - first + 1, 'picture') + ' · ' + spanTimes.value : '';
+  const count = last - first + 1;
+  return count === 1 ? 'this picture' : 'these ' + thousands(count) + ' pictures';
 });
 const saving = ref(false);
 async function setType(type: RoadType | null): Promise<void> {
@@ -335,11 +337,12 @@ async function undo(): Promise<void> {
         <div class="rt-fix">
           <!-- Inside a stretch the choice of its part is the title: one row less, so the loop still fits a phone. -->
           <Segmented v-if="splittable" v-model="part" :options="partOptions" label="Part of the stretch" class="rt-part"/>
-          <p class="rt-fix-head"><strong v-if="!splittable">{{ mark !== null ? 'From the mark to here' : 'This stretch' }}</strong>
-            <span>{{ spanText }}</span></p>
-          <div class="seg rt-pick" role="radiogroup" aria-label="Type of road">
-            <button v-for="[key, label] in CHOICES" :key="key ?? 'none'" type="button" role="radio"
-                    :aria-checked="Boolean(frame?.reviewed) && mark === null && frame?.road_type === key"
+          <p class="rt-fix-head"><strong>{{ mark !== null ? 'Set from the mark to here to:' : 'Set ' + spanCount + ' to:' }}</strong>
+            <span>{{ spanTimes }}</span></p>
+          <!-- Real buttons, one a type: a person must see at once that a tap here changes the stretch. -->
+          <div class="rt-pick" role="group" aria-label="Type of road">
+            <button v-for="[key, label] in CHOICES" :key="key ?? 'none'" type="button" class="btn rt-type"
+                    :aria-pressed="Boolean(frame?.reviewed) && mark === null && frame?.road_type === key"
                     :class="{'rt-map': key !== null && !frame?.reviewed && mark === null && frame?.road_type === key}"
                     :disabled="saving || readOnly" @click="setType(key)"><i class="rt-key" :class="'rt-' + (key ?? 'unknown')"
                     aria-hidden="true"></i>{{ label }}</button>
