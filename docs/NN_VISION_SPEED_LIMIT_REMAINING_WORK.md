@@ -932,3 +932,22 @@ From master `db27a433` (synced with sunnypilot/sunnypilot master on 27 Oct 2026)
 
 The old branch `nn-speed-limit-vision` (September, 277 commits behind master) is not carried over: it published only
 an "unavailable" state, had no inference, and its tests forbade the resolver source decided now.
+
+## Measured on the Chestnut (27 Oct 2026)
+
+The three networks in use (package `chestnut-test-20261027`, exported locally, nothing uploaded) run on the comma's
+Chestnut with tinygrad (`DEV=AMD`, the device sunnypilot's modeld uses), comma offroad, test files only in
+`/data/tmp/sl-chestnut`, openpilot untouched. Outputs compared with onnxruntime on the server, same inputs:
+
+| network | ONNX as exported | tinygrad | max difference | with TinyJit |
+|---|---|---|---|---|
+| classifier (160 px crop) | as is | runs | 6e-6, same class | 8–13 ms a crop |
+| decider (8 boxes) | `RoiAlign` not supported | runs with RoIAlign written with gathers (2e-7 from torchvision) | 5e-6, same classes | 14 ms |
+| cutter (1344 × 760) | `NonMaxSuppression` not supported (data-dependent shapes) | runs without its post-processing: boxes and scores of all 32,292 default boxes, the filter and NMS after it on the CPU (same top detection as the full model) | boxes 0.004 px, scores 3e-6 | 119 ms a frame |
+
+The Chestnut stayed at 48–52 °C (memory 63–67 °C), 22–25 W, fan 0–2 rpm. In the drive `00000141` the driving model
+alone used it at about 40 % (49 W, 52–55 °C, 27 ms a frame).
+
+To do before the car: export the cutter without its post-processing and the decider with the plain RoIAlign in
+`nnslr_tools.exporting` (both were test scripts); feed the cutter uint8 and normalise on the GPU (the 12 MB float32
+upload over USB is likely most of the 119 ms); then the memory, and one ONNX (or one JIT) for the chain.
