@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Training: from the reviews to a model, as an app on the phone. One line says what the networks learn from (objects,
-// frames, drives; the reviews not imported yet), a link to Data › Dataset, where they are imported. Then one network at a time, chosen
+// frames, drives; the reviews not imported yet), a link to Data › Training dataset, where they are imported. Then one network at a time, chosen
 // in a switcher with a dot on the one training: the cutter (scripts/run_detector_sizes.sh, its input size and the
 // signs it finds), the classifier with "not a sign" (scripts/run_classifier.sh), the decider (in preparation:
 // experiment B), the whole pipeline (helpers/3_train.sh, with where it starts). Each has the same place for its work:
@@ -58,7 +58,7 @@ const section = computed({
 const job = computed(() => jobFor(section.value));
 /** The job of the section in its slot: running or failed; one done or stopped by hand is a line. */
 const bigJob = computed(() => job.value && (job.value.state === 'running' || job.value.state === 'failed') ? job.value : null);
-/** Importing the reviews (Data › Dataset): said in the line of data. */
+/** Importing the reviews (Data › Training dataset): said in the line of data. */
 const importing = computed(() => jobOf(props.status, ['dataset'])?.state === 'running');
 
 /** The networks by role: every version trained here, newest first (the Models tab's data). */
@@ -157,7 +157,7 @@ const numbers = computed(() => {
   <Segmented v-model="section" class="train-sections" :options="SECTIONS" :marked="runningSections" label="Network"/>
 
 
-  <!-- What the networks learn from, in one line; the reviews not imported yet lead to Data › Dataset, where they are
+  <!-- What the networks learn from, in one line; the reviews not imported yet lead to Data › Training dataset, where they are
        imported. -->
   <a class="card data-strip" href="/dataset" aria-label="What the networks learn from: open the dataset">
     <span class="data-texts"><span class="data-line"><strong>{{ numbers ? thousands(numbers.objects) : '–' }}</strong> objects on

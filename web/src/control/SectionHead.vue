@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // The head of a page: its section's title, large as on iOS, and under it the section's pages as a segmented control
-// (Data: Drives, Review, Dataset, Roads; Models: Versions, Results, Publish), the page shown marked and a dot on a page with
+// (Data: Drives, Review, Roads, Training dataset; Models: Versions, Results, Publish), the page shown marked and a dot on a page with
 // work running. pages.sub_nav draws the same on the route list.
 import {computed} from 'vue';
 import {busyPaths} from '../composables/busy';

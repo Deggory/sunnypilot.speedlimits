@@ -47,13 +47,14 @@ TABS_MACHINE = '<div class="tabs-machine" id="tabs-machine" data-feed="{feed}"><
 COMMA_PILL = '<div class="tabs-machine" id="comma-pill"></div>'
 
 # The four sections of the site, in the order of the work: (key, address, label, its pages). A section with pages
-# shows them under its title (sub_nav; web/src/control/SubNav.vue draws the same): Data holds the drives, their review,
-# the dataset and the road types from the map; Models the versions to choose, their results and the package to publish.
+# shows them under its title (sub_nav; web/src/control/SectionHead.vue draws the same): Data holds the drives, their
+# review, the road types from the map and the training dataset; Models the versions to choose, their results and the
+# package to publish.
 # Account is the icon at the right. A page is (key of the current page, address, label).
 SECTIONS = (
     ('overview', '/', 'Overview', ()),
     ('data', '/prepare', 'Data', (('prepare', '/prepare', 'Drives'), ('review', '/routes', 'Review'),
-                                  ('dataset', '/dataset', 'Dataset'), ('roads', '/roads', 'Roads'))),
+                                  ('roads', '/roads', 'Roads'), ('dataset', '/dataset', 'Training dataset'))),
     ('train', '/train', 'Training', ()),
     ('models', '/models', 'Models', (('models', '/models', 'Versions'), ('evaluate', '/evaluate', 'Results'),
                                      ('publish', '/publish', 'Publish'))),
@@ -154,7 +155,7 @@ def top_bar(current: str = '', *, live: bool = False, signed_in: bool = True, ta
 
 
 def sub_nav(current: str) -> str:
-    """The pages of the current page's section, under its title, as an iOS segmented control (SubNav.vue draws the
+    """The pages of the current page's section, under its title, as an iOS segmented control (SectionHead.vue draws the
     same on the control pages); '' for a section without pages."""
     for key, _, label, pages in SECTIONS:
         if pages and any(page[0] == current for page in pages):

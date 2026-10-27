@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Overview, Drives, Dataset, Roads, Training, Results, Versions, Publish: one app, the tab shown follows the address (tabs.ts). One status for all
+// Overview, Drives, Roads, Training dataset, Training, Results, Versions, Publish: one app, the tab shown follows the address (tabs.ts). One status for all
 // tabs (/api/panel/status every 4 s, which also feeds the machine's history), the actions, and the sheet with the
 // details of a job. Evaluate reads the training runs itself (/api/panel/runs), Models the networks by role
 // (/api/panel/models).

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Data › Dataset: what the networks learn from. First the reviews not in the dataset yet, with Import reviews
+// Data › Training dataset: what the networks learn from. First the reviews not in the dataset yet, with Import reviews
 // (helpers/3_train.sh --dataset-only, the panel action "dataset"), or its import running; then what the dataset holds
 // (DatasetSection.vue). Importing is always a click: opening this page or another starts nothing.
 import {computed} from 'vue';

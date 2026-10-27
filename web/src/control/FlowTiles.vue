@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Three summaries under the next step, each a link to where its work is done: the drives left to prepare
 // (Data › Drives), the frames left to review (Data › Review), and what the dataset holds with the reviews not imported
-// yet (Data › Dataset). The one the next step points to is marked; a dot on one with work running.
+// yet (Data › Training dataset). The one the next step points to is marked; a dot on one with work running.
 import {computed} from 'vue';
 import {plural, reviewPercent, thousands} from '../common/format';
 import type {PanelStatus, RouteState} from '../common/panel-types';
@@ -50,7 +50,7 @@ const dataset = computed((): [string, string] => {
       <span class="flow-note">{{ reviewNote }}</span>
     </a>
     <a class="flow-tile k-train" :class="{attention: attention === 'train'}" href="/dataset" id="glance-dataset">
-      <span class="flow-head">Dataset<span v-if="busy.has('dataset')" class="flow-busy">running</span></span>
+      <span class="flow-head">Training dataset<span v-if="busy.has('dataset')" class="flow-busy">running</span></span>
       <span class="flow-big">{{ dataset[0] }}</span><span class="flow-note">{{ dataset[1] }}</span>
     </a>
   </nav>

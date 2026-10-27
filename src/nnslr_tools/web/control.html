@@ -1088,6 +1088,58 @@ font-variant-numeric:tabular-nums}
   .rt-speed{margin-left:0}
 }
 @media (prefers-reduced-motion:reduce){.rt-open{transition:none}}
+/* Data › Roads, parking and the loop of a check (RoadDrive.vue). Parking is the violet of the reference palette, stepped
+   for each theme: with the four others every pair passes the validator in both themes (all pairs, as any type can follow
+   any other: colour-blind ΔE ≥ 8.9, normal ≥ 15.5) and it clears 3:1 on the dark card. Unknown is a solid grey, 3.4:1 on
+   the dark card (half see-through it was 2.5:1), as light as before on the light one. On the strip of a drive an orange
+   line under the stretches to check (the colour of Next to check), the dark one under those a person set, the blue one
+   over the stretch a tap sets; the type buttons and Next to check right under the picture, the speeds, Mark start, Undo
+   and the legend under them; 44 px targets on a touch screen; a phone held sideways puts the buttons beside the picture. */
+:root{--rt-parking:#8a57ae;--rt-unknown:#6e6e73}
+:root[data-theme="light"]{--rt-parking:#744399;--rt-unknown:#8e8e93}
+@media (prefers-color-scheme:light){:root[data-theme="auto"]{--rt-parking:#744399;--rt-unknown:#8e8e93}}
+.rt-parking{background:var(--rt-parking)}.rt-unknown{background:var(--rt-unknown);opacity:1}
+.rt-track .rt-parking{fill:var(--rt-parking)}.rt-track .rt-unknown{fill:var(--rt-unknown)}.rt-track .rt-tocheck{fill:var(--bad)}
+.rt-view-main{grid-template-rows:auto 1fr}
+.rt-fix-head{flex-direction:row;flex-wrap:wrap;align-items:baseline;gap:2px 8px}
+.rt-pick button:last-child{grid-column:auto}
+.rt-more{display:flex;flex-direction:column;align-items:flex-start;gap:12px;padding-top:12px;border-top:1px solid var(--line)}
+.rt-more .rt-speed{margin-left:0}
+.rt-marks{gap:6px 14px;font-size:12.5px}
+.rt-line{width:14px;height:3px;border-radius:2px;flex:none}
+.rt-line.rt-tocheck{background:var(--bad)}.rt-line.rt-done{background:var(--fg)}.rt-line.rt-marked{background:var(--accent)}
+.rt-left{white-space:nowrap}
+@media (max-width:860px){
+  .rt-view-main{grid-template-rows:none}
+  .rt-pick{grid-template-columns:repeat(6,minmax(0,1fr))}
+}
+@media (max-width:860px),(pointer:coarse){
+  .rt-view .rt-back{min-height:44px;min-width:44px;margin:-10px 0 -8px -6px;padding:0 6px}
+  .rt-view .btn.rt-play,.rt-view .btn.rt-step,.rt-view .rt-fix-row .btn,.rt-view .btn.rt-next{min-height:44px}
+  .rt-view .btn.rt-step{min-width:48px;justify-content:center}
+  .rt-view .rt-speed button{min-height:44px;min-width:48px}
+  .rt-view .rt-pick button{min-height:44px}
+}
+@media (max-width:560px){
+  .rt-view{gap:10px}
+  .rt-view-main,.rt-side{gap:10px}
+  .rt-time{gap:6px}
+  .rt-chip{font-size:16px;padding:4px 12px 4px 10px}
+  .rt-fix{gap:8px;padding-top:10px}
+  .rt-pick{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .rt-pick button,.rt-pick button:last-child{grid-column:auto;flex-direction:row;gap:6px;padding:4px;font-size:13px}
+}
+@media (max-height:500px) and (min-width:600px){
+  .rt-view-main{grid-template-columns:minmax(0,1fr) 300px;grid-template-rows:auto 1fr;grid-template-areas:"stage side" "time side";
+    gap:10px 16px}
+  .rt-stage{width:min(100%,calc((100dvh - 124px) * 1344 / 760));min-width:0}
+  .rt-side{gap:8px}
+  .rt-chip{font-size:15px;padding:3px 12px 3px 9px}
+  .rt-basis{margin:-2px 0 0}
+  .rt-fix{gap:6px;padding-top:8px}
+  .rt-pick{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .rt-pick button,.rt-pick button:last-child{grid-column:auto;flex-direction:row;gap:6px;padding:4px;font-size:12.5px}
+}
 </style>
 </head>
 <body>

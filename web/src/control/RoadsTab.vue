@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// Data › Roads: the type of road of every picture of the prepared drives (town, rural, expressway, motorway), from where
-// the car was and the map (helpers/road_types.sh, the panel action "road_types"). First the action, with Find the road
+// Data › Roads: the type of road of every picture of the prepared drives (town, rural, expressway, motorway, parking),
+// from where the car was and the map (helpers/road_types.sh, the panel action "road_types"). First the action, with Find the road
 // types or its job running; then each drive as a thin strip of its whole length coloured by road type, from GET
 // /api/panel/road-types, read when the page opens and again when a search for the road types ends. Nothing here needs a
 // review: the map's types are a proposal; a tap on a drive opens it ("/roads?drive=<route>", RoadDrive.vue), to look at
@@ -62,7 +62,8 @@ const drives = computed(() => (payload.value?.routes ?? []).map((drive) => ({
     const kind = stretch.type ?? 'unknown';
     return {kind, frames: stretch.frames, tip: LABEL[kind] + ' · ' + plural(stretch.frames, 'picture')};
   }),
-  shares: TYPES.filter(([key]) => drive.types[key] > 0).map(([key, label]) => ({key, label, share: percentText(drive.types[key], drive.frames)})),
+  shares: TYPES.filter(([key]) => (drive.types[key] ?? 0) > 0)
+    .map(([key, label]) => ({key, label, share: percentText(drive.types[key] ?? 0, drive.frames)})),
 })));
 const without = computed(() => payload.value?.drives_without ?? 0);
 /** Prepared drives still without road types, or none read yet. */

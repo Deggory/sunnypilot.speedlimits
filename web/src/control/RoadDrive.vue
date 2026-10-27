@@ -1,15 +1,18 @@
 <script setup lang="ts">
 // Data › Roads, a drive opened ("/roads?drive=<route>"): its pictures one at a time with the type of road there, the
 // map's or a person's (GET /api/panel/road-types/<route>), and the strip of the whole drive under it, coloured as the
-// list, a dark line under the stretches a person set; a tap or a drag goes there. Play, the arrows and space step as in
-// Results › Drive (DriveView.vue). A person corrects the map: the type of the stretch shown (or from a marked start to
-// here), saved at once (POST, the drive comes back); Next to check goes to the next stretch the map is unsure about.
+// list, a dark line under the stretches a person set, an orange one under those to check, a blue one over the stretch a
+// tap sets; a tap or a drag on it goes there. Play, the arrows and space step as in Results › Drive (DriveView.vue). A
+// person corrects the map: the type of the stretch shown (or from a marked start to here), saved at once (POST, the drive
+// comes back), after a question when it is longer than a minute; Next to check goes to the next stretch the map is
+// unsure about. On a phone the loop (Next to check, look, tap a type) fits one screen; the rest is under it.
 import {computed, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import {plural, thousands} from '../common/format';
 import type {RoadDriveView, RoadType} from '../common/panel-types';
+import {askConfirm} from '../composables/confirm';
 import {toast} from '../composables/toast';
-import {frameTime, nextToCheck, ROAD_LABEL, roadRuns, toCheck} from './roads';
+import {checkStretches, frameTime, nextToCheck, reasonOf, ROAD_LABEL, ROAD_TYPES, roadRuns, stretchAt} from './roads';
 import Segmented from './Segmented.vue';
 import {goTo} from './tabs';
 import {SPEEDS, type Speed} from './watch';
@@ -24,7 +27,9 @@ const MARKS = {
 } as const;
 /** The choices of a correction, null: the person cannot tell. */
 const CHOICES: [key: RoadType | null, label: string][] = [['town', 'Town'], ['rural', 'Rural'], ['expressway', 'Expressway'],
-  ['motorway', 'Motorway'], [null, 'Can\'t tell']];
+  ['motorway', 'Motorway'], ['parking', 'Parking'], [null, 'Can\'t tell']];
+/** Longer than this (pictures, one a second), a correction asks first: one tap must not overwrite minutes of a drive. */
+const ASK_ABOVE = 60;
 
 // -- the drive -----------------------------------------------------------------------------------------------------------
 const payload = shallowRef<RoadDriveView | null>(null);
@@ -44,7 +49,11 @@ async function read(route: string): Promise<void> {
 }
 const frames = computed(() => payload.value?.frames ?? []);
 const runs = computed(() => roadRuns(frames.value));
-const left = computed(() => frames.value.filter(toCheck).length);
+/** The stretches to check: a line under each on the strip, Next to check goes from one to the next. */
+const checks = computed(() => checkStretches(frames.value));
+/** The narrowest mark of the strip, in frames: the position, a stretch of one picture (the stretch a tap sets three
+ * times that, to show beside the position). */
+const thin = computed(() => Math.max(1, frames.value.length / 250));
 const facts = computed(() => {
   const drive = payload.value;
   if (!drive) return '';
@@ -155,14 +164,19 @@ onBeforeUnmount(() => {
   window.clearTimeout(timer);
 });
 
+const stage = useTemplateRef<HTMLElement>('stage');
 /** Next to check: the next stretch no person set where the map says nothing or is often wrong. */
 function nextCheck(): void {
-  const index = nextToCheck(frames.value, cursor.value);
+  const index = nextToCheck(checks.value, cursor.value);
   if (index === null) {
     toast('Nothing else to check on this drive.');
     return;
   }
   step(index - cursor.value);
+  // The picture out of sight (a phone scrolled down to the buttons): back to its top, under the top bar.
+  const box = stage.value?.getBoundingClientRect();
+  const bar = document.querySelector('.topbar')?.getBoundingClientRect().bottom ?? 0;
+  if (box && (box.top < bar || box.bottom > window.innerHeight)) window.scrollTo({top: window.scrollY + box.top - bar - 8});
 }
 
 // -- the strip: a tap or a drag goes to that point of the drive ----------------------------------------------------------
@@ -185,27 +199,27 @@ function stripMove(event: PointerEvent): void {
 
 // -- the frame shown, and its correction -----------------------------------------------------------------------------------
 const kind = computed(() => frame.value?.road_type ?? 'unknown');
-/** Why the frame has its type, in words. */
-const reason = computed((): string => {
-  const item = frame.value;
-  if (!item) return '';
-  if (item.reviewed) return item.road_type === null ? 'A person could not tell.' : 'Set by a person.';
-  return 'From the map: ' + item.basis + '.';
-});
-/** The frames a correction covers: from the mark to here, else the stretch shown (its run of one kind). */
+/** Why the frame has its type, in a driver's words ('' when the map's reason has none). */
+const reason = computed(() => frame.value ? reasonOf(frame.value) : '');
+/** The frames a correction covers: from the mark to here, else the stretch shown (stretchAt: of one kind, as sure, not
+ * set by a person when this frame is not). */
 const span = computed((): [number, number] | null => {
   if (!frames.value.length) return null;
   if (mark.value !== null) return [Math.min(mark.value, shown.value), Math.max(mark.value, shown.value)];
-  const run = runs.value.find((item) => item.first <= shown.value && shown.value < item.first + item.count);
-  return run ? [run.first, run.first + run.count - 1] : null;
+  return stretchAt(frames.value, shown.value);
 });
-const spanText = computed((): string => {
+/** The times of the stretch a correction covers: "16:13:34 – 16:21:38". */
+const spanTimes = computed((): string => {
   const [first, last] = span.value ?? [0, -1];
   const start = payload.value?.start ?? null;
   const from = frames.value[first];
   const to = frames.value[last];
   if (!from || !to) return '';
-  return plural(last - first + 1, 'picture') + ' · ' + frameTime(from.key, start) + (last > first ? ' – ' + frameTime(to.key, start) : '');
+  return frameTime(from.key, start) + (last > first ? ' – ' + frameTime(to.key, start) : '');
+});
+const spanText = computed((): string => {
+  const [first, last] = span.value ?? [0, -1];
+  return spanTimes.value ? plural(last - first + 1, 'picture') + ' · ' + spanTimes.value : '';
 });
 const saving = ref(false);
 async function setType(type: RoadType | null): Promise<void> {
@@ -213,12 +227,20 @@ async function setType(type: RoadType | null): Promise<void> {
   const from = frames.value[first];
   const to = frames.value[last];
   if (!from || !to || saving.value) return;
+  const count = last - first + 1;
+  const label = type === null ? 'Can\'t tell' : ROAD_LABEL[type];
+  if (count > ASK_ABOVE && !await askConfirm({
+    title: 'Set ' + plural(count, 'picture') + ' (' + Math.round(count / 60) + ' min) to ' + label + '?',
+    text: 'The stretch marked in blue on the strip, ' + spanTimes.value + '. Undo last change takes it back.',
+    action: 'Set to ' + label,
+  })) return;
+  if (saving.value) return;
   saving.value = true;
   try {
     payload.value = await post<RoadDriveView>('/api/panel/road-types/' + encodeURIComponent(props.route),
       {from: from.key, to: to.key, road_type: type});
     mark.value = null;
-    toast((type === null ? 'Can\'t tell' : ROAD_LABEL[type]) + ' · ' + plural(last - first + 1, 'picture') + ' saved');
+    toast(label + ' · ' + plural(count, 'picture') + ' saved');
   } catch (problem) {
     toast(messageOf(problem), true);
   } finally {
@@ -253,8 +275,8 @@ async function undo(): Promise<void> {
     <p v-else-if="!payload" class="empty">Loading the drive…</p>
     <p v-else-if="frames.length === 0" class="empty">No road types for this drive yet: Find the road types reads them.</p>
     <div v-else class="rt-view-main">
-      <div class="rt-stage" tabindex="0" role="img" :aria-label="'Picture ' + (cursor + 1) + ' of ' + frames.length + ': ' + ROAD_LABEL[kind]"
-           @click="toggle">
+      <div ref="stage" class="rt-stage" tabindex="0" role="img"
+           :aria-label="'Picture ' + (cursor + 1) + ' of ' + frames.length + ': ' + ROAD_LABEL[kind]" @click="toggle">
         <img v-if="frame?.image && !failed" :src="frame.image" alt="" draggable="false">
         <p v-else class="wp-noimage">{{ frame?.image ? 'The picture cannot be loaded.' : 'No picture of this frame.' }}</p>
         <span v-if="!playing" class="wp-paused" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path :d="MARKS.play" fill="currentColor"/></svg></span>
@@ -268,8 +290,10 @@ async function undo(): Promise<void> {
           <template v-for="run in runs" :key="'r' + run.first">
             <rect v-if="run.reviewed" :x="run.first" y="16" :width="run.count" height="3" class="rt-done"/>
           </template>
-          <rect v-if="span && mark !== null" :x="span[0]" y="0" :width="span[1] - span[0] + 1" height="2" class="rt-marked"/>
-          <rect :x="cursor" y="0" :width="Math.max(1, frames.length / 250)" height="20" class="rt-head"/>
+          <rect v-for="item in checks" :key="'c' + item.first" :x="item.first" y="16" :width="Math.max(item.count, thin)" height="3"
+                class="rt-tocheck"/>
+          <rect v-if="span" :x="span[0]" y="0" :width="Math.max(span[1] - span[0] + 1, 3 * thin)" height="2.2" class="rt-marked"/>
+          <rect :x="cursor" y="0" :width="thin" height="20" class="rt-head"/>
         </svg>
         <div class="rt-controls">
           <button type="button" class="btn small primary rt-play" :aria-pressed="playing" @click="toggle"><svg class="icon"
@@ -282,7 +306,6 @@ async function undo(): Promise<void> {
             stroke-linecap="round" stroke-linejoin="round"/></svg></button>
           <span class="rt-pos"><b>{{ frame ? frameTime(frame.key, payload.start) : '' }}</b><span class="rt-count"> ·
             {{ thousands(cursor + 1) }} / {{ thousands(frames.length) }}</span></span>
-          <Segmented v-model="speedKey" :options="speedOptions" label="Speed" class="rt-speed"/>
         </div>
       </div>
 
@@ -290,30 +313,41 @@ async function undo(): Promise<void> {
         <div class="rt-now">
           <span class="rt-chip"><i class="rt-key" :class="'rt-' + kind" aria-hidden="true"></i>{{ ROAD_LABEL[kind] }}</span>
           <span v-if="frame?.reviewed" class="rt-flag done">Reviewed</span>
-          <span v-else-if="frame && !frame.sure" class="rt-flag unsure">Not sure</span>
+          <span v-else-if="frame && frame.road_type !== null && !frame.sure" class="rt-flag unsure">Not sure</span>
         </div>
-        <p class="rt-basis">{{ reason }}</p>
+        <p v-if="reason" class="rt-basis">{{ reason }}</p>
 
         <div class="rt-fix">
-          <p class="rt-fix-head"><strong>{{ mark === null ? 'This stretch is' : 'From the mark to here is' }}</strong>
+          <p class="rt-fix-head"><strong>{{ mark === null ? 'This stretch' : 'From the mark to here' }}</strong>
             <span>{{ spanText }}</span></p>
           <div class="seg rt-pick" role="radiogroup" aria-label="Type of road">
             <button v-for="[key, label] in CHOICES" :key="key ?? 'none'" type="button" role="radio"
                     :aria-checked="Boolean(frame?.reviewed) && mark === null && frame?.road_type === key"
-                    :class="{'rt-map': !frame?.reviewed && mark === null && frame?.road_type === key}"
+                    :class="{'rt-map': key !== null && !frame?.reviewed && mark === null && frame?.road_type === key}"
                     :disabled="saving || readOnly" @click="setType(key)"><i class="rt-key" :class="'rt-' + (key ?? 'unknown')"
                     aria-hidden="true"></i>{{ label }}</button>
           </div>
+        </div>
+
+        <button type="button" class="btn rt-next" :disabled="checks.length === 0" @click="nextCheck">{{ checks.length ? 'Next to check'
+          : 'Nothing left to check' }}<span v-if="checks.length" class="rt-left">{{ plural(checks.length, 'stretch', 'stretches') }}</span></button>
+
+        <div class="rt-more">
+          <Segmented v-model="speedKey" :options="speedOptions" label="Speed" class="rt-speed"/>
           <div class="rt-fix-row">
             <button type="button" class="btn small" :disabled="readOnly" @click="mark = mark === null ? shown : null">{{ mark === null ? 'Mark start' : 'Clear the mark' }}</button>
             <button v-if="payload.corrections > 0" type="button" class="btn small" :disabled="saving || readOnly" @click="undo">Undo last change</button>
           </div>
           <p class="rt-hint">{{ readOnly ? 'Read-only: corrections are turned off on this server.'
-            : mark === null ? 'Tap the right type: it is saved at once. Mark start to choose where a stretch begins.'
+            : mark === null ? 'Tap the right type: the stretch marked in blue on the strip is saved at once, a long one after a question. Mark start to choose where a stretch begins.'
               : 'Now go to the end of the stretch, then tap its type.' }}</p>
+          <ul class="rt-legend rt-marks" aria-label="The strip">
+            <li v-for="[key, label] in ROAD_TYPES" :key="key"><span class="rt-key" :class="'rt-' + key" aria-hidden="true"></span>{{ label }}</li>
+            <li><span class="rt-line rt-tocheck" aria-hidden="true"></span>To check</li>
+            <li><span class="rt-line rt-done" aria-hidden="true"></span>Set by you</li>
+            <li><span class="rt-line rt-marked" aria-hidden="true"></span>What a tap sets</li>
+          </ul>
         </div>
-
-        <button type="button" class="btn rt-next" :disabled="left === 0" @click="nextCheck">Next to check<span class="rt-left">{{ thousands(left) }}</span></button>
       </aside>
     </div>
   </section>

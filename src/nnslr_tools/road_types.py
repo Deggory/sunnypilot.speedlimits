@@ -1,10 +1,17 @@
 """The type of road of every frame, from the map: the labels of the road-type head, prepared without a person.
 
-``nnslr road-types --all`` reads the GPS position and heading of every frame (``derived/gps/<route>/positions.jsonl``,
-nnslr gps) and the OpenStreetMap roads near the drives (``derived/osm/roads.jsonl``, scripts/osm_roads.py, read
-offline from the local Geofabrik extract). For each frame it finds the road we drive on (the closest one along our
-heading, map_context.our_road) and names its type:
+``nnslr road-types --all`` reads the GPS position, speed and heading of every frame
+(``derived/gps/<route>/positions.jsonl``, nnslr gps) and the OpenStreetMap roads and car parks near the drives
+(``derived/osm/roads.jsonl`` and ``parking.jsonl``, scripts/osm_roads.py, read offline from the local Geofabrik
+extracts). For each frame it finds the road we drive on (the closest one along our heading, map_context.our_road) and
+names its type:
 
+- parking, a car park: our road is a parking aisle (``highway=service``, ``service=parking_aisle``: "parking aisle",
+  sure), or the position is inside a car park outline (``amenity=parking``: "car park on the map") and our road is a
+  service road, or no road is found, or the car is slower than PARKING_SPEED (the GPS finds the street next to the car
+  park). Faster than PARKING_MAX_SPEED an aisle or a service road found is the GPS slipping, not a car park. Sure only when the outline and a service road agree. An underground car park lies under the streets: slow
+  on a street over it is not parking. Its limit is always 0 to sunnypilot unless a sign is read, and seeing it drops
+  the limit remembered from the road before;
 - motorway: ``highway=motorway`` or its ramps;
 - expressway: ``highway=trunk`` or its ramps (the Swiss Autostrasse), unless the map puts it in a town;
 - town or rural, for every other road: the kind of limit when the map says it (``CH:urban``, ``CH:zone30`` → town,
@@ -13,12 +20,13 @@ heading, map_context.our_road) and names its type:
 
 Then along the drive: a gap of unknown frames between two stretches of the same type takes that type (a tunnel, a
 road of the map without a limit), and a stretch shorter than MIN_RUN frames between two stretches of the same type
-takes theirs (the GPS jumping to a side road or a bridge for a second).
+takes theirs (the GPS jumping to a side road, a bridge or a car park beside the road for a second).
 
 Writes ``derived/road_types/<route>.jsonl``: one line per frame, ``{"frame_key", "segment_index", "output_index",
-"road_type" (town, rural, expressway, motorway or null), "map_type" (before the drive was looked at), "basis" (why:
-"maxspeed 50", "highway motorway", "filled", "smoothed", "no road", "no gps"...), "sure" (false where the map is often
-wrong: WEAK_BASES, filled, smoothed), "way_id", "highway", "maxspeed"}``.
+"road_type" (town, rural, expressway, motorway, parking or null), "map_type" (before the drive was looked at), "basis"
+(why: "maxspeed 50", "highway motorway", "parking aisle", "car park on the map", "filled", "smoothed", "no road", "no
+gps"...), "sure" (false where the map is often wrong: WEAK_BASES, a car park of one signal, filled, smoothed),
+"way_id", "highway", "maxspeed"}`` (the road found, also in a car park).
 
 Measured on 27 Oct 2026, 240 frames of 11 drives looked at without the map: where the eye was sure, the map agreed on
 91% of town frames, 75% of rural ones and 95% of motorway ones; most rural misses were roads at 60 in a town.
@@ -37,13 +45,19 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
-from nnslr_tools.annotations import atomic_write, jsonl_bytes, load_jsonl
+from nnslr_tools.annotations import atomic_write, jsonl_bytes, load_jsonl, strict_json_loads
 from nnslr_tools.manifest import parse_route_id
-from nnslr_tools.map_context import OUR_ROAD_M, RoadMap, our_road
+from nnslr_tools.map_context import CELL_DEGREES, OUR_ROAD_M, RoadMap, our_road
 
 ROAD_TYPES_RELATIVE = Path('derived') / 'road_types'
 CORRECTIONS_RELATIVE = Path('annotations') / 'road_types'
-ROAD_TYPES = ('town', 'rural', 'expressway', 'motorway')
+PARKING_RELATIVE = Path('derived') / 'osm' / 'parking.jsonl'
+ROAD_TYPES = ('town', 'rural', 'expressway', 'motorway', 'parking')
+# Slower than this (m/s) inside a car park outline: parking, even with a street of the map within OUR_ROAD_M.
+PARKING_SPEED = 3.0
+# Faster than this (36 km/h) an aisle or a service road found is the GPS slipping onto a car park beside the road (a
+# motorway ramp at Basel St. Jakob, 27 Oct 2026), never a car park: nobody drives through one that fast.
+PARKING_MAX_SPEED = 10.0
 # The longest gap of unknown frames (one a second) filled from the same type on both sides: a long tunnel.
 MAX_GAP = 60
 # A stretch shorter than this between two stretches of one type is a slip of the GPS, not a change of road.
@@ -110,6 +124,65 @@ def way_type(way: dict) -> tuple[str | None, str]:
     return None, 'highway ' + (highway or 'road') + ' without a limit'
 
 
+def _inside(rings: list, lat: float, lon: float) -> bool:
+    """Whether a position is inside an outline: inside an odd number of its rings (an inner ring is a hole)."""
+    inside = False
+    for ring in rings:
+        for (a_lat, a_lon), (b_lat, b_lon) in zip(ring, ring[1:] + ring[:1]):
+            if (a_lat > lat) != (b_lat > lat) and lon < a_lon + (lat - a_lat) * (b_lon - a_lon) / (b_lat - a_lat):
+                inside = not inside
+    return inside
+
+
+class ParkingMap:
+    """The car parks near the drives (derived/osm/parking.jsonl, scripts/osm_roads.py), with a grid index of their
+    outlines. Empty before osm_roads.py wrote the file: no frame is parking then but by its aisle."""
+
+    def __init__(self, parks: list[dict]):
+        self.parks = parks
+        self.boxes: list[tuple[float, float, float, float]] = []
+        self.cells: dict[tuple[int, int], list[int]] = {}
+        for p, park in enumerate(parks):
+            lats = [point[0] for ring in park['rings'] for point in ring]
+            lons = [point[1] for ring in park['rings'] for point in ring]
+            self.boxes.append((min(lats), min(lons), max(lats), max(lons)))
+            for a in range(int(min(lats) // CELL_DEGREES), int(max(lats) // CELL_DEGREES) + 1):
+                for b in range(int(min(lons) // CELL_DEGREES), int(max(lons) // CELL_DEGREES) + 1):
+                    self.cells.setdefault((a, b), []).append(p)
+
+    @classmethod
+    def load(cls, root: Path) -> ParkingMap:
+        path = Path(root) / PARKING_RELATIVE
+        if not path.is_file():
+            return cls([])
+        return cls([park for park in load_jsonl(path) if isinstance(park, dict) and park.get('rings')
+                    and all(isinstance(ring, list) and len(ring) >= 3 for ring in park['rings'])])
+
+    def containing(self, lat: float, lon: float) -> dict | None:
+        """The car park whose outline holds the position, None outside every one."""
+        for p in self.cells.get((int(lat // CELL_DEGREES), int(lon // CELL_DEGREES)), ()):
+            south, west, north, east = self.boxes[p]
+            if south <= lat <= north and west <= lon <= east and _inside(self.parks[p]['rings'], lat, lon):
+                return self.parks[p]
+        return None
+
+
+def parking_basis(way: dict | None, park: dict | None, speed) -> tuple[str, bool] | None:
+    """Why a frame is in a car park and whether that is sure, None when it is not: way is our road (None: no road
+    found), park the car park whose outline holds the position (None: outside every one), speed in m/s or None."""
+    service = way is not None and way.get('highway') == 'service'
+    fast = isinstance(speed, (int, float)) and speed >= PARKING_MAX_SPEED
+    if service and way.get('service') == 'parking_aisle' and not fast:
+        return 'parking aisle', True
+    if park is None:
+        return None
+    slow = isinstance(speed, (int, float)) and speed < PARKING_SPEED and park.get('parking') != 'underground'
+    if (service and not fast) or way is None or slow:
+        # Both signals agree only when our road is a service road of the car park.
+        return 'car park on the map', service
+    return None
+
+
 def _runs(types: list[str | None]) -> list[list]:
     """[[type, start, end], ...]: the stretches of equal type, end excluded."""
     runs: list[list] = []
@@ -145,29 +218,38 @@ def smooth(types: list[str | None]) -> list[tuple[str | None, str | None]]:
     return result
 
 
-def frame_types(road_map: RoadMap, positions: list[dict]) -> list[dict]:
+def frame_types(road_map: RoadMap, positions: list[dict], parking: ParkingMap | None = None) -> list[dict]:
     """One line per position (in the order of the drive) with its road type."""
+    parking = ParkingMap([]) if parking is None else parking
     lines = []
+    # Per line: whether the map is often wrong about its reason (not "sure" even when not filled or smoothed).
+    weak = []
     for position in positions:
         line = {'frame_key': position['frame_key'], 'segment_index': position.get('segment_index'),
                 'output_index': position.get('output_index'), 'road_type': None, 'map_type': None,
                 'basis': 'no gps', 'way_id': None, 'highway': None, 'maxspeed': None}
+        doubtful = False
         lat, lon, heading = position.get('latitude'), position.get('longitude'), position.get('bearing_deg')
         if lat is not None and lon is not None and heading is not None:
             near = road_map.nearest(lat, lon, OUR_ROAD_M)
             ours = our_road(near, heading)
-            if ours is None:
+            way = None if ours is None else road_map.ways[ours]
+            if way is None:
                 line['basis'] = 'no road'
             else:
-                way = road_map.ways[ours]
                 kind, basis = way_type(way)
                 line.update(map_type=kind, basis=basis, way_id=way.get('id'), highway=way.get('highway'),
                             maxspeed=way.get('maxspeed'))
+                doubtful = basis in WEAK_BASES or basis.endswith(' in town')
+            parked = parking_basis(way, parking.containing(lat, lon), position.get('speed_mps'))
+            if parked is not None:
+                line.update(map_type='parking', basis=parked[0])
+                doubtful = not parked[1]
         lines.append(line)
-    for line, (kind, how) in zip(lines, smooth([line['map_type'] for line in lines])):
+        weak.append(doubtful)
+    for line, doubtful, (kind, how) in zip(lines, weak, smooth([line['map_type'] for line in lines])):
         line['road_type'] = kind
-        line['sure'] = kind is not None and how is None and line['basis'] not in WEAK_BASES \
-            and not line['basis'].endswith(' in town')
+        line['sure'] = kind is not None and how is None and not doubtful
         if how is not None:
             line['basis'] = how + ' (' + line['basis'] + ')'
     return lines
@@ -178,10 +260,12 @@ def road_types_path(root: Path, route: str) -> Path:
     return Path(root) / ROAD_TYPES_RELATIVE / f'{route}.jsonl'
 
 
-def build_road_types(root: Path, route: str, positions: list[dict], road_map: RoadMap) -> dict:
-    """Writes the road types of a route; returns how many frames of each type."""
+def build_road_types(root: Path, route: str, positions: list[dict], road_map: RoadMap,
+                     parking: ParkingMap | None = None) -> dict:
+    """Writes the road types of a route; returns how many frames of each type. parking: the car parks, read from the
+    data root when not given."""
     ordered = sorted(positions, key=lambda item: (item.get('segment_index') or 0, item.get('output_index') or 0))
-    lines = frame_types(road_map, ordered)
+    lines = frame_types(road_map, ordered, ParkingMap.load(root) if parking is None else parking)
     target = road_types_path(root, route)
     atomic_write(target, jsonl_bytes(lines))
     counts: dict[str, int] = {}
@@ -205,12 +289,22 @@ def corrections_path(root: Path, route: str) -> Path:
 
 
 def load_corrections(root: Path, route: str) -> list[dict]:
-    """A person's corrections of a route in the order they were made, [] before the first."""
+    """A person's corrections of a route in the order they were made, [] before the first. A line that cannot be read
+    (broken JSON, from or to not a frame key, road_type missing or not one) is skipped: the others still count, and
+    the drive still opens."""
     path = corrections_path(root, route)
     if not path.is_file():
         return []
-    return [line for line in load_jsonl(path) if isinstance(line, dict) and isinstance(line.get('from'), str)
-            and isinstance(line.get('to'), str) and (line.get('road_type') is None or line['road_type'] in ROAD_TYPES)]
+    found = []
+    for text in path.read_text(encoding='utf-8', errors='replace').splitlines():
+        try:
+            line = strict_json_loads(text)
+        except (ValueError, TypeError):
+            continue
+        if isinstance(line, dict) and isinstance(line.get('from'), str) and isinstance(line.get('to'), str) \
+                and 'road_type' in line and (line['road_type'] is None or line['road_type'] in ROAD_TYPES):
+            found.append(line)
+    return found
 
 
 def corrected(lines: list[dict], corrections: list[dict]) -> list[dict]:
@@ -278,7 +372,7 @@ def stretches(lines: list[dict]) -> list[dict]:
 
 
 def type_counts(lines: list[dict]) -> dict[str, int]:
-    """The frames of each type: {town, rural, expressway, motorway, unknown: frames}."""
+    """The frames of each type: {town, rural, expressway, motorway, parking, unknown: frames}."""
     types = {key: 0 for key in (*ROAD_TYPES, 'unknown')}
     for line in lines:
         key = line.get('road_type') if line.get('road_type') in ROAD_TYPES else 'unknown'
@@ -332,9 +426,10 @@ def _stamp(path: Path) -> tuple | None:
 
 def summary(root: Path) -> dict:
     """The road types of every drive, for Data › Roads (GET /api/panel/road-types): {'routes': [{'route', 'title',
-    'when', 'minutes', 'frames', 'types': {town, rural, expressway, motorway, unknown: frames}, 'reviewed': frames a
-    person set, 'stretches'}] newest drive first, 'made_at': when the newest file of the map was written (None before
-    the first), 'drives_without': the prepared drives (with a pre-annotation report) that have no road types yet}."""
+    'when', 'minutes', 'frames', 'types': {town, rural, expressway, motorway, parking, unknown: frames}, 'reviewed':
+    frames a person set, 'stretches'}] newest drive first, 'made_at': when the newest file of the map was written (None
+    before the first), 'drives_without': the prepared drives (with a pre-annotation report) that have no road types
+    yet}."""
     from nnslr_tools.review import list_reports
     root = Path(root)
     files = []

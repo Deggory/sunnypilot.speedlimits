@@ -1104,8 +1104,9 @@ export interface ModelsPayload {
   cutter_score_threshold: number;
 }
 
-/** The type of road of a frame, from the map (nnslr_tools.road_types); null: the map does not say. */
-export type RoadType = 'town' | 'rural' | 'expressway' | 'motorway';
+/** The type of road of a frame, from the map (nnslr_tools.road_types); null: the map does not say. Parking: a car park,
+ * no general limit there (sunnypilot gets 0), a kind of place the network learns. */
+export type RoadType = 'town' | 'rural' | 'expressway' | 'motorway' | 'parking';
 /** A stretch of a drive on one type of road, from and to frame keys. */
 export interface RoadStretch {
   type: RoadType | null;
@@ -1122,7 +1123,8 @@ export interface RoadDrive {
   when: string | null;
   minutes: number | null;
   frames: number;
-  types: Record<RoadType | 'unknown', number>;
+  /** Frames of each type; a type missing: none (parking, from a server before it). */
+  types: Partial<Record<RoadType | 'unknown', number>>;
   /** The frames whose type a person set (Data › Roads, the drive opened). */
   reviewed: number;
   /** In the order of the drive. */
@@ -1146,7 +1148,7 @@ export interface RoadFrame {
   image: string | null;
   /** null: unknown (the map says nothing, or a person cannot tell). */
   road_type: RoadType | null;
-  /** Why: "maxspeed 50", "no gps", "filled (no gps)"..., "reviewed" when a person set it. */
+  /** Why: "maxspeed 50", "no gps", "car park on the map", "filled (no gps)"..., "reviewed" when a person set it. */
   basis: string;
   /** False where the map is often wrong. */
   sure: boolean;

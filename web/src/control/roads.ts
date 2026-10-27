@@ -1,13 +1,13 @@
-// Data › Roads: the kinds of road with their words, and a drive opened (RoadDrive.vue) as runs of frames, the frames
-// still to check and the time of a frame.
+// Data › Roads: the kinds of road with their words, and a drive opened (RoadDrive.vue) as runs of frames, the stretches
+// still to check, the stretch a correction sets, why a frame has its type in a driver's words and the time of a frame.
 import type {RoadFrame, RoadType} from '../common/panel-types';
 
 /** The kinds of road in the order of the legend, each with its colour (control.html .rt-town ...). */
 export const ROAD_TYPES: [key: RoadType | 'unknown', label: string][] = [['town', 'Town'], ['rural', 'Rural'],
-  ['expressway', 'Expressway'], ['motorway', 'Motorway'], ['unknown', 'Unknown']];
+  ['expressway', 'Expressway'], ['motorway', 'Motorway'], ['parking', 'Parking'], ['unknown', 'Unknown']];
 export const ROAD_LABEL = Object.fromEntries(ROAD_TYPES) as Record<RoadType | 'unknown', string>;
 
-/** A run of frames of one kind, the map's or a person's: what the strip draws and what a correction covers. */
+/** A run of frames of one kind, the map's or a person's: what the strip draws. */
 export interface RoadRun {
   first: number;
   count: number;
@@ -30,19 +30,74 @@ export function toCheck(frame: RoadFrame): boolean {
   return !frame.reviewed && (frame.road_type === null || !frame.sure);
 }
 
+/** The stretches to check, in the order of the drive: the frames to check one after the other, of one kind (an unknown
+ * gap then an unsure ramp are two stretches, as a correction sets them one at a time). */
+export function checkStretches(frames: readonly RoadFrame[]): {first: number; count: number}[] {
+  const stretches: {first: number; count: number}[] = [];
+  frames.forEach((frame, index) => {
+    if (!toCheck(frame)) return;
+    const last = stretches[stretches.length - 1];
+    if (last && last.first + last.count === index && frames[index - 1]?.road_type === frame.road_type) last.count += 1;
+    else stretches.push({first: index, count: 1});
+  });
+  // One or two unsure pictures of the same kind as both their neighbours (a gap filled in a car park, a lone picture
+  // between two town stretches) are not worth a stop: the stretch around them already says what they are.
+  return stretches.filter(({first, count}) => count > 2 || frames[first]?.road_type === null
+    || frames[first - 1]?.road_type !== frames[first]?.road_type
+    || frames[first + count]?.road_type !== frames[first]?.road_type);
+}
+
 /** The first frame of the next stretch to check after the one at `from` (from the start again after the last); null when
  * none is left. */
-export function nextToCheck(frames: readonly RoadFrame[], from: number): number | null {
-  let first: number | null = null;
-  for (let index = 0; index < frames.length; index++) {
-    const frame = frames[index];
-    if (!frame || !toCheck(frame)) continue;
-    const start = index === 0 || !toCheck(frames[index - 1] as RoadFrame);
-    if (!start) continue;
-    if (index > from) return index;
-    first ??= index;
+export function nextToCheck(stretches: readonly {first: number}[], from: number): number | null {
+  const next = stretches.find((stretch) => stretch.first > from) ?? stretches[0];
+  return next && next.first !== from ? next.first : null;
+}
+
+/** The stretch a correction sets at a frame, [first, last]: the frames around it of the same kind, as sure and set by a
+ * person or not. A tap on an unsure ramp changes only its unsure frames, never the sure motorway around it nor a stretch
+ * a person already set. */
+export function stretchAt(frames: readonly RoadFrame[], index: number): [number, number] | null {
+  const here = frames[index];
+  if (!here) return null;
+  const same = (frame: RoadFrame | undefined): boolean => frame !== undefined && frame.road_type === here.road_type
+    && frame.sure === here.sure && frame.reviewed === here.reviewed;
+  let first = index;
+  let last = index;
+  while (same(frames[first - 1])) first -= 1;
+  while (same(frames[last + 1])) last += 1;
+  return [first, last];
+}
+
+/** The kinds of road of the map (highway=...) that name the type of road alone. */
+const HIGHWAY_WORDS: Record<string, string> = {
+  motorway: 'A motorway on the map', motorway_link: 'A motorway ramp on the map: check it',
+  trunk: 'An expressway on the map', trunk_link: 'An expressway ramp on the map: check it',
+  residential: 'A residential street on the map', living_street: 'A residential street on the map',
+};
+
+/** Why a frame has its type, in a driver's words, from the reason of the map (nnslr_tools.road_types: "maxspeed 50",
+ * "highway motorway_link", "filled (no gps)"...); '' for a reason without words here, rather than the tags of the map. */
+export function reasonOf(frame: RoadFrame): string {
+  if (frame.reviewed) return frame.road_type === null ? 'Set by you: can\'t tell' : 'Set by you';
+  const basis = frame.basis ?? '';
+  if (basis.startsWith('filled')) return 'Between two stretches of the same kind (a tunnel or a gap)';
+  if (basis.startsWith('smoothed')) return 'A short jump of the GPS';
+  if (basis === 'no gps') return 'No GPS here (garage, tunnel or the start of the drive)';
+  if (basis === 'no road') return 'No road on the map here';
+  if (basis === 'parking aisle' || basis.includes('car park')) return 'A car park on the map';
+  const limit = /^maxspeed (\d+)$/.exec(basis)?.[1];
+  if (limit) return 'The map says ' + limit + ' km/h' + (frame.sure ? ' here' : ': often a town edge, check it');
+  const zone = /^limit \S*zone ?(\d+)/i.exec(basis)?.[1];
+  if (zone) return 'A ' + zone + ' zone on the map';
+  if (/^limit \S*urban/i.test(basis)) return 'In town on the map';
+  if (/^limit \S*rural/i.test(basis)) return 'Out of town on the map';
+  if (basis.endsWith(' without a limit')) {
+    return /^highway (primary|secondary|tertiary)/.test(basis) ? 'A road with no limit on the map' : 'A small road with no limit on the map';
   }
-  return first !== null && first !== from ? first : null;
+  const road = /^highway (\w+)( in town)?$/.exec(basis);
+  if (!road) return '';
+  return road[2] ? 'An expressway through a town on the map: check it' : HIGHWAY_WORDS[road[1] ?? ''] ?? '';
 }
 
 /** Seconds from the start of the drive of a frame "segment/image": a segment a minute, a frame a second. */

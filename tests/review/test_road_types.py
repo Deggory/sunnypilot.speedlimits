@@ -111,7 +111,7 @@ def test_summary_names_each_drive_with_its_types_and_the_drives_left(tmp_path):
     assert result['drives_without'] == 0 and result['made_at'] is not None
     drive = result['routes'][0]
     assert (drive['route'], drive['frames']) == (ROUTE, 4)
-    assert drive['types'] == {'town': 0, 'rural': 0, 'expressway': 0, 'motorway': 3, 'unknown': 1}
+    assert drive['types'] == {'town': 0, 'rural': 0, 'expressway': 0, 'motorway': 3, 'parking': 0, 'unknown': 1}
     assert drive['stretches'] == [{'type': 'motorway', 'from': '0/0', 'to': '0/2', 'frames': 3},
                                   {'type': None, 'from': '0/3', 'to': '0/3', 'frames': 1}]
     # Read again when the file changes.
@@ -162,7 +162,8 @@ def test_corrections_over_the_map_the_last_wins_and_a_new_map_keeps_them(tmp_pat
     assert [(line['from'], line['to'], line['road_type']) for line in kept] == [('0/5', '0/3', 'town'), ('0/4', '0/4', None)]
     assert all(line['reviewer'] == 'admin' and line['at'] for line in kept)
     drive = summary(tmp_path)['routes'][0]
-    assert drive['reviewed'] == 3 and drive['types'] == {'town': 2, 'rural': 0, 'expressway': 0, 'motorway': 3, 'unknown': 1}
+    assert drive['reviewed'] == 3 and drive['types'] == {'town': 2, 'rural': 0, 'expressway': 0, 'motorway': 3,
+                                                         'parking': 0, 'unknown': 1}
 
     # Find again: the map is written anew, the corrections are not touched and still win.
     build_road_types(tmp_path, ROUTE, positions, road_map)
@@ -284,3 +285,124 @@ def test_a_read_only_panel_refuses_a_correction(tmp_path):
         assert not corrections_path(tmp_path, ROUTE).exists()
     finally:
         server.close()
+
+
+# -- car parks: the fifth type ---------------------------------------------------------------------------------------
+def _parking_map(tmp_path, ways, parks):
+    """The roads and car parks of the map in the data root, as scripts/osm_roads.py writes them."""
+    folder = tmp_path / 'derived' / 'osm'
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / 'roads.jsonl').write_text(''.join(json.dumps(way) + '\n' for way in ways))
+    (folder / 'parking.jsonl').write_text(''.join(json.dumps(park) + '\n' for park in parks))
+    return RoadMap.load(tmp_path)
+
+
+def _at(lat, lon, heading, speed):
+    return {'frame_key': '0/0', 'segment_index': 0, 'output_index': 0, 'latitude': lat, 'longitude': lon,
+            'bearing_deg': heading, 'speed_mps': speed}
+
+
+def _type(road_map, parking, lat, lon, heading=90.0, speed=4.0):
+    from nnslr_tools.road_types import frame_types
+    line = frame_types(road_map, [_at(lat, lon, heading, speed)], parking)[0]
+    return line['road_type'], line['basis'], line['sure']
+
+
+# A car park from lat 47.010 to 47.012, lon 8.010 to 8.013, with a hole (a building) in its south-west corner; a
+# primary road at 50 crosses it from west to east at lat 47.011, a service road runs north in its east part.
+CAR_PARK = {'id': 7, 'type': 'way', 'name': 'P', 'parking': 'surface',
+            'rings': [[[47.010, 8.010], [47.010, 8.013], [47.012, 8.013], [47.012, 8.010], [47.010, 8.010]],
+                      [[47.0102, 8.0102], [47.0106, 8.0102], [47.0106, 8.0108], [47.0102, 8.0108], [47.0102, 8.0102]]]}
+CROSSING = [{'id': 1, 'highway': 'primary', 'maxspeed': '50', 'nodes': [[47.011, 8.009], [47.011, 8.014]]},
+            {'id': 2, 'highway': 'service', 'nodes': [[47.0102, 8.0125], [47.0118, 8.0125]]}]
+
+
+def test_parking_from_an_aisle(tmp_path):
+    road_map = _parking_map(tmp_path, [{'id': 3, 'highway': 'service', 'service': 'parking_aisle',
+                                        'nodes': [[47.02, 8.0], [47.02, 8.002]]}], [])
+    positions = [{'frame_key': f'0/{index}', 'segment_index': 0, 'output_index': index, 'latitude': 47.02,
+                  'longitude': 8.0002 + index * 0.0003, 'bearing_deg': 90.0, 'speed_mps': 4.0} for index in range(5)]
+    # No outline around it: the tag of the aisle is enough, and sure.
+    assert build_road_types(tmp_path, ROUTE, positions, road_map)['types'] == {'parking': 5}
+    lines = load_road_types(tmp_path, ROUTE)
+    assert {(line['road_type'], line['basis'], line['sure'], line['way_id']) for line in lines} == {
+        ('parking', 'parking aisle', True, 3)}
+    # At 50 km/h on an aisle: the GPS slipping onto a car park beside a ramp (Basel St. Jakob), not a car park.
+    from nnslr_tools.road_types import ParkingMap
+    assert _type(road_map, ParkingMap([]), 47.02, 8.001, speed=13.0) == (None, 'highway service without a limit', False)
+    # A car park beside the road for less than MIN_RUN frames is a slip, as any other.
+    assert [value for value, _ in smooth(['town'] * 5 + ['parking'] * 2 + ['town'] * 5)] == ['town'] * 12
+
+
+def test_parking_from_an_outline_with_no_road(tmp_path):
+    from nnslr_tools.road_types import ParkingMap
+    road_map = _parking_map(tmp_path, CROSSING, [CAR_PARK])
+    parking = ParkingMap.load(tmp_path)
+    # Inside the outline, no road within reach: a car park, but one signal only.
+    assert _type(road_map, parking, 47.0118, 8.0105) == ('parking', 'car park on the map', False)
+    # On the service road inside it: the outline and the road agree.
+    assert _type(road_map, parking, 47.0104, 8.0125, heading=0.0) == ('parking', 'car park on the map', True)
+    # In the hole of the outline, or outside it: no road, no type.
+    assert _type(road_map, parking, 47.0104, 8.0105) == (None, 'no road', False)
+    assert _type(road_map, parking, 47.0135, 8.0105) == (None, 'no road', False)
+    # Without parking.jsonl (a map read before the car parks were kept) the outline is not known.
+    (tmp_path / 'derived' / 'osm' / 'parking.jsonl').unlink()
+    assert _type(road_map, ParkingMap.load(tmp_path), 47.0118, 8.0105) == (None, 'no road', False)
+
+
+def test_not_parking_on_a_road_through_a_car_park_at_speed(tmp_path):
+    from nnslr_tools.road_types import ParkingMap
+    road_map = _parking_map(tmp_path, CROSSING, [CAR_PARK])
+    parking = ParkingMap.load(tmp_path)
+    # On the primary road across the outline at 50 km/h: the road, not the car park.
+    assert _type(road_map, parking, 47.011, 8.0110, speed=14.0) == ('town', 'maxspeed 50', True)
+    # Without a speed the road stays too.
+    assert _type(road_map, parking, 47.011, 8.0110, speed=None) == ('town', 'maxspeed 50', True)
+    # The service road inside the outline at 45 km/h: the GPS slipping, not the car park.
+    assert _type(road_map, parking, 47.0104, 8.0125, heading=0.0, speed=12.5) == (
+        None, 'highway service without a limit', False)
+    # Slower than a walk there: the GPS finds the road beside the car park, the car is in it (not sure).
+    assert _type(road_map, parking, 47.011, 8.0110, speed=1.0) == ('parking', 'car park on the map', False)
+    # An underground car park lies under the street: slow over it is not parking.
+    underground = ParkingMap([{**CAR_PARK, 'parking': 'underground'}])
+    assert _type(road_map, underground, 47.011, 8.0110, speed=1.0) == ('town', 'maxspeed 50', True)
+
+
+def test_a_correction_to_parking(tmp_path):
+    from nnslr_tools.road_types import correct, summary
+    _drive_of(tmp_path)
+    correct(tmp_path, ROUTE, '0/0', '0/1', 'parking', 'admin')
+    lines = load_road_types(tmp_path, ROUTE)
+    assert [line['road_type'] for line in lines] == ['parking'] * 2 + ['motorway'] * 2 + [None] * 2
+    assert (lines[0]['basis'], lines[0]['sure'], lines[0]['reviewed']) == ('reviewed', True, True)
+    assert summary(tmp_path)['routes'][0]['types'] == {'town': 0, 'rural': 0, 'expressway': 0, 'motorway': 2,
+                                                       'parking': 2, 'unknown': 2}
+
+
+def test_a_broken_corrections_line_is_skipped(tmp_path):
+    from nnslr_tools.road_types import corrections_path, correct, drive_view, load_corrections, summary
+    _drive_of(tmp_path)
+    path = corrections_path(tmp_path, ROUTE)
+    path.parent.mkdir(parents=True)
+    good = {'from': '0/0', 'to': '0/0', 'road_type': 'town', 'reviewer': 'admin', 'at': '2026-10-27T12:00:00+01:00'}
+    path.write_text('\n'.join([
+        json.dumps(good),
+        '{"from": "0/1", "to":',                                        # cut short
+        '[1, 2]',                                                       # not an object
+        json.dumps({**good, 'from': '0/1', 'to': '0/1', 'road_type': 'highway'}),   # not a type
+        json.dumps({**good, 'from': 1, 'to': '0/1'}),                   # not a frame key
+        json.dumps({'from': '0/1', 'to': '0/1', 'reviewer': 'admin'}),  # no road_type
+        '{"from": "0/1", "to": "0/1", "road_type": NaN}',
+        '\xff\xfe not text',
+        json.dumps({**good, 'from': '0/2', 'to': '0/2', 'road_type': None}),
+    ]) + '\n', encoding='latin-1')
+    assert [(line['from'], line['road_type']) for line in load_corrections(tmp_path, ROUTE)] == [('0/0', 'town'),
+                                                                                                ('0/2', None)]
+    assert [line['road_type'] for line in load_road_types(tmp_path, ROUTE)] == ['town', 'motorway', None, 'motorway',
+                                                                                None, None]
+    # The list of Data › Roads and the drive opened still answer.
+    assert summary(tmp_path)['routes'][0]['reviewed'] == 2
+    assert drive_view(tmp_path, ROUTE, {})['corrections'] == 2
+    # A new correction is appended after them and counts.
+    correct(tmp_path, ROUTE, '0/1', '0/1', 'rural', 'admin')
+    assert [line['road_type'] for line in load_road_types(tmp_path, ROUTE)][:3] == ['town', 'rural', None]
