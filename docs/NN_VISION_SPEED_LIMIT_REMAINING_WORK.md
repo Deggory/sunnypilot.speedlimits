@@ -275,7 +275,32 @@ ONNX should be treated as an interchange/reference format. The final on-device f
 
 ## 6. Sunnypilot runtime — current source state
 
-Runtime branch:
+### 6.0 What runs on the comma now (28 Oct 2026)
+
+This replaces the older `nn-speed-limit-vision` scaffolding below for the comma 4 (mici, no Developer UI):
+
+- Branch `cristianku/sunnypilot:speed-limits`, injected by `OP-setup-psa-torque-testing sunny` into
+  `cristianku/openpilot:psa-torque-sunny-testing` (first build with the reader: `41a497509`).
+- Networks in `cristianku/speed-limits-models` (submodule `openpilot/sunnypilot/speed_limits/models`, format 2,
+  commit `62dca08`): SignNet `2026-10-28_1028-signnet-twothirds-s8-f1` epoch 27 as the finder and the classifier
+  `2026-10-26_1921-classifier`. No decider.
+- `openpilot/sunnypilot/speed_limits/speedvisiond.py` reads the road camera (VisionIPC, conflated) 5 times a second:
+  SignNet finds up to 5 boxes (score 0.3), the classifier reads each (70 % confidence), a value becomes the limit when
+  2 frames within 1.5 s agree and stays until another; it publishes `speedVisionSP` (m/s, 0: no reading).
+- The preprocessing (`vision.py`) is the training's bit for bit: swscale's BT.601 YUV to RGB (x86 fixed point) and
+  Pillow's bilinear resize, in numpy. On the comma's little cores: 100 ms a frame (offroad the big cores are off).
+- The networks are compiled on the device with tinygrad (`runner.py`, the QCOM flags of SConscript) into
+  `/data/media/0/models/speed_limits/`, by the offroad `speed_limits_warmup` (SignNet 50 s, classifier 96 s) or by
+  speedvisiond itself. Checked on the comma: the same boxes and classes as onnxruntime on the server.
+- SignNet runs right after a `modelV2` (the GPU is shared with the driving model at the same KGSL level);
+  the process runs at niceness 10.
+- Shown by the sunnylink toggle Cruise › Speed Limits › Show Vision Speed Limit (`SpeedLimitVisionDisplay`), the
+  round sign at the top right of the mici driving screen; used for the speed only with Speed Limit Source › Map Data +
+  Vision. speedvisiond runs when either is on.
+- Known limits: no 120 km/h class, some 40 and 50 missed by the classifier on the test route, and no decider, so a
+  sign of a side road can be read.
+
+Older runtime branch:
 
 ```text
 cristianku/sunnypilot:nn-speed-limit-vision
