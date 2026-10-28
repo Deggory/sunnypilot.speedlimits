@@ -208,7 +208,7 @@ def test_split_by_place_keeps_the_test_areas_and_a_buffer_out_of_training(tmp_pa
           +located_frames(tmp_path,'00000003--abcdef1234',road,human=False))
     dataset=import_rows(tmp_path,capsys,rows)
     report,split=split_of(tmp_path,capsys,'--test-route','00000001--abcdef1234')
-    assert split['policy']=='place-v3' and split['grouping'][0]=='place'
+    assert split['policy']=='place-v4' and split['grouping'][0]=='place'
     canonical=load_jsonl(dataset)
     where={}
     for row in canonical:
@@ -217,10 +217,28 @@ def test_split_by_place_keeps_the_test_areas_and_a_buffer_out_of_training(tmp_pa
     assert all(len(names)==1 for names in where.values())
     areas={name:{place for place,names in where.items() if name in names} for name in ('train','validation','test','buffer')}
     assert areas['test'] and areas['buffer'] and areas['train'] and areas['validation']
-    # Nothing next to a test area is trained on.
-    for a,b in areas['test']:
+    # Nothing next to a test area or to a validation area is trained on.
+    for a,b in areas['test']|areas['validation']:
         for da in (-1,0,1):
             for db in (-1,0,1):
                 assert (a+da,b+db) not in areas['train']
+    # The validation is not next to the test either: it is picked outside the test's buffer.
+    for a,b in areas['validation']:
+        assert not any((a+da,b+db) in areas['test'] for da in (-1,0,1) for db in (-1,0,1))
     assert split['counts']['test']<=0.3*len(canonical)
 # [place-split] - END
+
+
+def test_validation_grows_compact_from_the_area_with_the_most_speed_values():
+    from nnslr_tools.splits import _grow_groups
+    def group(cell,values,size=10):
+        return [{'annotation_id':f'{cell}-{i}','route_id':'r','sign_family':'maximum_speed' if i<len(values) else 'not_a_sign',
+                 'value_kph':values[i] if i<len(values) else None,
+                 'gps':{'latitude':cell[0]*0.0027+0.001,'longitude':cell[1]*0.004+0.001}}
+                for i in range(size)]
+    first=group((0,0),[60])                 # first in the seed order, one value
+    seed=group((5,5),[30,80])               # adds the most values: the cluster starts here
+    beside=group((5,6),[50])                # next to the seed: the cluster grows into it
+    far=group((9,9),[50])                   # as big as beside, but not adjacent
+    chosen=_grow_groups([first,far,seed,beside],wanted=20,keep=1,clusters=1)
+    assert [g[0]['annotation_id'] for g in chosen]==['(5, 5)-0','(5, 6)-0']

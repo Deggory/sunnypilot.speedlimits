@@ -1002,7 +1002,74 @@ things halve that again, both measured with the picture on the GPU and TinyJit:
 | one output, **fuse 1 × 1** (`--fuse-kernel 1`) | **12 ms** | 26 ms |
 | one output, fuse 1 × 1, stride 8 | 12 ms | 27 ms |
 
-So the ONNX for the car has one output, and the 1 × 1 fuse is trained next (runs `2026-10-28_1028-signnet-twothirds-s4-f1`,
-`-s8-f1`) to see what it costs in signs. The classifier is 5 ms a box on the same measure; the decider, 213 ms, runs
-only when a sign appears. Runs: `data/runs/2026-10-28_0718-signnet-s8`, `-s4`,
+So the ONNX for the car has one output, and the 1 × 1 fuse was trained the same day (runs
+`2026-10-28_1028-signnet-twothirds-s4-f1`, `-s8-f1`, 63 k parameters): at stride 8 it keeps the signs (55 % of all,
+62 % of the speed signs at 5 boxes, against 54 % and 64 % for the 3 × 3 fuse at stride 4), at stride 4 it loses three
+points (51 % and 62 %). So the car gets stride 8 with the 1 × 1 fuse, 12 ms of GPU, once retrained on the corrected
+labels below. The classifier is 5 ms a box on the same measure; the decider, 213 ms, runs only when a sign appears. Runs: `data/runs/2026-10-28_0718-signnet-s8`, `-s4`,
 `2026-10-28_0854-signnet-twothirds-s4`, `-half-s4`.
+
+### Is SignNet limited by the data, by the labels or by the net? (28 Oct 2026)
+
+Measured on `2026-10-28_0854-signnet-twothirds-s4` (896 × 288, stride 4, the cutter's plan and scoring, 5 boxes a
+frame), on the 1,133 test frames and on 1,200 training frames drawn at random. Scripts of the day in the session's
+scratchpad (`analyze.py`, `negatives.py`, `leakage.py`, `candidates.py`, `learning_curve.py`).
+
+| recall at 5 boxes | test | train sample |
+|---|---|---|
+| all signs | 54 % | 76 % |
+| speed signs | 64 % | 86 % |
+| speed signs, how the rest is missed | 43 not found, 23 box too loose (IoU 0.3–0.5), 9 ranked 6th or later | 35 not found, 107 too loose, 8 ranked later |
+| false alarms (score ≥ 0.3 on nothing boxed) | 0.06 a frame | 0.25 a frame |
+
+What it says:
+
+- **The net does not even fit its training frames** (86 % of the speed signs). The gap to the test (64 %) is real but
+  not the main loss: a bigger net or longer training is worth less than fixing what follows.
+- **The labels are the first limit.** A quarter of the training "alarms" are real signs with no box: SignNet is
+  confident on 717 frames where no reviewed box covers its sign (score ≥ 0.3; 96 frames at ≥ 0.5, nearly all real
+  signs on the contact sheets: give way, roundabout, no entry, width limits, some speed signs and lit displays; 493
+  of the 717 frames are confirmed as "no sign"). Every such frame teaches "sign = background". Recall on the training
+  frames also follows who labelled them: 87–89 % on frames reviewed by Claude Code and Codex, 78 % by Cristian,
+  67 % by the Qwen reviewer on the V100 and 46 % by strata's small Qwen (818 signs of the 2,284 in the sample).
+- **Loose boxes count.** 107 of the 150 speed signs missed on training frames are found with a box of IoU 0.3–0.5:
+  SignNet's own size head is coarse, and some reviewed boxes are loose too.
+- **Switched-off displays** are 92 of the 360 boxes of `variable_display` without a value (the other 268 are lit but
+  unreadable). An off panel looks like the gantry around it: on the test the family scores 2.5 % (40 boxes).
+- **Which signs are worst:** other signs (43 % on the test, direction panels 0 %, no entry 21 %) and signs under
+  12 px (41 % of the speed signs, 34 % of all); clear speed values are fine (60 → 95 %, 40 → 94 %, 100 → 8 of 8).
+- **How much data there is per value** (confirmed speed signs, whole dataset): 60 → 279, 80 → 110, 100 → 102, 50 →
+  77, 40 → 41, 20 → 28, 30 → 13, 120 → none (two boxes, not confirmed yet); 557 with a number that cannot be read.
+  80 and 100 come from two routes. The learning curve (25 % and 50 % of the
+  training frames against all of them, runs `2026-10-28_1100-signnet-twothirds-s4-share25` and `-share50`) tells
+  whether more of the same data still pays; its result goes here when the runs end.
+- **The split leaked between train and validation**, not between train and test: `place-v3` put a buffer around the
+  test only, so the validation shared its areas (and signs) with the training; the epoch it picked and the recall it
+  reported were optimistic. The test (one route, 15 %, buffered) was sound.
+
+Done the same day:
+
+- **Split `place-v4`** (`nnslr build-splits`): a buffer around the validation too; the validation is two compact
+  stretches of road, each started where it adds the most speed values, so the buffer costs 640 rows instead of 4,086
+  for scattered areas (train 9,389, validation 1,998 with the values 15–80, test unchanged at 1,284). Split
+  `e17e66fa…`.
+- **Off displays are ignore boxes** (`training.off_display`, `signnet.encode`): a `variable_display` box without a
+  value whose note says off, blank, unlit, spento or vuoto is neither a sign to find nor background; SignNet's loss
+  skips its cells (one cell around) and `measure` drops predictions on it. The cutter reads boxes only, so for it
+  the panel stays background.
+- **The 717 frames reviewed again** (workflow of two independent reviewers a frame, a judge where they disagree,
+  saves as `ai/Claude Code` through MCP): new boxes on the AI-reviewed frames; the 115 human-reviewed frames are
+  listed for Cristian, never overwritten. After the next import, retrain and rebuild the split (the new boxes change
+  the groups by image).
+
+Still to do:
+
+- **A new independent test** after the corrections: the current test route was reviewed before them and its
+  frames among the 717 (37) are corrected too, so the numbers above are not comparable with the next ones. One or
+  two new drives on roads never driven, confirmed by Cristian, pinned in `data/annotations/test-routes.txt`.
+- **Targeted collection**, in this order of value: towns and villages with 30 and 40 (Zone 30 entries, school
+  streets, town entries and exits: 30 has 13 boxes, 40 has 41); motorway entries and ends of roadworks for 120 and
+  `motorway_start` (no confirmed 120, 9 motorway signs); 80 and 100 on roads other than the two that hold them now; gantries with lit
+  displays (the test's 40 are mostly off or unreadable); dusk, rain and low sun (signs of poor visibility score 40 %
+  against 58 % clear). Each new drive on a new road lands whole in one area of the split; drives repeated on the
+  same roads add little.

@@ -14,7 +14,9 @@ cutter.
 
 ``nnslr train-signnet`` trains it on the cutter's plan (prepare_detector_training: the same frames, boxes, families
 and split) and measures it on validation and test with the cutter's own scoring (evaluation.score_frame,
-detector_size_metrics), so the two compare one to one. Needs the GPU environment (.venv-gpu).
+detector_size_metrics), so the two compare one to one. The plan's ignore boxes (switched-off variable displays) are
+neither signs nor background: the loss does not judge their cells, and a box found on one is dropped before scoring.
+Needs the GPU environment (.venv-gpu).
 """
 from __future__ import annotations
 
@@ -104,14 +106,17 @@ def band_boxes(boxes: list[list[float]], width: int, band_width: int = BAND_WIDT
     return kept
 
 
-def encode(boxes: list[list[float]], stride: int, band_width: int = BAND_WIDTH):
-    """Targets of one band: heat (1, H, W), shape (4, H, W), mask (H, W) of the cells that hold a centre."""
+def encode(boxes: list[list[float]], stride: int, band_width: int = BAND_WIDTH, ignore: list[list[float]] = ()):
+    """Targets of one band: heat (1, H, W), shape (4, H, W), mask (H, W) of the cells that hold a centre, and
+    weight (H, W): 0 on the cells of the ignore boxes (a switched-off display: neither a sign nor background),
+    1 elsewhere. The loss does not judge the heat of a cell of weight 0 unless a sign is centred there."""
     torch, _ = _torch()
     band_w, band_h = band_size(band_width)
     height, width = band_h // stride, band_w // stride
     heat = torch.zeros(1, height, width)
     shape = torch.zeros(4, height, width)
     mask = torch.zeros(height, width)
+    weight = torch.ones(height, width)
     ys = torch.arange(height).view(-1, 1).float()
     xs = torch.arange(width).view(1, -1).float()
     for x1, y1, x2, y2 in boxes:
@@ -123,15 +128,23 @@ def encode(boxes: list[list[float]], stride: int, band_width: int = BAND_WIDTH):
         heat[0] = torch.maximum(heat[0], gauss)
         shape[:, iy, ix] = torch.tensor([math.log(w), math.log(h), cx - ix, cy - iy])
         mask[iy, ix] = 1.0
-    return heat, shape, mask
+    for x1, y1, x2, y2 in ignore:
+        # The cells the box touches, one more around them: a peak next to the panel is still the panel.
+        ix1, iy1 = max(int(x1 / stride) - 1, 0), max(int(y1 / stride) - 1, 0)
+        ix2, iy2 = min(int(x2 / stride) + 1, width - 1), min(int(y2 / stride) + 1, height - 1)
+        weight[iy1:iy2 + 1, ix1:ix2 + 1] = 0.0
+    return heat, shape, mask, weight
 
 
-def loss(pred_heat, pred_shape, heat, shape, mask):
-    """CenterNet's focal loss on the heat map, plus L1 on the shape at the centres; both per sign."""
+def loss(pred_heat, pred_shape, heat, shape, mask, weight=None):
+    """CenterNet's focal loss on the heat map, plus L1 on the shape at the centres; both per sign. With weight
+    (N, H, W), the cells of weight 0 are not judged as background (the ignore boxes of encode)."""
     torch, _ = _torch()
     pred = pred_heat.clamp(1e-4, 1 - 1e-4)
     positive = heat.eq(1).float()
     negative = 1 - positive
+    if weight is not None:
+        negative = negative * weight.unsqueeze(1)
     pos_loss = torch.log(pred) * (1 - pred) ** 2 * positive
     neg_loss = torch.log(1 - pred) * pred ** 2 * (1 - heat) ** 4 * negative
     count = positive.sum().clamp(min=1)
@@ -190,6 +203,7 @@ def _dataset(frames: list[dict], data_root: Path, stride: int, *, train: bool, s
             frame = frames[index]
             image, width = _band_image(data_root / frame['image_path'], band_width)
             boxes = band_boxes(frame['boxes'], width, band_width)
+            ignore = band_boxes(frame.get('ignore_boxes') or [], width, band_width)
             image = image.float() / 255.0
             if train:
                 # Python's random is seeded apart in every DataLoader worker (base seed + worker id).
@@ -197,17 +211,26 @@ def _dataset(frames: list[dict], data_root: Path, stride: int, *, train: bool, s
                 if rng.random() < 0.5:
                     image = image.flip(-1)
                     boxes = [[band_width - x2, y1, band_width - x1, y2] for x1, y1, x2, y2 in boxes]
+                    ignore = [[band_width - x2, y1, band_width - x1, y2] for x1, y1, x2, y2 in ignore]
                 image = (image * rng.uniform(0.7, 1.3) + rng.uniform(-0.08, 0.08)).clamp(0, 1)
-            heat, shape, mask = encode(boxes, stride, band_width)
-            return image, heat, shape, mask, index
+            heat, shape, mask, weight = encode(boxes, stride, band_width, ignore)
+            return image, heat, shape, mask, weight, index
 
     return Bands()
+
+
+def _in_ignore(box: list[float], ignore: list[list[float]]) -> bool:
+    """A found box on a switched-off display: its centre inside an ignore box, or half overlapping one."""
+    from nnslr_tools.evaluation import box_iou
+    cx, cy = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+    return any(x1 <= cx <= x2 and y1 <= cy <= y2 or box_iou(box, [x1, y1, x2, y2]) >= 0.5 for x1, y1, x2, y2 in ignore)
 
 
 def measure(model, frames: list[dict], data_root: Path, stride: int, device, *, batch: int = 16,
             workers: int = 8, band_width: int = BAND_WIDTH) -> dict[str, Any]:
     """The cutter's measures on ``frames``: per score threshold (detector_size_metrics, reviewed boxes of the whole
-    frame, those below the band count as missed) and per box budget (the best N boxes of each frame)."""
+    frame, those below the band count as missed) and per box budget (the best N boxes of each frame). A box found
+    on an ignore box of the frame (a switched-off display) is dropped before either: neither found nor false."""
     torch, _ = _torch()
     from torch.utils.data import DataLoader
 
@@ -215,13 +238,22 @@ def measure(model, frames: list[dict], data_root: Path, stride: int, device, *, 
     loader = DataLoader(_dataset(frames, data_root, stride, train=False, seed=0, band_width=band_width),
                         batch_size=batch, shuffle=False, num_workers=workers)
     predictions: dict[int, list[dict]] = {}
+    ignored = 0
     model.eval()
     with torch.no_grad():
-        for image, _, _, _, indexes in loader:
+        for image, _, _, _, _, indexes in loader:
             heat, shape = model(image.to(device))
             for index, found in zip(indexes.tolist(), decode(heat.float().cpu(), shape.float().cpu(), stride)):
                 scale = float(frames[index]['width']) / band_width
-                predictions[index] = [{'box': [v * scale for v in p['box']], 'score': p['score']} for p in found]
+                ignore = frames[index].get('ignore_boxes') or []
+                kept = []
+                for p in found:
+                    box = [v * scale for v in p['box']]
+                    if ignore and _in_ignore(box, ignore):
+                        ignored += 1
+                        continue
+                    kept.append({'box': box, 'score': p['score']})
+                predictions[index] = kept
 
     def scored(select) -> dict[str, Any]:
         items = []
@@ -237,6 +269,8 @@ def measure(model, frames: list[dict], data_root: Path, stride: int, device, *, 
         'by_score_threshold': {str(t): scored(lambda found, t=t: [p for p in found if p['score'] >= t])
                                for t in SCORE_THRESHOLDS},
         'by_box_budget': {str(n): scored(lambda found, n=n: found[:n]) for n in BOX_BUDGETS},
+        'ignore_boxes': sum(len(f.get('ignore_boxes') or []) for f in frames),
+        'found_on_ignore_boxes': ignored,
     }
 
 
@@ -266,9 +300,10 @@ def train_signnet(plan: dict[str, Any], data_root: Path, run_dir: Path, *, width
     for epoch in range(1, epochs + 1):
         model.train()
         started, total, parts = time.monotonic(), 0.0, {'focal': 0.0, 'shape': 0.0}
-        for image, heat, shape, mask, _ in loader:
+        for image, heat, shape, mask, weight, _ in loader:
             pred_heat, pred_shape = model(image.to(device))
-            value, detail = loss(pred_heat, pred_shape, heat.to(device), shape.to(device), mask.to(device))
+            value, detail = loss(pred_heat, pred_shape, heat.to(device), shape.to(device), mask.to(device),
+                                 weight.to(device))
             optimizer.zero_grad(set_to_none=True)
             value.backward()
             optimizer.step()
@@ -297,7 +332,8 @@ def train_signnet(plan: dict[str, Any], data_root: Path, run_dir: Path, *, width
         'parameters': sum(p.numel() for p in model.parameters()), 'epochs': epochs, 'best_epoch': best_epoch,
         'dataset_sha256': plan.get('dataset_sha256'), 'split_sha256': plan.get('split_sha256'),
         'families': plan.get('families'), 'counts_by_split': plan.get('counts_by_split'),
-        'boxes_by_split': plan.get('boxes_by_split'), 'history': history,
+        'boxes_by_split': plan.get('boxes_by_split'), 'ignore_boxes_by_split': plan.get('ignore_boxes_by_split'),
+        'history': history,
         'validation': measure(model, validation, data_root, stride, device, workers=workers, band_width=band_width),
         'test': measure(model, test, data_root, stride, device, workers=workers, band_width=band_width),
     }

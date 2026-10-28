@@ -26,11 +26,18 @@ POLICY_SPLITS = ('train', 'validation', 'test')
 EVALUATION_SHARE = .15
 MIN_GROUPS = len(POLICY_SPLITS)
 # The split by place: areas of about 300 m (0.0027° of latitude, 0.004° of longitude at 47° N). Used when at least
-# PLACE_SHARE of the active rows have a GPS position; the areas next to a test area (also diagonally) are the
-# buffer: neither trained on nor measured, since a sign is seen from the next area too.
-PLACE_POLICY = 'place-v3'
+# PLACE_SHARE of the active rows have a GPS position; the areas next to a test or a validation area (also
+# diagonally) are the buffer: neither trained on nor measured, since a sign is seen from the next area too.
+# place-v3 shielded the test only: its validation shared signs with the training, so the epoch it picked and the
+# recall it reported were flattered.
+PLACE_POLICY = 'place-v4'
 PLACE_CELL = (0.0027, 0.004)
 PLACE_SHARE = .75
+# The validation by place grows over neighbouring areas in this many compact clusters, each started where it adds
+# the most speed-limit values: the buffer around a compact region costs few training frames (28 Oct 2026, 11,700
+# rows outside the test: 350 rows of buffer in two clusters against 3,800 for areas scattered by the seed), two
+# clusters still sample two roads, and the validation then holds the values 15 to 80 instead of 20 to 60.
+VALIDATION_CLUSTERS = 2
 
 
 def place_of(row: dict) -> tuple[int, int] | None:
@@ -157,28 +164,73 @@ def _route_partitions(groups: list[list[dict]], wanted: float, test_routes) -> t
     return test, _pick_groups(rest, wanted, keep=1)
 
 
+def _places(group: list[dict]) -> set[tuple[int, int]]:
+    return {place for place in (place_of(r) for r in group) if place is not None}
+
+
+def _around(cells) -> set[tuple[int, int]]:
+    """The cells and their eight neighbours."""
+    return {(a + da, b + db) for a, b in cells for da in (-1, 0, 1) for db in (-1, 0, 1)}
+
+
+def _speed_values(groups: list[list[dict]]) -> set[int]:
+    return {r['value_kph'] for g in groups for r in g if r['sign_family'] == 'maximum_speed' and r['value_kph'] is not None}
+
+
+def _grow_groups(candidates: list[list[dict]], wanted: float, *, keep: int,
+                 clusters: int = VALIDATION_CLUSTERS) -> list[list[dict]]:
+    """Whole groups adding up to about wanted rows, in compact clusters. A cluster starts from the candidate that
+    adds the most speed-limit values the chosen groups lack (the order of candidates on a tie) and grows over the
+    candidates next to it (in or touching its areas) while it is below wanted / clusters. A group is taken when
+    the partition gets closer to wanted with it than without it, while at least keep groups stay; when no group
+    fits, _pick_groups' one group.
+    """
+    chosen, size, remaining = [], 0, list(candidates)
+    cluster_cells, cluster_size, cap = set(), 0, wanted / max(clusters, 1)
+    while remaining and len(remaining) > keep:
+        near = _around(cluster_cells) if cluster_size < cap else set()
+        have = _speed_values(chosen)
+        seeds = sorted((g for g in remaining if not _places(g) & near), key=lambda g: -len(_speed_values([g]) - have))
+        order = [g for g in remaining if _places(g) & near] + seeds
+        pick = next((g for g in order if size + len(g) - wanted < wanted - size), None)
+        if pick is None:
+            break
+        if not _places(pick) & near:
+            cluster_cells, cluster_size = set(), 0
+        cluster_cells |= _places(pick)
+        cluster_size += len(pick)
+        chosen.append(pick)
+        size += len(pick)
+        remaining = [g for g in remaining if g is not pick]
+    return chosen or _pick_groups(candidates, wanted, keep=keep)
+
+
 def _place_partitions(groups: list[list[dict]], wanted: float, test_routes) -> tuple[list, list, list]:
-    """(test, buffer, validation) by areas (policy place-v3).
+    """(test, buffer, validation) by areas (policy place-v4).
 
     The test takes areas up to about the wanted share: areas the test routes drove through when there are
     test routes, the ones with the most frames confirmed by a person first (then the seed order). The areas
-    next to a test area are the buffer. Validation takes other areas up to about the wanted share in the seed
-    order, never next to the test either; everything else is train.
+    next to a test area are the buffer. Validation takes other areas up to about the wanted share, never next
+    to the test, grown from the seed order into VALIDATION_CLUSTERS compact clusters (_grow_groups); the areas
+    next to a validation area are the buffer too, so that the training never sees a sign the validation is
+    measured on. Everything else is train.
     """
-    def places(group):
-        return {place for place in (place_of(r) for r in group) if place is not None}
-
     routes = set(test_routes)
     candidates = [g for g in groups if not routes or any(r['route_id'] in routes for r in g)]
     candidates.sort(key=lambda g: -_human_frame_count(g))
     test = _pick_groups(candidates, wanted, keep=0)
-    tested = set().union(*(places(g) for g in test)) if test else set()
-    near = {(a + da, b + db) for a, b in tested for da in (-1, 0, 1) for db in (-1, 0, 1)}
-    buffer = [g for g in groups if not any(g is t for t in test) and places(g) & near]
+    near = _around(set().union(*(_places(g) for g in test)) if test else set())
+    buffer = [g for g in groups if not any(g is t for t in test) and _places(g) & near]
     rest = [g for g in groups if not any(g is t for t in test) and not any(g is b for b in buffer)]
     require(len(rest) >= 2, 'insufficient_independent_groups',
             'no area is left for validation and train next to the test and its buffer')
-    return test, buffer, _pick_groups(rest, wanted, keep=1)
+    validation = _grow_groups(rest, wanted, keep=1)
+    near = _around(set().union(*(_places(g) for g in validation)) if validation else set())
+    train = [g for g in rest if not any(g is v for v in validation)]
+    shield = [g for g in train if _places(g) & near]
+    require(len(shield) < len(train), 'insufficient_independent_groups',
+            'no area is left for train next to the validation and its buffer')
+    return test, buffer + shield, validation
 
 
 def build_splits(rows: list[dict], root: Path, *, seed: int = 0, output: Path | None = None,

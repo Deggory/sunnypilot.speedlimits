@@ -26,8 +26,9 @@ def test_band_boxes_keep_the_signs_of_the_band():
 @pytest.mark.parametrize('stride', (4, 8))
 def test_encode_then_decode_gives_the_box_back(stride):
     box = [601.0, 133.0, 627.0, 161.0]
-    heat, shape, mask = encode([box], stride)
+    heat, shape, mask, weight = encode([box], stride)
     assert heat.shape == (1, BAND_HEIGHT // stride, BAND_WIDTH // stride) and mask.sum() == 1
+    assert weight.shape == mask.shape and float(weight.min()) == 1.0
     assert float(heat.max()) == 1.0
     found = decode(heat[None], shape[None], stride)[0]
     assert found[0]['score'] == pytest.approx(1.0)
@@ -39,7 +40,7 @@ def test_network_shapes_and_loss_at_the_target():
     model = build_signnet(stride=8).eval()
     heat, shape = model(torch.rand(2, 3, BAND_HEIGHT, BAND_WIDTH))
     assert heat.shape == (2, 1, BAND_HEIGHT // 8, BAND_WIDTH // 8) and shape.shape == (2, 4, BAND_HEIGHT // 8, BAND_WIDTH // 8)
-    target_heat, target_shape, mask = encode([[100.0, 100.0, 130.0, 130.0]], 8)
+    target_heat, target_shape, mask, _ = encode([[100.0, 100.0, 130.0, 130.0]], 8)
     perfect, _ = loss(target_heat[None].clamp(1e-4, 1 - 1e-4), target_shape[None], target_heat[None], target_shape[None],
                       mask[None])
     random_guess, _ = loss(heat[:1], shape[:1], target_heat[None], target_shape[None], mask[None])
@@ -51,11 +52,37 @@ def test_half_band():
     assert band_size(BAND_WIDTH // 2) == (BAND_WIDTH // 2, BAND_HEIGHT // 2)
     assert band_size(896)[1] % 16 == 0
     assert band_boxes([[200, 100, 240, 140]], width=BAND_WIDTH, band_width=BAND_WIDTH // 2) == [[100.0, 50.0, 120.0, 70.0]]
-    heat, _, _ = encode([[100.0, 50.0, 120.0, 70.0]], 4, BAND_WIDTH // 2)
+    heat, *_ = encode([[100.0, 50.0, 120.0, 70.0]], 4, BAND_WIDTH // 2)
     assert heat.shape == (1, BAND_HEIGHT // 8, BAND_WIDTH // 8)
     model = build_signnet(stride=4).eval()
     out, _ = model(torch.rand(1, 3, BAND_HEIGHT // 2, BAND_WIDTH // 2))
     assert out.shape == heat[None].shape
+
+
+def test_ignore_boxes_are_neither_signs_nor_background():
+    from nnslr_tools.signnet import _in_ignore
+    # A switched-off display at 100..130: no centre, weight 0 on its cells and one cell around (stride 8: 11..17).
+    heat, shape, mask, weight = encode([], 8, ignore=[[100.0, 100.0, 130.0, 130.0]])
+    assert float(heat.max()) == 0.0 and mask.sum() == 0
+    assert weight[14, 14] == 0 and weight[11, 11] == 0 and weight[17, 17] == 0
+    assert weight[18, 18] == 1 and weight[10, 10] == 1 and weight[0, 0] == 1
+    # A confident peak on the panel costs nothing with the weight, and does without it.
+    pred = torch.full((1, 1) + tuple(weight.shape), 1e-4)
+    pred[0, 0, 14, 14] = 0.9
+    zero_shape = torch.zeros(1, 4, *weight.shape)
+    judged, _ = loss(pred, zero_shape, heat[None], shape[None], mask[None], weight[None])
+    unjudged, _ = loss(pred, zero_shape, heat[None], shape[None], mask[None])
+    assert float(judged) == pytest.approx(0.0, abs=1e-3) and float(unjudged) > 1.0
+    # A sign centred on an ignored cell still counts as a sign.
+    heat, shape, mask, weight = encode([[110.0, 110.0, 120.0, 120.0]], 8, ignore=[[100.0, 100.0, 130.0, 130.0]])
+    assert mask.sum() == 1 and float(heat.max()) == 1.0
+    missed, _ = loss(torch.full((1, 1) + tuple(weight.shape), 1e-4), zero_shape, heat[None], shape[None], mask[None],
+                     weight[None])
+    assert float(missed) > 1.0
+    # When measuring, a box found on the panel is dropped: its centre inside, or half of it over the panel.
+    panel = [[100.0, 100.0, 130.0, 130.0]]
+    assert _in_ignore([105.0, 105.0, 125.0, 125.0], panel) and _in_ignore([95.0, 95.0, 128.0, 128.0], panel)
+    assert not _in_ignore([140.0, 100.0, 170.0, 130.0], panel) and not _in_ignore([120.0, 120.0, 180.0, 180.0], panel)
 
 
 def test_fuse_kernel_one_gives_the_same_maps():

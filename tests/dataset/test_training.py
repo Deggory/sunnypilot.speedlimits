@@ -139,6 +139,36 @@ def test_latest_pointer_hash_mismatch_is_rejected(tmp_path, capsys):
 
 
 
+def test_off_displays_are_ignore_boxes_of_the_detector_plan(tmp_path, capsys):
+    from nnslr_tools.training import off_display
+    off = {"sign_family": "variable_display", "value_kph": None, "notes": "LED panel on the gantry is off/blank"}
+    assert off_display(off) and off_display({**off, "notes": "pannello variabile spento: nessun valore"})
+    assert not off_display({**off, "notes": "lit led display cut off by the top edge, number not readable"})
+    assert not off_display({**off, "notes": "far led display, number not readable"})
+    assert not off_display({**off, "value_kph": 80, "notes": "off"})
+    assert not off_display({**off, "sign_family": "maximum_speed"})
+    rows = []
+    for index in range(6):
+        row = reviewed(tmp_path, f"{index + 1:08x}--abcdef1234", index=index)
+        if index < 2:
+            # Two variable displays without a value: one off (an ignore box), one lit but too far (a sign to find).
+            row["detections"][0].update(family="variable_display", value_kph=None, value_state="unknown",
+                                        notes="led panel on the gantry, off/blank" if index == 0 else "lit led panel, too far")
+        rows.append(row)
+    source = write(tmp_path, rows)
+    code, out = invoke(capsys, "import-annotations", str(source), "--data-root", str(tmp_path))
+    assert code == 0, out.err + out.out
+    code, out = invoke(capsys, "build-splits", "--data-root", str(tmp_path))
+    assert code == 0, out.err + out.out
+    plan = prepare_detector_training(tmp_path / "annotations" / "objects.jsonl", tmp_path / "splits" / "latest.json", tmp_path)
+    by_route = {frame["route_id"][:8]: frame for frame in plan["frames"]}
+    # The frame with the off display alone stays in the plan: background everywhere but on the panel.
+    assert by_route["00000001"]["boxes"] == [] and by_route["00000001"]["ignore_boxes"] == [[1, 2, 15, 20]]
+    assert by_route["00000002"]["boxes"] == [[1, 2, 15, 20]] and by_route["00000002"]["box_families"] == ["variable_display"]
+    assert sum(plan["ignore_boxes_by_split"].values()) == 1 and sum(plan["boxes_by_split"].values()) == 5
+    assert all(frame["ignore_boxes"] == [] for route, frame in by_route.items() if route != "00000001")
+
+
 def test_prepare_detector_training_groups_full_frames_without_torch(tmp_path, capsys):
     dataset, frozen, latest = _training_fixture(tmp_path, capsys)
     assert "torch" not in sys.modules

@@ -32,6 +32,7 @@ import math
 import os
 from pathlib import Path
 import random
+import re
 import time
 from typing import Any
 
@@ -722,6 +723,20 @@ DEFAULT_CUTTER_FAMILIES = "all"
 LEGACY_CUTTER_FAMILIES = "speed"
 
 
+# A variable display that is off: a dark or blank panel showing no number. The review records it as variable_display
+# with value_kph null and a note; a lit display too far or too bright to read has a null value too, but is a sign to
+# find. Only the note tells the two apart ("cut off by the top edge" is not off).
+OFF_DISPLAY_NOTE = re.compile(r"(?<!cut )\b(off|blank|unlit|not active|spent[oaie]|vuot[oaie])\b|nessun valore")
+
+
+def off_display(row: dict[str, Any]) -> bool:
+    """A variable_display row without a value whose note says the panel is off or blank: an ignore box for the
+    detector (neither a sign to find nor background), see prepare_detector_training."""
+    if row.get("sign_family") != "variable_display" or row.get("value_kph") is not None:
+        return False
+    return OFF_DISPLAY_NOTE.search(str(row.get("notes") or "").lower()) is not None
+
+
 def cutter_families(value: Any) -> str:
     """The families setting of a checkpoint, plan, report or configuration; "speed" when it does not say."""
     families = value.get("families", LEGACY_CUTTER_FAMILIES) if isinstance(value, dict) else LEGACY_CUTTER_FAMILIES
@@ -744,7 +759,9 @@ def prepare_detector_training(
     positive detector boxes; every frame keeps the family of each box (box_families). A frame is a
     detector negative only when it has an explicit whole-frame not_a_sign
     review. other_sign rows alone are not silently promoted to
-    whole-frame negatives.
+    whole-frame negatives. A switched-off variable display (off_display) is an ignore box of its frame
+    (ignore_boxes): SignNet neither learns it as a sign nor as background and is not measured on it; the cutter
+    reads boxes only, so for it the panel is background.
     """
     if families not in CUTTER_FAMILIES:
         raise ValueError(f"unknown cutter families {families!r}: one of {', '.join(CUTTER_FAMILIES)}")
@@ -794,6 +811,7 @@ def prepare_detector_training(
             "decoded_frame_index": row["decoded_frame_index"],
             "boxes": [],
             "box_families": [],
+            "ignore_boxes": [],
             "annotation_ids": [],
             "explicit_negative": False,
             "label_basis": _label_basis(row),
@@ -813,6 +831,9 @@ def prepare_detector_training(
         if row["bbox_xyxy"] is None and family == "not_a_sign":
             frame["explicit_negative"] = True
             frame["annotation_ids"].append(annotation_id)
+        elif row["bbox_xyxy"] is not None and family in positive_families and off_display(row):
+            frame["ignore_boxes"].append(list(row["bbox_xyxy"]))
+            frame["annotation_ids"].append(annotation_id)
         elif row["bbox_xyxy"] is not None and family in positive_families:
             frame["boxes"].append(list(row["bbox_xyxy"]))
             frame["box_families"].append(family)
@@ -822,7 +843,7 @@ def prepare_detector_training(
 
     frames = []
     for frame in grouped.values():
-        if not frame["boxes"] and not frame["explicit_negative"]:
+        if not frame["boxes"] and not frame["ignore_boxes"] and not frame["explicit_negative"]:
             continue
         image = _safe_image_path(data_root, frame["image_path"])
         if not image.is_file():
@@ -832,10 +853,12 @@ def prepare_detector_training(
 
     counts_by_split = Counter(r["split"] for r in frames)
     boxes_by_split = Counter()
+    ignore_by_split = Counter()
     negatives_by_split = Counter()
     boxes_by_family: dict[str, Counter] = {}
     for frame in frames:
         boxes_by_split[frame["split"]] += len(frame["boxes"])
+        ignore_by_split[frame["split"]] += len(frame["ignore_boxes"])
         if frame["explicit_negative"] and not frame["boxes"]:
             negatives_by_split[frame["split"]] += 1
         for family in frame["box_families"]:
@@ -876,6 +899,7 @@ def prepare_detector_training(
         "counts_by_split": dict(sorted(counts_by_split.items())),
         "boxes_by_split": dict(sorted(boxes_by_split.items())),
         "boxes_by_family": {split: dict(sorted(counts.items())) for split, counts in sorted(boxes_by_family.items())},
+        "ignore_boxes_by_split": dict(sorted(ignore_by_split.items())),
         "negative_frames_by_split": dict(sorted(negatives_by_split.items())),
         "ignored": dict(sorted(ignored.items())),
         "trainable": trainable,
