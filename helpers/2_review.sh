@@ -5,15 +5,15 @@
 # Next: helpers/3_train.sh.
 #
 # Usage: helpers/2_review.sh [--local] [--foreground] [--stop]
-#   helpers/2_review.sh                (avvia, o se gia' acceso ristampa il link)
-#   helpers/2_review.sh --stop         (spegne)
-#   helpers/2_review.sh --local        (solo da questo server: dal PC serve il tunnel ssh)
-#   helpers/2_review.sh --foreground   (resta attaccato al terminale, Ctrl+C per spegnere)
+#   helpers/2_review.sh                (starts it, or prints the link again when it is already on)
+#   helpers/2_review.sh --stop         (stops it)
+#   helpers/2_review.sh --local        (only from this server: from the PC an ssh tunnel is needed)
+#   helpers/2_review.sh --foreground   (stays attached to the terminal, Ctrl+C to stop)
 #
 # By default it listens on the LAN (0.0.0.0) and every request needs the access token: the
 # link printed here already has it. The token is created once in the .env of this clone
 # (NNSLR_REVIEW_TOKEN=..., permissions 600, ignored by git), the same one the service uses,
-# so the link stays the same after a restart and can be bookmarked. Guide: docs/GUIDA.md.
+# so the link stays the same after a restart and can be bookmarked. Guide: docs/GUIDE.md.
 # When the systemd service speedlimits-web (scripts/install_review_service.sh) is active it does
 # not start a second server: it prints the link of the service.
 # -h, --help: this help.
@@ -69,13 +69,13 @@ token() {
     (
       umask 077
       if [ ! -f "$REPO_ENV" ]; then
-        echo "# Segreti locali di questo clone: il file e' in .gitignore, non va mai in git." > "$REPO_ENV"
-        echo "# Token di accesso al sito di revisione (servizio speedlimits-web e helpers/2_review.sh)." >> "$REPO_ENV"
+        echo "# Local secrets of this clone: the file is in .gitignore, it never goes into git." > "$REPO_ENV"
+        echo "# Access token of the review site (service speedlimits-web and helpers/2_review.sh)." >> "$REPO_ENV"
       fi
       echo "NNSLR_REVIEW_TOKEN=$value" >> "$REPO_ENV"
     )
     chmod 600 "$REPO_ENV"
-    echo "Token creato e salvato in $REPO_ENV" >&2
+    echo "Token created and saved in $REPO_ENV" >&2
   fi
   echo "$value"
 }
@@ -84,17 +84,17 @@ token() {
 # $1, the token, is not printed: the browser signs in with name and password; the token is only the
 # setup code of the first visit (and the key of the API), and it stays in .env.
 print_lan_link() {
-  echo "Apri dal PC:  http://$(server_ip):$PORT/"
-  echo "Pannello:     http://$(server_ip):$PORT/pannello"
-  echo "Si entra con nome e password. La prima visita crea l'amministratore con il codice di"
-  echo "configurazione: e' il token NNSLR_REVIEW_TOKEN di $REPO_ENV (grep NNSLR_REVIEW_TOKEN $REPO_ENV)."
+  echo "Open from the PC:  http://$(server_ip):$PORT/"
+  echo "Panel:             http://$(server_ip):$PORT/pannello"
+  echo "Sign in with name and password. The first visit creates the administrator with the setup"
+  echo "code: it is the token NNSLR_REVIEW_TOKEN of $REPO_ENV (grep NNSLR_REVIEW_TOKEN $REPO_ENV)."
 }
 # [site-login] - END
 
 print_local_link() {
-  echo "Dal PC apri prima il tunnel (lascia aperto quel terminale):"
+  echo "From the PC open the tunnel first (leave that terminal open):"
   echo "  ssh -L $PORT:127.0.0.1:$PORT root@$(server_ip)"
-  echo "poi nel browser:  http://localhost:$PORT/"
+  echo "then in the browser:  http://localhost:$PORT/"
 }
 
 local_only=0
@@ -111,23 +111,23 @@ while [ $# -gt 0 ]; do
   elif [ "$1" = "--stop" ]; then
     stop=1
   else
-    die "opzione non valida: $1 (vedi --help)"
+    die "invalid option: $1 (see --help)"
   fi
   shift
 done
 
-[ -x "$NN" ] || die "manca $NN: crea l'ambiente come in docs/INSTALL.md"
+[ -x "$NN" ] || die "$NN is missing: create the environment as in docs/INSTALL.md"
 mkdir -p "$(dirname "$LOG")"
 
 if [ "$stop" -eq 1 ]; then
   if pid="$(running_pid)"; then
     kill "$pid"
     rm -f "$PID_FILE"
-    echo "Revisione spenta (pid $pid)."
+    echo "Review site stopped (pid $pid)."
   else
-    echo "Nessuna revisione avviata da questo script."
+    echo "No review site started by this script."
     if systemctl is-active --quiet speedlimits-web 2>/dev/null; then
-      echo "C'e' il servizio speedlimits-web: si spegne con  systemctl stop speedlimits-web"
+      echo "The speedlimits-web service is installed: stop it with  systemctl stop speedlimits-web"
     fi
   fi
   exit 0
@@ -135,17 +135,17 @@ fi
 
 # Already on: the systemd service, or a server started earlier by this script.
 if systemctl is-active --quiet speedlimits-web 2>/dev/null; then
-  echo "La revisione gira gia' come servizio speedlimits-web (porta 8765)."
+  echo "The review site already runs as the speedlimits-web service (port 8765)."
   if [ -r "$SERVICE_ENV" ]; then
     PORT=8765
     print_lan_link "$(sed -n 's/^NNSLR_REVIEW_TOKEN=//p' "$SERVICE_ENV")"
   else
-    echo "Il token e' in $SERVICE_ENV (leggibile solo da root)."
+    echo "The token is in $SERVICE_ENV (readable by root only)."
   fi
   exit 0
 fi
 if pid="$(running_pid)"; then
-  echo "La revisione e' gia' accesa (pid $pid, log $LOG)."
+  echo "The review site is already on (pid $pid, log $LOG)."
   if grep -q "in ascolto su 127.0.0.1" "$LOG" 2>/dev/null; then
     print_local_link
   else
@@ -153,7 +153,7 @@ if pid="$(running_pid)"; then
   fi
   exit 0
 fi
-port_busy && die "la porta $PORT e' gia' occupata da un altro programma (NNSLR_REVIEW_PORT=<altra> per cambiarla)"
+port_busy && die "port $PORT is already in use by another program (NNSLR_REVIEW_PORT=<other> to change it)"
 
 if [ "$local_only" -eq 1 ]; then
   host="127.0.0.1"
@@ -167,7 +167,7 @@ command=("$NN" review --host "$host" --port "$PORT")
 
 if [ "$foreground" -eq 1 ]; then
   if [ "$local_only" -eq 1 ]; then print_local_link; else print_lan_link "$NNSLR_REVIEW_TOKEN"; fi
-  echo "Ctrl+C per spegnere."
+  echo "Ctrl+C to stop."
   exec "${command[@]}"
 fi
 
@@ -182,9 +182,9 @@ done
 if ! kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
   rm -f "$PID_FILE"
   tail -5 "$LOG" >&2
-  die "la revisione non e' partita (log completo: $LOG)"
+  die "the review site did not start (full log: $LOG)"
 fi
 
-echo "Revisione accesa in background (pid $(cat "$PID_FILE"), log $LOG)."
+echo "Review site started in the background (pid $(cat "$PID_FILE"), log $LOG)."
 if [ "$local_only" -eq 1 ]; then print_local_link; else print_lan_link "$NNSLR_REVIEW_TOKEN"; fi
-echo "Spegni con:  helpers/2_review.sh --stop"
+echo "Stop it with:  helpers/2_review.sh --stop"

@@ -1,6 +1,6 @@
 # Helpers, commands and scripts
 
-This page is the technical reference behind the portal. Daily work happens in the portal (see the [README](../README.md)), and its buttons run the helpers and scripts listed here. Run everything from the repository root. Before running anything, check its exact options with `--help`: this page only condenses them. Several helpers print their messages in Italian.
+This page is the technical reference behind the portal. Daily work happens in the portal (see the [README](../README.md)), and its buttons run the helpers and scripts listed here. Run everything from the repository root. Before running anything, check its exact options with `--help`: this page only condenses them.
 
 The **Effects** columns use these words:
 
@@ -270,5 +270,5 @@ Before publishing:
 
 - [INSTALL.md](INSTALL.md): system packages, environments and data folders.
 - [NEURAL_NETWORK.md](NEURAL_NETWORK.md): the pipeline and the plan, in detail.
-- [GUIDA.md](GUIDA.md) (in Italian): a step-by-step guide to the helpers and the service. Parts of it are older than this page.
+- [GUIDE.md](GUIDE.md): a step-by-step guide to the helpers and the service. Parts of it are older than this page.
 - [../integrations/sunnypilot/README.md](../integrations/sunnypilot/README.md): what the runtime snapshot contains, and what it does not.

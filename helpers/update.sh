@@ -11,7 +11,7 @@
 #      deploy/speedlimits-web.service changed, replaces the old service) and a restart
 #      of the service; without it, restarts the site started by helpers/2_review.sh, if on
 # A preparation or a training started from the panel keeps running: the service stops
-# only the web server (KillMode=process). Full procedure: docs/GUIDA.md.
+# only the web server (KillMode=process). Full procedure: docs/GUIDE.md.
 #
 # Usage: helpers/update.sh [--no-link]
 # --no-link: do not print the address of the site at the end (the panel uses it: its log stays short).
@@ -127,4 +127,4 @@ fi
 # The site is on (service or helpers/2_review.sh): 2_review.sh only prints its link.
 [ "$print_link" -eq 1 ] || exit 0
 echo
-"$ROOT/helpers/2_review.sh" 2>/dev/null | grep -e '^Apri' -e '^Pannello' || true
+"$ROOT/helpers/2_review.sh" 2>/dev/null | grep -e '^Open from the PC:' -e '^Panel:' || true

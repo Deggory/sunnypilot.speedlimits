@@ -5,7 +5,7 @@
 # this clone), then a new name and password. Every browser has to sign in again; the reviews, the
 # AI reviewer and the other settings stay as they are.
 # Works with the systemd service speedlimits-web, or with the site started by helpers/2_review.sh.
-# Guide: docs/GUIDA.md.
+# Guide: docs/GUIDE.md.
 #
 # Usage: helpers/reset_password.sh
 # -h, --help: this help.

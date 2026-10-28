@@ -109,7 +109,7 @@ SUBSTEPS = {'train_classifier': (7, CLASSIFIER_PIPELINE), 'train_cutter': (None,
 TITLES = {'train_cutter': CUTTER_TITLES}
 MARKERS = (
     (re.compile(r'^== a\+b\. '), 'gpu_env', ('import', 'split')),
-    (re.compile(r'^== a\. importo'), 'import', ()),
+    (re.compile(r'^== a\. (?:importing|importo)'), 'import', ()),
     (re.compile(r'^== b\. '), 'split', ()),
     (re.compile(r'^== c\. '), 'gpu_env', ()),
     (re.compile(r'^== a\. (?:linking|collego)'), 'link', ()),
@@ -132,7 +132,8 @@ METRIC = re.compile(r'\b(train_loss|val_loss|train_accuracy|val_accuracy|val_rec
                     r'val_balanced_accuracy) (-?[0-9.]+(?:e-?[0-9]+)?)\b')
 SECONDS = re.compile(r'\b([0-9]+)s$')
 FETCHED = re.compile(r'^== (\S+)--(\d+) -> ')
-ON_COMMA = re.compile(r'^(\S+) sul comma: ')
+# helpers/fetch_comma_segments.sh, a route and its segments (in Italian in the older logs).
+ON_COMMA = re.compile(r'^(\S+) (?:on the comma|sul comma): ')
 # A proposer measured (helpers/measure_proposer.sh): its worker writes a line per frame, "Preannotating 280/604: ...".
 PREANNOTATING = re.compile(r'^Preannotating (\d+)/(\d+)\b')
 # The last line the panel's wrapper writes (nnslr_tools.panel.WRAPPER; in Italian in the older logs).

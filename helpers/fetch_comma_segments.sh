@@ -3,18 +3,18 @@
 # comma videos, and link them into data/ under the hex folder name the dataset expects;
 # with --localizer it also runs the localizer on each.
 #
-# Usage: helpers/fetch_comma_segments.sh [--host=<ip|nome>]
-#        helpers/fetch_comma_segments.sh [--host=<ip|nome>] <route> --segments=<lista> [--localizer]
-#        helpers/fetch_comma_segments.sh [--host=<ip|nome>] <route> --skip=<lista> [--localizer]
-#        helpers/fetch_comma_segments.sh [--host=<ip|nome>] <route> [--strip-ends] [--localizer]
-#   helpers/fetch_comma_segments.sh                                         (automatico, vedi sotto)
+# Usage: helpers/fetch_comma_segments.sh [--host=<ip|name>]
+#        helpers/fetch_comma_segments.sh [--host=<ip|name>] <route> --segments=<list> [--localizer]
+#        helpers/fetch_comma_segments.sh [--host=<ip|name>] <route> --skip=<list> [--localizer]
+#        helpers/fetch_comma_segments.sh [--host=<ip|name>] <route> [--strip-ends] [--localizer]
+#   helpers/fetch_comma_segments.sh                                         (automatic, see below)
 #   helpers/fetch_comma_segments.sh 6616faac453a3064/0000011c--8152ba83cf   (= --strip-ends)
 #   helpers/fetch_comma_segments.sh 6616faac453a3064/0000011c--8152ba83cf --skip=0,1,2,last
 #   helpers/fetch_comma_segments.sh 6616faac453a3064/0000011c--8152ba83cf --skip 0,1,14
 #   helpers/fetch_comma_segments.sh 6616faac453a3064/0000011c--8152ba83cf --strip-ends
 #   helpers/fetch_comma_segments.sh 6616faac453a3064/0000011c--8152ba83cf --segments=1,2,3,4
 #   helpers/fetch_comma_segments.sh 6616faac453a3064/0000011c--8152ba83cf --segments=1,2,5-9
-#   helpers/fetch_comma_segments.sh 6616faac453a3064/0000011c--8152ba83cf/1   (formato connect)
+#   helpers/fetch_comma_segments.sh 6616faac453a3064/0000011c--8152ba83cf/1   (connect format)
 #   helpers/fetch_comma_segments.sh --host 192.168.88.29 6616faac453a3064/0000011c--8152ba83cf/1
 #   helpers/fetch_comma_segments.sh 0000011c--8152ba83cf 0 1 2
 #   helpers/fetch_comma_segments.sh 0000011c--8152ba83cf 2-9
@@ -116,18 +116,18 @@ move_old_file() {
     return 0
   fi
   if [ ! -f "$old" ]; then
-    die "$old non e' ne' un file ne' un link: controlla a mano"
+    die "$old is neither a file nor a link: check it by hand"
   fi
   if [ ! -e "$shared" ]; then
     mv "$old" "$shared"
-    echo "  $(basename "$old"): spostato da data/ nella cartella comune"
+    echo "  $(basename "$old"): moved from data/ into the shared folder"
   elif [ "$old" -ef "$shared" ]; then
-    die "$old e $shared sono lo stesso file (uno arriva all'altro tramite un link): non cancello niente, controlla a mano"
+    die "$old and $shared are the same file (one reaches the other through a link): nothing deleted, check it by hand"
   elif cmp -s "$old" "$shared"; then
     rm "$old"
-    echo "  $(basename "$old"): uguale a quello nella cartella comune, tolto da data/"
+    echo "  $(basename "$old"): the same as the one in the shared folder, removed from data/"
   else
-    die "$old ($(file_size "$old") byte) e $shared ($(file_size "$shared") byte) sono diversi: non cancello niente, controlla a mano"
+    die "$old ($(file_size "$old") bytes) and $shared ($(file_size "$shared") bytes) differ: nothing deleted, check it by hand"
   fi
 }
 
@@ -167,13 +167,13 @@ add_segment() {
   elif [[ "$1" =~ ^[0-9]+$ ]]; then
     segments="$segments $1"
   else
-    die "segmento non valido: $1"
+    die "invalid segment: $1"
   fi
 }
 
 # Adds a comma separated list (1,2,5-9) to $segments.
 add_segment_list() {
-  [ -n "$1" ] || die "--segments vuole una lista (es. --segments=1,2,3)"
+  [ -n "$1" ] || die "--segments needs a list (e.g. --segments=1,2,3)"
   IFS=',' read -r -a items <<< "$1"
   for item in "${items[@]}"; do
     add_segment "$item"
@@ -184,7 +184,7 @@ add_segment_list() {
 # first, second, second_last, last and last-N stay words here: the segments they mean are
 # known only after asking the comma (select_segments turns them into numbers).
 add_skip_list() {
-  [ -n "$1" ] || die "--skip vuole una lista (es. --skip=0,1,last)"
+  [ -n "$1" ] || die "--skip needs a list (e.g. --skip=0,1,last)"
   IFS=',' read -r -a items <<< "$1"
   for item in "${items[@]}"; do
     if [ "$item" = "first" ] || [ "$item" = "second" ] || [ "$item" = "second_last" ] || [ "$item" = "last" ]; then
@@ -200,7 +200,7 @@ add_skip_list() {
     elif [[ "$item" =~ ^[0-9]+$ ]]; then
       skip="$skip $item"
     else
-      die "segmento da saltare non valido: $item"
+      die "invalid segment to skip: $item"
     fi
   done
   skip_mode=1
@@ -219,7 +219,7 @@ add_comma_user() {
 select_segments() {
   found="$(ssh "$COMMA_HOST" "ls -d $REMOTE_DIR/$route--* 2>/dev/null || true" | sed 's/.*--//' | sort -n)"
   if [ -z "$found" ]; then
-    echo "nessun segmento di $route sul comma" >&2
+    echo "no segment of $route on the comma" >&2
     return 1
   fi
 
@@ -268,10 +268,10 @@ select_segments() {
   done
 
   if [ -z "$segments" ]; then
-    echo "$route: saltando$skip_numbers non resta nessun segmento" >&2
+    echo "$route: skipping$skip_numbers leaves no segment" >&2
     return 1
   fi
-  echo "$route sul comma: $(echo $found). Salto:$skip_numbers. Scarico:$segments"
+  echo "$route on the comma: $(echo $found). Skip:$skip_numbers. Download:$segments"
 }
 
 # Copies $segments of $route into the shared folder, links them into data/, then runs the
@@ -289,24 +289,24 @@ download_segments() {
     fi
     # Discarded by localize_segments.sh (Distill only): not again.
     if [ "$DATA_LAYOUT" = "distill" ] && [ -d "$ROOT/data_scartati/$name" ]; then
-      echo "== $route--$s: scartato dal localizer (data_scartati/$name), salto"
+      echo "== $route--$s: discarded by the localizer (data_scartati/$name), skipped"
       continue
     fi
     echo "== $route--$s -> $shared (link in $dst)"
 
     for f in $FILES; do
       if ! ssh "$COMMA_HOST" "test -f $src/$f"; then
-        die "$src/$f non esiste sul comma"
+        die "$src/$f does not exist on the comma"
       fi
     done
 
     # A segment folder that is a link would make data/$name/<file> and the shared file the
     # same file (the localizer outputs would also end up in the shared folder): stop.
     if [ -L "$dst" ]; then
-      die "$dst e' un link a una cartella: in data/ serve una cartella vera con dentro i link ai file. Non cancello niente, controlla a mano"
+      die "$dst is a link to a folder: data/ needs a real folder with the links to the files in it. Nothing deleted, check it by hand"
     fi
     if [ -L "$shared" ]; then
-      die "$shared e' un link a una cartella: nella cartella comune serve una cartella vera. Non cancello niente, controlla a mano"
+      die "$shared is a link to a folder: the shared folder needs a real folder. Nothing deleted, check it by hand"
     fi
 
     mkdir -p "$shared" "$dst"
@@ -354,17 +354,17 @@ route_is_long_enough() {
   # would wrongly accept a five-segment route ending before 5 minutes.
   if ! rsync -a "$COMMA_HOST:$REMOTE_DIR/$route--$first_segment/qlog.zst" "$temp/first.zst" \
        || ! rsync -a "$COMMA_HOST:$REMOTE_DIR/$route--$last_segment/qlog.zst" "$temp/last.zst"; then
-    echo "$route: qlog iniziale/finale non disponibili, giro escluso" >&2
+    echo "$route: first or last qlog not available, drive left out" >&2
     rm -rf "$temp"
     return 1
   fi
   seconds="$(inspect_log duration "$temp/first.zst" "$temp/last.zst")" || seconds="unknown"
   rm -rf "$temp"
   if [[ "$seconds" =~ ^[0-9]+([.][0-9]+)?$ ]] && [ "${seconds%%.*}" -ge 300 ]; then
-    echo "$route: durata completa ${seconds}s (>= 300s), ok"
+    echo "$route: full length ${seconds}s (>= 300s), ok"
     return 0
   fi
-  echo "$route: durata ${seconds}s (< 300s o sconosciuta), giro escluso"
+  echo "$route: length ${seconds}s (< 300s or unknown), drive left out"
   return 1
 }
 
@@ -376,7 +376,7 @@ filter_reverse_segments() {
     shared="$VIDEOS_DIR/$route--$s"
     logfile="$shared/rlog.zst"
     if [ -L "$shared" ] || [ -L "$logfile" ]; then
-      echo "$route--$s: link non sicuro nella cartella comune, segmento escluso" >&2
+      echo "$route--$s: unsafe link in the shared folder, segment left out" >&2
       continue
     fi
     # Cache the full log once in COMMA_VIDEOS_DIR: repeated automatic fetches
@@ -384,15 +384,15 @@ filter_reverse_segments() {
     if [ ! -s "$logfile" ]; then
       mkdir -p "$shared"
       if ! rsync -a "$COMMA_HOST:$REMOTE_DIR/$route--$s/rlog.zst" "$shared/"; then
-        echo "$route--$s: rlog non disponibile, segmento escluso" >&2
+        echo "$route--$s: rlog not available, segment left out" >&2
         continue
       fi
     fi
     state="$(inspect_log reverse "$logfile")" || state="unknown"
     case "$state" in
       forward) remaining="$remaining $s" ;;
-      reverse) echo "$route--$s: retromarcia rilevata, segmento escluso" ;;
-      *) echo "$route--$s: retromarcia non verificabile, segmento escluso" >&2 ;;
+      reverse) echo "$route--$s: reverse gear found, segment left out" ;;
+      *) echo "$route--$s: reverse gear cannot be checked, segment left out" >&2 ;;
     esac
   done
   segments="$remaining"
@@ -415,12 +415,12 @@ while [ $# -gt 0 ]; do
     add_skip_list "${1#--skip=}"
   elif [ "$1" = "--host" ]; then
     shift
-    [ -n "${1:-}" ] || die "--host vuole un IP o un nome"
+    [ -n "${1:-}" ] || die "--host needs an IP or a name"
     COMMA_HOST="$1"
     add_comma_user
   elif [[ "$1" == --host=* ]]; then
     COMMA_HOST="${1#--host=}"
-    [ -n "$COMMA_HOST" ] || die "--host vuole un IP o un nome"
+    [ -n "$COMMA_HOST" ] || die "--host needs an IP or a name"
     add_comma_user
   elif [ "$1" = "--segments" ]; then
     shift
@@ -435,7 +435,7 @@ while [ $# -gt 0 ]; do
     # route alone, with or without the dongle id: <dongle_id>/<route>
     route="${BASH_REMATCH[2]}"
   elif [ -z "$route" ]; then
-    die "route non valida: $1 (es. 6616faac453a3064/0000011c--8152ba83cf)"
+    die "invalid route: $1 (e.g. 6616faac453a3064/0000011c--8152ba83cf)"
   else
     add_segment "$1"
   fi
@@ -445,34 +445,34 @@ done
 auto_mode=0
 if [ -z "$route" ]; then
   if [ -n "$segments" ] || [ "$skip_mode" -eq 1 ]; then
-    die "manca la route (es. 0000011c--8152ba83cf)"
+    die "the route is missing (e.g. 0000011c--8152ba83cf)"
   fi
   auto_mode=1
 elif [ "$skip_mode" -eq 1 ]; then
-  [ -z "$segments" ] || die "--skip/--strip-ends non va insieme a una lista di segmenti"
+  [ -z "$segments" ] || die "--skip/--strip-ends does not go together with a list of segments"
 elif [ -z "$segments" ]; then
   # No segments and no --skip: the default is --strip-ends.
   add_skip_list "first,second,second_last,last"
 fi
 
 if [ "$DATA_LAYOUT" = "speedlimits" ] && [ "$run_localizer" -eq 1 ]; then
-  die "--localizer e' disponibile solo in openpilot.distill"
+  die "--localizer is available only in openpilot.distill"
 fi
 
 # Absolute path: Distill links must keep working when a folder moves to data_scartati/.
-mkdir -p "$VIDEOS_DIR" || die "non riesco a creare la cartella comune $VIDEOS_DIR (COMMA_VIDEOS_DIR)"
+mkdir -p "$VIDEOS_DIR" || die "cannot create the shared folder $VIDEOS_DIR (COMMA_VIDEOS_DIR)"
 VIDEOS_DIR="$(cd "$VIDEOS_DIR" && pwd)"
 
 ssh -o ConnectTimeout=8 "$COMMA_HOST" true \
-  || die "comma '$COMMA_HOST' non raggiungibile via ssh (hai fatto ssh -A?)"
+  || die "comma '$COMMA_HOST' not reachable over ssh (did you connect with ssh -A?)"
 
 if [ "$auto_mode" -eq 1 ]; then
   find_comma_routes
   if [ -z "$comma_routes" ]; then
-    echo "Nessuna route sul comma."
+    echo "No route on the comma."
     exit 0
   fi
-  echo "Route sul comma:$comma_routes"
+  echo "Routes found on the comma:$comma_routes"
 
   for r in $comma_routes; do
     route="$r"
@@ -482,7 +482,7 @@ if [ "$auto_mode" -eq 1 ]; then
     if select_segments && route_is_long_enough && filter_reverse_segments; then
       download_segments
     else
-      echo "$route: nessun segmento idoneo da scaricare"
+      echo "$route: no segment fit to download"
     fi
   done
 else
@@ -493,4 +493,4 @@ else
   download_segments
 fi
 
-echo "Fatto."
+echo "Done."

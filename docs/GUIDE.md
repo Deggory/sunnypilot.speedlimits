@@ -1,0 +1,284 @@
+# Quick guide: from videos to model
+
+How to use `sunnypilot.speedlimits` every day on the server (the LXC with the V100), with the three helpers and the web panel. To install the environment from scratch, see [INSTALL.md](INSTALL.md). For the `nnslr` commands one by one, see [upstream-training-guide.md](upstream-training-guide.md).
+
+`nnslr` (Neural Network Speed Limit Recognition) is the name of the project and of its CLI (`.venv/bin/nnslr`): it recognizes speed limit signs with a neural network. The name comes from the project it was recovered from, `openpilot-nnslr-tools`.
+
+Run every command from the repository folder, on the server:
+
+```sh
+cd ~/sunnypilot.speedlimits
+```
+
+Every operation below is a script of the repository: there are no manual steps to remember. If something is done often and is not a script yet, add it as a helper and document it here.
+
+## 1. The full loop
+
+| Step | Command | What you do |
+| --- | --- | --- |
+| 0 | `helpers/fetch_comma_segments.sh` (on the site: the **comma** pill at the top right, with a green dot when the comma can be reached and accepts the server's key, then **Download new drives**. The comma's address is changed there too: it is saved in `data/web/comma.json` and passed as `--host`. For a new comma the panel walks you through the steps: SSH on and a GitHub user on the comma, the server's public key added to that GitHub user with **Copy**, the address, **Test now**; see docs/INSTALL.md, "The comma, from zero". A comma the server has already logged into once (the time of the last login is in `data/web/comma-seen.json`) and that is now only switched off shows "Last connected …" instead of the steps) | It downloads every drive still on the comma, also the old ones not in dashcam mode, into the folder shared with `openpilot.distill` (`/root/comma-videos`). It drops the first two and the last two segments, and those with the reverse gear. Distill does not use them: it trains only on the drives it downloads itself (dashcam). |
+| 1 | `helpers/1_prepare.sh` | Nothing: it links the videos, extracts the frames (1 per second) and proposes the signs for every new route. |
+| 2 | `helpers/2_review.sh` | Open the link it prints, then confirm or correct the signs. It is the only manual step. |
+| 3 | `helpers/3_train.sh` | Nothing: it imports the reviews, checks the dataset, freezes the split, creates `.venv-gpu` the first time and trains. |
+| 4 | `scripts/publish_model.sh data/runs/<run>/bundle --no-upload` | Check the bundle. Then, without `--no-upload`, it publishes it on Hugging Face. |
+
+At any time, `helpers/status.sh` shows every route (segments, frames, reviewed frames, objects in the dataset), what is running, the GPU and the disk, and the **next command** to run. It changes nothing.
+
+You can run the helpers again whenever you like: work already done is skipped. `--help` on each one explains its options.
+
+### Useful options
+
+- `helpers/1_prepare.sh --jobs=4`: prepares 4 routes at a time (more cores, faster).
+- `helpers/1_prepare.sh --background` and `helpers/3_train.sh --background`: they keep going even if you close the ssh session. The log is in `data/logs/`.
+- `helpers/3_train.sh --dataset-only`: only the import and the dataset check, no GPU.
+- `helpers/3_train.sh --continue`: a new training that starts from the "stable" weights published on Hugging Face.
+- `helpers/3_train.sh --resume=<run>`: resumes an interrupted training (same folder `data/runs/<run>/`).
+
+### Three rules to know
+
+- **Training needs at least 3 reviewed routes.** `nnslr build-splits` divides the dataset into three independent parts, by whole routes: validation and test take about 15% each, and all the rest is train, so every reviewed route is used. The test takes first the routes with the most frames confirmed by a person (`--test-route <route>` puts a route in the test). With fewer than 3 routes it stops. The imported reviews stay in the dataset: nothing is lost.
+- **The dataset follows the latest review of every frame.** A frame already imported and then reviewed again (boxes changed, or the review reclassified as AI) replaces its old rows. A frame already imported and then withdrawn is removed. The removed rows stay archived in `data/annotations/replaced/`. `nnslr import-annotations --from-db --dry-run` shows what would go in, what would be replaced and what would be removed, without writing anything.
+- **A route already pre-annotated is never processed again.** A new pre-annotation would leave the reviews on the old report, and the import would skip them. Segments of that route that arrive later stay out; `helpers/status.sh` points them out.
+
+## 2. The web panel
+
+The site is in English and looks like `distill-web` and `perception-web` (dark; the **Account** icon at the top right opens the menu with the Dark / Light / Automatic look, the password and signing out). There are four sections in the top bar (on the phone, in a bar at the bottom, like an app): **Overview**; **Data**, with the pages **Drives** (`/prepare`), **Review** (`/routes`), **Roads** (`/roads`) and **Training dataset** (`/dataset`); **Training** (`/train`); **Models**, with **Versions** (`/models`), **Results** (`/evaluate`) and **Publish** (`/publish`). The pages of a section are under its title. It is one single page that switches tabs without reloading:
+
+- **Overview** (`/`, the start page): at the top, the jobs running, one line each (percent, step, time left; a tap opens the log with Stop), or the last job if it failed; the next step with its button; three summaries that lead to the pages (Drives to prepare, Review with the percent confirmed, Training dataset with the reviews to import); the last three finished jobs (**Show all** for the others). The machine (GPU, CPU, RAM, disk), the processes on the GPU and **Update the site** are in the panel of the server pill at the top. The list of routes `/routes` (Data › Review) opens on a summary: the frames confirmed, by you and by the AI assistants, the AI's frames still to confirm, and one tile per group (In progress, To start, Done). A tile shows its list: one list at a time and always one, remembered in the browser, otherwise the first group that has drives.
+- **Data** (`/prepare`, formerly "Prepare"): **Download from the comma** and **Prepare new drives**, their progress, and the table of the routes. **Find the signs → Found by** chooses who proposes the signs (Vietnamese YOLO, Our networks, Qwen3-VL) and shows its measure from Evaluate › Proposers (speed signs found and read right, seconds per frame). The choice stays on the server for every browser (`data/web/proposer.json`); until someone chooses, it is the proposer with the best measure. While a preparation of the site is running, it shows that preparation's proposer and cannot be changed. With Qwen3-VL not installed, or with less than about 18 GB free on the GPU, **Prepare new drives** and **Propose again** stay off, with the reason. Without new routes the page points to the comma's **Download new drives** in the top bar.
+- **Results** (`/evaluate`): **Drive**, the first view, replays a drive as in the car. It shows the real video of the comma's road camera (20 frames per second; the server converts it to MP4 the first time Drive shows the drive, about 4 minutes for a 45-minute drive, with `nnslr drive-video`, and meanwhile it shows the frames, one per second, with how much is left). On the frame are the speed signs the networks read (green: right; orange: another number; red: where there is no sign; dashed: the missed ones), and in the corner the limit the car would show now, next to the limit of the reviewed signs. Below is the strip of the drive, green where the limit is right and red where it is wrong (a tap goes there), and at the side the percent of the drive with the right limit. The limit is the last sign read, held until the next one or an end of limit: a single sign read wrong stays until another one is read, as the car would do. The road a sign applies to (the decider) is not there yet: every sign read counts. You choose the drive, the version of the classifier (with the cutter it was measured with) and **Test drives** (roads the networks never saw in training: how they would do on a new road) or **Validation drives** (used during training to choose when to stop, so a bit easier). **Scores** has the numbers of every version, per network (Proposers, Chain, Cutter, Classifier, Decider, AI reviewers): two versions are compared only when they were measured the same way on the same test.
+- **Models** (`/models`): at the top, the three networks in use (cutter, classifier, decider) with their numbers. Below, the versions of one of them (the switch, or a tap on its card) in a table to compare (speed signs, all signs, and for the classifier the chain with the cutter; under each number, how many signs it is measured on). A row opens its card, with **Use this one**. The cutters include the SignNets too (`nnslr train-signnet`, the cutter made for the comma's GPU), measured on the same frames and in the same way. They cannot be put in use here, because Prepare and the training of the classifier use a detector. **Speed signs** and **Every sign** count the signs found at threshold 0.1, with all the boxes that pass (a detector has a couple of hundred per frame, SignNet a few). **In 5 boxes** counts the speed signs among the 5 best boxes of every frame, the ones the car reads ("–" for old reports that do not keep the boxes of every frame). **On the car** marks the networks the comma downloads (the SignNet and the classifier published in `speed-limits-models`). `nnslr on-car` records them (section 6) in `data/models/on-car.json`; they do not change the networks in use. **Publish** (`/publish`) prepares and publishes the package of the three networks in use.
+- **Send to the car** and **Try on the comma now**, on the card of a SignNet (Models › Versions, Cutter): both take that SignNet and the classifier in use, and ask first. **Send to the car** (`scripts/send_to_car.sh`) publishes them in `speed-limits-models`, moves the sunnypilot `speed-limits` branch to them and builds `psa-torque-sunny-testing` again (a few minutes; nothing is published or built when they are already there); then, on the comma: Settings, Software, Check for updates, and install. **Try on the comma now** (`scripts/try_on_comma.sh`) copies them straight onto the comma over ssh, without publishing or building: they last until the comma's next software update. Before copying it checks the comma (it answers, it is parked, its build has speedvisiond, Show Vision Speed Limit is on or Speed Limit Source is Map Data + Vision) and the networks with the comma's own code (their contracts against its `vision.py`, then its `read_signs` on 5 reviewed frames, the confirmed speed read on 3 at least); then it waits up to 6 minutes for the parked comma to compile them, and puts the build's networks back itself when it does not. While a trial is on, the Models tab marks the SignNet **Trying on the comma** and shows **Back to the build's networks**. The button is off, with the reason, when the comma does not answer on the network (checked at most once a minute). Their jobs show at the top of the page while they run.
+- **Roads** (`/roads`): the road type of every frame of the prepared drives (town, rural, expressway, motorway, parking), read from the local OpenStreetMap map and from the comma's GPS, with no network. The **Find the road types** button runs `helpers/road_types.sh`: the GPS of the drives that do not have it yet, the map roads near the drives (about 4 minutes, only when there is a new drive or a new map), and the road type of every frame in `data/derived/road_types/`. It starts on click, without a question, and nothing needs to be reviewed first; it says how many prepared drives do not have their types yet. Below, every drive is a thin strip colored by road type, with the percentages. The legend has six entries: Town, Rural, Expressway, Motorway, Parking (purple) and Unknown (gray). **Parking** is a car park (a car park or one of its aisles on the map): there is no general legal limit there, but the network always gives 15 km/h (a sign read there counts only if it is lower), because the map often has no limit in car parks and the car could speed up. These are proposals from the map; the signs and their reviews do not change.
+  A tap on a drive opens it (`/roads?drive=<route>`; **‹ Roads** or Back return to the list). It shows its pictures one at a time, with the road type (Town, Rural, Expressway, Motorway, Parking or Unknown) and the reason in plain words ("The map says 50 here", "A motorway ramp on the map: check it", "No GPS here (garage, tunnel or the start of the drive)", "Set by you"; nothing when the map has no reason to give). **Not sure** marks where the map is often wrong, and **Reviewed** where a person decided. Below are the strip of the drive (a red line under the stretches to check, a dark one under the reviewed ones, a blue one over the stretch a tap changes; a tap or a drag goes there), Play, the arrows and the space bar.
+  To correct, tap Town / Rural / Expressway / Motorway / Parking / Can't tell. It gives that type to the stretch shown, that is the nearby frames of the same type, equally sure or unsure, and not reviewed yet (on an unsure ramp only the unsure frames, never the sure motorway around it, nor a stretch already corrected). It can also change only part of the stretch: inside a stretch, the choice **Whole · Up to here · From here** splits it at the picture shown. For example, for the 183 frames without GPS at the start of Zürich → Herznach: on the picture of the exit from the garage, **Up to here** and then **Parking**, then **From here** and **Town**. With **Mark start**, it goes from the marked point to here. Each change is saved at once. A stretch of more than 60 pictures (one minute) asks for confirmation first ("Set 485 pictures (8 min) to Town?"). **Undo last change** removes the last correction. **Next to check** goes to the next unknown or unsure stretch not reviewed yet, and says how many stretches are left ("31 stretches").
+  On the phone the picture, the type, the buttons and Next to check fit on one screen, above the bottom bar, and after Next to check the page goes back to the picture; speed, Mark start, Undo and the legend are below. With the phone in landscape, the buttons are next to the picture. The corrections are kept apart, in `data/annotations/road_types/<route>.jsonl` (one line per correction, the last one wins), and they stay after **Find again**: the map's types are written again, and the corrections go on top of them.
+- **Training dataset** (`/dataset`): the new or changed reviews to import with **Import reviews** (or *Dataset is up to date*), the import running, and **In the dataset** (frames and objects, objects by type, reviews by people and by AI, the last import, the split, the table per route). Opening the page imports nothing.
+- **Training** (`/train`): the data line (objects, frames, routes, the reviews not imported) leads to Training dataset. **Train a model** has the choice of the starting point (**Pre-trained on ImageNet**, recommended; **Random weights**; **The stable model**, when there is one on Hugging Face; an earlier training finished on this server) and **Start training**. **Train the classifier** runs `scripts/run_classifier.sh` with a generated name, `YYYY-MM-DD_HHMM-classifier`: the false boxes of the cutter in use, the classifier with "not a sign", its evaluation alone and in the chain; it needs a cutter in use, chosen on the Models tab. The **training charts** show the detector loss, and the reader loss and accuracy, epoch by epoch. At the top is the choice of the network (Cutter, Classifier, Decider, Pipeline). The card of a training running shows the parameters it was started with (size, signs, epochs, batch…, read from the start of its log). The latest version of the chosen network is in a line with its number, which leads to its versions on the Models tab (`/models#role-classifier`): a version is chosen only there.
+
+The old addresses (`/pannello`, `/stato`, `/panoramica`, `/prepara`, `/allena`) lead to the new tabs. The confirmations (starting a training, Stop, Update the code, signing out of every browser) are windows of the site, not of the browser.
+
+Every job running has a live card:
+
+- the percent, only when it is really known (from the steps done, from the epochs and the batches, from the images checked, from the routes ready); otherwise a moving bar;
+- the steps, ticked off, with the current one and its bar;
+- the detail ("detector · epoch 5 of 20");
+- the time elapsed and, with the percent, the time left (roughly);
+- the last line of the log;
+- small gauges of GPU, GPU memory, CPU and RAM;
+- **Stop** and **Details** (the log).
+
+The server works out the progress from the job's log (`nnslr_tools/job_progress.py`) and from `data/logs/progress.json`, where the long commands (dataset check, split, training) write how far they are (`nnslr_tools/progress.py`). **Stop** works even after a restart of the site: the process number is in `data/logs/panel/<job>.pid`. A training started from the terminal shows up with its steps and charts (from its `data/logs/train-<run>.log`), but it is stopped from the terminal. An action that is off has the reason under it.
+
+The **Stop** window says what is left for each action: the download and the install of Qwen3-VL resume from where they were, the training of the pipeline has **Resume**, and a measure and **Propose again** start over. When the log shows a known fault (GPU out of memory, disk full, comma not answering, ...), a failed job says in one sentence what went wrong. It has **Try again** if it is a download, a preparation, the install of Qwen3-VL, an import or the measure of a proposer. The exit code and the paths stay in **Details**, which also says how long the job took and has **Stop** while the job runs. The measure of a proposer is named after it ("Measure Qwen3-VL") and counts the frames done. **Propose again** has a single time left, the server's. The list of recent jobs shows the last 12. **Update the code** runs `helpers/update.sh --no-link` (section 3), that is `git pull` and a restart of the site; it starts only when no preparation, training or AI review is running.
+
+**Download from the comma** runs `helpers/fetch_comma_segments.sh` with no arguments (step 0): every drive still on the comma, over ssh with this machine's key (`Host comma` in `~/.ssh/config`), with no need for `ssh -A`. To read the comma's logs (length of the drive, reverse gear) it uses `COMMA_FETCH_PYTHON` when it is set, otherwise the Python of `../openpilot.distill/.venv`, which has openpilot's `LogReader`. Without either of them, the button stays off with the reason. It does not start together with a preparation: both write the links in `data/raw/routes`. After the download, the next step is **Prepare new drives**.
+
+The panel runs only its own fixed actions, never just any command, and only one of each kind at a time (download, preparation, import/training, AI review). It counts the ones started from the terminal too, including the download of `openpilot.distill`. It is protected like the rest of the site: a token on the LAN, and the buttons accept only requests from the page itself. The logs of the actions are in `data/logs/panel/`; the last line of each one is the exit code.
+
+`NNSLR_PANEL_ACTIONS=0` (in the environment of the server; for the service, in `/etc/speedlimits-web.env`) makes the panel read-only, for example when other people use the site to review.
+
+## 3. The always-on site: the `speedlimits-web` service
+
+To keep the site and the panel always on, even after a restart of the server, install the systemd service once (as root):
+
+```sh
+cd ~/sunnypilot.speedlimits
+helpers/2_review.sh --stop                        # if you had started the review by hand (port 8765)
+scripts/install_review_service.sh --dry-run       # shows what it would do, changes nothing
+scripts/install_review_service.sh                 # installs, starts and prints the link
+```
+
+The service listens on `0.0.0.0:8765`. It restarts by itself if it stops, and at every boot. Running the install again does no harm: it rewrites the service only when `deploy/speedlimits-web.service` changed, and it does not touch the token.
+
+### Signing in from the browser: name and password
+
+On the LAN the site asks you to sign in with a **name and password** (pages, panel and images). The **first visit** creates the administrator: the page asks for the **setup code**, which is the server's access token, then for the name and the password (at least 12 characters). From then on the token no longer opens the site in the browser: it is only the key of the `/api/v1` API, of MCP and of the agents that send it in the `X-Review-Token` header.
+
+- The **Account** page (at the top) shows who is signed in, signs you out (also from every browser) and changes the password. After the change, the other browsers have to sign in again.
+- A session lasts 7 days without use, 30 days in all. 5 wrong attempts from one address block it for 15 minutes.
+- The sign-in files are in the data folder, under `web/auth/` (`admin.json`, `sessions.json`, permissions 600; the password is saved only as a scrypt hash).
+- **Forgotten password**: on the server, in the folder of the clone, run `helpers/reset_password.sh`. It stops the site, moves `web/auth/admin.json` of the data folder to `admin.json.<time>.old` and starts the site again (the service, or the site started by `helpers/2_review.sh`). The next visit asks again for the setup code, then for a new name and password. Reviews and settings stay; every browser has to sign in again. The sign-in page mentions it under **Forgot the password?**.
+- Old links with `?token=...` no longer open the site: they lead to the sign-in page.
+- Started by hand only on `127.0.0.1` (without `--host 0.0.0.0`), the site stays open to this computer without signing in, as before.
+
+### The token (setup code and API key)
+
+The place to look for it is the **`.env` file of the repository** (`~/sunnypilot.speedlimits/.env`), the line `NNSLR_REVIEW_TOKEN=...`:
+
+```sh
+grep NNSLR_REVIEW_TOKEN ~/sunnypilot.speedlimits/.env
+```
+
+- `.env` is in `.gitignore`: it never ends up in git or on GitHub. It has permissions 600 (only root reads it).
+- Whichever needs it first creates it: `helpers/2_review.sh` or `scripts/install_review_service.sh`. The install of the service uses the token already in `.env`; if there is none, it creates one and writes it in `.env`.
+- The systemd service reads it from its own copy, `/etc/speedlimits-web.env` (permissions 600). Every install writes the same value back into `.env`.
+- The install, `helpers/2_review.sh` and `helpers/update.sh` print the address of the site (`http://<server IP>:8765/`), without the token.
+
+Do not share the token: whoever has it can create the administrator while there is none, and can use the API. To change it, write the new value (at least 16 characters, from letters, digits, `-` and `_`) in `/etc/speedlimits-web.env`, then run `scripts/install_review_service.sh` (it copies the value into `.env`) and `systemctl restart speedlimits-web`.
+
+### Updating the code
+
+```sh
+cd ~/sunnypilot.speedlimits
+helpers/update.sh
+```
+
+`helpers/update.sh` runs `git pull --ff-only` (it stops when there are local changes), updates `.venv` when `pyproject.toml` changed, runs `scripts/install_review_service.sh` again (it rewrites the service only when it changed) and restarts the service. Without the service, it restarts the site started by `helpers/2_review.sh`. At the end it prints the link, except with `--no-link`: that is how the **Update the site** button runs it, in the server panel (the GPU/CPU pill at the top right). The button is off, with the reason, while a job runs that the update cannot interrupt. After the confirmation, the site follows the job and reloads the page only when it succeeded; otherwise it writes "Not updated." and why (in the panel and in a notice at the bottom).
+
+The service has `KillMode=process`: a restart stops only the site, not a preparation or a training started from the panel. After the restart the panel finds them again as "running".
+
+### Checking and stopping
+
+```sh
+systemctl status speedlimits-web                     # is it on? since when?
+journalctl -u speedlimits-web -n 50                  # the last lines of the server (also "Pannello: avviata ...")
+systemctl stop speedlimits-web                       # switches it off (it starts again at the next boot)
+scripts/install_review_service.sh --uninstall     # removes the service (the token stays)
+```
+
+### REST API and MCP (review without a browser)
+
+The same service also offers the **REST API** (`/api/v1/...`) and, with the optional MCP dependencies, the **MCP** server on `/mcp`, to review with `curl`, a script or an AI (Claude Code, Codex) that runs on its own computer. Everything is in [API_MCP.md](API_MCP.md). In short:
+
+- the token goes **in the header** `Authorization: Bearer <NNSLR_REVIEW_TOKEN>`, never in the address; it is needed on 127.0.0.1 too;
+- the same rules and the same database as the page; the panel (Prepare, Import, Train, Update) cannot be reached from the API or MCP;
+- install the MCP dependencies once and restart the site: `helpers/setup_mcp.sh --restart` (see "Local install for MCP" below);
+- MCP also works without HTTP, over ssh: `helpers/mcp.sh` (with `--read-only` for a trial without saving; `NNSLR_MCP_READ_ONLY=1` in the service does the same on `/mcp`);
+- the reviews of an AI are saved as `ai/<name>`, type `ai`, and they do not change the confirmations of a person. They are final, like those of a person: `helpers/3_train.sh` imports them into the dataset without another approval, with the AI provenance (`ai/<name>`, `label_basis` `ai_review`, channel). Confirming does not import and does not train: import and training are started separately.
+
+#### Local install for MCP
+
+Some things are not in git, because they are installs or settings of the machine. `helpers/setup_mcp.sh` does all of them. You can run it again whenever you like (it skips what is already there):
+
+```sh
+cd ~/sunnypilot.speedlimits
+helpers/setup_mcp.sh                         # only the MCP SDK in .venv (extra [mcp])
+helpers/setup_mcp.sh --claude                # + Claude Code in this folder, for the review sessions
+helpers/setup_mcp.sh --claude --effort=low   # as above, with another effort (default medium)
+helpers/setup_mcp.sh --restart               # + a copy of the database if it must be migrated, and a restart of speedlimits-web
+```
+
+| What | Where it ends up | Why it is not in git |
+| --- | --- | --- |
+| MCP SDK (`mcp` 2.x and its dependencies) | `.venv` | installed packages |
+| MCP server `nnslr-review` (stdio, `helpers/mcp.sh`) for Claude Code | `~/.claude.json`, for the folder of the repository | Claude Code configuration of the machine |
+| `mcp__nnslr-review` tools allowed without asking, `effortLevel` of the sessions | `.claude/settings.local.json`, listed in `.git/info/exclude` | a local setting: the review sessions started here (also the remote ones of the bridge environment) do not stop to ask, and do not use the high effort |
+| copy of the database before the migration | `data/annotations/review.sqlite.bak-v1-<time>` | data |
+
+To take the permissions away from the sessions, delete `.claude/settings.local.json`. To remove the MCP server: `claude mcp remove -s local nnslr-review`.
+
+Reviews an AI made from the page (with a name like `Codex` or `ChatGPT`) count as human. `nnslr review-reclassify-ai --reviewer Codex --reviewer ChatGPT --dry-run` counts the ones to change; without `--dry-run` it marks them as AI (a new review in the history, same boxes). Make a copy of the database first.
+
+The review database updates itself to version 2 at the first start of the new code (it adds the reviewer type and the channel; the reviews already made stay "human, from the page"). After that, an old `nnslr` can no longer open it.
+
+### The AI reviewer (Settings)
+
+A review can be done by hand, or by an AI that sees the images, through any server compatible with the OpenAI API (`/v1/models` and `/v1/chat/completions`): strata, your own llama.cpp `llama-server` on another machine with a vision model and its `--mmproj` file (for example Qwen3-VL-32B-Instruct), or another service.
+
+- **Connecting a provider**: menu **Account → Settings**, the **AI reviewer** box: a name, an address that ends in `/v1`, the API key (when the server wants one) and the model (the list comes from the server; when it does not answer, type it by hand). **Test** sends a frame reviewed by a person, without the proposals, and says whether the model answers in JSON and reads the speed sign. When the server says the model takes text only, it says so without asking the model anything. Below, **Who reviews** is a list with a check mark: choose a provider that passed the Test, or **Don't use AI**. A provider never tested, or one that did not pass its last Test, cannot be chosen (not from the terminal either). When the chosen reviewer no longer passes it, **Ask AI** and **Review with AI** stay off, with the reason, until it passes again. Changing the address or the model clears the Test.
+- **From the terminal**, for example strata:
+
+  ```sh
+  .venv/bin/nnslr llm-provider add --name strata --base-url https://strata.farm.14bodhi.com/v1 --key-file /root/.config/strata-api-key
+  .venv/bin/nnslr llm-provider test strata
+  .venv/bin/nnslr llm-provider use strata
+  ```
+
+  `nnslr llm-provider list` lists the providers (never the keys); then `models ID`, `remove ID`, `use none`. Without `--model` it takes the first model the server lists.
+- **Where the key is**: in `data/web/private/llm-providers.json` (permissions 600, folder 700, outside git). `NNSLR_LLM_PROVIDERS=/full/path.json` moves the file. The key never leaves the server: no page, answer, log or report contains it, and the browser only knows that there is one. Leaving the key field empty keeps the saved key; **Remove key** removes it.
+- **On the review page**: **Ask AI** (key **I**) shows the AI's suggestion for the frame, with Keep, Correct, Add, Delete or Not judged for every box. It saves nothing: **Apply** turns it into changes to check, and your **Confirm** saves them as your review, as always; **Dismiss** throws it away. At most two requests to the AI run at a time.
+- **A whole route**: in the list of routes, **Review with AI** on the routes not finished (until an AI reviewer is chosen in Settings, there is a single **Set up AI review** link in its place, and a line with the same link on the review page). **Try without saving** tries 20 frames without saving: the suggestions go to `data/ai_reviews/<route>/`, and the review page of the route shows them in the **AI reviewer** box of every frame tried (with **Apply** and **Dismiss**, like **Ask AI**) and in the **AI trial** filter. **Review and save** saves the AI's reviews, only with a provider that passed the Test. They still have to be confirmed (on the **AI · to confirm** page, in the list «N by AI to confirm»), and they go into training only after a person confirms them: the import leaves them out, and removes the ones imported before this rule. It starts as a job of the panel (`helpers/ai_review.sh`, followed in the Overview), never together with a preparation or an update. Frames confirmed by a person are never touched.
+- **The reviews saved by the AI are final**: nobody approves them again, and the next import (`helpers/3_train.sh`, **Import reviews**) puts them into training as AI reviews: `reviewer` `ai/<provider>/<model>`, type `ai`, channel `web`, `label_basis` `ai_review`. Saving does not import and does not train.
+- **Measuring a provider**: Evaluate → **AI reviewers**, **Measure** (`helpers/measure_ai_reviewer.sh`): up to 60 frames reviewed by people, always the same ones for every provider. It measures the speed signs found and read right, the agreement on the frames without signs, the false boxes, and the seconds per frame. It saves nothing; the result goes to `data/evaluations/ai_reviewers/`.
+- **Who can**: only a browser that has signed in, or the site on 127.0.0.1, changes the providers and uses the AI. The token (API, MCP, agents) can only read the settings, the state of the AI and the measures ([API_MCP.md](API_MCP.md), section 8).
+
+## 4. Where things are
+
+| What | Where |
+| --- | --- |
+| Original videos (shared with distill) | `/root/comma-videos/<route>--<segment>/` |
+| Links to the videos, per route | `data/raw/routes/<route>/<segment>/` |
+| Extracted frames | `data/derived/frames/<route>/` |
+| Videos of the drives for Results › Drive (`nnslr drive-video`) | `data/derived/video/<route>.mp4` and `.json` |
+| Proposed signs (report) | `data/derived/preannotations/<route>/` |
+| Confirmed reviews | `data/annotations/review.sqlite` |
+| Imported dataset | `data/annotations/objects.jsonl` |
+| Train/validation/test split | `data/splits/` (`latest.json` is the one in use) |
+| Training, evaluation, bundle | `data/runs/<run>/` |
+| Networks on the comma (Models › On the car) | `data/models/on-car.json`, written by `nnslr on-car` |
+| Networks tried on the comma (Models › Trying on the comma) | `data/models/on-comma-trial.json`, written by `scripts/try_on_comma.sh` |
+| A build of Send to the car still owed | `data/models/send-to-car.pending` |
+| Logs of the helpers | `data/logs/` (`prepare/<route>.log`, `train-<run>.log`, `review.log`) |
+| Logs of the panel actions | `data/logs/panel/` |
+| AI providers of Settings and their keys | `data/web/private/llm-providers.json` (permissions 600; `NNSLR_LLM_PROVIDERS` moves it) |
+| Suggestions of the AI reviews of a route | `data/ai_reviews/<route>/` |
+| Measures of the AI reviewers | `data/evaluations/ai_reviewers/` |
+| Access token of the site (the place to look for it) | `.env` of the repository, line `NNSLR_REVIEW_TOKEN=` |
+| Copy of the token the service reads | `/etc/speedlimits-web.env` |
+| Definition of the service | `deploy/speedlimits-web.service` → installed in `/etc/systemd/system/speedlimits-web.service` |
+
+`data/` and `.env` are not in git.
+
+### The code of the site's pages
+
+| What | Where |
+| --- | --- |
+| Sources of the pages: Vue 3 components (`.vue`) and TypeScript; one entry per page, the shared components and functions | `web/src/pages/<page>.ts`; `web/src/review/` (review), `web/src/control/` (Overview, Prepare, Train, charts), `web/src/account/`, `web/src/login/`; shared ones in `web/src/components/` (Account menu, notices, bars), `web/src/composables/`, `web/src/common/` |
+| HTML templates, styles (`shared.css`: colors and frame shared with distill-web) | `src/nnslr_tools/web/` |
+| Built scripts (committed: the server and `helpers/update.sh` do not need Node) | `src/nnslr_tools/web/js/<page>.js` |
+| What puts page, styles and script together, with the nonce (the Vue page draws itself in `<div id="app">`) | `src/nnslr_tools/pages.py` |
+
+To change a page: edit `web/src` (or the template), run `helpers/build_web.sh`, then commit the sources and `js/` together. The components have no `<style>`: the styles stay in the templates and in `shared.css`. Vue is compiled ahead of time (no `eval`, which the site's CSP forbids); a test fails when `js/` does not match the sources. HTML, CSS and `js/` are read again at every request: reloading the page is enough. `pages.py` and the rest of the Python take effect after a restart of the service.
+
+## 6. Scripts of the repository
+
+| Script | What it does | Effects |
+| --- | --- | --- |
+| `helpers/status.sh` | the state of everything, and the next command | read-only |
+| `helpers/1_prepare.sh` | videos → frames → proposed signs | writes in `data/`, CPU |
+| `helpers/2_review.sh` | starts or stops the review site, prints the link | opens port 8765 on the LAN, creates the token in `.env` |
+| `helpers/3_train.sh` | reviews → dataset → model | writes the dataset, installs `.venv-gpu` the first time, GPU |
+| `helpers/update.sh` | updates the code and restarts the site | `git pull`, `.venv`, restart of the service |
+| `helpers/reset_password.sh` | forgotten password: the administrator starts over (the next visit asks for the setup code) | stops and restarts the site, moves `web/auth/admin.json` |
+| `helpers/setup_mcp.sh` | installs the MCP SDK; `--claude` sets up Claude Code in this folder; `--restart` copies the database when it must be migrated, and restarts the site | packages in `.venv`, `~/.claude.json`, `.claude/settings.local.json`, restart of the service |
+| `helpers/mcp.sh` | MCP server (stdio) for Claude Code, Codex and other clients, also over ssh ([API_MCP.md](API_MCP.md)) | reads the routes; saves AI reviews in the database (not with `--read-only`) |
+| `helpers/fetch_comma_segments.sh` | downloads the new drives from the comma | network, the shared folder of the videos |
+| `helpers/road_types.sh [--again]` | the road type of every frame of the prepared drives, from the map and the GPS: a. `nnslr gps --all --missing`, b. `scripts/osm_roads.py` when there is a new drive or a new map (`--again`: always), c. `nnslr road-types --all`. It is the **Find the road types** button of Data › Roads | writes in `data/derived/`, CPU for a few minutes when it reads the map, no network |
+| `helpers/build_web.sh` | checks the types of the pages (Vue 3 and TypeScript in `web/src`, with `vue-tsc`) and builds them with Vite into `src/nnslr_tools/web/js`; `--check` only says whether the built files are up to date | the first time, it installs Vue, Vite and TypeScript in `web/node_modules` (Node from PyPI with `uvx`, nothing in the system) |
+| `scripts/install_review_service.sh` | installs, updates or removes the `speedlimits-web` service | systemd, `/etc/speedlimits-web.env`, `.env` |
+| `scripts/setup_v100_training_env.sh` | creates `.venv-gpu` (`helpers/3_train.sh` runs it too) | installs packages |
+| `scripts/setup_vlm.sh [--no-test]` | installs Qwen3-VL-8B-Instruct (it sees images, Apache-2.0, ~17.5 GB) in `data/models/vlm/`, and `transformers`, `accelerate`, `qwen-vl-utils` in `.venv-gpu` (no package already there changes version), then tries it on the GPU on one frame; nothing uses it for now ([INSTALL.md](INSTALL.md)) | installs packages, downloads 17.5 GB, GPU |
+| `uv run --no-project --with osmium python scripts/osm_places.py` | extracts from the local OpenStreetMap map (`data/raw/osm/`) the names of Swiss towns, villages and districts into `data/derived/osm/places.jsonl`: the Review list names every drive with the day, the time and where it went from and to ("Herznach → Zürich") | writes data, no network |
+| `helpers/measure_proposer.sh [vietnam\|ours\|qwen]` | measures a proposer on the reviewed test frames, as Prepare would use it (`nnslr evaluate-proposer`): speed signs found and read right, all signs found, false proposals per frame, seconds per frame. It is the **Measure** button of the Proposers view of Evaluate | writes only `data/evaluations/proposers/`; `ours` and `qwen` use the GPU |
+| `helpers/ai_review.sh <route> [--provider=ID] [--save] [--limit=N]` | reviews the frames of a route not confirmed yet with the AI of Settings (`nnslr ai-review`). Without `--save` it is a trial, and it saves only the suggestions, in `data/ai_reviews/<route>/`. It is the **Review with AI** button of the list of routes | network (the provider's server); with `--save` it saves AI reviews to confirm in the database (the import takes them only after a person confirms them) |
+| `helpers/measure_ai_reviewer.sh [--provider=ID] [--limit=N]` | measures an AI provider on the frames reviewed by people (`nnslr measure-ai-reviewer`). It is the **Measure** button of Evaluate → AI reviewers | network, writes only `data/evaluations/ai_reviewers/` |
+| `helpers/1_prepare.sh --again` | proposes the signs again on the frames not confirmed yet of every route, with the chosen proposer. The confirmed frames stay as they are (copied onto the new report before it becomes the current one, `nnslr preannotate --keep-reviews`), a route that is all confirmed is left out, and every route is read-only until its new proposals are ready (`NNSLR_PROPOSER=vietnam`, `ours` or `qwen`, the **Find the signs → Found by** choice of the Prepare tab) | writes the proposals in `data/derived/preannotations/`; `ours` and `qwen` use the GPU |
+| `scripts/run_v100_baseline.sh` | the full training (`helpers/3_train.sh` runs it) | GPU |
+| `scripts/run_experiment_b.sh <name>` | experiment B ([NEURAL_NETWORK.md](NEURAL_NETWORK.md), step 2): trains, one after the other, the `crop`, `crop_geom` and `full` variants of `nnslr experiment-b` on the reviewed boxes, and prints the comparison (reading, other_road, macro-F1, abstentions) on test and on the human rows. First `nnslr experiment-b --variant full --dry-run` (CPU only) | GPU, writes in `data/runs/<name>/experiment-b/` |
+| `scripts/run_detector_sizes.sh <name> [sizes...]` | the input size of the detector ([NEURAL_NETWORK.md](NEURAL_NETWORK.md), step 3): trains one detector per size (by default `320x320 640x360 960x544`, `nnslr train --task detector --input-size`) with the same settings (the smallest default box is 0.02 of the image, `NNSLR_DETECTOR_ANCHOR_MIN_RATIO`; 10% of the frames without signs per epoch; the best epoch is the one with the highest validation recall at threshold 0.1; the boxes are the speed signs and the other road signs, `NNSLR_CUTTER_FAMILIES=all`, or only the speed signs with `speed`). It evaluates each one on test and validation and prints the comparison (recall in total, of the speed signs only, and per sign width, at thresholds 0.05, 0.1, 0.25, 0.3 and 0.5; boxes per frame passed to the classifier; false boxes per frame; precision; ms per frame; s per epoch; GPU memory; best epoch), saved in `comparison.txt`. Run again with the same name, it finishes the missing sizes. First `nnslr train --task detector --input-size 640x360 --dry-run` (CPU only) | GPU, writes in `data/runs/<name>/detector-sizes/` |
+| `scripts/run_classifier.sh <name>` | the classifier ([NEURAL_NETWORK.md](NEURAL_NETWORK.md), step 2; it is also the **Train the classifier** button of the Train tab). It collects the false boxes of the cutter in use (`nnslr mine-negatives`: score ≥ 0.1, no overlap with the reviewed boxes, at most 3 per frame and 3 times the signs of each partition, first from the frames reviewed by a person). It trains the classifier with `not_a_sign` and the types of the other signs (`nnslr train --task reader --classes v2 --negatives`, from ImageNet, with darker crops and shifted boxes). It evaluates it alone on test and validation, then evaluates the cutter → classifier chain (`nnslr evaluate-chain`: signs found and read right, false boxes per frame that survive, at thresholds 0.05, 0.1 and 0.25), does the same chain with the old reader and prints the comparison, saved in `comparison.txt`. Run again with the same name, it finishes the missing steps. First `nnslr mine-negatives --dry-run` and `nnslr train --task reader --classes v2 --dry-run` (CPU only) | GPU, writes in `data/runs/<name>/` |
+| `scripts/publish_model.sh` | publishes a bundle on Hugging Face | public upload |
+| `.venv/bin/nnslr on-car --models /root/speed-limits-models [--dry-run]` | to run after every publication in `cristianku/speed-limits-models` (the networks the comma downloads): it records which versions run on the car, which the Models page marks **On the car**. It reads `speed_limits.json` of the clone (format 2: finder and classifier) and the contracts. It checks the sha256 of every ONNX against its contract, and that of the weights on this server against `checkpoint_sha256`. The clone must have no changes and its commit must be pushed already; `data/models/active.json` does not change | reads only the clone, no network; writes `data/models/on-car.json` |
+| `scripts/send_to_car.sh --signnet=<run> [--rebuild] [--dry-run]` | **Send to the car**: export, publish in `speed-limits-models`, record in `on-car.json`, move the sunnypilot `speed-limits` submodule, build `psa-torque-sunny-testing` (only when something changed, or `--rebuild`; `NO_PUSH=true` does not push it). Details in [COMMANDS.md](COMMANDS.md) | **publishes** |
+| `scripts/try_on_comma.sh --signnet=<run> [--dry-run]` | **Try on the comma now**: checks the comma and the networks with its code, copies them onto the comma, waits for it to compile them (else puts the build's back). `--dry-run` only reads the comma. Each check in [COMMANDS.md](COMMANDS.md) | writes on the comma |
+| `scripts/try_on_comma.sh --restore` | **Back to the build's networks** on the comma | writes on the comma |
+
+## 5. Common problems
+
+| Message | What to do |
+| --- | --- |
+| `splitting the dataset needs at least 3 independent reviewed routes (or places)` | Prepare and review more routes, then run `helpers/3_train.sh` again. |
+| `the GPU 0 is busy` / the button says "the GPU is busy with another process" | Another training is running (often `openpilot.distill`): wait for it to finish. From the terminal, `--force` starts anyway, and both get slower. |
+| `port 8765 is already in use` | A site is already on (the service, or another `nnslr review`): `helpers/2_review.sh` prints the link again, `helpers/2_review.sh --stop` stops the one started by hand. |
+| `Sign-in required: reload the page and sign in` | The session ended (7 days without use, signed out, password changed): reload and sign in with name and password (section 3). |
+| API or MCP: `401 unauthorized`, `501 mcp_unavailable`, `409 ...` | See [API_MCP.md](API_MCP.md), section 7. |
+| `Sign in on the site to use the AI reviewer.` (403 `session_required`) | The AI reviewer works only from a browser that has signed in, or from the site on 127.0.0.1: the token can only read. |
+| `Choose an AI reviewer in Settings.` (409 `no_ai_reviewer`) | Account → Settings → AI reviewer: add a provider, press **Test** and choose it in **Who reviews**; or `nnslr llm-provider test ID` and `nnslr llm-provider use ID`. |
+| `... did not pass its last Test ...` / `Test ... in Settings first ...` (409 `ai_not_tested`) | The provider did not pass the Test (or was never tested): fix it and press **Test** in Settings (`nnslr llm-provider test ID`). Only then can it review. |
+| 429 `ai_busy` | Two requests to the AI are already running: try again shortly. |
+| 502 `ai_unreachable`, `ai_http_error`, 504 `ai_timeout` | The provider's server does not answer, refuses (a wrong key, a model that does not exist: the message says `HTTP <code>`) or does not answer within 2 minutes: check it with **Test**. |
+| Test: `... takes text only: it cannot see the frames.` | The model cannot see images: choose a vision model (with llama.cpp, its `--mmproj` file is needed too). |
+| `there are no stable weights on ... yet` | `--continue` needs a model already published as stable: train from scratch first. |
+| A route stays at "videos to link" (`helpers/status.sh`) | `link-videos` found a conflict: see `data/logs/prepare/link-videos.json`. Segments with only the log and no `fcamera.hevc` (the fetch downloads only the log of the first two and the last two) are not an error: they are not linked, and they are listed in `log_only`. |
+| Extraction or pre-annotation failed | The reason is in `data/logs/prepare/<route>.log`. |

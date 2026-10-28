@@ -51,6 +51,12 @@ def test_a_failed_step_is_marked_and_a_finished_job_is_complete():
     assert states(failed)['gpu_env'] == 'failed' and failed['last_line'] == 'ERROR: venv'
     done = progress('dataset', 'ok', '== a. importo le revisioni confermate\n== b. controllo\n')
     assert done['percent'] == 100.0 and set(states(done).values()) == {'done'}
+    # helpers/3_train.sh speaks English now; its steps read the same.
+    english = progress('dataset', 'running', '== a. importing the confirmed reviews\n')
+    assert states(english) == {'import': 'current', 'split': 'todo'}
+    english = progress('train', 'running', '== a. importing the confirmed reviews\n'
+                       '== b. checking the dataset and freezing the split\n== c. GPU environment\n')
+    assert states(english)['import'] == 'done' and states(english)['gpu_env'] == 'current'
 
 
 def test_preparation_uses_its_own_count_and_fetch_counts_segments():
@@ -63,6 +69,9 @@ def test_preparation_uses_its_own_count_and_fetch_counts_segments():
     assert states(english)['link'] == 'done' and english['last_line'] == 'r1: proposing failed (see r1.log)'
     fetched = progress('fetch', 'running', 'r1 sul comma: 0 1. Salto:. Scarico: 0 1\n== r1--0 -> /x\n')
     assert fetched['percent'] is None and fetched['detail'] == '1 segment downloaded · r1'
+    fetched = progress('fetch', 'running', 'Routes found on the comma: r1 r2\n'
+                       'r1 on the comma: 0 1. Skip:. Download: 0 1\n== r1--0 -> /x\n')
+    assert fetched['detail'] == '1 segment downloaded · r1'
 
 
 def test_the_progress_inside_the_current_step_comes_from_the_last_report():

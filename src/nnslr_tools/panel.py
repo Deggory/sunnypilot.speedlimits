@@ -744,7 +744,7 @@ class Panel:
             elif name == 'fetch' and not (self.repo / 'helpers/fetch_comma_segments.sh').is_file():
                 reason = 'helpers/fetch_comma_segments.sh is missing in this installation'
             elif name == 'fetch' and self.fetch_python() is None:
-                reason = 'the reader of the comma logs is missing (see docs/GUIDA.md)'
+                reason = 'the reader of the comma logs is missing (see docs/GUIDE.md)'
             elif name == 'fetch':
                 pass
             elif name == 'prepare' and not to_prepare:
@@ -1315,7 +1315,7 @@ class Panel:
                 raise PanelError(403, 'actions_disabled', 'helpers/fetch_comma_segments.sh is missing in this installation.')
             fetch_python = self.fetch_python()
             if fetch_python is None:
-                raise PanelError(403, 'actions_disabled', 'The reader of the comma logs is missing (see docs/GUIDA.md).')
+                raise PanelError(403, 'actions_disabled', 'The reader of the comma logs is missing (see docs/GUIDE.md).')
         if action == 'train_cutter' and not (self.repo / CUTTER_SCRIPT).is_file():
             raise PanelError(403, 'actions_disabled', CUTTER_SCRIPT + ' is missing in this installation.')
         if action == 'train_decider' and not (self.repo / DECIDER_SCRIPT).is_file():

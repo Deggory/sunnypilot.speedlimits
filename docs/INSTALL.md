@@ -159,7 +159,7 @@ ffmpeg -version | head -n 1
 
 ## 5. Always-on review site and daily use
 
-Install the review site (with its control panel) as the systemd service `speedlimits-web`, then use the helpers; both are described step by step in [GUIDA.md](GUIDA.md):
+Install the review site (with its control panel) as the systemd service `speedlimits-web`, then use the helpers; both are described step by step in [GUIDE.md](GUIDE.md):
 
 ```sh
 scripts/install_review_service.sh --dry-run

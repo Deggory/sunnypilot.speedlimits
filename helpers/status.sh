@@ -22,19 +22,19 @@ if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
   sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'
   exit 0
 fi
-[ -x "$PY" ] || { echo "ERROR: manca $PY: crea l'ambiente come in docs/INSTALL.md" >&2; exit 1; }
+[ -x "$PY" ] || { echo "ERROR: $PY is missing: create the environment as in docs/INSTALL.md" >&2; exit 1; }
 
 (cd "$ROOT" && "$PY" -m helpers.route_status)
 
 echo
-echo "In corso:"
+echo "Running now:"
 running=0
 if pgrep -f "nnslr (extract-frames|preannotate)" > /dev/null; then
-  echo "  preparazione: $(pgrep -af "nnslr (extract-frames|preannotate)" | sed 's/.*nnslr //' | head -3 | paste -sd ';' -)"
+  echo "  preparation: $(pgrep -af "nnslr (extract-frames|preannotate)" | sed 's/.*nnslr //' | head -3 | paste -sd ';' -)"
   running=1
 fi
 if pgrep -f "nnslr review" > /dev/null || systemctl is-active --quiet speedlimits-web 2>/dev/null; then
-  echo "  sito di revisione acceso (helpers/2_review.sh ristampa il link)"
+  echo "  review site on (helpers/2_review.sh prints the link again)"
   running=1
 fi
 if pgrep -f "run_v100_baseline.sh" > /dev/null; then
@@ -42,7 +42,7 @@ if pgrep -f "run_v100_baseline.sh" > /dev/null; then
   echo "    log: $(ls -t "$DATA_ROOT"/logs/train-*.log 2>/dev/null | head -1)"
   running=1
 fi
-[ "$running" -eq 1 ] || echo "  niente"
+[ "$running" -eq 1 ] || echo "  nothing"
 
 gpu="$(nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total --format=csv,noheader 2>/dev/null | head -1 || true)"
 # In a container nvidia-smi cannot name the processes ("[Not Found]"): count them instead.
@@ -50,10 +50,10 @@ apps="$(nvidia-smi --query-compute-apps=pid --format=csv,noheader 2>/dev/null | 
 if [ -n "$gpu" ]; then
   users=""
   if [ "${apps:-0}" -gt 0 ]; then
-    users=" (in uso: $apps processi"
-    if pgrep -f "supervised.train" > /dev/null; then users="$users, c'e' il training di openpilot.distill"; fi
+    users=" (in use: $apps processes"
+    if pgrep -f "supervised.train" > /dev/null; then users="$users, the openpilot.distill training among them"; fi
     users="$users)"
   fi
   echo "GPU: $gpu$users"
 fi
-echo "Disco: $(df -h "$DATA_ROOT" | awk 'NR==2 {print $4 " liberi su " $2}')"
+echo "Disk: $(df -h "$DATA_ROOT" | awk 'NR==2 {print $4 " free of " $2}')"

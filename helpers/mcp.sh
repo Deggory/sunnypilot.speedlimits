@@ -23,7 +23,7 @@ if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
   sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'
   exit 0
 fi
-[ -x "$PY" ] || { echo "ERROR: manca $PY: crea l'ambiente come in docs/INSTALL.md" >&2; exit 1; }
+[ -x "$PY" ] || { echo "ERROR: $PY is missing: create the environment as in docs/INSTALL.md" >&2; exit 1; }
 
 cd "$ROOT"
 exec "$PY" -m nnslr_tools.cli mcp "$@"

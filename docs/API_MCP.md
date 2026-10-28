@@ -33,7 +33,7 @@ Claude Code (stdio, anche via ssh) → helpers/mcp.sh → SDK MCP ────�
 
 ## 2. Autenticazione e sicurezza
 
-- `/api/v1/...` e `/mcp` vogliono **sempre** il token, anche quando il sito ascolta solo su 127.0.0.1 (dove la pagina non lo chiede). Il token è `NNSLR_REVIEW_TOKEN`: sul server è nel `.env` del repository e in `/etc/speedlimits-web.env` (vedi [GUIDA.md](GUIDA.md), sezione 3). Su 127.0.0.1 senza `NNSLR_REVIEW_TOKEN` il server ne genera uno a caso e lo stampa all'avvio.
+- `/api/v1/...` e `/mcp` vogliono **sempre** il token, anche quando il sito ascolta solo su 127.0.0.1 (dove la pagina non lo chiede). Il token è `NNSLR_REVIEW_TOKEN`: sul server è nel `.env` del repository e in `/etc/speedlimits-web.env` (vedi [GUIDE.md](GUIDE.md), sezione 3). Su 127.0.0.1 senza `NNSLR_REVIEW_TOKEN` il server ne genera uno a caso e lo stampa all'avvio.
 - Il token va **in un header**: `Authorization: Bearer <token>` (oppure `X-Review-Token: <token>`). Il cookie della pagina non vale per l'API. Un `?token=` nell'indirizzo è rifiutato con 400 `token_in_url` (finirebbe in log e cronologie).
 - Senza token o con un token sbagliato: 401 `unauthorized` con `WWW-Authenticate: Bearer`.
 - Un header `Origin` diverso dal server stesso (o `Sec-Fetch-Site: cross-site`) → 403 `cross_origin`: un sito web aperto nel browser non può chiamare l'API o `/mcp` (protezione DNS rebinding richiesta dal trasporto MCP). I client da terminale non mandano `Origin`.
@@ -239,7 +239,7 @@ helpers/setup_mcp.sh --restart     # + copia del database se va migrato e riavvi
 helpers/setup_mcp.sh --claude      # + Claude Code in questa cartella (server nnslr-review, permessi, effort medium)
 ```
 
-A mano è `uv pip install --python .venv/bin/python -e ".[mcp]"` (oppure `.venv/bin/python -m pip install -e ".[mcp]"`), poi un riavvio del sito. Tutto quello che lo script installa o scrive fuori da git è elencato in [GUIDA.md](GUIDA.md), "Installazione locale per MCP". `helpers/update.sh` non installa da solo l'extra `mcp`, ma non lo toglie. `GET /api/v1` dice `"mcp": true` quando è attivo. Per ritagli e ingrandimenti serve Pillow, già presente con l'extra `preannotate`.
+A mano è `uv pip install --python .venv/bin/python -e ".[mcp]"` (oppure `.venv/bin/python -m pip install -e ".[mcp]"`), poi un riavvio del sito. Tutto quello che lo script installa o scrive fuori da git è elencato in [GUIDE.md](GUIDE.md#local-install-for-mcp), "Local install for MCP". `helpers/update.sh` non installa da solo l'extra `mcp`, ma non lo toglie. `GET /api/v1` dice `"mcp": true` quando è attivo. Per ritagli e ingrandimenti serve Pillow, già presente con l'extra `preannotate`.
 
 ### Claude Code: Streamable HTTP (dal PC, verso il servizio)
 
@@ -350,7 +350,7 @@ Un data root di prova si costruisce con le funzioni di `tests/review/review_help
 
 ## 8. Il revisore AI del sito (Settings)
 
-Il sito può far revisionare i cartelli a un'AI che vede le immagini, attraverso un server compatibile con l'API OpenAI (`/v1/models`, `/v1/chat/completions`) scelto in **Account → Settings → AI reviewer**: strata, un `llama-server` di llama.cpp con un modello visivo e il suo `--mmproj`, o un altro servizio. Il server del sito chiama quel provider; l'uso quotidiano è in [GUIDA.md](GUIDA.md), sezione 3, i comandi `nnslr llm-provider`, `nnslr ai-review` e `nnslr measure-ai-reviewer` in [COMMANDS.md](COMMANDS.md).
+Il sito può far revisionare i cartelli a un'AI che vede le immagini, attraverso un server compatibile con l'API OpenAI (`/v1/models`, `/v1/chat/completions`) scelto in **Account → Settings → AI reviewer**: strata, un `llama-server` di llama.cpp con un modello visivo e il suo `--mmproj`, o un altro servizio. Il server del sito chiama quel provider; l'uso quotidiano è in [GUIDE.md](GUIDE.md), sezione 3, i comandi `nnslr llm-provider`, `nnslr ai-review` e `nnslr measure-ai-reviewer` in [COMMANDS.md](COMMANDS.md).
 
 Questi indirizzi sono del **sito**, non di `/api/v1` né di MCP:
 

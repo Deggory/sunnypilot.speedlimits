@@ -18,15 +18,15 @@ CHECK=0
 case "${1:-}" in
   --check) CHECK=1 ;;
   '') ;;
-  *) echo "uso: $0 [--check]" >&2; exit 2 ;;
+  *) echo "usage: $0 [--check]" >&2; exit 2 ;;
 esac
 
 if [ ! -f "$WEB/node_modules/vite/package.json" ] || [ ! -f "$WEB/node_modules/vue-tsc/bin/vue-tsc.js" ]; then
-  echo "Installo Vue, Vite e TypeScript in web/node_modules (npm ci)…"
+  echo "Installing Vue, Vite and TypeScript in web/node_modules (npm ci)…"
   (cd "$WEB" && "${NODE[@]}" npm ci --no-audit --no-fund)
 fi
 
-echo "Controllo dei tipi (vue-tsc)…"
+echo "Checking the types (vue-tsc)…"
 (cd "$WEB" && "${NODE[@]}" node node_modules/vue-tsc/bin/vue-tsc.js --noEmit -p .)
 
 target=$OUT
@@ -35,21 +35,21 @@ if [ "$CHECK" = 1 ]; then
   trap 'rm -rf "$target"' EXIT
 fi
 mkdir -p "$target"
-echo "Compilo le pagine (Vite)…"
+echo "Building the pages (Vite)…"
 (cd "$WEB" && "${NODE[@]}" node build.mjs "$target")
 
 if [ "$CHECK" = 1 ]; then
   if ! diff -r "$target" "$OUT" >/dev/null; then
-    echo "src/nnslr_tools/web/js non corrisponde ai sorgenti di web/src: lancia helpers/build_web.sh e committa." >&2
+    echo "src/nnslr_tools/web/js does not match the sources in web/src: run helpers/build_web.sh and commit." >&2
     diff -rq "$target" "$OUT" >&2 || true
     exit 1
   fi
-  echo "Script delle pagine aggiornati."
+  echo "The page scripts are up to date."
 else
   # A page removed from web/src/pages leaves no stale script behind.
   for built in "$OUT"/*.js; do
     [ -e "$WEB/src/pages/$(basename "$built" .js).ts" ] || rm -f "$built"
   done
-  echo "Script delle pagine in src/nnslr_tools/web/js:"
+  echo "Page scripts in src/nnslr_tools/web/js:"
   ls "$OUT"
 fi

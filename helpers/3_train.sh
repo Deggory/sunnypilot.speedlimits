@@ -8,12 +8,12 @@
 # Next: scripts/publish_model.sh data/runs/<run>/bundle --no-upload, then without --no-upload.
 #
 # Usage: helpers/3_train.sh [--background] [--name=<run>] [--continue | --resume=<run>] [--dataset-only]
-#   helpers/3_train.sh                       (dataset + training da zero, in primo piano: parte da
-#                                             MobileNetV3 pre-allenata su ImageNet, non da pesi casuali)
-#   helpers/3_train.sh --background          (continua anche se chiudi la ssh)
-#   helpers/3_train.sh --dataset-only        (solo a+b: importa e controlla, niente GPU)
-#   helpers/3_train.sh --continue            (parte dai pesi "stable" su Hugging Face)
-#   helpers/3_train.sh --resume=2026-10-21_2100   (riprende un training interrotto)
+#   helpers/3_train.sh                       (dataset + training from scratch, in the foreground: it starts
+#                                             from MobileNetV3 pre-trained on ImageNet, not from random weights)
+#   helpers/3_train.sh --background          (keeps going even if you close the ssh session)
+#   helpers/3_train.sh --dataset-only        (only a+b: imports and checks, no GPU)
+#   helpers/3_train.sh --continue            (starts from the "stable" weights on Hugging Face)
+#   helpers/3_train.sh --resume=2026-10-21_2100   (resumes an interrupted training)
 #
 # --name: name of the run, folder data/runs/<run>/ (default: date and time, e.g. 2026-10-21_2100).
 # --continue: a new run from the PyTorch weights of training/stable.json on Hugging Face
@@ -76,10 +76,10 @@ while [ $# -gt 0 ]; do
   elif [ "$1" = "--force" ]; then
     force=1
   elif [ "$1" = "--continue" ]; then
-    [ "$mode" != "resume" ] || die "--continue e --resume insieme non hanno senso"
+    [ "$mode" != "resume" ] || die "--continue and --resume together make no sense"
     mode="continue"
   elif [[ "$1" == --resume=* ]]; then
-    [ "$mode" != "continue" ] || die "--continue e --resume insieme non hanno senso"
+    [ "$mode" != "continue" ] || die "--continue and --resume together make no sense"
     mode="resume"
     name="${1#--resume=}"
     name="${name%/}"
@@ -87,18 +87,18 @@ while [ $# -gt 0 ]; do
   elif [[ "$1" == --name=* ]]; then
     name="${1#--name=}"
   else
-    die "opzione non valida: $1 (vedi --help)"
+    die "invalid option: $1 (see --help)"
   fi
   shift
 done
 
-[ -x "$NN" ] || die "manca $NN: crea l'ambiente come in docs/INSTALL.md"
-[ "$mode" != "resume" ] || [ -n "$name" ] || die "--resume vuole il nome del run (la cartella in data/runs/)"
-[ "$mode" != "resume" ] || [ "$dataset_only" -eq 0 ] || die "--resume non rifa' il dataset: --dataset-only non serve"
+[ -x "$NN" ] || die "$NN is missing: create the environment as in docs/INSTALL.md"
+[ "$mode" != "resume" ] || [ -n "$name" ] || die "--resume needs the name of the run (its folder in data/runs/)"
+[ "$mode" != "resume" ] || [ "$dataset_only" -eq 0 ] || die "--resume does not redo the dataset: --dataset-only is not needed"
 if [ -z "$name" ]; then
   name="$(date '+%Y-%m-%d_%H%M')"
 fi
-[[ "$name" =~ ^[A-Za-z0-9._-]+$ ]] || die "nome del run non valido: $name (lettere, numeri, . _ -)"
+[[ "$name" =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid run name: $name (letters, digits, . _ -)"
 mkdir -p "$LOG_DIR"
 
 if [ "$background" -eq 1 ]; then
@@ -108,7 +108,7 @@ if [ "$background" -eq 1 ]; then
   if [ "$mode" = "continue" ]; then args+=(--continue); fi
   if [ "$mode" = "resume" ]; then args+=(--resume="$name"); else args+=(--name="$name"); fi
   NNSLR_TRAIN_LOGGED=1 nohup "$0" "${args[@]}" < /dev/null >> "$LOG_DIR/train-$name.log" 2>&1 &
-  echo "Partito in background (pid $!). Segui con:  tail -f $LOG_DIR/train-$name.log"
+  echo "Started in the background (pid $!). Follow it with:  tail -f $LOG_DIR/train-$name.log"
   exit 0
 fi
 
@@ -118,32 +118,32 @@ if [ "$mode" = "continue" ]; then
   http_code="$(curl -sS -L -o /dev/null -w '%{http_code}' "$stable_url" || true)"
   # Hugging Face answers 401 (not 404) for a repository that does not exist yet.
   if [ "$http_code" = "404" ] || [ "$http_code" = "401" ]; then
-    die "su $HF_REPO non ci sono ancora pesi stable (training/stable.json): allena prima da zero"
+    die "there are no stable weights on $HF_REPO yet (training/stable.json): train from scratch first"
   fi
-  [ "$http_code" = "200" ] || die "non riesco a leggere $stable_url (HTTP $http_code)"
+  [ "$http_code" = "200" ] || die "cannot read $stable_url (HTTP $http_code)"
 fi
 
 if [ "$mode" = "resume" ]; then
-  [ -d "$DATA_ROOT/runs/$name" ] || die "non c'e' il run $DATA_ROOT/runs/$name da riprendere"
-  echo "== a+b. dataset saltato: --resume riprende con il dataset e lo split del run"
+  [ -d "$DATA_ROOT/runs/$name" ] || die "there is no run $DATA_ROOT/runs/$name to resume"
+  echo "== a+b. dataset skipped: --resume goes on with the dataset and the split of the run"
 else
-  [ ! -e "$DATA_ROOT/runs/$name" ] || die "il run $name esiste gia' in $DATA_ROOT/runs/: scegli un altro --name"
+  [ ! -e "$DATA_ROOT/runs/$name" ] || die "the run $name already exists in $DATA_ROOT/runs/: choose another --name"
 
-  echo "== a. importo le revisioni confermate"
+  echo "== a. importing the confirmed reviews"
   if ! "$NN" import-annotations --from-db < /dev/null > "$LOG_DIR/import.json" 2> "$LOG_DIR/import.err"; then
     if grep -q empty_dataset "$LOG_DIR/import.json"; then
-      die "nessun frame confermato nel sito di revisione: prima helpers/2_review.sh"
+      die "no frame confirmed in the review site: run helpers/2_review.sh first"
     fi
     report_errors "$LOG_DIR/import.json" >&2
-    die "import fallito (report completo: $LOG_DIR/import.json)"
+    die "import failed (full report: $LOG_DIR/import.json)"
   fi
-  echo "Frame nuovi nel dataset: $(report "$LOG_DIR/import.json" 'r.get("imported_frame_count", 0)'), gia' presenti: $(report "$LOG_DIR/import.json" 'r.get("already_imported_frame_count", "-")'), rivisti e sostituiti: $(report "$LOG_DIR/import.json" 'r.get("replaced_frame_count", 0)'), tolti perche' ritirati: $(report "$LOG_DIR/import.json" 'r.get("removed_withdrawn_frame_count", 0)')"
-  report "$LOG_DIR/import.json" '"\n".join("  attenzione: " + w for w in r.get("warnings", []))' | sed '/^$/d'
+  echo "New frames in the dataset: $(report "$LOG_DIR/import.json" 'r.get("imported_frame_count", 0)'), already there: $(report "$LOG_DIR/import.json" 'r.get("already_imported_frame_count", "-")'), reviewed again and replaced: $(report "$LOG_DIR/import.json" 'r.get("replaced_frame_count", 0)'), removed because withdrawn: $(report "$LOG_DIR/import.json" 'r.get("removed_withdrawn_frame_count", 0)')"
+  report "$LOG_DIR/import.json" '"\n".join("  warning: " + w for w in r.get("warnings", []))' | sed '/^$/d'
 
-  echo "== b. controllo il dataset e fisso lo split"
+  echo "== b. checking the dataset and freezing the split"
   if ! "$NN" validate-dataset < /dev/null > "$LOG_DIR/validate.json" 2> "$LOG_DIR/validate.err"; then
     report_errors "$LOG_DIR/validate.json" >&2
-    die "dataset non valido (report completo: $LOG_DIR/validate.json)"
+    die "invalid dataset (full report: $LOG_DIR/validate.json)"
   fi
   # The test routes (reviewed entirely by hand): annotations/test-routes.txt, one route per line. The split is
   # by place: their areas are the test, the areas next to them are kept out of training.
@@ -158,34 +158,34 @@ else
     # with fewer groups the split cannot be made.
     groups="$(sed -n 's/.*: \([0-9][0-9]*\) groups.*/\1/p' "$LOG_DIR/splits.json" | head -1)"
     if [ -n "$groups" ]; then
-      die "per dividere il dataset servono almeno 3 route (o luoghi) indipendenti revisionate, ora ce ne sono $groups.
-Prepara e revisiona altre route (helpers/1_prepare.sh, helpers/2_review.sh), poi rilancia.
-Le revisioni fatte sono gia' nel dataset: non si perde niente."
+      die "splitting the dataset needs at least 3 independent reviewed routes (or places), there are $groups now.
+Prepare and review more routes (helpers/1_prepare.sh, helpers/2_review.sh), then run this again.
+The reviews done are already in the dataset: nothing is lost."
     fi
     report_errors "$LOG_DIR/splits.json" >&2
-    die "split non creato (report completo: $LOG_DIR/splits.json)"
+    die "split not created (full report: $LOG_DIR/splits.json)"
   fi
   echo "Split: $(report "$LOG_DIR/splits.json" '", ".join(f"{k} {v}" for k, v in r["counts"].items())')"
   if [ "$dataset_only" -eq 1 ]; then
-    echo "--dataset-only: dataset pronto, training non lanciato."
+    echo "--dataset-only: dataset ready, training not started."
     exit 0
   fi
 fi
 
-echo "== c. ambiente GPU"
+echo "== c. GPU environment"
 if [ ! -x "$ROOT/.venv-gpu/bin/nnslr" ]; then
-  echo "Manca .venv-gpu: lo creo (scarica PyTorch per la V100, qualche minuto)."
+  echo ".venv-gpu is missing: creating it (it downloads PyTorch for the V100, a few minutes)."
   bash "$ROOT/scripts/setup_v100_training_env.sh" < /dev/null > "$LOG_DIR/setup-gpu.log" 2>&1 \
-    || die "creazione di .venv-gpu fallita (log: $LOG_DIR/setup-gpu.log)"
+    || die "creating .venv-gpu failed (log: $LOG_DIR/setup-gpu.log)"
 fi
 echo "Ok: $ROOT/.venv-gpu"
 
 busy="$(nvidia-smi -i "$GPU_INDEX" --query-compute-apps=pid --format=csv,noheader 2>/dev/null | sed '/^$/d' || true)"
 if [ -n "$busy" ]; then
   if [ "$force" -eq 0 ]; then
-    who="$(echo "$busy" | wc -l) processi"
-    if pgrep -f "supervised.train" > /dev/null; then who="il training di openpilot.distill"; fi
-    die "la GPU $GPU_INDEX e' occupata ($who): aspetta che finisca, o --force per partire lo stesso (piu' lenti tutti e due)"
+    who="$(echo "$busy" | wc -l) processes"
+    if pgrep -f "supervised.train" > /dev/null; then who="the openpilot.distill training"; fi
+    die "the GPU $GPU_INDEX is busy ($who): wait for it to finish, or --force to start anyway (both slower)"
   fi
   export NNSLR_ALLOW_BUSY_GPU=1
 fi
@@ -195,11 +195,11 @@ if [ -n "${NNSLR_TRAIN_LOGGED:-}" ]; then
   # --background: this whole output already goes to the log.
   NNSLR_GPU_INDEX="$GPU_INDEX" bash "$ROOT/scripts/run_v100_baseline.sh" "$name" "$mode" < /dev/null
 else
-  echo "Log anche in $LOG_DIR/train-$name.log"
+  echo "Log also in $LOG_DIR/train-$name.log"
   NNSLR_GPU_INDEX="$GPU_INDEX" bash "$ROOT/scripts/run_v100_baseline.sh" "$name" "$mode" < /dev/null 2>&1 \
     | tee -a "$LOG_DIR/train-$name.log"
 fi
 
 echo
-echo "Fatto. Bundle: $DATA_ROOT/runs/$name/bundle"
-echo "Per pubblicarlo:  scripts/publish_model.sh $DATA_ROOT/runs/$name/bundle --no-upload   (poi senza --no-upload)"
+echo "Done. Bundle: $DATA_ROOT/runs/$name/bundle"
+echo "To publish it:  scripts/publish_model.sh $DATA_ROOT/runs/$name/bundle --no-upload   (then without --no-upload)"

@@ -13,7 +13,7 @@
 # It is also kept in the .env of this clone (NNSLR_REVIEW_TOKEN=..., permissions 600,
 # ignored by git), the one place to look it up, shared with helpers/2_review.sh: the
 # first install takes the token already there, otherwise it creates one and writes it
-# in both files. Full procedure: docs/GUIDA.md.
+# in both files. Full procedure: docs/GUIDE.md.
 # NNSLR_REVIEW_ENV_FILE, NNSLR_REVIEW_UNIT_FILE and NNSLR_REVIEW_REPO_ENV override the
 # three paths (used by the tests).
 set -euo pipefail

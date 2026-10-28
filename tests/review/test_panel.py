@@ -252,7 +252,7 @@ def test_fetch_uses_the_log_reader_of_openpilot_distill(root, checkout, no_log_r
 
 def test_fetch_needs_a_log_reader(root, checkout, no_log_reader):
     panel = Panel(root, repo=checkout)
-    assert panel.status()['actions']['fetch']['reason'] == 'the reader of the comma logs is missing (see docs/GUIDA.md)'
+    assert panel.status()['actions']['fetch']['reason'] == 'the reader of the comma logs is missing (see docs/GUIDE.md)'
     with pytest.raises(PanelError) as missing:
         panel.start('fetch')
     assert missing.value.status == 403
