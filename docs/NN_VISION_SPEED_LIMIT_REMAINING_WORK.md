@@ -969,3 +969,25 @@ upload over USB is likely most of the 119 ms); then the memory, and one ONNX (or
 Next: a cutter made for the Adreno: lower input (e.g. 672 × 380) and/or only the part of the picture where signs
 stand, a lighter backbone, at 2–5 frames a second (a sign stays in view 1–3 s); measured on the Adreno before training
 it fully.
+
+### SignNet, a sign finder made for the Adreno (28 Oct 2026)
+
+`nnslr train-signnet` (`nnslr_tools.signnet`): plain 3 × 3 convolutions on the top band of the frame (the top 416 of
+760 rows hold 97 % of the reviewed signs), a heat map of sign centres with each sign's size (CenterNet), no NMS. Trained
+from scratch on the cutter's plan and scored like it, on the same 1,133 test frames (381 signs); the best N boxes a
+frame. Times on the Adreno with openpilot's tinygrad flags (`IMAGE=1 FLOAT16=1 NOLOCALS=1 JIT_BATCH_SIZE=0
+OPENPILOT_HACKS=1`), TinyJit, outputs checked against PyTorch:
+
+| finder | picture | parameters | Adreno | all signs, 5 boxes | speed signs, 5 boxes | far (< 12 px) |
+|---|---|---|---|---|---|---|
+| cutter in use (SSDlite) | 1344 × 760 | — | 540 ms | 61 % | 62 % | 29 % |
+| SignNet stride 8 | 1344 × 416 | 163 k | 138 ms | 58 % | 67 % | 40 % |
+| SignNet stride 4 | 1344 × 416 | 81 k | 119 ms | 59 % | 66 % | 45 % |
+| SignNet stride 4 | 896 × 288 (2/3) | 81 k | 63 ms | 54 % | 64 % | 34 % |
+| SignNet stride 4 | 672 × 208 (half) | 156 k | 87 ms | 49 % | 59 % | 22 % |
+
+Untrained, timed only: 672 × 208 at stride 8 51 ms, 448 × 144 at stride 4 49 ms; the cutter at 640 × 360 122 ms.
+The time does not fall with the pixels (a quarter of them still costs 87 ms of 119): much of it is per layer, not per
+pixel. SignNet is weaker than the cutter on the big signs (≥ 40 px: 43–58 % against 67 %) and the other signs; to
+look at before the next round. Runs: `data/runs/2026-10-28_0718-signnet-s8`, `-s4`,
+`2026-10-28_0854-signnet-twothirds-s4`, `-half-s4`.
