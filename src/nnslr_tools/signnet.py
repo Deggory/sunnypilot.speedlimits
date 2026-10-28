@@ -303,3 +303,85 @@ def train_signnet(plan: dict[str, Any], data_root: Path, run_dir: Path, *, width
     }
     (run_dir / 'result.json').write_text(json.dumps(result, indent=2, sort_keys=True) + '\n', encoding='utf-8')
     return result
+
+
+def decode_output(out, stride: int, **kw) -> list[list[dict]]:
+    """``decode`` on the one tensor the exported ONNX gives: heat in channel 0, the shape in channels 1 to 4."""
+    return decode(out[:, :1], out[:, 1:], stride, **kw)
+
+
+def load_signnet(checkpoint_path: Path):
+    """The network of a signnet-best.pt in eval mode, and the checkpoint."""
+    torch, _ = _torch()
+    checkpoint = torch.load(Path(checkpoint_path), map_location='cpu', weights_only=True)
+    if not isinstance(checkpoint, dict) or checkpoint.get('task') != 'signnet':
+        raise ValueError('checkpoint_task_mismatch: expected signnet')
+    model = build_signnet(tuple(checkpoint['widths']), checkpoint['stride'], checkpoint.get('fuse_kernel', 3))
+    model.load_state_dict(checkpoint['state_dict'], strict=True)
+    return model.eval(), checkpoint
+
+
+def export_signnet_onnx(checkpoint_path: Path, output_path: Path, *, verify: bool = True) -> dict[str, Any]:
+    """SignNet as ONNX for the car. Input ``images`` (1, 3, band height, band width), float 0..1, RGB: the frame
+    scaled to the band's width, its top rows. One output ``out`` (1, 5, H, W): heat (sigmoid), log width, log height,
+    offset x, offset y (as two outputs the Adreno takes twice the time: 40 ms against 21 at 896 x 288). Checked
+    against PyTorch with onnxruntime; writes ``<output>.contract.json`` beside it."""
+    torch, nn = _torch()
+    from nnslr_tools.exporting import _export_onnx, sha256_file
+    model, checkpoint = load_signnet(checkpoint_path)
+    band_w, band_h = checkpoint['band']
+    stride = checkpoint['stride']
+
+    class OneOutput(nn.Module):
+        def __init__(self, net):
+            super().__init__()
+            self.net = net
+
+        def forward(self, images):
+            heat, shape = self.net(images)
+            return torch.cat([heat, shape], 1)
+
+    wrapped = OneOutput(model).eval()
+    example = torch.rand(1, 3, band_h, band_w)
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    _export_onnx(wrapped, example, output_path, input_names=['images'], output_names=['out'])
+    try:
+        import onnx
+    except ImportError as exc:
+        raise ValueError('onnx_dependencies_missing: install onnx') from exc
+    onnx.checker.check_model(onnx.load(str(output_path)))
+    verification: dict[str, Any] = {'enabled': verify, 'passed': None}
+    if verify:
+        try:
+            import onnxruntime as ort
+        except ImportError as exc:
+            raise ValueError('onnxruntime_missing') from exc
+        import numpy as np
+        with torch.no_grad():
+            expected = wrapped(example).numpy()
+        session = ort.InferenceSession(str(output_path), providers=['CPUExecutionProvider'])
+        actual = session.run(['out'], {'images': example.numpy()})[0]
+        max_abs_error = float(np.max(np.abs(expected - actual)))
+        passed = bool(np.allclose(expected, actual, rtol=1e-4, atol=1e-5))
+        verification = {'enabled': True, 'passed': passed, 'max_abs_error': max_abs_error, 'rtol': 1e-4, 'atol': 1e-5,
+                        'provider': 'CPUExecutionProvider'}
+        if not passed:
+            raise ValueError(f'onnx_parity_failed: max_abs_error={max_abs_error}')
+    contract = {
+        'task': 'signnet', 'widths': list(checkpoint['widths']), 'stride': stride,
+        'fuse_kernel': checkpoint.get('fuse_kernel', 3), 'epoch': checkpoint.get('epoch'),
+        'input': {'name': 'images', 'shape': [1, 3, band_h, band_w], 'dtype': 'float32', 'range': [0.0, 1.0],
+                  'layout': 'RGB; the road frame scaled to the band width, its top rows (the band)'},
+        'output': {'name': 'out', 'shape': [1, 5, band_h // stride, band_w // stride],
+                   'channels': ['heat', 'log_width', 'log_height', 'offset_x', 'offset_y'],
+                   'decode': 'a sign at each 3x3 local maximum of heat above the score wanted; its centre '
+                             '((x + offset_x) * stride, (y + offset_y) * stride) and size (exp(log_width), '
+                             'exp(log_height)), in band pixels; the frame scale is frame width / band width'},
+        'onnx_sha256': sha256_file(output_path), 'checkpoint': str(checkpoint_path),
+        'checkpoint_sha256': sha256_file(Path(checkpoint_path)), 'verification': verification,
+    }
+    contract_path = output_path.with_suffix(output_path.suffix + '.contract.json')
+    contract_path.write_text(json.dumps(contract, indent=2, sort_keys=True, allow_nan=False) + '\n', encoding='utf-8')
+    return {'valid': True, 'task': 'signnet', 'onnx': str(output_path), 'onnx_sha256': contract['onnx_sha256'],
+            'contract': str(contract_path), 'verification': verification}

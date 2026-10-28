@@ -1009,7 +1009,10 @@ def _cmd_mine_hard_examples(args: argparse.Namespace) -> int:
 def _cmd_export_onnx(args: argparse.Namespace) -> int:
     from nnslr_tools.exporting import export_detector_onnx, export_reader_onnx
 
-    if args.task == "detector":
+    if args.task == "signnet":
+        from nnslr_tools.signnet import export_signnet_onnx
+        report = export_signnet_onnx(Path(args.checkpoint), Path(args.output), verify=not args.no_verify)
+    elif args.task == "detector":
         report = export_detector_onnx(
             Path(args.checkpoint),
             Path(args.output),
@@ -1714,10 +1717,10 @@ def build_parser() -> argparse.ArgumentParser:
     # [onnx-export] - START
     p_export = sub.add_parser(
         "export-onnx",
-        help="export a trained reader/detector checkpoint to a verified ONNX reference artifact",
+        help="export a trained reader/detector/signnet checkpoint to a verified ONNX reference artifact",
     )
-    p_export.add_argument("--task", choices=("reader", "detector"), default="reader")
-    p_export.add_argument("--checkpoint", required=True, help="reader-best.pt or detector-best.pt checkpoint")
+    p_export.add_argument("--task", choices=("reader", "detector", "signnet"), default="reader")
+    p_export.add_argument("--checkpoint", required=True, help="reader-best.pt, detector-best.pt or signnet-best.pt")
     p_export.add_argument("--output", required=True, help="target .onnx path")
     p_export.add_argument("--detector-input-width", type=int, default=1344,
                           help="detector native input width (default: narrow road 1344)")

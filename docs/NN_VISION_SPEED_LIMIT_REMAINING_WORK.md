@@ -987,7 +987,22 @@ OPENPILOT_HACKS=1`), TinyJit, outputs checked against PyTorch:
 | SignNet stride 4 | 672 × 208 (half) | 156 k | 87 ms | 49 % | 59 % | 22 % |
 
 Untrained, timed only: 672 × 208 at stride 8 51 ms, 448 × 144 at stride 4 49 ms; the cutter at 640 × 360 122 ms.
-The time does not fall with the pixels (a quarter of them still costs 87 ms of 119): much of it is per layer, not per
-pixel. SignNet is weaker than the cutter on the big signs (≥ 40 px: 43–54 % against 67 %) and the other signs; to
-look at before the next round. Runs: `data/runs/2026-10-28_0718-signnet-s8`, `-s4`,
+SignNet is weaker than the cutter on the big signs (≥ 40 px: 43–54 % against 67 %) and the other signs; to look at
+before the next round.
+
+**Where those milliseconds go** (profiled the same day, 896 × 288 at stride 4): of the 63 ms, 20 are the upload of
+the picture from the CPU and 22 the read of the two outputs; the GPU itself takes 21 ms when the picture is already
+there (as in the car: camerad's buffer is on the GPU, dmonitoringmodeld reads it with `Tensor.from_blob`). Two
+things halve that again, both measured with the picture on the GPU and TinyJit:
+
+| SignNet, GPU only | 896 × 288 | 1344 × 416 |
+|---|---|---|
+| two outputs (heat, shape), fuse 3 × 3 | 40 ms | 90 ms |
+| **one output** (heat and shape in one tensor), fuse 3 × 3 | 21 ms | — |
+| one output, **fuse 1 × 1** (`--fuse-kernel 1`) | **12 ms** | 26 ms |
+| one output, fuse 1 × 1, stride 8 | 12 ms | 27 ms |
+
+So the ONNX for the car has one output, and the 1 × 1 fuse is trained next (runs `2026-10-28_1028-signnet-twothirds-s4-f1`,
+`-s8-f1`) to see what it costs in signs. The classifier is 5 ms a box on the same measure; the decider, 213 ms, runs
+only when a sign appears. Runs: `data/runs/2026-10-28_0718-signnet-s8`, `-s4`,
 `2026-10-28_0854-signnet-twothirds-s4`, `-half-s4`.

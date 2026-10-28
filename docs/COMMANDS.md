@@ -166,7 +166,7 @@ These helpers are the daily flow, and the portal's buttons run them. Each one sk
 
 | Subcommand | Purpose | Effects |
 |---|---|---|
-| `export-onnx` | exports a checkpoint to ONNX and checks it against PyTorch | writes data |
+| `export-onnx --task reader\|detector\|signnet --checkpoint P --output X.onnx` | exports a checkpoint to ONNX and checks it against PyTorch (onnxruntime), with a `.contract.json` beside it. SignNet's ONNX has one output `out` (heat and the sign's size in one tensor): two outputs cost the Adreno twice the time. | writes data |
 | `package-model`, `verify-bundle` | packages detector and reader into an immutable bundle, and verifies its files, hashes, provenance and advisory-only flag | writes data / read-only |
 | `export-core` | exports and verifies the dependency-free `speed_vision_core` | writes files |
 

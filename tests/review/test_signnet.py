@@ -65,3 +65,26 @@ def test_fuse_kernel_one_gives_the_same_maps():
     assert model.fuse[0].kernel_size == (1, 1)
     with pytest.raises(ValueError):
         build_signnet(fuse_kernel=2)
+
+
+def test_export_gives_one_output_equal_to_the_two(tmp_path):
+    ort = pytest.importorskip('onnxruntime')
+    import numpy as np
+
+    from nnslr_tools.signnet import decode_output, export_signnet_onnx
+    model = build_signnet((8, 8, 8, 8), 8, 1)
+    torch.save({'task': 'signnet', 'state_dict': model.state_dict(), 'widths': [8, 8, 8, 8], 'stride': 8,
+                'fuse_kernel': 1, 'band': [BAND_WIDTH // 2, BAND_HEIGHT // 2], 'epoch': 1}, tmp_path / 'signnet-best.pt')
+    report = export_signnet_onnx(tmp_path / 'signnet-best.pt', tmp_path / 'signnet.onnx')
+    assert report['verification']['passed'] and (tmp_path / 'signnet.onnx.contract.json').exists()
+    session = ort.InferenceSession(str(tmp_path / 'signnet.onnx'), providers=['CPUExecutionProvider'])
+    assert [o.name for o in session.get_outputs()] == ['out']
+    images = np.random.rand(1, 3, BAND_HEIGHT // 2, BAND_WIDTH // 2).astype(np.float32)
+    out = session.run(['out'], {'images': images})[0]
+    assert out.shape == (1, 5, BAND_HEIGHT // 16, BAND_WIDTH // 16)
+    with torch.no_grad():
+        heat, shape = model.eval()(torch.from_numpy(images))
+    assert np.allclose(out, torch.cat([heat, shape], 1).numpy(), atol=1e-4)
+    first = decode_output(torch.from_numpy(out), 8, min_score=0.0)[0][0]
+    same = decode(heat, shape, 8, min_score=0.0)[0][0]
+    assert first['score'] == pytest.approx(same['score'], abs=1e-4) and first['box'] == pytest.approx(same['box'], abs=0.05)
