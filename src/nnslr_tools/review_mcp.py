@@ -260,6 +260,7 @@ def build_server(service, *, client: str, read_only: bool = False):
         temporary: bool | None
         variable_display: bool | None
         sign_type: Literal[SIGN_TYPES + NOT_A_SIGN_TYPES] | None
+        painted: bool | None
         notes: str
         # From apply_previous_frame: a save refuses check_position true (look, fix the box, drop the flag).
         check_position: bool

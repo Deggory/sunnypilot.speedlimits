@@ -30,6 +30,7 @@ export const ON_VEHICLE = 'on_vehicle';
 /** Drops a kind the box's family cannot have: one left from an "Other sign" (a direction, say) whose number was then
  * typed, which made it a speed limit. The server refuses such a box, so it goes before every save too. */
 export function dropStaleKind(d: Detection): void {
+  if (d.family !== 'other_sign') delete d.painted;
   if (d.sign_type == null) return;
   if (d.family === 'other_sign' || (d.family === 'not_a_sign' && d.sign_type === ON_VEHICLE)) return;
   delete d.sign_type;
@@ -154,7 +155,9 @@ export function hasValue(d: {value_kph?: number | null | undefined}): boolean {
 /** The full description in the panel: "Speed limit · 60 km/h", "Town entry". */
 export function describe(d: Detection): string {
   const kind = d.family === 'other_sign' ? signKindOf(d.sign_type) : null;
-  if (kind !== null) return kind.label;
+  const painted = d.family === 'other_sign' && d.painted === true ? ', painted on the road' : '';
+  if (kind !== null) return kind.label + painted;
+  if (painted) return 'Other sign' + painted;
   if (d.family === 'not_a_sign' && d.sign_type === ON_VEHICLE) return 'Not a sign: on a vehicle';
   const family = familyOf(d.family);
   let text = family ? family.label : String(d.family || 'No type');
@@ -172,7 +175,7 @@ export function shortName(d: Detection): string {
     case 'variable_display': return known ? 'variable ' + v : 'variable';
     case 'road_marking_candidate': return known ? 'road ' + v : 'road';
     case 'cancellation': return known ? 'end ' + v : 'end';
-    case 'other_sign': return signKindOf(d.sign_type)?.short ?? 'other';
+    case 'other_sign': return (d.painted === true ? 'painted ' : '') + (signKindOf(d.sign_type)?.short ?? 'other');
     case 'not_a_sign': return d.sign_type === ON_VEHICLE ? 'on a vehicle' : 'no';
     default: return '?';
   }

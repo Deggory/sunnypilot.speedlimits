@@ -48,10 +48,10 @@ TURN_COST = 0.3
 MAX_TURN_UP = 0.1
 # The labels a box takes from the previous frame. Visibility and occlusion belong to this picture.
 CARRIED_KEYS = ('family', 'value_kph', 'applicability', 'supplementary_panel', 'temporary', 'variable_display',
-                'sign_type', 'notes')
+                'sign_type', 'painted', 'notes')
 # The labels that tell whether the reviewer already changed a box (the review page's fields).
 LABEL_KEYS = ('family', 'value_kph', 'applicability', 'supplementary_panel', 'visibility', 'occlusion',
-              'temporary', 'variable_display', 'sign_type')
+              'temporary', 'variable_display', 'sign_type', 'painted')
 VALUE_FAMILIES = ('maximum_speed', 'cancellation', 'zone', 'variable_display', 'road_marking_candidate')
 CHECK_FIELD = 'check_position'
 FROM_FIELD = 'carried_from'

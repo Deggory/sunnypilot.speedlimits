@@ -36,8 +36,11 @@ export function setFamily(id: string): void {
   editSelected((d) => {
     d.family = id;
     if (!familyHasValue(id)) d.value_kph = null;
-    // The kind belongs to "Other sign" only.
-    if (id !== 'other_sign') delete d.sign_type;
+    // The kind and "painted" belong to "Other sign" only.
+    if (id !== 'other_sign') {
+      delete d.sign_type;
+      delete d.painted;
+    }
     d.value_state = d.value_kph === null || d.value_kph === undefined ? 'unknown' : 'reviewed';
     state.valueError = false;
   });
@@ -46,7 +49,10 @@ export function setFamily(id: string): void {
 /** The most common box: an "Other sign" (its kind kept when it has one) for the road the car drives on (S). */
 export function setOtherOurs(): void {
   editSelected((d) => {
-    if (d.family !== 'other_sign') delete d.sign_type;
+    if (d.family !== 'other_sign') {
+      delete d.sign_type;
+      delete d.painted;
+    }
     d.family = 'other_sign';
     d.value_kph = null;
     d.value_state = 'unknown';
@@ -76,6 +82,21 @@ export function setKind(id: string): void {
     d.value_kph = null;
     d.value_state = 'unknown';
     d.sign_type = id;
+    state.valueError = false;
+  });
+}
+
+/** Painted on the road, on or off: the box becomes an "Other sign" and keeps its kind (the children's triangle with
+ * "SCHULE" is "Children", painted). */
+export function togglePainted(): void {
+  editSelected((d) => {
+    const painted = !(d.family === 'other_sign' && d.painted === true);
+    if (d.family !== 'other_sign') delete d.sign_type;
+    d.family = 'other_sign';
+    d.value_kph = null;
+    d.value_state = 'unknown';
+    if (painted) d.painted = true;
+    else delete d.painted;
     state.valueError = false;
   });
 }

@@ -25,6 +25,8 @@ export interface Detection {
   variable_display?: boolean | null;
   /** What an "Other sign" is: town_entry, direction_right... (catalog.SIGN_KIND_GROUPS); null: not said. */
   sign_type?: string | null;
+  /** An "Other sign" painted on the road (the children's triangle with "SCHULE"): true, or absent. */
+  painted?: boolean | null;
   notes?: string | null;
   detection_id?: string;
   /** "Apply previous": the frame its labels come from. The server drops it when saving. */

@@ -41,7 +41,7 @@ from nnslr_tools.annotations import (
     validate_dataset,
 )
 from nnslr_tools.carry_over import unchecked_boxes
-from nnslr_tools.sign_types import sign_type_problem
+from nnslr_tools.sign_types import painted_problem, sign_type_problem
 from nnslr_tools.manifest import parse_route_id
 from speed_vision_core.types import MAX_VALUE_KPH, MIN_VALUE_KPH
 
@@ -52,7 +52,7 @@ DB_RELATIVE_PATH = Path('annotations') / 'review.sqlite'
 # Fields the reviewer can change on a box: the label fields of the import plus
 # the notes. Everything else on a proposal (score, model label, class, evidence)
 # comes from the read-only report on the server.
-EDITABLE_DETECTION_KEYS = LABEL_KEYS + ('notes', 'sign_type')
+EDITABLE_DETECTION_KEYS = LABEL_KEYS + ('notes', 'sign_type', 'painted')
 
 # Every box of a saved frame is checked against the original image (hash and
 # PNG decode), so the number of boxes in one request is bounded.
@@ -801,6 +801,9 @@ def save_frame_review(store: ReviewStore, root: Path, *, route_id: str, run_id: 
         problem = sign_type_problem(item) if isinstance(item, dict) else None
         if problem is not None:
             raise ReviewRejected(400, 'invalid_sign_type', f'Box {number}: {problem}.')
+        problem = painted_problem(item) if isinstance(item, dict) else None
+        if problem is not None:
+            raise ReviewRejected(400, 'invalid_painted', f'Box {number}: {problem}.')
     # "Apply previous" placed these boxes where a sign should be: someone must have looked at them.
     unchecked = unchecked_boxes(body['detections'])
     if unchecked:

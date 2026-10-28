@@ -167,7 +167,7 @@ def _sent_boxes(items, width: int, height: int) -> list[dict]:
         if x2 - x1 <= 0 or y2 - y1 <= 0:
             continue
         sent = {}
-        for name in LABEL_KEYS + ('notes', 'sign_type', 'detection_id'):
+        for name in LABEL_KEYS + ('notes', 'sign_type', 'painted', 'detection_id'):
             if name in item:
                 sent[name] = item[name]
         sent['bbox_xyxy'] = [x1, y1, x2, y2]
@@ -432,6 +432,9 @@ def _detection(detection_id: str, box: list[float], labels: dict, original: dict
               'value_kph': labels['value_kph'], 'applicability': labels['applicability']}
     if 'sign_type' in labels:
         result['sign_type'] = labels['sign_type']
+    # Painted on the road: the reviewer's, kept while the box stays an other sign.
+    if labels['family'] == 'other_sign' and original.get('painted') is True:
+        result['painted'] = True
     occlusion = original.get('occlusion')
     panel = original.get('supplementary_panel')
     result.update({'visibility': labels['visibility'],

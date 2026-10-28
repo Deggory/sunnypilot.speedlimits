@@ -7,7 +7,7 @@ import {BOOLEAN_FIELDS, FAMILIES, QUICK_VALUES, ROADS, SELECT_FIELDS, SIGN_KIND_
 import {aiBlocker, fitBox, fitting} from './ai';
 import {addedBy, originalOf} from './boxes';
 import {coarsePointer, releaseFocus} from './dom';
-import {setFamily, setField, setKind, setOnVehicle, setOtherOurs, setValue} from './edits';
+import {setFamily, setField, setKind, setOnVehicle, setOtherOurs, setValue, togglePainted} from './edits';
 import {workOf} from './frames';
 import {vFill} from './fill';
 import {handlesOf, sceneScale, zoomView, type Rect} from './overlay';
@@ -186,6 +186,13 @@ function booleanChanged(key: BooleanField, event: Event): void {
         <button v-for="kind in group.kinds" :key="kind.id" type="button" class="chip kind"
                 :aria-pressed="detection?.family === 'other_sign' && detection?.sign_type === kind.id"
                 :data-kind="kind.id" @click="setKind(kind.id); releaseFocus($event)">{{ kind.chip }}<kbd v-if="KIND_KEYS[kind.id]" class="key-hint">{{ KIND_KEYS[kind.id] }}</kbd></button>
+      </div>
+      <!-- On or off, with any kind: the children's triangle with "SCHULE" is Children, painted. -->
+      <div class="kind-group" role="group" aria-label="Where">
+        <span class="kind-group-label">Where</span>
+        <button type="button" class="chip kind" id="painted"
+                :aria-pressed="detection?.family === 'other_sign' && detection?.painted === true"
+                @click="togglePainted(); releaseFocus($event)">Painted on the road</button>
       </div>
     </div>
     <details>

@@ -825,6 +825,9 @@ def review_schema() -> dict:
             'sign_type': 'with family other_sign: what the sign is, one of ' + ', '.join(SIGN_TYPES)
                          + '; with family not_a_sign: on_vehicle for a sign-like disc or panel on a vehicle (the '
                          'top-speed sticker on the back of a truck); null or omitted when not said',
+            'painted': 'with family other_sign: true when the sign is painted on the road (the children\'s triangle '
+                       'with "SCHULE" in front of a school); its sign_type stays what it means. Null or omitted '
+                       'otherwise',
             'check_position': 'only in the answer of apply_previous: true on a box placed where a sign of the '
                               'previous frame should be. A save with it still true is refused '
                               '(400 position_not_checked): look at the image, fix bbox_xyxy or drop the box, '

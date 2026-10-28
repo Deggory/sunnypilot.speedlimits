@@ -461,6 +461,17 @@
         null
       ],
       "description": "kind of an other_sign box, or on_vehicle for a not_a_sign box; optional"
+    },
+    "painted": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "enum": [
+        true,
+        null
+      ],
+      "description": "an other_sign box painted on the road (true), its sign_type still what it means; optional"
     }
   },
   "required": [

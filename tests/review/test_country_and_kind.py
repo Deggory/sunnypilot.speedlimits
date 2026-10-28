@@ -148,3 +148,25 @@ def test_a_not_a_sign_box_on_a_vehicle_is_kept_only_as_not_a_sign(server):
     status, response, data = running.post_frame(ROUTE, '0/2', body)
     assert status == 400 and json_of(data)['error'] == 'invalid_sign_type'
     assert "ON_VEHICLE = 'on_vehicle'" in CATALOG.read_text()
+
+
+def test_an_other_sign_painted_on_the_road_keeps_its_kind(server, tmp_path):
+    """The children's triangle with "SCHULE" painted in front of a school: Children, painted on the road."""
+    from nnslr_tools.annotations import reviewed_frame_annotations, validate_dataset
+    running, rows = server
+    body = page_body(rows['0/0'])
+    body['detections'][0].update(family='other_sign', value_kph=None, sign_type='children', painted=True)
+    status, response, data = running.post_frame(ROUTE, '0/0', body)
+    saved = json_of(data)['review']['detections'][0]
+    assert status == 200 and (saved['sign_type'], saved['painted']) == ('children', True)
+    payload = {review['frame_key']: review for review in running.app.store.reviews(ROUTE, RUN_ID)}['0/0']['payload']
+    annotations = reviewed_frame_annotations(payload, '0' * 64, dataset_kind='gold', name='test')
+    assert [(row['sign_type'], row['painted']) for row in annotations] == [('children', True)]
+    assert validate_dataset(annotations, tmp_path, dataset_kind='gold')['valid'] is True
+    body = page_body(rows['0/2'])
+    body['detections'][0]['painted'] = True
+    status, response, data = running.post_frame(ROUTE, '0/2', body)
+    assert status == 400 and json_of(data)['error'] == 'invalid_painted'
+    body['detections'][0].update(family='other_sign', value_kph=None, painted='yes')
+    status, response, data = running.post_frame(ROUTE, '0/2', body)
+    assert status == 400 and json_of(data)['error'] == 'invalid_painted'

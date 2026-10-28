@@ -44,12 +44,13 @@ FIELDS = set(ENUMS) | {
     "capture_mono_ns", "image_path", "image_sha256", "width", "height", "bbox_xyxy", "value_kph",
     "temporary", "variable_display", "proposal_source", "proposal_score", "reviewer", "review_timestamp", "notes",
     "source_video_sha256", "source_log_sha256", "provenance", "site_group", "encounter_id",
-    "country", "gps", "sign_type",
+    "country", "gps", "sign_type", "painted",
 }
 # Added later, so rows imported before them may miss them: the country of the frame (ISO code, from its GPS
 # position or the reviewer), where the car was ({latitude, longitude, speed_mps, bearing_deg}, nnslr_tools.gps)
-# and the kind of an "Other sign" (nnslr_tools.sign_types). The split by place uses gps.
-OPTIONAL_FIELDS = {"country", "gps", "sign_type"}
+# the kind of an "Other sign" (nnslr_tools.sign_types) and whether it is painted on the road. The split by place
+# uses gps.
+OPTIONAL_FIELDS = {"country", "gps", "sign_type", "painted"}
 COUNTRY_CODE = re.compile(r"[A-Z]{2}")
 # Label fields of a reviewed box: a box whose labels all equal the proposal is
 # "accepted", otherwise "corrected". The review server copies the same fields.
@@ -186,6 +187,8 @@ def validate_annotation(row: dict, root: Path, *, dataset_kind: str = 'gold',
         from nnslr_tools.sign_types import NOT_A_SIGN_TYPES, SIGN_TYPES
         require((sign_type in SIGN_TYPES and row['sign_family'] == 'other_sign')
                 or (sign_type in NOT_A_SIGN_TYPES and row['sign_family'] == 'not_a_sign'), "invalid_schema", "sign_type")
+    painted = row.get('painted')
+    require(painted is None or (painted is True and row['sign_family'] == 'other_sign'), "invalid_schema", "painted")
     require(_hash(row['image_sha256']), "missing_provenance", "image_sha256")
     for field in ('source_video_sha256', 'source_log_sha256'):
         require(row[field] is None or _hash(row[field]), "missing_provenance", field)
@@ -385,6 +388,7 @@ def _canonical(frame: dict, detection: dict | None, original: dict | None, sourc
         'country': frame.get('country'), 'gps': frame.get('gps'),
         'sign_type': d.get('sign_type') if family == 'other_sign'
                      or (family == 'not_a_sign' and d.get('sign_type') == 'on_vehicle') else None,
+        'painted': True if family == 'other_sign' and d.get('painted') is True else None,
         'alignment_status': frame.get('alignment_status', 'unresolved'),
         'capture_time_provenance': frame.get('capture_time_provenance', 'unknown'),
         'provenance': provenance,

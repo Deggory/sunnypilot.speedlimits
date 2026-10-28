@@ -9,6 +9,9 @@ said (older reviews, or not chosen).
 A box of family ``not_a_sign`` may say what it is instead (NOT_A_SIGN_TYPES): ``on_vehicle``, a sign-like
 disc or panel on a vehicle, such as the top-speed sticker on the back of a truck. It stays "not a sign" for
 the training; the kind keeps these cases countable apart.
+
+An "Other sign" may also be painted on the road (``painted``: true), such as the children's triangle with
+"SCHULE" in front of a school. Its kind stays what the sign means; the flag keeps these cases countable apart.
 """
 from __future__ import annotations
 
@@ -44,4 +47,16 @@ def sign_type_problem(detection: dict) -> str | None:
         return 'sign_type must be one of: ' + ', '.join(SIGN_TYPES + NOT_A_SIGN_TYPES) + ', or null'
     if detection.get('family') != 'other_sign':
         return 'sign_type is only for boxes of family other_sign (or on_vehicle for not_a_sign)'
+    return None
+
+
+def painted_problem(detection: dict) -> str | None:
+    """Why the painted flag of a box is not allowed, or None when it is."""
+    value = detection.get('painted')
+    if value is None or value is False:
+        return None
+    if value is not True:
+        return 'painted must be true, false or null'
+    if detection.get('family') != 'other_sign':
+        return 'painted is only for boxes of family other_sign'
     return None
