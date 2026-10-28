@@ -1043,6 +1043,34 @@ def _cmd_on_car(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_send_to_car(args: argparse.Namespace) -> int:
+    """Steps 1-3 of Send to the car (nnslr_tools.car_release): export, publish in the models clone, on-car.json."""
+    from nnslr_tools.car_release import send_to_car
+    from nnslr_tools.preannotate import resolve_data_root
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    if args.steps_of < 3 or args.steps_of > 9:
+        raise ValueError("--steps-of is 3 to 9")
+    send_to_car(root, args.signnet, classifier=args.classifier, models=Path(args.models) if args.models else None,
+                dry_run=args.dry_run, steps_of=args.steps_of)
+    return 0
+
+
+def _cmd_try_on_comma(args: argparse.Namespace) -> int:
+    """Try on the comma now, or back to the build's networks (nnslr_tools.comma_trial)."""
+    from nnslr_tools import comma_trial
+    from nnslr_tools.preannotate import resolve_data_root
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    if args.restore:
+        if args.signnet or args.classifier or args.dry_run:
+            raise ValueError("--restore takes no SignNet, classifier or --dry-run")
+        comma_trial.back_to_build(root)
+    elif not args.signnet:
+        raise ValueError("which SignNet? --signnet <run>, or --restore")
+    else:
+        comma_trial.try_on_comma(root, args.signnet, classifier=args.classifier, dry_run=args.dry_run)
+    return 0
+
+
 def _cmd_drive_video(args: argparse.Namespace) -> int:
     """A drive as an MP4 for the Drive view of Results (nnslr_tools.drive_video)."""
     from nnslr_tools import drive_video
@@ -1761,6 +1789,38 @@ def build_parser() -> argparse.ArgumentParser:
     p_car.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_car.add_argument("--dry-run", action="store_true", help="check and print the record, write nothing")
     p_car.set_defaults(func=_cmd_on_car)
+
+    p_send = sub.add_parser(
+        "send-to-car",
+        help="export a SignNet and the classifier in use to ONNX, publish them in the clone of the models the comma "
+             "downloads (one commit pushed; nothing when they are the published ones already) and record them in "
+             "models/on-car.json: steps 1-3 of scripts/send_to_car.sh",
+    )
+    p_send.add_argument("--signnet", required=True, help="the run of the SignNet (one listed on the Models tab)")
+    p_send.add_argument("--classifier", help="the id of the classifier (default: the one in use, models/active.json)")
+    p_send.add_argument("--models", help="clone of cristianku/speed-limits-models "
+                                         "(default: NNSLR_MODELS_CLONE or /root/speed-limits-models)")
+    p_send.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+    p_send.add_argument("--dry-run", action="store_true",
+                        help="export and compare only: nothing copied, committed, pushed or recorded")
+    p_send.add_argument("--steps-of", type=int, default=3,
+                        help="number the step lines n/N (scripts/send_to_car.sh: 5, its last two steps are its own)")
+    p_send.set_defaults(func=_cmd_send_to_car)
+
+    p_try = sub.add_parser(
+        "try-on-comma",
+        help="copy a SignNet and the classifier in use straight onto the comma over ssh, after checking them with the "
+             "comma's own code, and wait for it to compile them (until its next software update; no publication, "
+             "no build); --restore puts back the build's networks: scripts/try_on_comma.sh",
+    )
+    p_try.add_argument("--signnet", help="the run of the SignNet (one listed on the Models tab)")
+    p_try.add_argument("--classifier", help="the id of the classifier (default: the one in use, models/active.json)")
+    p_try.add_argument("--restore", action="store_true",
+                       help="put back the build's networks on the comma (git checkout -- . in its models folder)")
+    p_try.add_argument("--dry-run", action="store_true",
+                       help="check the comma and the networks with its code (steps 1-3), copy nothing")
+    p_try.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+    p_try.set_defaults(func=_cmd_try_on_comma)
 
     # [offline-replay] - START
     p_replay = sub.add_parser(

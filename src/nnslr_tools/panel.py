@@ -29,8 +29,10 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
+from nnslr_tools.car_release import CAR_SCRIPT, build_pending, car_missing
+from nnslr_tools.comma_trial import TRY_SCRIPT, CommaProbe, read_trial, trial_missing
 from nnslr_tools.job_progress import last_line, progress, with_step_progress
-from nnslr_tools.model_roles import ModelChoiceError, ModelIndex
+from nnslr_tools.model_roles import SIGNNET_PART, ModelChoiceError, ModelIndex
 from nnslr_tools.runs import RunsIndex, WatchError
 
 REPO = Path(__file__).resolve().parents[2]
@@ -75,7 +77,12 @@ RUN_LINES = {
     'train_classifier': (re.compile(r'^== scripts/run_classifier\.sh (\S+)\s*$', re.M), RUN_ARGUMENT_LINE),
     'train_cutter': (re.compile(r'^== scripts/run_detector_sizes\.sh (\S+)(?: \S+)*\s*$', re.M), RUN_ARGUMENT_LINE),
     'train_decider': (re.compile(r'^== scripts/run_experiment_b\.sh (\S+)\s*$', re.M), RUN_ARGUMENT_LINE),
+    # The SignNet being sent ("== Send to the car: SignNet <run>, classifier <id>"), for the Models tab.
+    'send_to_car': (re.compile(r'^== Send to the car: SignNet ([^\s,]+)', re.MULTILINE),),
+    'try_on_comma': (re.compile(r'^== Try on the comma: SignNet ([^\s,]+)', re.MULTILINE),),
 }
+# The actions that take a SignNet of the Models tab ({'signnet': run}).
+SIGNNET_ACTIONS = ('send_to_car', 'try_on_comma')
 # The cutter's training: one input size of the detector (scripts/run_detector_sizes.sh NAME SIZE), and the boxes it
 # learns to find (NNSLR_CUTTER_FAMILIES): every sign (the speed signs and the other signs) or the speed signs only.
 CUTTER_SIZES = ('640x360', '960x544', '1344x760')
@@ -86,7 +93,8 @@ CUTTER_FAMILY = 'all'
 # The GPU memory Qwen3-VL-8B takes in float16 (scripts/setup_vlm.sh: 17.5 GB), with a margin for one frame.
 QWEN_GPU_MB = 18 * 1024
 ACTION_OPTIONS = {'train_cutter': ('size', 'families'), 'prepare': ('proposer',), 'prepare_again': ('proposer',),
-                  'measure_proposer': ('proposer',), 'networks_publish': ('package',),
+                  'measure_proposer': ('proposer',), 'networks_publish': ('package',), 'send_to_car': ('signnet',),
+                  'try_on_comma': ('signnet',),
                   'ai_review': ('route', 'provider', 'save', 'limit'), 'measure_ai_reviewer': ('provider', 'limit')}
 # [ai-reviewer] - START
 # The AI actions and their options (strings; checked by Panel._ai_arguments). The provider is an id of Settings
@@ -215,6 +223,14 @@ ACTIONS = {
     'networks_prepare': {'label': 'Prepare the package', 'group': 'publish', 'command': [NETWORKS_SCRIPT]},
     # A package prepared here ({'package': name}) uploaded to Hugging Face, public: other people download it.
     'networks_publish': {'label': 'Publish on Hugging Face', 'group': 'publish', 'command': [NETWORKS_SCRIPT, '--upload']},
+    # A SignNet of the Models tab ({'signnet': run}) and the classifier in use sent to the comma: exported, published
+    # in cristianku/speed-limits-models, recorded on the car, the sunnypilot speed-limits branch moved to them and
+    # psa-torque-sunny-testing built again (nnslr_tools.car_release). Then the comma updates from its settings.
+    'send_to_car': {'label': 'Send to the car', 'group': 'publish', 'command': [CAR_SCRIPT]},
+    # The same two networks copied straight onto the comma over ssh, checked first with the comma's own code, until
+    # its next software update (nnslr_tools.comma_trial): no publication, no build. And the build's networks back.
+    'try_on_comma': {'label': 'Try on the comma now', 'group': 'publish', 'command': [TRY_SCRIPT]},
+    'comma_restore': {'label': "Back to the build's networks", 'group': 'publish', 'command': [TRY_SCRIPT, '--restore']},
     # A proposer of Prepare measured on the test frames (the Proposers view of Evaluate); in the train group: the GPU.
     'measure_proposer': {'label': 'Measure a proposer', 'group': 'train', 'command': ['helpers/measure_proposer.sh']},
     # Qwen3-VL as the third proposer of Prepare: its packages, its weights (17.5 GB, what is already there is kept after
@@ -247,6 +263,8 @@ ACTIVITIES = (
     ('train', 'cutter training', 'run_detector_sizes.sh'),
     ('update', 'code update', 'helpers/update.sh'),
     ('publish', 'package of the networks', 'publish_networks.sh'),
+    ('publish', 'send to the car', 'send_to_car.sh'),
+    ('publish', 'networks on the comma', 'try_on_comma.sh'),
     # [ai-reviewer] - START
     ('ai', 'AI review', 'nnslr ai-review'),
     ('ai', 'AI reviewer measure', 'nnslr measure-ai-reviewer'),
@@ -267,6 +285,8 @@ RUNNING_NAMES = {'fetch': 'a download from the comma', 'prepare': 'a preparation
                  'train_resume': 'a training', 'train_classifier': 'a classifier training',
                  'train_cutter': 'a cutter training', 'train_decider': 'a decider training', 'update': 'a code update',
                  'networks_prepare': 'the preparation of a package', 'networks_publish': 'a publication',
+                 'send_to_car': 'a send to the car', 'try_on_comma': 'a trial on the comma',
+                 'comma_restore': "a return to the build's networks",
                  'ai_review': 'an AI review',
                  'measure_ai_reviewer': 'an AI reviewer measurement', 'road_types': 'a search for the road types'}
 ACTIVITY_NAMES = {'download from the comma': 'a download from the comma', 'preparation': 'a preparation',
@@ -274,7 +294,8 @@ ACTIVITY_NAMES = {'download from the comma': 'a download from the comma', 'prepa
                   'dataset and training': 'an import or a training', 'GPU training': 'a training',
                   'classifier training': 'a classifier training', 'cutter training': 'a cutter training',
                   'code update': 'a code update', 'AI review': 'an AI review',
-                  'package of the networks': 'a package of the networks',
+                  'package of the networks': 'a package of the networks', 'send to the car': 'a send to the car',
+                  'networks on the comma': 'a copy onto the comma',
                   'AI reviewer measure': 'an AI reviewer measurement', 'road types': 'a search for the road types'}
 # Groups that never run together with a group, besides itself. The download and the preparation
 # both write the links of data/raw/routes; the update rewrites the helpers under a running bash
@@ -318,6 +339,8 @@ class Panel:
         self.runs_index = RunsIndex(root)
         # The same runs by role (cutter, classifier, decider) and the model in use, for the Models tab.
         self.models_index = ModelIndex(self.runs_index)
+        # Whether the comma answers, for "Try on the comma now" (a TCP probe in a thread, at most once a minute).
+        self.comma_probe = CommaProbe()
 
     # -- helpers of the checkout -------------------------------------------------------------
     def available(self) -> bool:
@@ -449,7 +472,8 @@ class Panel:
                 from nnslr_tools.preannotate import PROPOSER_NAMES
                 label = 'Measure ' + PROPOSER_NAMES.get(proposer, proposer)
             result.append({'id': job_id, 'action': action, 'label': label,
-                           'run': _run_of(path, action) if ACTIONS[action]['group'] == 'train' else None,
+                           'run': _run_of(path, action) if ACTIONS[action]['group'] == 'train'
+                           or action in SIGNNET_ACTIONS else None,
                            'proposer': proposer,
                            'settings': _settings_of(path, action),
                            'started': started.strftime('%Y-%m-%d %H:%M:%S'),
@@ -747,6 +771,16 @@ class Panel:
                 reason = 'no package prepared yet'
             elif name == 'networks_publish' and not (payload.get('networks', {}).get('account') or {}).get('connected'):
                 reason = 'connect Hugging Face first: Settings, Hugging Face'
+            elif name == 'send_to_car':
+                # The SignNet is chosen on the Models tab (start() checks it); the classifier is the one in use.
+                reason = car_missing(self.repo) or self.models_index.in_use('classifier')[1]
+            elif name in ('try_on_comma', 'comma_restore'):
+                # Whether the comma answers is known from a probe of a minute ago at most (never an ssh per page);
+                # the job checks the rest on the comma and says why it stops.
+                reason = trial_missing(self.repo) or (
+                    self.models_index.in_use('classifier')[1] if name == 'try_on_comma' else '') or (
+                    'the comma does not answer on the network: it answers while the car is on or just parked'
+                    if self.comma_probe.state() is False else '')
             # [ai-reviewer] - START
             elif name in AI_ACTIONS and not (self.repo / action['command'][0]).is_file():
                 reason = action['command'][0] + ' is missing in this installation'
@@ -968,8 +1002,10 @@ class Panel:
     # [ai-reviewer] - END
 
     def models(self) -> dict:
-        """Every trained cutter, classifier and decider with its numbers, newest first, and the one in use."""
-        return self.models_index.index()
+        """Every trained cutter, classifier and decider with its numbers, newest first, and the one in use; and
+        whether a build of the testing branch is still owed after a Send to the car (it is sent again then)."""
+        return {**self.models_index.index(), 'car_build_pending': build_pending(self.root),
+                'comma_trial': read_trial(self.root)}
 
     def set_active_model(self, body, *, who: str | None, via: str) -> dict:
         """The model in use for a role ({"role", "id"}), written to <root>/models/active.json. A read-only panel
@@ -1222,6 +1258,23 @@ class Panel:
             kept = hf_account.token(self.root)
             if kept:
                 start_env['HF_TOKEN'] = kept
+        signnet = (options or {}).get('signnet')
+        if signnet is not None and action not in SIGNNET_ACTIONS:
+            raise PanelError(400, 'bad_option', 'Only "Send to the car" and "Try on the comma now" take a SignNet.')
+        if action in SIGNNET_ACTIONS:
+            # A finished SignNet of the Models tab, by its run name: nothing else reaches the command line.
+            wanted = f'cutter:{signnet}/{SIGNNET_PART}' if isinstance(signnet, str) and RUN_NAME.fullmatch(signnet) else None
+            if wanted is None or not any(entry['id'] == wanted and entry['finished']
+                                         for entry in self.models_index.artifacts(('cutter',))['cutter']):
+                raise PanelError(400, 'bad_option', 'Unknown SignNet: choose a finished one on the Models tab.')
+            script = CAR_SCRIPT if action == 'send_to_car' else TRY_SCRIPT
+            if not (self.repo / script).is_file():
+                raise PanelError(403, 'actions_disabled', script + ' is missing in this installation.')
+            missing = ((car_missing if action == 'send_to_car' else trial_missing)(self.repo)
+                       or self.models_index.in_use('classifier')[1])
+            if missing:
+                raise PanelError(409, 'not_available', missing[0].upper() + missing[1:] + '.')
+            start_args.append('--signnet=' + signnet)
         if action == 'networks_prepare':
             from nnslr_tools.networks_package import new_name
             from nnslr_tools.preannotate import ours_missing

@@ -4,8 +4,8 @@
 import {onBeforeUnmount, onMounted, ref, shallowRef} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import {isoWhen, thousands} from '../common/format';
-import type {ActiveChosen, ActiveModel, ModelRole, ModelVersion, ModelsPayload} from '../common/panel-types';
-import {askConfirm} from '../composables/confirm';
+import type {ActionState, ActiveChosen, ActiveModel, ModelRole, ModelVersion, ModelsPayload} from '../common/panel-types';
+import {askConfirm, type ConfirmOptions} from '../composables/confirm';
 import {toast} from '../composables/toast';
 import {chooseRun} from './evaluate';
 import {goTo} from './tabs';
@@ -85,6 +85,54 @@ export async function putInUse(version: ModelVersion, roleLabel: string): Promis
     toast(messageOf(problem), true);
     return false;
   }
+}
+
+/** “Send to the car” for the SignNet versions: the action's state, the run of the SignNet being sent ('' when the
+ * run is not known yet; null when none is sent), and whether a build of the testing branch is still owed. */
+export interface CarState {
+  state: ActionState | null;
+  sending: string | null;
+  pending: boolean;
+  /** “Try on the comma now”: its state, the run being copied ('' while not known; null: none), the run on trial. */
+  tryState?: ActionState | null;
+  trying?: string | null;
+  onTrial?: string | null;
+}
+
+/** The question before "Send to the car" (scripts/send_to_car.sh): which SignNet and which classifier (the one in
+ * use) the comma gets, what the job publishes and builds, and what is left to do on the comma. */
+export function sendQuestion(signnet: ModelVersion, classifier: ModelVersion | null): ConfirmOptions {
+  const reader = classifier ? classifier.label + ' ' + (classifier.trained_at ? isoWhen(classifier.trained_at) : classifier.run)
+    : 'the classifier in use';
+  return {
+    title: 'Send this SignNet to the car?', action: 'Send to the car',
+    text: 'The comma gets ' + signnet.label + ' of ' + signnet.run + ' to find the signs and ' + reader
+      + ' (the classifier in use) to read them. They are published in speed-limits-models, the sunnypilot speed-limits '
+      + 'branch moves to them and psa-torque-sunny-testing is built again: a few minutes. Then, on the comma: '
+      + 'Settings, Software, Check for updates, and install.',
+  };
+}
+
+/** The question before "Try on the comma now" (scripts/try_on_comma.sh): the same two networks copied straight onto the
+ * comma, checked first with the comma's own code; no publication, no build. */
+export function tryQuestion(signnet: ModelVersion, classifier: ModelVersion | null): ConfirmOptions {
+  const reader = classifier ? classifier.label + ' ' + (classifier.trained_at ? isoWhen(classifier.trained_at) : classifier.run)
+    : 'the classifier in use';
+  return {
+    title: 'Try this SignNet on the comma now?', action: 'Try on the comma',
+    text: 'The networks go onto the comma now: ' + signnet.label + ' of ' + signnet.run + ' and ' + reader
+      + ' (the classifier in use), checked first with the comma\'s own code. Parked, the comma prepares them within a '
+      + 'few minutes; they are used from the next drive. Nothing is published or built: the comma\'s next software '
+      + 'update puts back the build\'s networks.',
+  };
+}
+
+/** The question before "Back to the build's networks" (scripts/try_on_comma.sh --restore). */
+export function restoreQuestion(): ConfirmOptions {
+  return {
+    title: 'Back to the build\'s networks?', action: 'Put them back',
+    text: 'The comma gets back the networks of the build it runs, from the next drive. Nothing else on the comma is touched.',
+  };
 }
 
 /** Who chose the model in use, and when: "chosen 24 Oct 16:40 by admin". */

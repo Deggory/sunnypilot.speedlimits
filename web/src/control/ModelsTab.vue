@@ -4,18 +4,28 @@
 // compare: the numbers that judge that role in columns, the one in use marked; a row opens its whole card (ModelItem:
 // details, Use this one, the run). A role has no model in use until someone picks one: there is no default. The
 // networks the comma downloads (models/on-car.json, written by nnslr on-car) are marked “on the car”: SignNet, the
-// cutter made for the car, is listed with the cutters but is never the one in use here. The runs themselves are on
+// cutter made for the car, is listed with the cutters but is never the one in use here: its card has “Send to the car”
+// instead (scripts/send_to_car.sh: it and the classifier in use published for the comma, the sunnypilot speed-limits
+// branch moved, psa-torque-sunny-testing built), whose job shows here while it runs, and “Try on the comma now”
+// (scripts/try_on_comma.sh: the same two networks copied straight onto the comma, checked first with its own code, until
+// its next software update; models/on-comma-trial.json), with “Back to the build's networks”. The runs themselves are on
 // Results (/evaluate); the package of the three in use is on Publish (/publish).
 import {computed, nextTick, ref, watch} from 'vue';
 import {isoWhen} from '../common/format';
-import type {ModelRole, ModelVersion, PanelStatus, RoleModels} from '../common/panel-types';
+import type {ActionName, ActionOptions, ActionState, Job, ModelRole, ModelVersion, PanelStatus, RoleModels} from '../common/panel-types';
+import {askConfirm} from '../composables/confirm';
 import {pct} from './evaluate';
+import JobProgress from './JobProgress.vue';
+import {JOB_STATE, jobOf, startedWhen} from './jobs';
 import ModelItem from './ModelItem.vue';
 import Segmented from './Segmented.vue';
-import {ROLE_TEXT, chosenText, metricsOf, putInUse, useModels} from './models';
+import {ROLE_TEXT, chosenText, metricsOf, putInUse, restoreQuestion, sendQuestion, tryQuestion, useModels,
+  type CarState} from './models';
 import SectionHead from './SectionHead.vue';
 
 const props = defineProps<{status: PanelStatus | null}>();
+const emit = defineEmits<{run: [name: ActionName, state: ActionState, start?: undefined, options?: ActionOptions];
+  stop: [job: Job]; details: [job: Job]}>();
 const {payload, error, refresh} = useModels();
 const roles = computed((): RoleModels[] => payload.value?.roles ?? []);
 /** Read-only server: the choice is off, as the buttons of the other tabs. */
@@ -80,6 +90,66 @@ function cell(version: ModelVersion, key: string) {
   return metricsOf(version).find((metric) => metric.key === key) ?? null;
 }
 
+/** The last Send to the car, trial on the comma or return to the build's networks; running or failed, it is shown in
+ * full above the versions. */
+const carJob = computed(() => jobOf(props.status, ['send_to_car', 'try_on_comma', 'comma_restore']));
+const bigCarJob = computed(() => carJob.value && (carJob.value.state === 'running' || carJob.value.state === 'failed') ? carJob.value : null);
+const CAR_JOB_TEXT: Partial<Record<ActionName, string>> = {send_to_car: 'Last send to the car',
+  try_on_comma: 'Last trial on the comma', comma_restore: 'Last return to the build’s networks'};
+const carHeading = (job: Job): string | undefined => !job.run ? undefined
+  : 'SignNet ' + job.run + (job.action === 'try_on_comma' ? ' on the comma' : '');
+const runningOf = (action: ActionName): string | null =>
+  carJob.value?.state === 'running' && carJob.value.action === action ? carJob.value.run ?? '' : null;
+/** The networks being tried on the comma now (models/on-comma-trial.json), null when none. */
+const trial = computed(() => payload.value?.comma_trial ?? null);
+const car = computed((): CarState => ({
+  state: props.status?.actions.send_to_car ?? null,
+  sending: runningOf('send_to_car'),
+  pending: Boolean(payload.value?.car_build_pending),
+  tryState: props.status?.actions.try_on_comma ?? null,
+  trying: runningOf('try_on_comma') ?? runningOf('comma_restore'),
+  onTrial: trial.value?.signnet.run ?? null,
+}));
+/** The trial in a few words: "copied 28 Oct 14:20 · ready: used from the next drive". */
+const trialText = computed((): string => {
+  const value = trial.value;
+  if (value === null) return '';
+  const classifier = value.classifier.run ? ', classifier ' + value.classifier.run : '';
+  const state = value.state === 'ready' ? 'ready: used from the next drive' : 'being prepared on the comma';
+  return [classifier ? classifier.slice(2) : '', value.copied_at ? 'copied ' + isoWhen(value.copied_at) : '', state]
+    .filter(Boolean).join(' · ');
+});
+const restoreState = computed(() => props.status?.actions.comma_restore ?? null);
+const restoreBlocked = computed((): string => {
+  if (readOnly.value) return 'Read-only: the buttons are turned off on this server.';
+  if (carJob.value?.state === 'running') return 'Wait for the job running now.';
+  const state = restoreState.value;
+  if (state === null) return 'Not available on this server.';
+  return state.allowed ? '' : state.reason.charAt(0).toUpperCase() + state.reason.slice(1) + '.';
+});
+/** Asks, naming the SignNet and the classifier in use, then starts the job. */
+async function send(version: ModelVersion): Promise<void> {
+  const state = car.value.state;
+  if (state === null || !state.allowed) return;
+  const classifiers = roles.value.find((role) => role.role === 'classifier');
+  if (!await askConfirm(sendQuestion(version, classifiers ? inUseOf(classifiers) : null))) return;
+  emit('run', 'send_to_car', state, undefined, {signnet: version.run});
+}
+/** Asks in plain words what a trial on the comma does, then starts the job. */
+async function tryOnComma(version: ModelVersion): Promise<void> {
+  const state = car.value.tryState ?? null;
+  if (state === null || !state.allowed) return;
+  const classifiers = roles.value.find((role) => role.role === 'classifier');
+  if (!await askConfirm(tryQuestion(version, classifiers ? inUseOf(classifiers) : null))) return;
+  emit('run', 'try_on_comma', state, undefined, {signnet: version.run});
+}
+async function restore(): Promise<void> {
+  const state = restoreState.value;
+  if (state === null || !state.allowed) return;
+  if (!await askConfirm(restoreQuestion())) return;
+  emit('run', 'comma_restore', state);
+}
+
 async function choose(version: ModelVersion): Promise<void> {
   if (busy.value !== null) return;
   busy.value = version.id;
@@ -126,6 +196,19 @@ async function choose(version: ModelVersion): Promise<void> {
       </button>
     </div>
 
+    <section v-if="bigCarJob" class="card car-job" id="car-job" :aria-label="bigCarJob.label">
+      <JobProgress :job="bigCarJob" :heading="carHeading(bigCarJob)"
+                   @details="emit('details', $event)" @stop="emit('stop', $event)"/>
+    </section>
+
+    <!-- The networks tried on the comma now, and the way back to the build's. -->
+    <section v-if="trial" class="card trial-card" id="comma-trial" aria-label="Trying on the comma">
+      <p class="trial-text"><strong>Trying on the comma: SignNet {{ trial.signnet.run }}</strong><br><span>{{ trialText }}.
+        Until the comma's next software update.</span></p>
+      <button type="button" class="link-button" :disabled="restoreBlocked !== ''" :title="restoreBlocked"
+              id="comma-restore" @click="restore">Back to the build’s networks</button>
+    </section>
+
     <!-- The versions of one network, to compare and to choose. -->
     <section v-if="pickedRole" class="card versions-card" :data-role="pickedRole.role" aria-label="Versions">
       <Segmented v-model="picked" :options="roleOptions" label="Network" class="versions-seg"/>
@@ -141,7 +224,8 @@ async function choose(version: ModelVersion): Promise<void> {
             <span class="vt-name"><b>{{ version.label }}</b><small>{{ version.trained_at ? isoWhen(version.trained_at) : version.run }}<template
               v-if="signnetText(version)"> · {{ signnetText(version) }}</template><template
               v-if="version.in_use"> · <em class="vt-use">in use</em></template><template v-else-if="!version.finished"> · <em
-              class="vt-wait">not finished</em></template><template v-if="version.on_car"> · <em class="vt-car">on the car</em></template></small></span>
+              class="vt-wait">not finished</em></template><template v-if="version.on_car"> · <em class="vt-car">on the car</em></template><template
+              v-if="trial && version.role === 'cutter' && trial.signnet.run === version.run"> · <em class="vt-trial">trying on the comma</em></template></small></span>
             <span v-for="column in columns" :key="column.key" class="vt-num" :class="['vt-c-' + column.key, {none: cell(version, column.key)?.value == null}]"
                   :title="cell(version, column.key)?.detail ?? ''">
               <b>{{ cell(version, column.key)?.value == null ? '–' : pct(cell(version, column.key)?.value) }}</b>
@@ -152,16 +236,21 @@ async function choose(version: ModelVersion): Promise<void> {
           </summary>
           <ul class="model-list">
             <ModelItem :version="version" :role-label="pickedRole.label" :score="payload.cutter_score_threshold"
-                       :read-only="readOnly" :busy="busy" @use="choose"/>
+                       :read-only="readOnly" :busy="busy" :car="car" @use="choose" @send="send" @try="tryOnComma"/>
           </ul>
         </details>
       </div>
+      <p v-if="pickedRole.role === 'cutter' && carJob && !bigCarJob" class="last-line" id="car-last">{{ CAR_JOB_TEXT[carJob.action] }}:
+        {{ carJob.run ? 'SignNet ' + carJob.run + ', ' : '' }}{{ startedWhen(carJob) }} ·
+        {{ carJob.state === 'interrupted' ? 'stopped' : JOB_STATE[carJob.state][0] }} ·
+        <button type="button" class="link-button" @click="emit('details', carJob)">Details</button></p>
       <p v-if="pickedRole.role === 'cutter'" class="note models-foot">Speed signs and Every sign: found at score {{ payload.cutter_score_threshold }},
         however many boxes it passes on (a detector a couple of hundred a frame, SignNet a few). In {{ payload.box_budget ?? 5 }} boxes: the
         speed signs among its {{ payload.box_budget ?? 5 }} best boxes of each frame, as the car reads them.</p>
       <p class="note models-foot">The numbers compare only on the same test: the older versions were measured on fewer signs (the count
         under each number). The choice is kept in <code>{{ payload.active_file }}</code> of the data root; it copies, exports and
-        deploys nothing: nothing on the comma changes.<template v-if="carText"> On the car: the networks published in {{ carText }}.</template></p>
+        deploys nothing: nothing on the comma changes. Only Send to the car, on a SignNet, changes what the comma
+        downloads; Try on the comma now copies a SignNet onto it until its next software update.<template v-if="carText"> On the car: the networks published in {{ carText }}.</template></p>
       <p v-if="payload.on_car_problem" class="note">What is on the car cannot be shown: {{ payload.on_car_problem }}.</p>
     </section>
     <p v-if="error" class="note">Not updated: {{ error }}</p>

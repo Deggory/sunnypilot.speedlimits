@@ -3,7 +3,7 @@ import type {AiState} from './ai-types';
 
 export type ActionName = 'fetch' | 'prepare' | 'prepare_again' | 'measure_proposer' | 'setup_vlm' | 'dataset' | 'train' | 'train_continue' | 'train_resume' | 'train_classifier'
   | 'train_cutter' | 'train_decider' | 'update' | 'ai_review' | 'measure_ai_reviewer' | 'networks_prepare' | 'networks_publish'
-  | 'road_types';
+  | 'road_types' | 'send_to_car' | 'try_on_comma' | 'comma_restore';
 /** What a cutter learns to find: every sign (the speed signs and the other signs) or the speed signs only. */
 export type CutterFamilies = 'all' | 'speed';
 /** The options of “Train the cutter” (POST /api/panel/run/train_cutter {"size", "families"}). */
@@ -56,6 +56,8 @@ export interface ActionOptions {
   limit?: string;
   /** The package to publish (networks_publish). */
   package?: string;
+  /** The run of the SignNet sent to the car (send_to_car) or tried on the comma (try_on_comma). */
+  signnet?: string;
 }
 export type JobState = 'running' | 'ok' | 'failed' | 'interrupted';
 export type RouteState = 'collegare' | 'estrarre' | 'preannotare' | 'revisionare' | 'importare' | 'pronta';
@@ -1120,6 +1122,30 @@ export interface ModelsPayload {
   /** What runs on the comma: the published models commit (models/on-car.json); null when nothing was recorded. */
   on_car?: {repository: string | null; commit: string | null; version: string | null; recorded_at: string | null} | null;
   on_car_problem?: string | null;
+  /** A Send to the car moved the sunnypilot branch but its build of the testing branch did not finish: sending the
+   * SignNet on the car again builds it. */
+  car_build_pending?: boolean;
+  /** The networks copied onto the comma by “Try on the comma now” (models/on-comma-trial.json), until its next software
+   * update, “Back to the build's networks” or the next Send to the car; null when none. */
+  comma_trial?: CommaTrial | null;
+}
+
+/** One network of a trial on the comma. */
+export interface TrialNetwork {
+  id: string | null;
+  run: string | null;
+  onnx_sha256: string | null;
+}
+/** A trial on the comma (nnslr_tools.comma_trial.read_trial): 'preparing' while the comma compiles them, 'ready' once
+ * both are compiled (used from the next drive). */
+export interface CommaTrial {
+  signnet: TrialNetwork;
+  classifier: TrialNetwork;
+  version: string | null;
+  state: 'preparing' | 'ready' | string | null;
+  copied_at: string | null;
+  ready_at: string | null;
+  comma_build: string | null;
 }
 
 /** The type of road of a frame, from the map (nnslr_tools.road_types); null: the map does not say. Parking: a car park,

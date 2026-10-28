@@ -277,6 +277,8 @@ Day-to-day work happens in the portal, whose buttons run a few helper scripts an
 
 Two helpers belong to the AI reviewer. `helpers/ai_review.sh` (**Review with AI**) reviews a route with the provider chosen in Settings. `helpers/measure_ai_reviewer.sh` (**Measure** in Evaluate → AI reviewers) measures a provider on the same frames people reviewed. Neither takes a key as an argument: the providers and their keys stay on the server, in `data/web/private/llm-providers.json`. An AI review saved by **Review and save** waits for a person: the import leaves it out until you confirm the frame. Providers can also be added from a terminal with `nnslr llm-provider add` ([docs/INSTALL.md](docs/INSTALL.md)).
 
+Two scripts take a SignNet to the comma, from its card on Models › Versions. `scripts/send_to_car.sh` (**Send to the car**) publishes it with the classifier in use in `speed-limits-models`, moves the sunnypilot `speed-limits` branch and builds `psa-torque-sunny-testing`; the comma then installs the update. `scripts/try_on_comma.sh` (**Try on the comma now**) copies them straight onto the comma over ssh after checking them with the comma's own code, until its next software update; `--restore` (**Back to the build's networks**) undoes it.
+
 ## Data, privacy, licences and credits
 
 ### Data and privacy

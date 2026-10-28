@@ -13,14 +13,16 @@ export const JOB_STATE: Record<JobState, [label: string, kind: string]> = {
 export const ACTION_GROUP: Record<ActionName, string> = {
   fetch: 'fetch', prepare: 'prepare', prepare_again: 'prepare', measure_proposer: 'train', setup_vlm: 'train', dataset: 'train', train: 'train', train_continue: 'train', train_resume: 'train',
   train_classifier: 'train', train_cutter: 'train', train_decider: 'train', update: 'update', ai_review: 'ai', measure_ai_reviewer: 'ai',
-  networks_prepare: 'publish', networks_publish: 'publish', road_types: 'prepare',
+  networks_prepare: 'publish', networks_publish: 'publish', road_types: 'prepare', send_to_car: 'publish',
+  try_on_comma: 'publish', comma_restore: 'publish',
 };
 
 /** The icon of each action, on its button. */
 export const ACTION_ICON: Record<ActionName, IconName> = {
   fetch: 'download', prepare: 'prepare', prepare_again: 'resume', measure_proposer: 'train', setup_vlm: 'download', dataset: 'import', train: 'train', train_continue: 'train',
   train_resume: 'resume', train_classifier: 'train', train_cutter: 'train', train_decider: 'train', update: 'update', ai_review: 'ai',
-  measure_ai_reviewer: 'ai', networks_prepare: 'package', networks_publish: 'upload', road_types: 'routes',
+  measure_ai_reviewer: 'ai', networks_prepare: 'package', networks_publish: 'upload', road_types: 'routes', send_to_car: 'upload',
+  try_on_comma: 'upload', comma_restore: 'resume',
 };
 
 /**
@@ -34,6 +36,7 @@ export const ACTION_TAB: Record<ActionName, string | null> = {
   train_cutter: '/train', train_decider: '/train', ai_review: '/train',
   measure_proposer: '/evaluate', measure_ai_reviewer: '/evaluate',
   networks_prepare: '/publish', networks_publish: '/publish',
+  send_to_car: '/models', try_on_comma: '/models', comma_restore: '/models',
   update: null,
 };
 const actionsOf = (tab: string): ActionName[] => (Object.keys(ACTION_TAB) as ActionName[]).filter((name) => ACTION_TAB[name] === tab);
@@ -46,6 +49,7 @@ export const EVALUATE_ACTIONS: ActionName[] = actionsOf('/evaluate');
  * road types (in the group of the preparation) are Roads'. */
 export function activityTab(activity: Pick<Activity, 'group' | 'label'>): string | null {
   if (activity.label === 'road types') return '/roads';
+  if (activity.label === 'send to the car' || activity.label === 'networks on the comma') return '/models';
   if (activity.group === 'ai') return activity.label.includes('measure') ? '/evaluate' : '/train';
   if (activity.group === 'publish') return '/publish';
   return activity.group === 'fetch' || activity.group === 'prepare' ? '/prepare' : activity.group === 'train' ? '/train' : null;

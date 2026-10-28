@@ -53,6 +53,16 @@ NETWORKS_PREPARE_STEPS = (('cutter', 'Export the cutter', 40), ('classifier', 'E
                           ('decider', 'Export the decider', 30), ('package', 'Model card and checks', 10))
 NETWORKS_PUBLISH_STEPS = (('check', 'Check the package', 10), ('catalog', 'Read the catalog', 10),
                           ('upload', 'Upload to Hugging Face', 80))
+# scripts/send_to_car.sh: "== 1/5 Export ..." to "== 5/5 Build ..."; the build of the testing branch takes the minutes.
+CAR_STEPS = (('export', 'Export the SignNet and the classifier', 10), ('publish', 'Publish them for the comma', 5),
+             ('record', 'Record them as on the car', 2), ('move', 'Move the sunnypilot speed-limits branch', 3),
+             ('build', 'Build psa-torque-sunny-testing', 80))
+# scripts/try_on_comma.sh: "== 1/5 Check the comma" to "== 5/5 Wait ..."; the comma compiles them in a few minutes.
+TRY_STEPS = (('check', 'Check the comma', 3), ('export', 'Export the SignNet and the classifier', 15),
+             ('verify', "Check them with the comma's code", 15), ('copy', 'Copy them onto the comma', 7),
+             ('prepare', 'Wait for the comma to prepare them', 60))
+# scripts/try_on_comma.sh --restore: "== 1/2 Check the comma", "== 2/2 Put back the build's networks".
+RESTORE_STEPS = (('check', 'Check the comma', 50), ('restore', "Put back the build's networks", 50))
 FETCH_STEPS = (('fetch', 'Download the drives from the comma', 100),)
 # helpers/road_types.sh: the GPS of the drives prepared without it, the map roads near the drives (minutes when the map
 # is read again), the road type of every frame.
@@ -68,10 +78,12 @@ STEPS = {'fetch': FETCH_STEPS, 'prepare': PREPARE_STEPS, 'dataset': DATASET_STEP
          'train_continue': TRAIN_STEPS, 'train_resume': TRAIN_STEPS, 'train_classifier': CLASSIFIER_STEPS,
          'train_cutter': CUTTER_STEPS, 'train_decider': DECIDER_STEPS, 'update': UPDATE_STEPS, 'ai_review': AI_REVIEW_STEPS,
          'measure_ai_reviewer': AI_MEASURE_STEPS, 'networks_prepare': NETWORKS_PREPARE_STEPS,
-         'networks_publish': NETWORKS_PUBLISH_STEPS, 'road_types': ROAD_TYPES_STEPS}
+         'networks_publish': NETWORKS_PUBLISH_STEPS, 'road_types': ROAD_TYPES_STEPS, 'send_to_car': CAR_STEPS,
+         'try_on_comma': TRY_STEPS, 'comma_restore': RESTORE_STEPS}
 # The actions whose percent is the weighted sum of their steps (the AI's: its frames done, from its reports).
 WEIGHTED = ('train', 'train_continue', 'train_resume', 'train_classifier', 'train_cutter', 'train_decider', 'dataset', 'ai_review',
-            'measure_ai_reviewer', 'networks_prepare', 'networks_publish', 'road_types')
+            'measure_ai_reviewer', 'networks_prepare', 'networks_publish', 'road_types', 'send_to_car',
+            'try_on_comma', 'comma_restore')
 
 # The sub-steps of scripts/run_v100_baseline.sh ("== 4/10 ...") and the step they belong to.
 PIPELINE = {1: 'checks', 2: 'checks', 3: 'checks', 4: 'detector', 5: 'reader', 6: 'evaluate', 7: 'export',
@@ -90,7 +102,10 @@ DECIDER_PIPELINE = {1: 'checks', 2: 'checks', 3: 'experiment_b_crop', 4: 'experi
 SUBSTEPS = {'train_classifier': (7, CLASSIFIER_PIPELINE), 'train_cutter': (None, CUTTER_PIPELINE),
             'train_decider': (5, DECIDER_PIPELINE),
             'networks_prepare': (4, {1: 'cutter', 2: 'classifier', 3: 'decider', 4: 'package'}),
-            'networks_publish': (3, {1: 'check', 2: 'catalog', 3: 'upload'})}
+            'networks_publish': (3, {1: 'check', 2: 'catalog', 3: 'upload'}),
+            'send_to_car': (5, {1: 'export', 2: 'publish', 3: 'record', 4: 'move', 5: 'build'}),
+            'try_on_comma': (5, {1: 'check', 2: 'export', 3: 'verify', 4: 'copy', 5: 'prepare'}),
+            'comma_restore': (2, {1: 'check', 2: 'restore'})}
 TITLES = {'train_cutter': CUTTER_TITLES}
 MARKERS = (
     (re.compile(r'^== a\+b\. '), 'gpu_env', ('import', 'split')),

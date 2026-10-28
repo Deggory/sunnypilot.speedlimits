@@ -61,7 +61,7 @@ watch(busyPaths, markBusy);
     <DatasetTab v-else-if="currentTab === 'dataset'" :status="status" @run="run" @stop="stop" @details="details"/>
     <RoadsTab v-else-if="currentTab === 'roads'" :status="status" @run="run" @stop="stop" @details="details"/>
     <PublishTab v-else-if="currentTab === 'publish'" :status="status" @run="run" @stop="stop" @details="details"/>
-    <ModelsTab v-else :status="status"/>
+    <ModelsTab v-else :status="status" @run="run" @stop="stop" @details="details"/>
   </main>
   <LogSheet :job="shownJob" @close="shownId = null" @stop="stop"/>
 </template>
