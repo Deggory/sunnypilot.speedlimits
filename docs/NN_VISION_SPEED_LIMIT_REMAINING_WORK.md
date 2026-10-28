@@ -1062,13 +1062,13 @@ Done the same day:
   value whose note says off, blank, unlit, spento or vuoto is neither a sign to find nor background; SignNet's loss
   skips its cells (one cell around) and `measure` drops predictions on it. The cutter reads boxes only, so for it
   the panel stays background.
-- **The 717 frames reviewed again** (workflow of two independent reviewers a frame, a judge where they disagree,
-  saves as `ai/Claude Code` through MCP): new boxes on the AI-reviewed frames; the 115 human-reviewed frames are
-  listed for Cristian, never overwritten. After the next import, retrain and rebuild the split (the new boxes change
-  the groups by image).
 
 Still to do:
 
+- **Box the 717 frames by hand** (602 AI-reviewed, 115 human-reviewed): the list per route, highest score first, is
+  `data/evaluations/unboxed-signs-2026-10-28/frames.md` on the server. They are reviewed by hand on the review site,
+  not by agents in bulk. After the next import, retrain and rebuild the split (the new boxes change the groups by
+  image).
 - **A new independent test** after the corrections: the current test route was reviewed before them and its
   frames among the 717 (37) are corrected too, so the numbers above are not comparable with the next ones. One or
   two new drives on roads never driven, confirmed by Cristian, pinned in `data/annotations/test-routes.txt`.
