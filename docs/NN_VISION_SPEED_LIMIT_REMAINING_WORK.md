@@ -32,8 +32,8 @@ Permanent invariants:
 
 - never write `CarStateSP.speedLimit`;
 - never write or impersonate `LiveMapDataSP`;
-- Vision reaches `SpeedLimitResolver` only as its own source `vision`, opt-in (Signs Read By, 27 Oct 2026: see the
-  last section); it never writes `carStateSP` or the map;
+- Vision reaches `SpeedLimitResolver` only as its own source `vision`, opt-in (Speed Limit Source "Map Data +
+  Vision", 28 Oct 2026: see the last section); it never writes `carStateSP` or the map;
 - no CAN, acceleration, steering, torque, radar, safety, or cruise-button output;
 - do not change the driving model just to make NNSLR work;
 - do not initialize Chestnut from a second process;
@@ -920,17 +920,19 @@ same place, and the limit counts as from the previous drive.
 
 ### sunnypilot side: branch `speed-limits` of cristianku/sunnypilot
 
-From master `db27a433` (synced with sunnypilot/sunnypilot master on 27 Oct 2026), commit `638211d6`:
+From master `db27a433` (synced with sunnypilot/sunnypilot master on 27 Oct 2026), commits `638211d6` and `e89824fa`:
 
-- `SpeedLimitSignReader` (device settings and sunnylink): who reads the signs for "Car" in Speed Limit Source:
-  Car (default, as before), Network, or Car, then Network. The five policies stay as they are.
+- Speed Limit Source has a sixth choice, **Map Data + Vision** in sunnylink (`Map+Vision` on the device,
+  `SpeedLimitPolicy` 5): the network's limit when it has one, else the map. The five upstream policies stay as they
+  are and ignore the network; the car's own limit is not used by this one. (On 27 Oct it was a separate setting,
+  Signs Read By, `SpeedLimitSignReader`; replaced on 28 Oct because Cristian wants the choice in Speed Limit Source.)
 - `speedVisionSP` (in `customReserved10 @136`): `speedLimit` m/s, 0 when not sure; `modelName`.
 - `SpeedLimitResolver`: source `vision`, skipped at 0 like the car; a stale `speedVisionSP` is never used.
 - The models: the public repo `cristianku/speed-limits-models` as a submodule at
   `openpilot/sunnypilot/speed_limits/models` (commit `2f2700fb`), the way sunnypilot takes its lateral models from
   `neural_network_data`, not a Hugging Face download. A new model is a commit there and a move of the pointer.
 - Missing: `speedvisiond` (camera → ONNX → `speedVisionSP`) and the tinygrad compile of the ONNX in the build
-  (SConscript, as modeld does). Until then Network is always 0, so the map.
+  (SConscript, as modeld does). Until then the network's limit is always 0, so Map Data + Vision is the map.
 
 The old branch `nn-speed-limit-vision` (September, 277 commits behind master) is not carried over: it published only
 an "unavailable" state, had no inference, and its tests forbade the resolver source decided now.
