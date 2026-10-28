@@ -1120,9 +1120,10 @@ def make_handler(app: ReviewApp):
                 if run:
                     # The options: where a training starts ({"start": key}), the run to resume ({"run": name}), the
                     # cutter's size and signs ({"size", "families"}), the SignNet sent to the car ({"signnet": run}),
-                    # the route, provider, save and limit of an AI action, all checked by Panel.start.
+                    # the classifier's Mapillary signs ({"mapillary": "on"}), the route, provider, save and limit of
+                    # an AI action, all checked by Panel.start.
                     options = {key: body[key] for key in ('start', 'run', 'size', 'families', 'proposer', 'package',
-                                                          'signnet')
+                                                          'signnet', 'mapillary')
                                if isinstance(body, dict) and isinstance(body.get(key), str)}
                     # [ai-reviewer] - START
                     # Passed as they are, also when not strings: Panel.start refuses them, never drops them (a limit

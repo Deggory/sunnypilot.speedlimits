@@ -39,9 +39,10 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
         + 'about 15 minutes. Its run is a new one, named by the time it starts.'};
   }
   if (name === 'train_classifier') {
+    const mapillary = options?.mapillary === 'on' ? ' The signs of Mapillary join its training crops, not its measures.' : '';
     return {title: 'Train the classifier?', action: 'Start training',
       text: 'Mines the false boxes of the cutter in use, trains the classifier with “not a sign” on the GPU, then measures it '
-        + 'alone and in the chain: it takes hours. Its run is a new one, named by the time it starts.'};
+        + 'alone and in the chain: it takes hours. Its run is a new one, named by the time it starts.' + mapillary};
   }
   if (name === 'networks_publish') {
     return {title: 'Publish ' + (options?.package ?? 'the package') + ' on Hugging Face?', action: 'Publish', danger: true,

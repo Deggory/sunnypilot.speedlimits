@@ -397,6 +397,7 @@ def prepare_reader_training(
     dataset_kind: str = "gold",
     class_scheme: str = "v1",
     negatives_path: Path | None = None,
+    mapillary_path: Path | None = None,
 ) -> dict[str, Any]:
     """Validate inputs and build the immutable reader-training plan.
 
@@ -404,12 +405,15 @@ def prepare_reader_training(
 
     class_scheme v1 is the reader as it always was. v2 (the classifier) adds the kinds of the other signs and
     the not_a_sign crops (see _classifier_negatives); negatives_path is the file of nnslr mine-negatives for
-    the cutter's false boxes (without it, only the removed proposals and the boxes marked "not a sign").
+    the cutter's false boxes (without it, only the removed proposals and the boxes marked "not a sign");
+    mapillary_path is the crops file of nnslr mapillary-crops, extra train crops of v2 (nnslr_tools.mapillary).
     """
     if class_scheme not in CLASS_SCHEMES:
         raise ValueError(f"unknown class scheme {class_scheme!r}: one of {', '.join(CLASS_SCHEMES)}")
     if negatives_path is not None and class_scheme != "v2":
         raise ValueError("negatives are crops of the v2 classifier: use --classes v2")
+    if mapillary_path is not None and class_scheme != "v2":
+        raise ValueError("the Mapillary crops are for the v2 classifier: use --classes v2")
     dataset_path = Path(dataset_path)
     split_path = Path(split_path)
     data_root = Path(data_root)
@@ -421,7 +425,7 @@ def prepare_reader_training(
     assignments = loaded["assignments"]
     if class_scheme == "v2":
         return _prepare_classifier(loaded, dataset_path, split_path, data_root, dataset_kind=dataset_kind,
-                                   negatives_path=negatives_path)
+                                   negatives_path=negatives_path, mapillary_path=mapillary_path)
 
     records: list[dict[str, Any]] = []
     skipped = Counter()
@@ -588,9 +592,11 @@ def _mined_negatives(negatives_path: Path, loaded: dict[str, Any], frames: list[
 
 
 def _prepare_classifier(loaded: dict[str, Any], dataset_path: Path, split_path: Path, data_root: Path, *,
-                        dataset_kind: str, negatives_path: Path | None) -> dict[str, Any]:
+                        dataset_kind: str, negatives_path: Path | None,
+                        mapillary_path: Path | None = None) -> dict[str, Any]:
     """The v2 plan (see prepare_reader_training): the sign crops with their v2 labels, the kinds too rare to
-    learn folded into other_sign, and the not_a_sign crops of each partition from its own frames only."""
+    learn folded into other_sign, the not_a_sign crops of each partition from its own frames only, and the
+    Mapillary crops in train when asked (after the folding, which counts our crops only)."""
     rows = loaded["rows"]
     assignments = loaded["assignments"]
     frames = reviewed_frames(rows, assignments)
@@ -630,6 +636,16 @@ def _prepare_classifier(loaded: dict[str, Any], dataset_path: Path, split_path: 
     for record in records:
         if record["label"] in folded:
             record["label"] = OTHER_SIGN
+    mapillary = None
+    if mapillary_path is not None:
+        from nnslr_tools.mapillary import training_records
+        ours = {r["label"] for r in records if r["split"] == TRAIN_SPLIT}
+        extra, mapillary = training_records(Path(mapillary_path), ours,
+                                            {label for label in ours if label.startswith(OTHER_SIGN + ":")})
+        for path in sorted({record["image_path"] for record in extra}):
+            if not _safe_image_path(data_root, path).is_file():
+                raise ValueError(f"missing_image: {path} (prepare Mapillary again: helpers/mapillary.sh)")
+        records += extra
 
     train_labels = sorted({r["label"] for r in records if r["split"] == TRAIN_SPLIT})
     val_labels = sorted({r["label"] for r in records if r["split"] == VALIDATION_SPLIT})
@@ -667,6 +683,8 @@ def _prepare_classifier(loaded: dict[str, Any], dataset_path: Path, split_path: 
     ]
     if negatives_path is None:
         limitations.append("no_mined_negatives: only removed proposals and boxes marked not a sign")
+    if mapillary is not None:
+        limitations.append("mapillary_crops_in_train: street photos of other cameras, measured on our drives only")
     if any(record.get("tier") == "ai_before_rule" for record in records if record["label"] == NOT_A_SIGN):
         limitations.append("negatives_of_ai_reviews_before_the_other_sign_rule_may_be_unboxed_signs")
     if dataset_kind == "training-candidate":
@@ -692,6 +710,8 @@ def _prepare_classifier(loaded: dict[str, Any], dataset_path: Path, split_path: 
         "negatives_by_tier": dict(sorted(by_tier.items())),
         "negatives_file": negatives_file,
         "negatives_sha256": None if negatives_file is None else negatives_file["sha256"],
+        "mapillary": mapillary,
+        "mapillary_sha256": None if mapillary is None else mapillary["sha256"],
         "folded_labels": folded,
         "min_kind_train_crops": MIN_KIND_TRAIN_CROPS,
         "negative_max_iou": NEGATIVE_MAX_IOU,
@@ -941,10 +961,12 @@ class TrainConfig:
     # v2 only: the darker, lower-contrast photometric augmentation (CLASSIFIER_AUGMENTATION) and the jitter of the
     # box (CLASSIFIER_BOX_JITTER) of the training crops, in place of the light colour jitter of v1.
     augment: bool = False
+    # v2 only: the crops file of nnslr mapillary-crops whose signs join train (nnslr_tools.mapillary), or None.
+    mapillary: str | None = None
 
 
 # The settings a reader run saved before they existed was trained with: resuming such a run compares against these.
-READER_CONFIG_BEFORE_SETTINGS = {"class_scheme": "v1", "augment": False}
+READER_CONFIG_BEFORE_SETTINGS = {"class_scheme": "v1", "augment": False, "mapillary": None}
 
 # The box of a training crop moved and resized before the crop, as the cutter's boxes are never exact: each side
 # scaled by a factor in "scale", the centre moved by up to "shift" of the box's size, with this probability.
@@ -1241,6 +1263,8 @@ def resume_arguments(state: dict[str, Any]) -> list[str]:
         flags += ["--classes", "v2"]
         if config.get("augment") is False:
             flags.append("--no-augment")
+        if config.get("mapillary"):
+            flags += ["--mapillary", str(config["mapillary"])]
     return flags
 
 
@@ -2031,6 +2055,8 @@ def train_reader(
             raise ValueError("resume reader classes mismatch")
         if classifier and saved.get("negatives_sha256") != plan.get("negatives_sha256"):
             raise ValueError("resume negatives mismatch: the run started with another negatives file")
+        if classifier and saved.get("mapillary_sha256") != plan.get("mapillary_sha256"):
+            raise ValueError("resume Mapillary mismatch: the run started with other Mapillary crops")
         start_epoch = saved.get("epoch")
         if not isinstance(start_epoch, int) or not 0 <= start_epoch < config.epochs:
             raise ValueError("invalid or already completed resume epoch")
@@ -2057,6 +2083,7 @@ def train_reader(
             "split_sha256": plan["split_sha256"],
             "class_scheme": scheme,
             "negatives_sha256": plan.get("negatives_sha256"),
+            "mapillary_sha256": plan.get("mapillary_sha256"),
             "classes": classes,
             "input_size": config.input_size,
             "best_accuracy": best_accuracy,

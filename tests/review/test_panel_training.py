@@ -469,3 +469,30 @@ def test_the_networks_are_packaged_then_published_from_the_models_tab(root, chec
     job = panel.start('networks_publish', {'package': 'pkg-1'})
     finished(panel, job['id'])
     assert re.search(r'args: --upload --name=pkg-1$', full_log(panel, job['id']), re.M)
+
+
+def test_the_classifier_takes_the_mapillary_signs_only_when_prepared(root, checkout, monkeypatch):
+    from nnslr_tools.mapillary import CROPS_FILE
+    classifier_script(checkout, FAKE_CLASSIFIER.replace('echo "args $*"', 'echo "args $* mapillary=${NNSLR_CLASSIFIER_MAPILLARY:-0}"'))
+    panel = Panel(root, repo=checkout)
+    monkeypatch.setattr(panel, 'activities', lambda: [])
+    cutter_in_use(root, panel)
+    assert panel.status()['classifier_options']['mapillary']['available'] is False
+    with pytest.raises(PanelError) as missing:
+        panel.start('train_classifier', {'mapillary': 'on'})
+    assert (missing.value.status, missing.value.message) == (409, 'Mapillary is not prepared (helpers/mapillary.sh).')
+    for action, options in (('train_classifier', {'mapillary': 'yes'}), ('train_cutter', {'mapillary': 'off'})):
+        with pytest.raises(PanelError) as refused:
+            panel.start(action, options)
+        assert refused.value.status == 400
+    (root / CROPS_FILE).parent.mkdir(parents=True)
+    (root / CROPS_FILE).write_text(json.dumps({'kind': 'mapillary_crops', 'version': 1, 'crops': 2,
+                                               'by_label': {'maximum_speed:50': 2}}) + '\n')
+    assert panel.status()['classifier_options']['mapillary'] == {'available': True, 'crops': 2, 'labels': 1, 'reason': ''}
+    job = panel.start('train_classifier', {'mapillary': 'on'})
+    finished(panel, job['id'])
+    assert 'mapillary=1\n' in full_log(panel, job['id'])
+    time.sleep(1.1)  # a job's log is named by its second
+    job = panel.start('train_classifier', {'mapillary': 'off'})
+    finished(panel, job['id'])
+    assert 'mapillary=0\n' in full_log(panel, job['id'])

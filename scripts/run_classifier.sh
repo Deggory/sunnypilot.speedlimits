@@ -38,8 +38,9 @@ set -euo pipefail
 # NNSLR_CLASSIFIER_PATIENCE (5), NNSLR_CLASSIFIER_BATCH_SIZE (64), NNSLR_NUM_WORKERS (half the cores, 4 to 16),
 # NNSLR_NEGATIVE_SCORE (0.1), NNSLR_NEGATIVES_PER_FRAME (3), NNSLR_NEGATIVES_FACTOR (3),
 # NNSLR_OLD_READER_RUN (2026-10-24_1452; empty: no comparison), NNSLR_CLASSIFIER_AUGMENT=0 to train without the
-# darker crops and box jitter, NNSLR_TRAIN_INIT=random, NNSLR_ALLOW_BUSY_GPU=1 to share a GPU that already has
-# compute processes.
+# darker crops and box jitter, NNSLR_CLASSIFIER_MAPILLARY=1 to add the signs of the Mapillary Traffic Sign Dataset
+# to train (the crops of helpers/mapillary.sh, $DATA_ROOT/external/mapillary/crops.jsonl; nnslr_tools.mapillary),
+# NNSLR_TRAIN_INIT=random, NNSLR_ALLOW_BUSY_GPU=1 to share a GPU that already has compute processes.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DATA_ROOT="${NNSLR_DATA_ROOT:-$ROOT_DIR/data}"
@@ -173,6 +174,15 @@ fi
 if [[ "${NNSLR_CLASSIFIER_AUGMENT:-1}" == "0" ]]; then
   SETTINGS+=(--no-augment)
 fi
+MAPILLARY=()
+if [[ "${NNSLR_CLASSIFIER_MAPILLARY:-0}" == "1" ]]; then
+  if [[ ! -s "$DATA_ROOT/external/mapillary/crops.jsonl" ]]; then
+    echo "error: Mapillary is not prepared: run helpers/mapillary.sh first" >&2
+    exit 2
+  fi
+  MAPILLARY=(--mapillary "$DATA_ROOT/external/mapillary/crops.jsonl")
+  SETTINGS+=("${MAPILLARY[@]}")
+fi
 
 echo "== Classifier (cutter -> classifier -> decider) =="
 echo "run:          $RUN_ID"
@@ -188,7 +198,7 @@ echo "wandb:        project ${WANDB_PROJECT:-sunnypilot.speedlimits}, group $RUN
 echo
 
 echo "== 1/7 Check the dataset, the split and the cutter (CPU-only) =="
-"$NN" train --task reader --classes v2 --dataset-kind "$DATASET_KIND" --dry-run > /dev/null
+"$NN" train --task reader --classes v2 --dataset-kind "$DATASET_KIND" "${MAPILLARY[@]}" --dry-run > /dev/null
 "$NN" mine-negatives --dataset-kind "$DATASET_KIND" --per-frame "$PER_FRAME" --total-factor "$FACTOR" --dry-run
 for partition in "${PARTITIONS[@]}"; do
   "$NN" evaluate-chain --dataset-kind "$DATASET_KIND" --partition "$partition" --dry-run

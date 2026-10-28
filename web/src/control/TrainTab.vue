@@ -8,7 +8,7 @@
 // (GET /api/panel/models, a link to its versions in Models). The page does not move while work runs.
 import {computed, ref} from 'vue';
 import {isoWhen, plural, thousands} from '../common/format';
-import type {ActionName, ActionState, Activity, CutterFamilies, CutterOptions, Job, JobProgress as Progress, ModelRole, ModelVersion,
+import type {ActionName, ActionOptions, ActionState, Activity, CutterFamilies, Job, JobProgress as Progress, ModelRole, ModelVersion,
   PanelStatus, TrainingStart} from '../common/panel-types';
 import ActionList from './ActionList.vue';
 import JobProgress from './JobProgress.vue';
@@ -22,7 +22,7 @@ import TrainStart from './TrainStart.vue';
 import SectionHead from './SectionHead.vue';
 
 const props = defineProps<{status: PanelStatus | null}>();
-const emit = defineEmits<{run: [name: ActionName, state: ActionState, start?: TrainingStart, options?: CutterOptions]; stop: [job: Job];
+const emit = defineEmits<{run: [name: ActionName, state: ActionState, start?: TrainingStart, options?: ActionOptions]; stop: [job: Job];
   details: [job: Job]}>();
 
 /** The page as an app: one line of data, then one network at a time (Cutter, Classifier, Decider, the whole Pipeline),
@@ -117,9 +117,19 @@ const CUTTER_ACTIONS = computed((): [ActionName, string][] => [
 const DECIDER_ACTIONS: [ActionName, string][] = [
   ['train_decider', 'Three deciders: the crop alone, with position and speed, with the scene. About 15 minutes on the GPU.'],
 ];
-const CLASSIFIER_ACTIONS: [ActionName, string][] = [
-  ['train_classifier', 'A new classifier, taught on the signs and on the cutter’s mistakes. Takes a few hours on the GPU.'],
-];
+/** The classifier: our signs only, or with the signs of the Mapillary dataset in train (status.classifier_options). */
+const mapillaryState = computed(() => props.status?.classifier_options?.mapillary ?? null);
+const MAPILLARY_OPTIONS: {key: 'off' | 'on'; label: string}[] = [{key: 'off', label: 'Our signs'}, {key: 'on', label: 'With Mapillary'}];
+const pickedMapillary = ref<'off' | 'on' | null>(null);
+const mapillary = computed({
+  get: (): 'off' | 'on' => mapillaryState.value?.available ? pickedMapillary.value ?? 'off' : 'off',
+  set: (value: 'off' | 'on') => { pickedMapillary.value = value; },
+});
+const CLASSIFIER_ACTIONS = computed((): [ActionName, string][] => [
+  ['train_classifier', 'A new classifier, taught on the signs and on the cutter’s mistakes'
+    + (mapillary.value === 'on' ? ', with ' + thousands(mapillaryState.value?.crops ?? 0) + ' signs of Mapillary' : '')
+    + '. Takes a few hours on the GPU.'],
+]);
 const activities = computed(() => terminalActivities(props.status, ['train']));
 const sectionActivities = computed(() => activitiesFor(section.value));
 /** The curves of a training: while it runs (a placeholder before the first epoch), or of the last one if it has any. */
@@ -191,8 +201,17 @@ const numbers = computed(() => {
         <ActionList :items="CUTTER_ACTIONS" :actions="status?.actions ?? null"
                     @run="(name, state) => emit('run', name, state, undefined, {size: cutterSize, families: cutterFamilies})"/>
       </template>
-      <ActionList v-else-if="section === 'classifier'" :items="CLASSIFIER_ACTIONS" :actions="status?.actions ?? null"
-                  @run="(name, state) => emit('run', name, state)"/>
+      <template v-else-if="section === 'classifier'">
+        <div v-if="mapillaryState?.available" class="seg-row">
+          <Segmented v-model="mapillary" :options="MAPILLARY_OPTIONS" label="Signs the classifier learns from"/>
+        </div>
+        <ActionList :items="CLASSIFIER_ACTIONS" :actions="status?.actions ?? null"
+                    @run="(name, state) => emit('run', name, state, undefined, {mapillary})"/>
+        <p v-if="mapillaryState?.available" class="latest-none" id="train-mapillary-note">Mapillary: {{ thousands(mapillaryState.crops) }}
+          street-photo signs of {{ plural(mapillaryState.labels, 'kind') }}, added to train only: every measure stays on your drives.</p>
+        <p v-else-if="mapillaryState" class="latest-none" id="train-mapillary-note">Mapillary signs: not prepared yet
+          (helpers/mapillary.sh).</p>
+      </template>
       <template v-else-if="section === 'decider'">
         <ActionList :items="DECIDER_ACTIONS" :actions="status?.actions ?? null" @run="(name, state) => emit('run', name, state)"/>
         <p class="latest-none" id="train-decider-note">The one in use (Models) sets OURS or another on the speed signs Our networks propose.</p>

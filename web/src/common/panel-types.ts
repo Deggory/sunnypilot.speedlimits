@@ -58,6 +58,8 @@ export interface ActionOptions {
   package?: string;
   /** The run of the SignNet sent to the car (send_to_car) or tried on the comma (try_on_comma). */
   signnet?: string;
+  /** Whether the classifier's training adds the signs of the Mapillary dataset to train (train_classifier). */
+  mapillary?: 'on' | 'off';
 }
 export type JobState = 'running' | 'ok' | 'failed' | 'interrupted';
 export type RouteState = 'collegare' | 'estrarre' | 'preannotare' | 'revisionare' | 'importare' | 'pronta';
@@ -334,6 +336,9 @@ export interface PanelStatus {
   training_starts: TrainingStart[];
   /** The choices of “Train the cutter”: its input sizes and the default one, what it finds and the default. */
   cutter_options?: {sizes: string[]; size: string; families: CutterFamilies[]; family: CutterFamilies};
+  /** The Mapillary switch of “Train the classifier”: whether its crops are prepared (helpers/mapillary.sh), how many
+   * and of how many labels, and why not when they are not. */
+  classifier_options?: {mapillary: {available: boolean; crops: number; labels: number; reason: string}};
   /** Why a proposer cannot run on this server (null: it can): qwen not installed, or qwen_gpu, the GPU memory it
    * needs taken now. */
   /** Why a proposer cannot run here: qwen not installed, its GPU memory taken, Our networks not whole yet. */

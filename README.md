@@ -120,7 +120,7 @@ The review page is the picture at the top of this page. This is the one step don
 The Train tab has one card per network:
 
 - **Cutter.** Pick the input size (640 × 360, 960 × 544 or the full 1344 × 760, the default) and whether it boxes every sign or only speed signs, then press **Train the cutter**.
-- **Classifier.** **Train the classifier** collects the cutter's false boxes, trains the classifier with "not a sign", and measures it on its own and together with the cutter.
+- **Classifier.** **Train the classifier** collects the cutter's false boxes, trains the classifier with "not a sign", and measures it on its own and together with the cutter. Once `helpers/mapillary.sh` has cut the signs of the Mapillary Traffic Sign Dataset, a switch adds them to its training crops (**With Mapillary**); the measures stay on our drives.
 - **Decider.** **Train the decider** trains experiment B's three variants (the crop alone, with position and speed, with the scene) in about 15 minutes, and compares them. It is a prototype; the one in use (Models) sets OURS or another on the speed signs Our networks propose.
 
 Two more buttons cover the dataset and the older pipeline. **Import reviews** turns the confirmed frames into the dataset. **Whole pipeline** runs the older detector-and-reader baseline, from the import to a packaged model.
@@ -307,6 +307,7 @@ Two scripts take a SignNet to the comma, from its card on Models › Versions. `
   - the traffic-sign detector [`star092304/traffic-sign-detection-vietnam-yolo`](https://huggingface.co/star092304/traffic-sign-detection-vietnam-yolo) (YOLO, 82 classes of Vietnamese signs). Its model card says Apache-2.0, but the model file's own metadata says AGPL-3.0. This has not been resolved.
   - the road segmentation [`Xenova/segformer-b0-finetuned-cityscapes-1024-1024`](https://huggingface.co/Xenova/segformer-b0-finetuned-cityscapes-1024-1024), an ONNX conversion of NVIDIA SegFormer. [NVIDIA's licence](https://github.com/NVlabs/SegFormer/blob/master/LICENSE) allows non-commercial research and evaluation only, and the Cityscapes dataset has terms of its own.
   - [RapidOCR](https://github.com/RapidAI/RapidOCR) 3.4.0 with the PaddleOCR PP-OCRv4 models (Apache-2.0), for numbers painted on the road.
+- The [Mapillary Traffic Sign Dataset](https://www.mapillary.com/dataset/trafficsign) (CC BY-NC-SA 4.0), whose street photos can add sign crops to the classifier's training (`helpers/mapillary.sh`, off by default). It is never committed, and a classifier trained with it carries its non-commercial terms.
 - Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), under the ODbL, read offline to find the roads near the drives.
 - Country borders from [Natural Earth](https://www.naturalearthdata.com) (public domain).
 - The portal is built with [Vue 3](https://vuejs.org) (MIT, bundled into the built pages), Vite and TypeScript.

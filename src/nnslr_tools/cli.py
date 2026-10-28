@@ -721,6 +721,7 @@ def _train_config(args: argparse.Namespace):
         amp=not args.no_amp,
         class_scheme=classes,
         augment=classes == "v2" and not args.no_augment,
+        mapillary=str(Path(args.mapillary).resolve()) if getattr(args, "mapillary", None) else None,
     )
 
 
@@ -746,7 +747,12 @@ def _reader_plan_options(args: argparse.Namespace) -> dict:
         raise ValueError("--cutter-families is a detector option")
     if args.negatives and args.classes != "v2":
         raise ValueError("--negatives are crops of the classifier: add --classes v2")
-    return {"class_scheme": args.classes, "negatives_path": Path(args.negatives) if args.negatives else None}
+    options = {"class_scheme": args.classes, "negatives_path": Path(args.negatives) if args.negatives else None}
+    if getattr(args, "mapillary", None):
+        if args.task != "reader" or args.classes != "v2":
+            raise ValueError("--mapillary adds crops to the classifier: --task reader --classes v2")
+        options["mapillary_path"] = Path(args.mapillary)
+    return options
 
 
 def _cmd_train(args: argparse.Namespace) -> int:
@@ -1487,6 +1493,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_signnet.add_argument("--workers", type=int, default=8)
     p_signnet.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_signnet.set_defaults(func=_cmd_train_signnet)
+    p_mapillary = sub.add_parser("mapillary-crops", help="cut the signs of the Mapillary Traffic Sign Dataset that are "
+                                                         "ours into <data root>/external/mapillary/crops and "
+                                                         "crops.jsonl: extra train crops of the classifier "
+                                                         "(nnslr train --mapillary)")
+    p_mapillary.add_argument("--annotations", required=True, help="MTSD's folder of <key>.json annotations")
+    p_mapillary.add_argument("--images", required=True, help="MTSD's folder of <key>.jpg photos")
+    p_mapillary.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+    p_mapillary.set_defaults(func=_cmd_mapillary_crops)
     p_tracks = sub.add_parser("tracks", help="the same sign followed across consecutive confirmed frames "
                                              "(derived/tracks/<route>/tracks.jsonl), with the matching of Apply previous")
     p_tracks.add_argument("--route", action="append", help="route id; repeat for more")
@@ -1601,6 +1615,8 @@ def build_parser() -> argparse.ArgumentParser:
                               "of other signs, with darker crops and box jitter (--no-augment: without)")
     p_train.add_argument("--negatives", help="reader --classes v2: the cutter's false boxes of nnslr "
                                              "mine-negatives (mined on this dataset and split)")
+    p_train.add_argument("--mapillary", help="reader --classes v2: the crops file of nnslr mapillary-crops, whose "
+                                             "signs join train (never validation or test)")
     # [classifier-chain] - END
     p_train.set_defaults(func=_cmd_train)
     # [training-baseline] - END
@@ -2094,6 +2110,15 @@ def _cmd_road_types(args: argparse.Namespace) -> int:
             result = {"route_id": route, "error": str(exc)}
         print(json.dumps(result, sort_keys=True), flush=True)
     return 1 if failed else 0
+
+
+def _cmd_mapillary_crops(args: argparse.Namespace) -> int:
+    from nnslr_tools.mapillary import make_crops
+    from nnslr_tools.preannotate import resolve_data_root
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    header = make_crops(Path(args.annotations), Path(args.images), root, log=lambda line: print(line, flush=True))
+    print(json.dumps(header, sort_keys=True), flush=True)
+    return 0 if header["crops"] else 1
 
 
 def _cmd_train_signnet(args: argparse.Namespace) -> int:

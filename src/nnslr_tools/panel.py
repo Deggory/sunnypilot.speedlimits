@@ -92,7 +92,8 @@ CUTTER_FAMILY = 'all'
 # The options an action takes, besides a training's start and the run to resume (checked by Panel.start).
 # The GPU memory Qwen3-VL-8B takes in float16 (scripts/setup_vlm.sh: 17.5 GB), with a margin for one frame.
 QWEN_GPU_MB = 18 * 1024
-ACTION_OPTIONS = {'train_cutter': ('size', 'families'), 'prepare': ('proposer',), 'prepare_again': ('proposer',),
+ACTION_OPTIONS = {'train_cutter': ('size', 'families'), 'train_classifier': ('mapillary',),
+                  'prepare': ('proposer',), 'prepare_again': ('proposer',),
                   'measure_proposer': ('proposer',), 'networks_publish': ('package',), 'send_to_car': ('signnet',),
                   'try_on_comma': ('signnet',),
                   'ai_review': ('route', 'provider', 'save', 'limit'), 'measure_ai_reviewer': ('provider', 'limit')}
@@ -170,6 +171,8 @@ def _settings_of(log: Path, action: str) -> list[str]:
         chips.append(FAMILY_TEXT.get(flags['--cutter-families'], flags['--cutter-families']))
     if flags.get('--classes'):
         chips.append('classes ' + flags['--classes'])
+    if '--mapillary' in flags:
+        chips.append('Mapillary signs')
     epochs = flags.get('--epochs') or fields.get('epochs')
     if epochs:
         chips.append(epochs + ' epochs')
@@ -613,6 +616,9 @@ class Panel:
         # The choices of "Train the cutter", for its buttons.
         payload['cutter_options'] = {'sizes': list(CUTTER_SIZES), 'size': CUTTER_SIZE, 'families': list(CUTTER_FAMILIES),
                                      'family': CUTTER_FAMILY}
+        # The Mapillary switch of "Train the classifier": whether its crops are prepared (helpers/mapillary.sh).
+        from nnslr_tools.mapillary import crops_state
+        payload['classifier_options'] = {'mapillary': crops_state(self.root)}
         payload['dataset'] = self.dataset_summary()
         payload['training_starts'] = self.training_starts()
         payload['next_step_text'], payload['all_ready'] = _next_step_text(payload)
@@ -1187,9 +1193,9 @@ class Panel:
     def start(self, action: str, options: dict | None = None) -> dict:
         """Starts an action. The only options are the starting point of a training ({'start': key} of
         training_starts()), turned into a flag or the environment of helpers/3_train.sh, the run to resume, and the
-        cutter's size and families (one of CUTTER_SIZES, CUTTER_FAMILIES), and the route, provider, save and limit of
-        an AI action (_ai_arguments): never a command. The classifier's and the cutter's trainings run on a new run
-        named here (new_run_name)."""
+        cutter's size and families (one of CUTTER_SIZES, CUTTER_FAMILIES), the route, provider, save and limit of an AI
+        action (_ai_arguments), and whether the classifier adds the Mapillary signs ('on' or 'off'): never a command.
+        The classifier's and the cutter's trainings run on a new run named here (new_run_name)."""
         if action not in ACTIONS:
             raise PanelError(404, 'unknown_action', 'Unknown action.')
         start_env = {}
@@ -1242,6 +1248,18 @@ class Panel:
             if families not in CUTTER_FAMILIES:
                 raise PanelError(400, 'bad_option', 'Unknown signs for the cutter: all or speed.')
             start_env['NNSLR_CUTTER_FAMILIES'] = families
+        mapillary = (options or {}).get('mapillary')
+        if mapillary is not None:
+            if action != 'train_classifier':
+                raise PanelError(400, 'bad_option', 'Only "Train the classifier" takes the Mapillary signs.')
+            if mapillary not in ('on', 'off'):
+                raise PanelError(400, 'bad_option', 'Mapillary is on or off.')
+            if mapillary == 'on':
+                from nnslr_tools.mapillary import crops_state
+                state = crops_state(self.root)
+                if not state['available']:
+                    raise PanelError(409, 'not_available', state['reason'][0].upper() + state['reason'][1:] + '.')
+                start_env['NNSLR_CLASSIFIER_MAPILLARY'] = '1'
         package = (options or {}).get('package')
         if package is not None and action != 'networks_publish':
             raise PanelError(400, 'bad_option', 'Only "Publish on Hugging Face" takes a package.')
