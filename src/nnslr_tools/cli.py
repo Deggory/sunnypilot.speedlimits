@@ -1031,6 +1031,18 @@ def _cmd_export_onnx(args: argparse.Namespace) -> int:
 # [onnx-export] - END
 
 
+def _cmd_on_car(args: argparse.Namespace) -> int:
+    """What runs on the comma, for the Models tab (nnslr_tools.model_roles.record_on_car)."""
+    from nnslr_tools.model_roles import record_on_car
+    from nnslr_tools.preannotate import resolve_data_root
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    record = record_on_car(root, Path(args.models), dry_run=args.dry_run)
+    print(json.dumps(record, indent=2))
+    if args.dry_run:
+        print("dry run: nothing written", file=sys.stderr)
+    return 0
+
+
 def _cmd_drive_video(args: argparse.Namespace) -> int:
     """A drive as an MP4 for the Drive view of Results (nnslr_tools.drive_video)."""
     from nnslr_tools import drive_video
@@ -1738,6 +1750,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_video.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_video.add_argument("--again", action="store_true", help="make it again even when it is up to date")
     p_video.set_defaults(func=_cmd_drive_video)
+
+    p_car = sub.add_parser(
+        "on-car",
+        help="record which networks run on the comma (models/on-car.json, shown on the Models tab) from a clone of "
+             "the published models repository",
+    )
+    p_car.add_argument("--models", required=True,
+                       help="clone of the published models repository (speed_limits.json, format 2)")
+    p_car.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+    p_car.add_argument("--dry-run", action="store_true", help="check and print the record, write nothing")
+    p_car.set_defaults(func=_cmd_on_car)
 
     # [offline-replay] - START
     p_replay = sub.add_parser(

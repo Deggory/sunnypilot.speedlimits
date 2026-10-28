@@ -210,7 +210,8 @@ const rows = computed((): Row[] => {
     for (const version of versionsOf('cutter') as CutterModel[]) {
       const test = version.test;
       const speed = test?.by_family?.speed;
-      list.push({id: version.id, name: 'Cutter ' + sizeText(version.input_size) + (version.families === 'all' ? ' · all signs' : ' · speed signs'),
+      list.push({id: version.id, name: (version.kind === 'signnet' ? version.label : 'Cutter ' + sizeText(version.input_size))
+        + (version.families === 'all' ? ' · all signs' : ' · speed signs'),
         when: isoWhen(version.trained_at), main: speed ? share(speed.found, speed.truth) : share(test?.found, test?.truth_boxes),
         mainText: speed ? ofText(speed.found, speed.truth, 'speed signs found')
           : ofText(test?.found, test?.truth_boxes, version.families === 'all' ? 'signs found' : 'speed signs found'),

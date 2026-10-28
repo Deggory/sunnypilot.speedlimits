@@ -5,7 +5,8 @@
 // classifier: the speed signs and every sign read right on the test, and for the classifier with “not a sign” the “not a sign” crops it rejects and
 // the chain end to end at the cutter's score, the speed signs found and read right and the false boxes per frame that
 // survive it; the decider: the "Another" road found, on validation and test), the button that puts it in use and the
-// link to its run on Evaluate.
+// link to its run on Evaluate. A SignNet (the cutter made for the car) has its own details and no button: it is never
+// the cutter in use here. “On the car”: one of the networks the comma downloads.
 import {computed} from 'vue';
 import {isoWhen, thousands} from '../common/format';
 import type {DeciderNumbers, ModelVersion} from '../common/panel-types';
@@ -17,13 +18,15 @@ const props = defineProps<{version: ModelVersion; roleLabel: string; score: numb
 const emit = defineEmits<{use: [version: ModelVersion]}>();
 
 const cutter = computed(() => props.version.role === 'cutter' ? props.version : null);
+const signnet = computed(() => cutter.value?.kind === 'signnet');
 const classifier = computed(() => props.version.role === 'classifier' ? props.version : null);
 const decider = computed(() => props.version.role === 'decider' ? props.version : null);
 /** The cutter's numbers: on the test, else on validation (a size compared before its test was measured). */
 const cut = computed(() => cutter.value?.test ?? cutter.value?.validation ?? null);
 const cutterMetrics = computed((): Metric[] => cutter.value ? metricsOf(cutter.value) : []);
 const cutterCaption = computed(() => cut.value === null ? ''
-  : 'Found on the ' + (PARTITION_LABEL[cut.value.partition] ?? cut.value.partition).toLowerCase() + ' at score ' + (cut.value.score_threshold ?? '–'));
+  : 'Found on the ' + (PARTITION_LABEL[cut.value.partition] ?? cut.value.partition).toLowerCase() + ' at score ' + (cut.value.score_threshold ?? '–')
+    + ', and in the ' + (cut.value.budget?.boxes ?? 5) + ' best boxes of each frame (what the car reads)');
 const evaluated = computed(() => cut.value !== null || (classifier.value?.test ?? null) !== null || (classifier.value?.chain ?? null) !== null
   || decider.value?.validation != null || decider.value?.test != null);
 const epoch = computed(() => epochText(props.version.best_epoch, props.version.epochs_run ?? props.version.epochs));
@@ -63,8 +66,11 @@ const noOtherOnTest = computed(() => decider.value?.test?.other_road_support ===
         <span class="model-name" :title="version.id">{{ version.label }}</span>
         <span class="model-sub">{{ version.trained_at ? isoWhen(version.trained_at) : version.run }} · {{ version.detail }}</span>
       </div>
-      <span v-if="version.in_use" class="pill ok">In use</span>
-      <span v-else-if="!version.finished" class="pill warn">Not finished</span>
+      <span v-if="version.in_use || version.on_car || !version.finished" class="model-pills">
+        <span v-if="version.in_use" class="pill ok">In use</span>
+        <span v-else-if="!version.finished" class="pill warn">Not finished</span>
+        <span v-if="version.on_car" class="pill car">On the car</span>
+      </span>
     </div>
 
     <template v-if="cutter">
@@ -79,9 +85,17 @@ const noOtherOnTest = computed(() => decider.value?.test?.other_road_support ===
         <dl class="model-facts">
           <div><dt>Boxes per frame</dt><dd>{{ perFrame(cut.boxes_per_frame) }}</dd></div>
           <div><dt>False per frame</dt><dd>{{ perFrame(cut.false_per_frame) }}</dd></div>
+          <template v-if="signnet">
+          <div><dt title="The top rows of the frame, scaled to this width">Input band</dt><dd>{{ cutter.input_size ? sizeText(cutter.input_size) : '–' }}</dd></div>
+          <div><dt title="The step of its output grid, in pixels of the band">Grid step</dt><dd>{{ cutter.stride ? cutter.stride + ' px' : '–' }}</dd></div>
+          <div><dt>Weights</dt><dd>{{ cutter.parameters ? thousands(cutter.parameters) : '–' }}</dd></div>
+          <div v-if="cutter.train_share"><dt>Training drives</dt><dd>{{ pct(cutter.train_share) }}</dd></div>
+          </template>
+          <template v-else>
           <div><dt>Time per frame</dt><dd :title="cut.device ?? ''">{{ cut.ms_per_frame === null ? '–' : perFrame(cut.ms_per_frame) + ' ms' }}</dd></div>
           <div><dt>Input</dt><dd>{{ sizeText(cutter.input_size) }}<span v-if="!cutter.input_size_recorded" class="muted"> (default)</span></dd></div>
-          <div><dt>Default box</dt><dd>{{ cutter.anchor_min_ratio }}<span v-if="!cutter.anchor_recorded" class="muted"> (default)</span></dd></div>
+          <div><dt>Default box</dt><dd>{{ cutter.anchor_min_ratio ?? '–' }}<span v-if="!cutter.anchor_recorded" class="muted"> (default)</span></dd></div>
+          </template>
           <div><dt>Best epoch</dt><dd>{{ epoch }}</dd></div>
           <div><dt>Finds</dt><dd>{{ cutter.families === 'all' ? 'speed and other signs' : 'speed signs' }}<span v-if="!cutter.families_recorded"
             class="muted"> (not recorded)</span></dd></div>
@@ -170,7 +184,8 @@ const noOtherOnTest = computed(() => decider.value?.test?.other_road_support ===
 
     <div class="model-actions">
       <a class="flow-link" :href="evaluateHref(version)" @click="openRun($event, version)">Open the run ›</a>
-      <button v-if="!version.in_use" class="btn small" type="button" :disabled="blocked !== '' || busy !== null" :title="blocked || ROLE_TEXT[version.role].uses"
+      <span v-if="signnet" class="model-car-note">Made for the car: here Prepare and the classifier’s training use a detector.</span>
+      <button v-else-if="!version.in_use" class="btn small" type="button" :disabled="blocked !== '' || busy !== null" :title="blocked || ROLE_TEXT[version.role].uses"
               :aria-label="'Use ' + version.run + ' · ' + version.label + ' as the ' + roleLabel.toLowerCase()"
               @click="emit('use', version)">{{ busy === version.id ? 'Saving…' : 'Use this one' }}</button>
     </div>

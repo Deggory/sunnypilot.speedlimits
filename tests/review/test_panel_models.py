@@ -493,3 +493,208 @@ def test_what_a_cutter_finds_and_the_speed_signs_alone(root, models):
     write(root / 'runs/r1/detector/detector-best.pt', 'weights')
     old = {entry['id']: entry for entry in by_role(models.index())['cutter']['versions']}['cutter:r1/detector']
     assert (old['families'], old['families_recorded'], old['test']['by_family']) == ('speed', False, None)
+
+
+# -- SignNet, the 5 best boxes, what runs on the car ------------------------------------------------------------
+def signnet_metrics(speed: int, other: int, boxes: float) -> dict:
+    """The metrics of nnslr_tools.signnet.measure on 4 frames with 6 speed signs and 4 other signs."""
+    found = speed + other
+    return {'true_positives': found, 'false_negatives': 10 - found, 'false_positives': round(boxes * 4) - found,
+            'image_count': 4, 'truth_box_count': 10, 'predictions_per_image': boxes, 'recall_iou': found / 10,
+            'recall_by_family': {'speed': {'truth': 6, 'found': speed, 'recall': speed / 6},
+                                 'other_sign': {'truth': 4, 'found': other, 'recall': other / 4}},
+            'recall_by_width': {'lt12': {'truth': 2, 'found': 1, 'recall': 0.5}}}
+
+
+def make_signnet(root: Path, name: str = 's1', *, finished: bool = True, share: float | None = None) -> Path:
+    """A run folder as ``nnslr train-signnet`` leaves it."""
+    run = root / 'runs' / name
+    write(run / 'signnet-best.pt', 'signnet weights')
+    write(run / 'train.log', 'epoch 1\n')
+    if share is not None:
+        write(run / 'subset.json', {'share': share, 'segments_kept': 4})
+    if finished:
+        partition = {'by_score_threshold': {'0.05': signnet_metrics(5, 4, 9.0), '0.1': signnet_metrics(4, 2, 3.0)},
+                     'by_box_budget': {'3': signnet_metrics(3, 1, 3.0), '5': signnet_metrics(5, 2, 5.0)}}
+        write(run / 'result.json', {'task': 'signnet', 'band': [896, 288], 'stride': 8, 'fuse_kernel': 1,
+                                    'parameters': 62997, 'best_epoch': 27, 'epochs': 40, 'families': 'all',
+                                    'history': [{'epoch': n} for n in range(1, 41)], 'test': partition})
+    return run
+
+
+def test_signnet_is_a_cutter_of_the_models_tab_never_the_one_in_use(root, models):
+    pipeline(root)
+    make_signnet(root, 's1')
+    make_signnet(root, 's2', share=0.25)
+    make_signnet(root, 's3', finished=False)
+    cutters = {entry['id']: entry for entry in by_role(models.index())['cutter']['versions']}
+    signnet = cutters['cutter:s1/signnet']
+    assert (signnet['kind'], signnet['label'], signnet['detail']) == ('signnet', 'SignNet 896 × 288', 'for the comma’s GPU')
+    assert (signnet['finished'], signnet['in_use'], signnet['on_car'], signnet['problems']) == (True, False, False, [])
+    assert (signnet['input_size'], signnet['anchor_min_ratio'], signnet['stride'], signnet['parameters']) == ('896x288', None, 8, 62997)
+    assert (signnet['best_epoch'], signnet['epochs_run'], signnet['families']) == (27, 40, 'all')
+    test = signnet['test']
+    # At the cutter's score, as a detector is judged on the same frames.
+    assert (test['at_cutter_score'], test['recall'], test['boxes_per_frame']) == (True, 0.6, 3.0)
+    assert test['by_family']['speed'] == {'truth': 6, 'found': 4, 'recall': pytest.approx(4 / 6)}
+    # Among its 5 best boxes of each frame.
+    assert test['budget'] == {'boxes': 5, 'truth_boxes': 10, 'found': 7, 'recall': 0.7, 'by_family': {
+        'speed': {'truth': 6, 'found': 5, 'recall': pytest.approx(5 / 6)}, 'other_sign': {'truth': 4, 'found': 2, 'recall': 0.5}}}
+    assert signnet['validation'] is None
+    assert cutters['cutter:s2/signnet']['detail'] == 'for the comma’s GPU · 25 % of the training drives'
+    assert cutters['cutter:s2/signnet']['train_share'] == 0.25
+    assert cutters['cutter:s3/signnet']['finished'] is False
+    assert cutters['cutter:r1/detector']['kind'] == 'detector'
+    # Prepare and the classifier's training load a detector: SignNet is never written in active.json.
+    with pytest.raises(ModelChoiceError) as error:
+        models.set_active('cutter', 'cutter:s1/signnet', who='admin', via='sign-in')
+    assert (error.value.status, error.value.reason) == (409, 'not_selectable')
+    assert not (root / 'models').exists()
+
+
+def test_a_result_that_is_not_a_signnet_is_unreadable(root, models):
+    run = make_signnet(root, 's1')
+    write(run / 'result.json', {'task': 'detector'})
+    entry = by_role(models.index())['cutter']['versions'][0]
+    assert (entry['id'], entry['finished'], entry['problems']) == ('cutter:s1/signnet', False, ['result.json is unreadable'])
+
+
+def test_the_speed_signs_in_the_5_best_boxes_of_a_detector_from_the_boxes_of_each_frame():
+    report = {'per_frame_boxes': {'max_boxes': 50}, 'images': [
+        # Best first: a speed sign found by the 4th box, an other sign only by the 7th.
+        {'truth_count': 2, 'truth_families': ['maximum_speed', 'other_sign'],
+         'cutter_boxes': ['0 0 9 9 0.900 -1', '0 0 9 9 0.800 -1', 'garbage', '0 0 9 9 0.500 0', '0 0 9 9 0.400 -1',
+                          '0 0 9 9 0.300 -1', '0 0 9 9 0.100 1']},
+        {'truth_count': 1, 'truth_families': ['zone'], 'cutter_boxes': ['1 1 20 20 0.800 0']},
+        {'truth_count': 0, 'truth_families': [], 'cutter_boxes': []},
+    ]}
+    assert model_roles.cutter_digest(report)['budget'] == {
+        'boxes': 5, 'truth_boxes': 3, 'found': 2, 'recall': pytest.approx(2 / 3),
+        'by_family': {'other_sign': {'truth': 1, 'found': 0, 'recall': 0.0}, 'speed': {'truth': 2, 'found': 2, 'recall': 1.0}}}
+    # A report without the boxes of each frame: not measured.
+    assert model_roles.cutter_digest({**report, 'per_frame_boxes': None})['budget'] is None
+    assert model_roles.cutter_digest(sizes_report())['budget'] is None
+
+
+def test_what_runs_on_the_car_is_marked_from_on_car_json(root, models):
+    pipeline(root)
+    make_signnet(root, 's1')
+    write(root / 'models/on-car.json', {'schema_version': 1, 'repository': 'owner/models', 'commit': 'a' * 40,
+                                        'version': '2026-10-28', 'recorded_at': '2026-10-28T18:00:00+00:00',
+                                        'cutter': {'id': 'cutter:s1/signnet'}, 'classifier': {'id': 'classifier:r1/reader'}})
+    index = models.index()
+    marked = {entry['id'] for role in index['roles'] for entry in role['versions'] if entry['on_car']}
+    assert marked == {'cutter:s1/signnet', 'classifier:r1/reader'}
+    assert index['on_car'] == {'repository': 'owner/models', 'commit': 'a' * 40, 'version': '2026-10-28',
+                               'recorded_at': '2026-10-28T18:00:00+00:00'}
+    assert (index['on_car_problem'], index['box_budget']) == (None, 5)
+    # Nothing is in use because of it.
+    assert all(role['active'] is None for role in index['roles'])
+    assert not (root / 'models/active.json').exists()
+    # Ids it could not have written mark nothing.
+    write(root / 'models/on-car.json', {'cutter': {'id': 'cutter:s1/../../signnet'}, 'classifier': {'id': 'cutter:r1/detector'},
+                                        'commit': 'not a commit'})
+    index = models.index()
+    assert not any(entry['on_car'] for role in index['roles'] for entry in role['versions'])
+    assert index['on_car']['commit'] is None
+    write(root / 'models/on-car.json', '{"cutter": ')
+    index = models.index()
+    assert (index['on_car'], index['on_car_problem']) == (None, 'models/on-car.json cannot be read')
+
+
+def _git(folder: Path, *args: str) -> None:
+    import subprocess
+    subprocess.run(['git', '-C', str(folder), '-c', 'user.name=test', '-c', 'user.email=test@example.com', *args],
+                   check=True, capture_output=True)
+
+
+def published_models(tmp_path: Path, root: Path) -> Path:
+    """A clone of the published models repository (format 2), pushed, for SignNet s1 and the reader of r1."""
+    import hashlib
+    sha = lambda data: hashlib.sha256(data).hexdigest()  # noqa: E731
+    clone = tmp_path / 'models-clone'
+    clone.mkdir()
+    (clone / 'signnet.onnx').write_bytes(b'signnet onnx')
+    (clone / 'classifier.onnx').write_bytes(b'classifier onnx')
+    write(clone / 'signnet.onnx.contract.json', {
+        'task': 'signnet', 'checkpoint': 'data/runs/s1/signnet-best.pt', 'onnx_sha256': sha(b'signnet onnx'),
+        'checkpoint_sha256': sha((root / 'runs/s1/signnet-best.pt').read_bytes())})
+    write(clone / 'classifier.onnx.contract.json', {
+        'task': 'reader', 'checkpoint': 'classifier:r1/reader', 'onnx_sha256': sha(b'classifier onnx'),
+        'checkpoint_sha256': sha((root / 'runs/r1/reader/reader-best.pt').read_bytes())})
+    write(clone / 'speed_limits.json', {'format': 2, 'version': '2026-10-28',
+                                        'finder': {'file': 'signnet.onnx', 'contract': 'signnet.onnx.contract.json'},
+                                        'classifier': {'file': 'classifier.onnx', 'contract': 'classifier.onnx.contract.json'}})
+    origin = tmp_path / 'origin.git'
+    _git(tmp_path, 'init', '--bare', '-q', str(origin))
+    _git(clone, 'init', '-q', '-b', 'main')
+    _git(clone, 'add', '-A')
+    _git(clone, 'commit', '-q', '-m', 'models')
+    _git(clone, 'remote', 'add', 'origin', str(origin))
+    _git(clone, 'push', '-q', 'origin', 'main')
+    _git(clone, 'remote', 'set-url', 'origin', 'git@github.com:owner/speed-models.git')
+    return clone
+
+
+def test_on_car_is_recorded_from_a_clone_of_the_published_models(root, models, tmp_path):
+    pipeline(root)
+    make_signnet(root, 's1')
+    clone = published_models(tmp_path, root)
+    record = model_roles.record_on_car(root, clone, dry_run=True)
+    assert not (root / 'models').exists()
+    record = model_roles.record_on_car(root, clone)
+    assert (record['cutter']['id'], record['classifier']['id']) == ('cutter:s1/signnet', 'classifier:r1/reader')
+    assert (record['repository'], record['version'], len(record['commit'])) == ('owner/speed-models', '2026-10-28', 40)
+    assert json.loads((root / 'models/on-car.json').read_text()) == record
+    marked = {entry['id'] for role in models.index()['roles'] for entry in role['versions'] if entry['on_car']}
+    assert marked == {'cutter:s1/signnet', 'classifier:r1/reader'}
+    assert not (root / 'models/active.json').exists()
+
+
+@pytest.mark.parametrize('change, message', [
+    ('onnx', 'signnet.onnx is not the ONNX of its contract'),
+    ('weights', 'the weights of cutter:s1/signnet on this server are not the ones of the published finder'),
+    ('gone', 'the finder cutter:s1/signnet is not on this server'),
+    ('unpushed', 'is on no remote branch'),
+    ('format', 'format 2 expected'),
+])
+def test_on_car_is_refused_unless_the_clone_matches_this_server(root, tmp_path, change, message):
+    pipeline(root)
+    make_signnet(root, 's1')
+    clone = published_models(tmp_path, root)
+    if change == 'onnx':
+        (clone / 'signnet.onnx').write_bytes(b'another onnx')
+    elif change == 'weights':
+        write(root / 'runs/s1/signnet-best.pt', 'retrained')
+    elif change == 'gone':
+        (root / 'runs/s1/signnet-best.pt').unlink()
+    elif change == 'unpushed':
+        (clone / 'README.md').write_text('more')
+        _git(clone, 'add', 'README.md')
+        _git(clone, 'commit', '-q', '-m', 'more')
+    else:
+        write(clone / 'speed_limits.json', {'format': 1})
+        _git(clone, 'commit', '-q', '-am', 'format 1')
+    with pytest.raises(ValueError, match=message):
+        model_roles.record_on_car(root, clone)
+    assert not (root / 'models/on-car.json').exists()
+
+
+def test_on_car_refuses_a_clone_with_changes_not_committed(root, tmp_path):
+    pipeline(root)
+    make_signnet(root, 's1')
+    clone = published_models(tmp_path, root)
+    write(clone / 'speed_limits.json', json.loads((clone / 'speed_limits.json').read_text()) | {'version': 'x'})
+    with pytest.raises(ValueError, match='changes not committed'):
+        model_roles.record_on_car(root, clone)
+
+
+def test_nnslr_on_car_prints_the_record(root, tmp_path, capsys):
+    from nnslr_tools.cli import main
+    pipeline(root)
+    make_signnet(root, 's1')
+    clone = published_models(tmp_path, root)
+    assert main(['on-car', '--models', str(clone), '--data-root', str(root), '--dry-run']) == 0
+    assert json.loads(capsys.readouterr().out)['cutter']['id'] == 'cutter:s1/signnet'
+    assert not (root / 'models/on-car.json').exists()
+    assert main(['on-car', '--models', str(tmp_path / 'nowhere'), '--data-root', str(root)]) == 2

@@ -1155,6 +1155,13 @@ font-variant-numeric:tabular-nums}
 .rt-cut-head{margin:0 0 6px;font-size:13px;color:var(--muted);line-height:1.35}
 .rt-cut-head strong{color:var(--fg);font-size:14.5px;margin-right:4px}
 .rt-track .rt-cut{fill:var(--surface);stroke:var(--fg);stroke-width:0.6}
+/* What runs on the comma (Models): a blue mark next to “in use”, its line on the card of a role, its pill. */
+.vt-car{color:var(--accent)}
+.pill.car{background:var(--accent-soft);color:var(--accent)}
+.model-pills{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px;flex:none}
+.inuse-car{font-size:12.5px;font-weight:600;color:var(--accent);overflow-wrap:anywhere}
+.model-car-note{font-size:12.5px;color:var(--muted)}
+@media (max-width:560px){.inuse-car{grid-column:1/-1}.versions-card[data-role="cutter"] .vt-c-every{display:none}}
 </style>
 </head>
 <body>

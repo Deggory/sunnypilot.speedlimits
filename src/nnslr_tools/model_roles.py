@@ -9,7 +9,12 @@ from what the training and the evaluation wrote:
 - cutter: ``<run>/detector/detector-best.pt`` (measured in ``<run>/evaluation/detector-test.json``) and
   ``<run>/detector-sizes/<size>/detector-best.pt`` (scripts/run_detector_sizes.sh, measured in
   ``<size>/evaluation/detector-{test,validation}.json``): recall overall and by sign width at the cutter's score
-  (CUTTER_SCORE, else the report's own threshold), boxes and false boxes per frame, time per frame;
+  (CUTTER_SCORE, else the report's own threshold), boxes and false boxes per frame, time per frame; and the speed
+  signs found among the BOX_BUDGET best boxes of each frame, what the car reads, from the boxes a newer report keeps
+  frame by frame. ``<run>/signnet-best.pt`` with its ``<run>/result.json`` (``nnslr train-signnet``, SignNet, the
+  cutter made for the comma's GPU): measured on the same frames with the same scoring (nnslr_tools.signnet.measure),
+  so its numbers sit in the same columns; it cannot be the cutter in use here (Prepare and the classifier's training
+  run a detector);
 - classifier: ``<run>/reader/reader-best.pt`` (``<run>/evaluation/reader-test.json``): right answers on the test,
   overall and on the crops a person confirmed; ``<run>/classifier/reader-best.pt`` of scripts/run_classifier.sh, the
   classifier with "not a sign" (``<run>/evaluation/classifier-test.json``, ``<run>/evaluation/chain-test.json``):
@@ -19,8 +24,13 @@ from what the training and the evaluation wrote:
   whom the sign applies to on validation and test, and the reading.
 
 Each artifact has a stable id ``<role>:<run>/<part>``: ``cutter:2026-10-24_1452/detector``,
-``cutter:<run>/detector-sizes/640x360``, ``classifier:<run>/reader``, ``classifier:<run>/classifier``,
-``decider:<run>/experiment-b/crop_geom``.
+``cutter:<run>/detector-sizes/640x360``, ``cutter:<run>/signnet``, ``classifier:<run>/reader``,
+``classifier:<run>/classifier``, ``decider:<run>/experiment-b/crop_geom``.
+
+What runs on the comma is <data root>/models/on-car.json, written by ``nnslr on-car --models <clone>``
+(record_on_car) from a clone of the published models repository (speed_limits.json and each network's contract):
+the id of each network there, checked against the sha256 of its weights on this server, and the commit. The Models
+tab marks those versions "On the car"; nothing else reads the file.
 
 The model in use for each role is <data root>/models/active.json, ``{"cutter": {"id", "who", "via", "at"} or null,
 "classifier": ..., "decider": ...}``: null until someone picks one, never a default here. Prepare's "ours" proposer
@@ -35,9 +45,11 @@ run, its digests kept while a file does not change).
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import os
 import re
+import subprocess
 import tempfile
 import threading
 from datetime import datetime
@@ -45,10 +57,11 @@ from pathlib import Path
 from typing import Any
 
 from nnslr_tools.checkpoints import DEFAULT_DETECTOR_ANCHOR_MIN_RATIO, DEFAULT_DETECTOR_INPUT_SIZE
-from nnslr_tools.runs import (EXPERIMENT_DIR, INPUT_NAMES, RUN_NAME, SIZE_BUCKETS, UNREADABLE, VARIANT_LABELS,
-                              VARIANTS, RunsIndex, _dig, _int, _iso, _mtime, _num, _ratio, _size_table, _words,
-                              chain_digest, chain_headline, classifier_headline, classifier_result_digest,
+from nnslr_tools.runs import (CHAIN_WEIGHTS, EXPERIMENT_DIR, INPUT_NAMES, RUN_NAME, SIZE_BUCKETS, UNREADABLE,
+                              VARIANT_LABELS, VARIANTS, RunsIndex, _dig, _int, _iso, _mtime, _num, _ratio, _size_table,
+                              _words, chain_digest, chain_headline, classifier_headline, classifier_result_digest,
                               reader_digest, result_digest)
+from nnslr_tools.training import DETECTOR_FAMILIES
 
 ROLES = ('cutter', 'classifier', 'decider')
 ROLE_LABELS = {'cutter': 'Cutter', 'classifier': 'Classifier', 'decider': 'Decider'}
@@ -62,8 +75,22 @@ SIZE_NAME = re.compile(r'[1-9][0-9]{0,4}x[1-9][0-9]{0,4}')
 _RUN = RUN_NAME.pattern
 MODEL_ID = re.compile(rf'(cutter|classifier|decider):({_RUN})/(detector|detector-sizes/{SIZE_NAME.pattern}|reader|'
                       rf'classifier|{EXPERIMENT_DIR}/{_RUN})')
+# SignNet: a cutter of the Models tab, never one of active.json (chain.py and Prepare load a detector).
+SIGNNET_PART = 'signnet'
+SIGNNET_ID = re.compile(rf'cutter:({_RUN})/{SIGNNET_PART}')
+# The boxes a frame the classifier reads after the cutter in the car (SignNet keeps its epoch with the best recall
+# at this many, nnslr_tools.signnet.BOX_BUDGETS): every cutter is also judged on the speed signs among its best 5.
+BOX_BUDGET = 5
 MAX_ID = 320
 ACTIVE_FILE = 'models/active.json'
+ON_CAR_FILE = 'models/on-car.json'
+# The networks of the published models repository (speed_limits.json, format 2) by the role they play here.
+CAR_NETWORKS = {'finder': 'cutter', 'classifier': 'classifier'}
+SIGNNET_WEIGHTS = re.compile(rf'/runs/({_RUN})/{SIGNNET_PART}-best\.pt$')
+# The weights file of a version, inside its part (SignNet's is at the root of its run).
+WEIGHTS = {'cutter': 'detector-best.pt', 'classifier': 'reader-best.pt'}
+SHA256 = re.compile(r'[0-9a-f]{64}')
+COMMIT = re.compile(r'[0-9a-f]{40}')
 # How the person who chose was recognised: signed in on the site, the access token of an agent, 127.0.0.1 without
 # sign-in.
 VIA = ('sign-in', 'token', 'local')
@@ -155,11 +182,59 @@ def _by_family(table: Any) -> dict | None:
     return rows or None
 
 
+def _family_group(family: str) -> str:
+    """As nnslr_tools.evaluation.family_group: "speed" for the speed families, else the family."""
+    return 'speed' if family in DETECTOR_FAMILIES else family
+
+
+def _budget(found: int, truth: int, by_family: dict | None) -> dict:
+    return {'boxes': BOX_BUDGET, 'truth_boxes': truth, 'found': found, 'recall': _ratio(found, truth),
+            'by_family': by_family}
+
+
+def _frames_budget(report: dict) -> dict | None:
+    """The signs found among the BOX_BUDGET best boxes of each frame, from the boxes a newer report keeps frame by
+    frame (per_frame_boxes of nnslr_tools.evaluation: every box that found a reviewed box, then the best others, best
+    first, each with the reviewed box it found in the greedy best-first matching, so the first N boxes found what N
+    boxes alone find). None for a report without them."""
+    images = report.get('images')
+    if not isinstance(report.get('per_frame_boxes'), dict) or not isinstance(images, list) or not images:
+        return None
+    truth = found = 0
+    families: dict[str, list[int]] = {}
+    every_family = True
+    for image in images:
+        if not isinstance(image, dict) or not isinstance(image.get('cutter_boxes'), list):
+            return None
+        hits = set()
+        for line in image['cutter_boxes'][:BOX_BUDGET]:
+            fields = line.split() if isinstance(line, str) else []
+            if len(fields) >= 6 and fields[5].isdigit():
+                hits.add(int(fields[5]))
+        count = _int(image.get('truth_count'))
+        if count is None:
+            count = len(image['truth_boxes']) if isinstance(image.get('truth_boxes'), list) else 0
+        truth += count
+        found += len([index for index in hits if index < count])
+        kinds = image.get('truth_families')
+        if isinstance(kinds, list) and len(kinds) == count:
+            for index, family in enumerate(kinds):
+                row = families.setdefault(_family_group(str(family)), [0, 0])
+                row[0] += 1
+                row[1] += int(index in hits)
+        else:
+            every_family = False
+    by_family = {key: {'truth': whole, 'found': part, 'recall': _ratio(part, whole)}
+                 for key, (whole, part) in sorted(families.items())} if every_family and families else None
+    return _budget(found, truth, by_family)
+
+
 def cutter_digest(report: Any) -> dict:
     """A detector evaluation (nnslr_tools.evaluation.evaluate_detector) as the cutter is judged: at CUTTER_SCORE when
     the report measured it (by_score_threshold), else at the report's own threshold; recall by the width of the
     reviewed box, and by family (the speed signs apart) for a cutter that also finds the other signs; the boxes per
-    frame passed on; the time per frame; the input size and default boxes it ran with, and what it finds."""
+    frame passed on; the time per frame; the input size and default boxes it ran with, and what it finds; the signs
+    among the BOX_BUDGET best boxes of each frame, when the report kept its boxes frame by frame."""
     if not isinstance(report, dict):
         raise ValueError('not a report')
     chosen = None
@@ -196,7 +271,50 @@ def cutter_digest(report: Any) -> dict:
         'checkpoint_epoch': _int(report.get('checkpoint_epoch')),
         'families': _families(report.get('families')),
         'by_family': _by_family(metrics.get('recall_by_family')),
+        'budget': _frames_budget(report),
     }
+
+
+def signnet_digest(result: Any) -> dict:
+    """result.json of ``nnslr train-signnet``: how it was trained (no history), and test and validation as a cutter
+    is judged (cutter_digest of their by_score_threshold, the cutter's scoring on the cutter's frames), with the signs
+    among its BOX_BUDGET best boxes a frame (by_box_budget)."""
+    if not isinstance(result, dict) or result.get('task') != 'signnet':
+        raise ValueError('not a SignNet result')
+    band = _size_label(result.get('band'))
+    families = _families(result.get('families'))
+    measured: dict[str, dict | None] = {}
+    for partition in DECIDER_PARTITIONS:
+        report = result.get(partition)
+        if not isinstance(report, dict):
+            measured[partition] = None
+            continue
+        digest = cutter_digest({key: value for key, value in report.items() if key not in ('images', 'per_frame_boxes')}
+                               | {'partition': partition, 'input_size': band, 'families': families})
+        budget = _dig(report, ('by_box_budget', str(BOX_BUDGET)))
+        if isinstance(budget, dict):
+            counts = _box_counts(budget)
+            digest['budget'] = _budget(counts['found'] or 0, counts['truth_boxes'] or 0,
+                                       _by_family(budget.get('recall_by_family')))
+        measured[partition] = digest
+    history = result.get('history')
+    return {
+        'band': band, 'families': families,
+        'stride': _int(result.get('stride')), 'fuse_kernel': _int(result.get('fuse_kernel')),
+        'parameters': _int(result.get('parameters')),
+        'best_epoch': _int(result.get('best_epoch')), 'epochs': _int(result.get('epochs')),
+        'epochs_run': len(history) if isinstance(history, list) and history else None,
+        'split_sha256': result.get('split_sha256') if isinstance(result.get('split_sha256'), str) else None,
+        **measured,
+    }
+
+
+def subset_digest(subset: Any) -> dict:
+    """subset.json of a SignNet trained on a share of the training drives (the learning curve)."""
+    if not isinstance(subset, dict):
+        raise ValueError('not a subset')
+    share = _num(subset.get('share'))
+    return {'share': share if share is not None and 0 < share <= 1 else None}
 
 
 def model_result_digest(result: Any) -> dict:
@@ -299,6 +417,136 @@ def _write_atomic(path: Path, value: dict) -> None:
             os.close(directory)
 
 
+def _car_id_ok(role: str, model_id: Any) -> bool:
+    """An id of a network on the car: a SignNet or a detector for the cutter, a reader or classifier."""
+    if not isinstance(model_id, str) or len(model_id) > MAX_ID:
+        return False
+    if role == 'cutter' and SIGNNET_ID.fullmatch(model_id):
+        return True
+    match = MODEL_ID.fullmatch(model_id)
+    return match is not None and match.group(1) == role
+
+
+def _on_car_record(data: Any) -> dict:
+    """on-car.json checked: the id of each network on the car (None when not one this module could have written),
+    the repository, commit and version of the published models, and when it was recorded."""
+    if not isinstance(data, dict):
+        raise ValueError('not a JSON object')
+    text = lambda key, limit: data.get(key) if isinstance(data.get(key), str) and len(data[key]) <= limit else None  # noqa: E731
+    ids = {}
+    for role in CAR_NETWORKS.values():
+        value = data.get(role)
+        model_id = value.get('id') if isinstance(value, dict) else None
+        ids[role] = model_id if _car_id_ok(role, model_id) else None
+    commit = text('commit', 40)
+    return {'ids': ids, 'repository': text('repository', 100), 'commit': commit if commit and COMMIT.fullmatch(commit) else None,
+            'version': text('version', 40), 'recorded_at': text('recorded_at', 40)}
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open('rb') as source:
+        for block in iter(lambda: source.read(1 << 20), b''):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _models_json(folder: Path, name: Any) -> tuple[Path, Any]:
+    """A file of the published models clone, by a name of its speed_limits.json: inside the clone, never a link
+    out of it; and its JSON when it is one."""
+    if not isinstance(name, str) or not name or '/' in name or name.startswith('.'):
+        raise ValueError(f'speed_limits.json names {name!r}, not a file of the clone')
+    path = RunsIndex._inside(folder / name, folder)
+    if path is None:
+        raise ValueError(f'{name} is not a file of {folder}')
+    if not name.endswith('.json'):
+        return path, None
+    try:
+        return path, json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, ValueError) as exc:
+        raise ValueError(f'{name} cannot be read: {exc}') from exc
+
+
+def _car_model_id(role: str, checkpoint: Any) -> str:
+    """The id of the Models tab for the checkpoint a contract names: an id as is, else a path of the weights of a
+    run (<run>/signnet-best.pt, <run>/<part>/<weights>)."""
+    if _car_id_ok(role, checkpoint):
+        return checkpoint
+    if isinstance(checkpoint, str) and len(checkpoint) <= 1000:
+        found = SIGNNET_WEIGHTS.search('/' + checkpoint) if role == 'cutter' else None
+        if found is not None:
+            return f'cutter:{found.group(1)}/{SIGNNET_PART}'
+        found = CHAIN_WEIGHTS[role].search('/' + checkpoint)
+        if found is not None:
+            return f'{role}:{found.group(1)}/{found.group(2)}'
+    raise ValueError(f'the {role} contract names {checkpoint!r}, not weights of a run')
+
+
+def _git(folder: Path, *args: str) -> str:
+    done = subprocess.run(['git', '-C', str(folder), *args], capture_output=True, text=True, timeout=30, check=False)
+    if done.returncode != 0:
+        raise ValueError(f'git {" ".join(args)} in {folder}: {done.stderr.strip() or "failed"}')
+    return done.stdout.strip()
+
+
+def record_on_car(root: Path, models: Path, *, dry_run: bool = False) -> dict:
+    """``nnslr on-car``: <root>/models/on-car.json from a clone of the published models repository, the networks
+    the comma downloads. Each network of its speed_limits.json (format 2: finder and classifier) must match its
+    contract (the ONNX sha256), name weights of a run on this server, and those weights must be the ones the contract
+    was made from (checkpoint sha256); the clone must be clean and its commit on a remote branch. Reads only the
+    clone (no network) and the runs; writes the one file, unless dry_run."""
+    root, models = Path(root), Path(models)
+    if not models.is_dir():
+        raise ValueError(f'{models} is not a folder')
+    _, manifest = _models_json(models, 'speed_limits.json')
+    if not isinstance(manifest, dict) or manifest.get('format') != 2:
+        raise ValueError('speed_limits.json: format 2 expected (a finder and a classifier)')
+    runs = RunsIndex(root)
+    artifacts = ModelIndex(runs).artifacts(tuple(CAR_NETWORKS.values()))
+    record: dict[str, Any] = {'schema_version': 1}
+    for network, role in CAR_NETWORKS.items():
+        item = manifest.get(network)
+        if not isinstance(item, dict):
+            raise ValueError(f'speed_limits.json has no {network}')
+        onnx, _ = _models_json(models, item.get('file'))
+        _, contract = _models_json(models, item.get('contract'))
+        if not isinstance(contract, dict):
+            raise ValueError(f'{item.get("contract")} is not a JSON object')
+        onnx_sha256 = _sha256(onnx)
+        if contract.get('onnx_sha256') != onnx_sha256:
+            raise ValueError(f'{item["file"]} is not the ONNX of its contract (sha256)')
+        model_id = _car_model_id(role, contract.get('checkpoint'))
+        if not any(entry['id'] == model_id for entry in artifacts[role]):
+            raise ValueError(f'the {network} {model_id} is not on this server')
+        run_name, part = model_id.split(':', 1)[1].split('/', 1)
+        run = runs._run_dir(run_name)
+        weights = None if run is None else runs._file(
+            run, SIGNNET_PART + '-best.pt' if part == SIGNNET_PART else f'{part}/{WEIGHTS[role]}')
+        wanted = contract.get('checkpoint_sha256')
+        if weights is None or not isinstance(wanted, str) or not SHA256.fullmatch(wanted) or _sha256(weights) != wanted:
+            raise ValueError(f'the weights of {model_id} on this server are not the ones of the published {network}')
+        record[role] = {'id': model_id, 'file': item['file'], 'onnx_sha256': onnx_sha256, 'checkpoint_sha256': wanted}
+    if _git(models, 'status', '--porcelain', '--untracked-files=no'):
+        raise ValueError(f'{models} has changes not committed: the record names a commit')
+    commit = _git(models, 'rev-parse', 'HEAD')
+    if not COMMIT.fullmatch(commit):
+        raise ValueError(f'{models}: no commit')
+    if not _git(models, 'branch', '--remotes', '--contains', commit):
+        raise ValueError(f'{models}: commit {commit[:7]} is on no remote branch (not pushed, or fetch first)')
+    url = _git(models, 'remote', 'get-url', 'origin')
+    found = re.search(r'github\.com[:/]([\w.-]+/[\w.-]+?)(?:\.git)?/?$', url)
+    version = manifest.get('version')
+    record.update({'repository': found.group(1) if found else None, 'commit': commit,
+                   'version': version if isinstance(version, str) and len(version) <= 40 else None,
+                   'recorded_at': datetime.now().astimezone().isoformat(timespec='seconds')})
+    if not dry_run:
+        path = root / ON_CAR_FILE
+        if not path.parent.resolve().is_relative_to(root.resolve()):
+            raise ValueError('models/ of the data root leads outside it')
+        _write_atomic(path, record)
+    return record
+
+
 # -- the index --------------------------------------------------------------------------------------------
 class ModelIndex:
     """Every trained artifact of <root>/runs by role, and the one in use for each role (models/active.json)."""
@@ -312,7 +560,7 @@ class ModelIndex:
     def _base(self, role: str, run: str, part: str, checkpoint: Path, result: Any, problems: list[str]) -> dict:
         return {'id': f'{role}:{run}/{part}', 'role': role, 'run': run, 'part': part,
                 'trained_at': _iso(_mtime(checkpoint)), '_mtime': _mtime(checkpoint) or 0.0,
-                'finished': isinstance(result, dict), 'in_use': False, 'problems': problems}
+                'finished': isinstance(result, dict), 'in_use': False, 'on_car': False, 'problems': problems}
 
     def _read(self, run: Path, relative: str, digest, problems: list[str], name: str | None = None) -> Any:
         """The digest of a file of the run (None when missing); an unreadable file is a problem of the version."""
@@ -341,6 +589,7 @@ class ModelIndex:
         families = trained.get('families') or measured.get('families')
         entry = self._base('cutter', name, part, checkpoint, result, problems)
         entry.update({
+            'kind': 'detector',
             'label': 'Detector ' + _pretty_size(input_size or default_size),
             'detail': 'input-size comparison' if size else 'training pipeline',
             'architecture': trained.get('architecture'), 'initialization': trained.get('initialization'),
@@ -353,6 +602,35 @@ class ModelIndex:
             # What it finds: every sign or the speed signs only (before it was recorded, the speed signs only).
             'families': families or 'speed', 'families_recorded': families is not None,
             'test': test, 'validation': validation,
+        })
+        return entry
+
+    def _signnet(self, name: str, run: Path) -> dict | None:
+        """A SignNet of ``nnslr train-signnet``: the small finder made for the comma's GPU, judged on the cutter's
+        test frames with the cutter's scoring. It cannot be the cutter in use here (Prepare and the classifier's
+        training still need a detector), so it is listed, never chosen."""
+        checkpoint = self.runs._file(run, SIGNNET_PART + '-best.pt')
+        if checkpoint is None:
+            return None
+        problems: list[str] = []
+        result = self._read(run, 'result.json', signnet_digest, problems)
+        subset = self._read(run, 'subset.json', subset_digest, problems)
+        trained = result or {}
+        share = (subset or {}).get('share')
+        entry = self._base('cutter', name, SIGNNET_PART, checkpoint, result, problems)
+        band = trained.get('band')
+        entry.update({
+            'kind': 'signnet',
+            'label': 'SignNet' + (' ' + _pretty_size(band) if band else ''),
+            'detail': 'for the comma’s GPU' + (f' · {round(share * 100)} % of the training drives' if share else ''),
+            'architecture': None, 'initialization': None,
+            'best_epoch': trained.get('best_epoch'), 'epochs': trained.get('epochs'),
+            'epochs_run': trained.get('epochs_run'),
+            'input_size': band, 'input_size_recorded': band is not None,
+            'anchor_min_ratio': None, 'anchor_recorded': False, 'augmentation': None,
+            'stride': trained.get('stride'), 'parameters': trained.get('parameters'), 'train_share': share,
+            'families': trained.get('families') or 'all', 'families_recorded': trained.get('families') is not None,
+            'test': trained.get('test'), 'validation': trained.get('validation'),
         })
         return entry
 
@@ -467,6 +745,7 @@ class ModelIndex:
             for size in folders:
                 folder = 'detector-sizes/' + size
                 cutters.append(self._cutter(name, run, folder, folder + '/evaluation', folder, size))
+            cutters.append(self._signnet(name, run))
             found['cutter'] += [entry for entry in cutters if entry is not None]
         for versions in found.values():
             versions.sort(key=lambda entry: (entry['_mtime'], entry['id']), reverse=True)
@@ -475,15 +754,31 @@ class ModelIndex:
         return found
 
     # -- the model in use ------------------------------------------------------------------------------
-    def _active_path(self) -> Path | None:
-        """<root>/models/active.json, None when models/ leads out of the data root."""
+    def _active_path(self, name: str = 'active.json') -> Path | None:
+        """<root>/models/active.json (or another file of models/), None when models/ leads out of the data root."""
         models = self.root / 'models'
         try:
             if not models.resolve().is_relative_to(self.root.resolve()):
                 return None
         except (OSError, RuntimeError):
             return None
-        return models / 'active.json'
+        return models / name
+
+    def read_on_car(self) -> tuple[dict | None, str | None]:
+        """What runs on the comma (models/on-car.json of record_on_car): None when nothing was recorded; and why the
+        file cannot be used, if it cannot."""
+        path = self._active_path(Path(ON_CAR_FILE).name)
+        if path is None:
+            return None, 'models/ of the data root leads outside it'
+        if not path.exists() and not path.is_symlink():
+            return None, None
+        real = self.runs._inside(path, path.parent)
+        if real is None:
+            return None, ON_CAR_FILE + ' is not a file inside models/'
+        try:
+            return _on_car_record(json.loads(real.read_text(encoding='utf-8'))), None
+        except (OSError, ValueError):
+            return None, ON_CAR_FILE + ' cannot be read'
 
     def read_active(self) -> tuple[dict[str, dict | None], str | None]:
         """The model in use per role (None: nobody picked one), and why the file cannot be used, if it cannot."""
@@ -522,18 +817,24 @@ class ModelIndex:
         """GET /api/panel/models: the three roles, each with its versions newest first and the one in use."""
         artifacts = self.artifacts()
         active, problem = self.read_active()
+        on_car, car_problem = self.read_on_car()
+        car_ids = (on_car or {}).get('ids') or {}
         roles = []
         for role in ROLES:
             chosen = active[role]
             versions = artifacts[role]
             for entry in versions:
                 entry['in_use'] = chosen is not None and entry['id'] == chosen['id']
+                entry['on_car'] = car_ids.get(role) is not None and entry['id'] == car_ids[role]
             roles.append({'role': role, 'label': ROLE_LABELS[role], 'versions': versions,
                           'active': None if chosen is None else {
                               **chosen, 'found': any(entry['in_use'] for entry in versions)}})
         self.runs._prune()
         return {'roles': roles, 'active_problem': problem, 'active_file': ACTIVE_FILE,
-                'runs_dir_exists': self.runs.runs_dir.is_dir(), 'cutter_score_threshold': CUTTER_SCORE}
+                'runs_dir_exists': self.runs.runs_dir.is_dir(), 'cutter_score_threshold': CUTTER_SCORE,
+                'box_budget': BOX_BUDGET, 'on_car_file': ON_CAR_FILE, 'on_car_problem': car_problem,
+                'on_car': None if on_car is None else {
+                    key: on_car[key] for key in ('repository', 'commit', 'version', 'recorded_at')}}
 
     def set_active(self, role: Any, model_id: Any, *, who: str | None, via: str) -> dict:
         """POST /api/panel/models/active: the model in use for a role. The id must be a finished artifact of the
@@ -542,6 +843,9 @@ class ModelIndex:
             raise ModelChoiceError(400, 'bad_role', 'Unknown role: cutter, classifier or decider.')
         if not isinstance(model_id, str) or len(model_id) > MAX_ID:
             raise ModelChoiceError(400, 'bad_id', 'Not a model id.')
+        if SIGNNET_ID.fullmatch(model_id):
+            raise ModelChoiceError(409, 'not_selectable', 'SignNet is made for the car: Prepare and the classifier’s '
+                                   'training here still need a detector.')
         match = MODEL_ID.fullmatch(model_id)
         if match is None:
             raise ModelChoiceError(400, 'bad_id', 'Not a model id.')

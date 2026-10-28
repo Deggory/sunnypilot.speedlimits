@@ -992,6 +992,10 @@ export interface CutterNumbers {
   families: CutterFamilies | null;
   /** Recall by family at this score (newer reports): the speed signs, and the other signs for a cutter of every sign. */
   by_family: Record<string, {truth: number; found: number; recall: number | null}> | null;
+  /** The signs among the box_budget best boxes of each frame, what the car reads; null when the report did not keep
+   * its boxes frame by frame. */
+  budget?: {boxes: number; truth_boxes: number; found: number; recall: number | null;
+            by_family: Record<string, {truth: number; found: number; recall: number | null}> | null} | null;
 }
 
 /** An experiment B variant on one partition: whom the sign applies to, and the reading. */
@@ -1022,6 +1026,8 @@ interface ModelBase {
   /** Its training wrote result.json: the weights no longer change. */
   finished: boolean;
   in_use: boolean;
+  /** One of the networks the comma downloads (models/on-car.json). */
+  on_car?: boolean;
   /** Files that exist but cannot be read. */
   problems: string[];
   architecture: string | null;
@@ -1033,10 +1039,17 @@ interface ModelBase {
 
 export interface CutterModel extends ModelBase {
   role: 'cutter';
-  /** "320x320"; recorded false: the default, from before the size was recorded. */
+  /** A detector (can be in use here) or a SignNet, the small finder made for the comma's GPU (never in use here). */
+  kind?: 'detector' | 'signnet';
+  /** "320x320" (a SignNet: its band); recorded false: the default, from before the size was recorded. */
   input_size: string;
   input_size_recorded: boolean;
-  anchor_min_ratio: number;
+  /** null for a SignNet: no default boxes. */
+  anchor_min_ratio: number | null;
+  /** A SignNet: its output grid step in pixels, its weights, the share of the training drives it saw (null: all). */
+  stride?: number | null;
+  parameters?: number | null;
+  train_share?: number | null;
   anchor_recorded: boolean;
   augmentation: boolean | null;
   /** What it finds; recorded false: from before it was recorded (the speed signs only). */
@@ -1102,6 +1115,11 @@ export interface ModelsPayload {
   active_file: string;
   runs_dir_exists: boolean;
   cutter_score_threshold: number;
+  /** The boxes a frame the car reads (the "In 5 boxes" measure). */
+  box_budget?: number;
+  /** What runs on the comma: the published models commit (models/on-car.json); null when nothing was recorded. */
+  on_car?: {repository: string | null; commit: string | null; version: string | null; recorded_at: string | null} | null;
+  on_car_problem?: string | null;
 }
 
 /** The type of road of a frame, from the map (nnslr_tools.road_types); null: the map does not say. Parking: a car park,

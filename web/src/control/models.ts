@@ -17,7 +17,8 @@ const INTERVAL_MS = 10000;
  * from the false boxes of the cutter in use and is measured with it, scripts/run_classifier.sh). */
 export const ROLE_TEXT: Record<ModelRole, {what: string; today: string; empty: string; emptyMore: string; uses: string}> = {
   cutter: {
-    what: 'Finds every box that could be a sign. It must miss nothing: the classifier drops its false boxes.',
+    what: 'Finds every box that could be a sign. It must miss nothing: the classifier drops its false boxes. '
+      + 'A detector does it here; SignNet, made small for the comma’s GPU, does it in the car.',
     today: 'Today: the detector, judged on the signs it misses by size.',
     empty: 'No cutter trained yet: the detector of a training run plays this role.',
     emptyMore: 'Start a training on the Train tab; its detector appears here.',
@@ -133,18 +134,20 @@ export function initText(initialization: string | null): string {
   return initialization ?? '–';
 }
 
-/** A headline number of a version: what it counts, the share (0-1, null: not measured or not trained for it), the
- * count it is of ("145 of 208") and a line under it. */
+/** A headline number of a version: what it counts (and a short name for a table header), the share (0-1, null: not
+ * measured or not trained for it), the count it is of ("145 of 208") and a line under it. */
 export interface Metric {
   key: string;
   label: string;
+  short?: string;
   value: number | null;
   count: string;
   detail: string;
 }
 
 /** The numbers that judge a version, side by side (MetricTiles, the Models table): the cutter: the speed signs and
- * every sign found on the test at its score; the classifier with “not a sign”: the speed-sign crops and every sign
+ * every sign found on the test at its score, and the speed signs among its 5 best boxes a frame (what the car reads:
+ * a detector passes on a couple of hundred boxes a frame at that score, SignNet a few); the classifier with “not a sign”: the speed-sign crops and every sign
  * crop read right (the kind of an other sign aside), and the chain with the cutter; an old reader: its crops read
  * right; the decider: the “Another” signs found on validation and on the test. */
 export function metricsOf(version: ModelVersion): Metric[] {
@@ -155,14 +158,22 @@ export function metricsOf(version: ModelVersion): Metric[] {
     if (cut === null) return [];
     const every: Metric = {key: 'every', label: 'Every sign', value: cut.recall, count: of(cut.found, cut.truth_boxes),
       detail: cut.truth_boxes === null ? '' : of(cut.found, cut.truth_boxes) + ' found'};
+    const boxes = cut.budget?.boxes ?? 5;
+    const kept = cut.budget ? (version.families === 'all' ? cut.budget.by_family?.['speed'] ?? null
+      : {truth: cut.budget.truth_boxes, found: cut.budget.found, recall: cut.budget.recall}) : null;
+    const budget: Metric = kept
+      ? {key: 'budget', label: 'Speed signs in ' + boxes + ' boxes', short: 'In ' + boxes + ' boxes', value: kept.recall,
+        count: of(kept.found, kept.truth), detail: of(kept.found, kept.truth) + ' in the ' + boxes + ' best boxes of each frame'}
+      : {key: 'budget', label: 'Speed signs in ' + boxes + ' boxes', short: 'In ' + boxes + ' boxes', value: null,
+        count: 'not measured', detail: 'Its report did not keep the boxes of each frame'};
     const speed = version.families === 'all' ? cut.by_family?.['speed'] ?? null : null;
     if (speed) {
       return [{key: 'speed', label: 'Speed signs', value: speed.recall, count: of(speed.found, speed.truth),
-        detail: of(speed.found, speed.truth) + ' found'}, every];
+        detail: of(speed.found, speed.truth) + ' found'}, every, budget];
     }
-    if (version.families === 'all') return [every];
+    if (version.families === 'all') return [every, budget];
     return [{...every, key: 'speed', label: 'Speed signs'},
-      {key: 'every', label: 'Every sign', value: null, count: 'speed only', detail: 'Trained on speed signs only'}];
+      {key: 'every', label: 'Every sign', value: null, count: 'speed only', detail: 'Trained on speed signs only'}, budget];
   }
   if (version.role === 'classifier') {
     const test = version.test;

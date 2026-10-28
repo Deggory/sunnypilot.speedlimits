@@ -2,8 +2,10 @@
 // Models: first the three networks of the pipeline in use (cutter, classifier, decider; docs/NEURAL_NETWORK.md), one
 // card each with its numbers; then the versions of one of them (the switch, or a tap on its card) as a table to
 // compare: the numbers that judge that role in columns, the one in use marked; a row opens its whole card (ModelItem:
-// details, Use this one, the run). A role has no model in use until someone picks one: there is no default. The runs
-// themselves are on Results (/evaluate); the package of the three in use is on Publish (/publish).
+// details, Use this one, the run). A role has no model in use until someone picks one: there is no default. The
+// networks the comma downloads (models/on-car.json, written by nnslr on-car) are marked “on the car”: SignNet, the
+// cutter made for the car, is listed with the cutters but is never the one in use here. The runs themselves are on
+// Results (/evaluate); the package of the three in use is on Publish (/publish).
 import {computed, nextTick, ref, watch} from 'vue';
 import {isoWhen} from '../common/format';
 import type {ModelRole, ModelVersion, PanelStatus, RoleModels} from '../common/panel-types';
@@ -42,6 +44,21 @@ const roleOptions = computed(() => roles.value.map((role) => ({key: role.role, l
 
 /** The version in use of a role, or null (none chosen, or its files are gone). */
 const inUseOf = (role: RoleModels): ModelVersion | null => role.versions.find((version) => version.in_use) ?? null;
+/** The version of a role that runs on the comma, or null. */
+const carOf = (role: RoleModels): ModelVersion | null => role.versions.find((version) => version.on_car) ?? null;
+/** A SignNet in a few words, to tell its versions apart in the table: "grid 8 px", "grid 4 px · 25 % of the drives". */
+function signnetText(version: ModelVersion): string {
+  if (version.role !== 'cutter' || version.kind !== 'signnet') return '';
+  return [version.stride ? 'grid ' + version.stride + ' px' : '',
+    version.train_share ? Math.round(version.train_share * 100) + ' % of the drives' : ''].filter(Boolean).join(' · ');
+}
+/** The published models on the car, in a few words: "speed-limits-models 62dca08, 28 Oct". */
+const carText = computed((): string => {
+  const car = payload.value?.on_car;
+  if (!car) return '';
+  const name = car.repository?.split('/').pop() ?? 'the published models';
+  return [name + (car.commit ? ' ' + car.commit.slice(0, 7) : ''), car.version ?? ''].filter(Boolean).join(', ');
+});
 /** What Prepare uses while no classifier is in use: the newest classifier with “not a sign”
  * (nnslr_tools.preannotate.our_networks); the versions are newest first. */
 function fallbackOf(role: RoleModels): ModelVersion | null {
@@ -57,7 +74,7 @@ const columns = computed(() => {
     const metrics = metricsOf(version);
     if (metrics.length > widest.length) widest = metrics;
   }
-  return widest.map((metric) => ({key: metric.key, label: metric.label.replace(/^With the cutter.*/, 'With the cutter')}));
+  return widest.map((metric) => ({key: metric.key, label: metric.short ?? metric.label.replace(/^With the cutter.*/, 'With the cutter')}));
 });
 function cell(version: ModelVersion, key: string) {
   return metricsOf(version).find((metric) => metric.key === key) ?? null;
@@ -104,6 +121,7 @@ async function choose(version: ModelVersion): Promise<void> {
           <span class="inuse-when">{{ fallbackOf(role) ? 'Prepare uses the newest, ' + fallbackOf(role)?.label + ' ' + isoWhen(fallbackOf(role)?.trained_at ?? null) + ', until you pick one.'
             : role.versions.length ? 'There is no default.' : ROLE_TEXT[role.role].emptyMore }}</span>
         </template>
+        <span v-if="carOf(role)" class="inuse-car">{{ carOf(role) === inUseOf(role) ? 'Also on the car' : 'On the car: ' + carOf(role)?.label }}</span>
         <span class="inuse-more">{{ role.versions.length }} {{ role.versions.length === 1 ? 'version' : 'versions' }} ›</span>
       </button>
     </div>
@@ -121,8 +139,9 @@ async function choose(version: ModelVersion): Promise<void> {
                  :data-model="version.id">
           <summary>
             <span class="vt-name"><b>{{ version.label }}</b><small>{{ version.trained_at ? isoWhen(version.trained_at) : version.run }}<template
+              v-if="signnetText(version)"> · {{ signnetText(version) }}</template><template
               v-if="version.in_use"> · <em class="vt-use">in use</em></template><template v-else-if="!version.finished"> · <em
-              class="vt-wait">not finished</em></template></small></span>
+              class="vt-wait">not finished</em></template><template v-if="version.on_car"> · <em class="vt-car">on the car</em></template></small></span>
             <span v-for="column in columns" :key="column.key" class="vt-num" :class="['vt-c-' + column.key, {none: cell(version, column.key)?.value == null}]"
                   :title="cell(version, column.key)?.detail ?? ''">
               <b>{{ cell(version, column.key)?.value == null ? '–' : pct(cell(version, column.key)?.value) }}</b>
@@ -137,9 +156,13 @@ async function choose(version: ModelVersion): Promise<void> {
           </ul>
         </details>
       </div>
+      <p v-if="pickedRole.role === 'cutter'" class="note models-foot">Speed signs and Every sign: found at score {{ payload.cutter_score_threshold }},
+        however many boxes it passes on (a detector a couple of hundred a frame, SignNet a few). In {{ payload.box_budget ?? 5 }} boxes: the
+        speed signs among its {{ payload.box_budget ?? 5 }} best boxes of each frame, as the car reads them.</p>
       <p class="note models-foot">The numbers compare only on the same test: the older versions were measured on fewer signs (the count
         under each number). The choice is kept in <code>{{ payload.active_file }}</code> of the data root; it copies, exports and
-        deploys nothing: nothing on the comma changes.</p>
+        deploys nothing: nothing on the comma changes.<template v-if="carText"> On the car: the networks published in {{ carText }}.</template></p>
+      <p v-if="payload.on_car_problem" class="note">What is on the car cannot be shown: {{ payload.on_car_problem }}.</p>
     </section>
     <p v-if="error" class="note">Not updated: {{ error }}</p>
   </template>
