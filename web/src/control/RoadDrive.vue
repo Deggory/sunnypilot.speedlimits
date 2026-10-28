@@ -212,8 +212,8 @@ watch(() => stretch.value?.[0], () => { part.value = 'all'; });
 /** The part can be chosen when the picture shown is inside its stretch, not at one of its ends. */
 const splittable = computed(() => mark.value === null && stretch.value !== null && shown.value > stretch.value[0]
   && shown.value < stretch.value[1]);
-const partOptions = computed((): {key: Part; label: string}[] => [{key: 'all', label: 'Whole'},
-  {key: 'before', label: 'Up to here'}, {key: 'after', label: 'From here'}]);
+const partOptions = computed((): {key: Part; label: string}[] => [{key: 'all', label: 'Whole stretch'},
+  {key: 'before', label: '✂ Before'}, {key: 'after', label: '✂ After'}]);
 /** The frames a correction covers: from the mark to here, else the part chosen of the stretch shown. */
 const span = computed((): [number, number] | null => {
   if (!frames.value.length) return null;
@@ -311,6 +311,7 @@ async function undo(): Promise<void> {
                 class="rt-tocheck"/>
           <rect v-if="span" :x="span[0]" y="0" :width="Math.max(span[1] - span[0] + 1, 3 * thin)" height="2.2" class="rt-marked"/>
           <rect :x="cursor" y="0" :width="thin" height="20" class="rt-head"/>
+          <rect v-if="splittable && part !== 'all'" :x="cursor" y="-2" :width="Math.max(thin, 1)" height="24" class="rt-cut"/>
         </svg>
         <div class="rt-controls">
           <button type="button" class="btn small primary rt-play" :aria-pressed="playing" @click="toggle"><svg class="icon"
@@ -335,8 +336,10 @@ async function undo(): Promise<void> {
         <p v-if="reason" class="rt-basis">{{ reason }}</p>
 
         <div class="rt-fix">
-          <!-- Inside a stretch the choice of its part is the title: one row less, so the loop still fits a phone. -->
-          <Segmented v-if="splittable" v-model="part" :options="partOptions" label="Part of the stretch" class="rt-part"/>
+          <!-- Inside a stretch: cut it at the picture shown (the white line on the strip) and set one side. -->
+          <p v-if="splittable" class="rt-cut-head"><strong>✂ Cut here?</strong> <span>The stretch goes on before and after
+            this picture: set the whole of it, or only the part before or after the cut.</span></p>
+          <Segmented v-if="splittable" v-model="part" :options="partOptions" label="Cut the stretch at this picture" class="rt-part"/>
           <p class="rt-fix-head"><strong>{{ mark !== null ? 'Set from the mark to here to:' : 'Set ' + spanCount + ' to:' }}</strong>
             <span>{{ spanTimes }}</span></p>
           <!-- Real buttons, one a type: a person must see at once that a tap here changes the stretch. -->
