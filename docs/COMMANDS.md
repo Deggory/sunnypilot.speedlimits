@@ -153,6 +153,7 @@ These helpers are the daily flow, and the portal's buttons run them. Each one sk
 | Subcommand | Purpose | Effects |
 |---|---|---|
 | `train --task detector\|reader` | Trains the cutter (`detector`) or the classifier (`reader`). Main options: `--input-size WxH`, `--cutter-families all\|speed`, `--classes v1\|v2`, `--negatives`, `--select-by recall\|loss`, `--patience`, `--mode fresh\|continue\|resume`, and `--dry-run`. | GPU, writes data |
+| `train-signnet --run-dir D [--stride 4\|8] [--widths 16,32,48,64] [--band-width 1344\|896\|672]` | SignNet, the sign finder made for the comma's Adreno: plain convolutions on the top band of the frame (the top 416 of 760 rows), a heat map of sign centres and each sign's size, no NMS. Same frames, split and scoring as the cutter; `result.json` has recall at 3, 5 and 10 boxes a frame, by width and family. `--band-width 672` is half the resolution. About 2 minutes an epoch on the V100. | GPU, writes data |
 | `evaluate` | measures a detector or reader checkpoint on a frozen partition | GPU, writes data |
 | `mine-negatives` | runs the cutter on the reviewed frames and keeps its false boxes as "not a sign" crops | GPU, writes data |
 | `evaluate-chain` | runs cutter and classifier end to end: signs found and read right, and false boxes per frame, at several cutter thresholds | GPU, writes data |

@@ -1425,6 +1425,23 @@ def build_parser() -> argparse.ArgumentParser:
     p_road.add_argument("--all", action="store_true", help="every route with GPS positions (nnslr gps)")
     p_road.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_road.set_defaults(func=_cmd_road_types)
+    p_signnet = sub.add_parser("train-signnet", help="train SignNet, the sign detector made for the comma's Adreno, on "
+                                                     "the cutter's plan (GPU, .venv-gpu); writes signnet-best.pt and "
+                                                     "result.json with the cutter's test measures")
+    p_signnet.add_argument("--run-dir", required=True, help="output folder, e.g. data/runs/<time>-signnet")
+    p_signnet.add_argument("--dataset", default=None, help="default: <data root>/annotations/objects.jsonl")
+    p_signnet.add_argument("--split", default=None, help="default: <data root>/splits/latest.json")
+    p_signnet.add_argument("--families", default="all", help="speed or all, as the cutter")
+    p_signnet.add_argument("--stride", type=int, default=8, choices=(4, 8))
+    p_signnet.add_argument("--widths", default="16,32,48,64", help="channels at strides 2,4,8,16")
+    p_signnet.add_argument("--band-width", type=int, default=1344,
+                           help="the band's width in pixels: 1344 full resolution, 672 half")
+    p_signnet.add_argument("--epochs", type=int, default=40)
+    p_signnet.add_argument("--batch", type=int, default=16)
+    p_signnet.add_argument("--learning-rate", type=float, default=3e-3)
+    p_signnet.add_argument("--workers", type=int, default=8)
+    p_signnet.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+    p_signnet.set_defaults(func=_cmd_train_signnet)
     p_tracks = sub.add_parser("tracks", help="the same sign followed across consecutive confirmed frames "
                                              "(derived/tracks/<route>/tracks.jsonl), with the matching of Apply previous")
     p_tracks.add_argument("--route", action="append", help="route id; repeat for more")
@@ -1989,6 +2006,26 @@ def _cmd_road_types(args: argparse.Namespace) -> int:
             result = {"route_id": route, "error": str(exc)}
         print(json.dumps(result, sort_keys=True), flush=True)
     return 1 if failed else 0
+
+
+def _cmd_train_signnet(args: argparse.Namespace) -> int:
+    from nnslr_tools.preannotate import resolve_data_root
+    from nnslr_tools.signnet import train_signnet
+    from nnslr_tools.training import prepare_detector_training
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    plan = prepare_detector_training(Path(args.dataset or root / "annotations" / "objects.jsonl"),
+                                     Path(args.split or root / "splits" / "latest.json"), root, families=args.families)
+    widths = tuple(int(value) for value in args.widths.split(","))
+    result = train_signnet(plan, root, Path(args.run_dir), widths=widths, stride=args.stride, epochs=args.epochs,
+                           batch=args.batch, learning_rate=args.learning_rate, workers=args.workers,
+                           band_width=args.band_width)
+    summary = {split: {budget: {key: result[split]["by_box_budget"][budget][key]
+                                for key in ("recall_iou", "false_positives_per_image")}
+                       for budget in result[split]["by_box_budget"]}
+               for split in ("validation", "test")}
+    print(json.dumps({"run_dir": args.run_dir, "best_epoch": result["best_epoch"], "parameters": result["parameters"],
+                      "by_box_budget": summary}, sort_keys=True), flush=True)
+    return 0
 
 
 def _cmd_tracks(args: argparse.Namespace) -> int:
