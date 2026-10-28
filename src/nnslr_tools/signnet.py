@@ -52,15 +52,19 @@ def band_size(band_width: int = BAND_WIDTH) -> tuple[int, int]:
     return band_width, math.ceil(BAND_HEIGHT * band_width / BAND_WIDTH / 16) * 16
 
 
-def build_signnet(widths=DEFAULT_WIDTHS, stride: int = DEFAULT_STRIDE):
+def build_signnet(widths=DEFAULT_WIDTHS, stride: int = DEFAULT_STRIDE, fuse_kernel: int = 3):
     """The network: strides 2, 4, 8, 16; the deepest map brought back to ``stride`` (4 or 8) and joined with the
-    map of that stride; out: heat (1, sigmoid) and shape (log width, log height, offset x, offset y)."""
+    map of that stride by a convolution of ``fuse_kernel`` (3, or 1: on the Adreno the 3 x 3 at stride 4 is 40 % of
+    the time); out: heat (1, sigmoid) and shape (log width, log height, offset x, offset y)."""
     torch, nn = _torch()
     if stride not in (4, 8):
         raise ValueError("signnet stride must be 4 or 8")
+    if fuse_kernel not in (1, 3):
+        raise ValueError("signnet fuse kernel must be 1 or 3")
 
-    def block(cin, cout, step):
-        return nn.Sequential(nn.Conv2d(cin, cout, 3, step, 1, bias=False), nn.BatchNorm2d(cout), nn.ReLU(inplace=True))
+    def block(cin, cout, step, kernel=3):
+        return nn.Sequential(nn.Conv2d(cin, cout, kernel, step, kernel // 2, bias=False), nn.BatchNorm2d(cout),
+                             nn.ReLU(inplace=True))
 
     class SignNet(nn.Module):
         def __init__(self):
@@ -71,7 +75,7 @@ def build_signnet(widths=DEFAULT_WIDTHS, stride: int = DEFAULT_STRIDE):
             self.s4 = nn.Sequential(block(a, b, 2), block(b, b, 1))
             self.s8 = nn.Sequential(block(b, c, 2), block(c, c, 1))
             self.s16 = nn.Sequential(block(c, d, 2), block(d, d, 1))
-            self.fuse = block(d + (b if stride == 4 else c), c, 1)
+            self.fuse = block(d + (b if stride == 4 else c), c, 1, fuse_kernel)
             self.out = nn.Conv2d(c, 5, 1)
             # Heat starts near 0.01 everywhere (CenterNet's prior): the focal loss starts from few false alarms.
             nn.init.constant_(self.out.bias[:1], -4.6)
@@ -238,7 +242,8 @@ def measure(model, frames: list[dict], data_root: Path, stride: int, device, *, 
 
 def train_signnet(plan: dict[str, Any], data_root: Path, run_dir: Path, *, widths=DEFAULT_WIDTHS,
                   stride: int = DEFAULT_STRIDE, epochs: int = 40, batch: int = 16, learning_rate: float = 3e-3,
-                  workers: int = 8, seed: int = 1, band_width: int = BAND_WIDTH, log=print) -> dict[str, Any]:
+                  workers: int = 8, seed: int = 1, band_width: int = BAND_WIDTH, fuse_kernel: int = 3,
+                  log=print) -> dict[str, Any]:
     """Train on the plan's train frames, keep the epoch with the best validation recall at 5 boxes a frame, then
     measure it on validation and test. Writes signnet-best.pt and result.json in run_dir."""
     torch, _ = _torch()
@@ -252,7 +257,7 @@ def train_signnet(plan: dict[str, Any], data_root: Path, run_dir: Path, *, width
     for frame in plan['frames']:
         by_split.setdefault(frame['split'], []).append(frame)
     train_frames, validation, test = by_split.get('train', []), by_split.get('validation', []), by_split.get('test', [])
-    model = build_signnet(widths, stride).to(device)
+    model = build_signnet(widths, stride, fuse_kernel).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-4)
     loader = DataLoader(_dataset(train_frames, data_root, stride, train=True, seed=seed, band_width=band_width),
                         batch_size=batch, shuffle=True, num_workers=workers, drop_last=True, persistent_workers=True)
@@ -282,11 +287,13 @@ def train_signnet(plan: dict[str, Any], data_root: Path, run_dir: Path, *, width
         if checked['recall_iou'] > best:
             best, best_epoch = checked['recall_iou'], epoch
             torch.save({'task': 'signnet', 'state_dict': model.state_dict(), 'widths': list(widths), 'stride': stride,
-                        'band': list(band_size(band_width)), 'epoch': epoch}, run_dir / 'signnet-best.pt')
+                        'fuse_kernel': fuse_kernel, 'band': list(band_size(band_width)), 'epoch': epoch},
+                       run_dir / 'signnet-best.pt')
     checkpoint = torch.load(run_dir / 'signnet-best.pt', map_location=device, weights_only=True)
     model.load_state_dict(checkpoint['state_dict'])
     result = {
-        'task': 'signnet', 'widths': list(widths), 'stride': stride, 'band': list(band_size(band_width)),
+        'task': 'signnet', 'widths': list(widths), 'stride': stride, 'fuse_kernel': fuse_kernel,
+        'band': list(band_size(band_width)),
         'parameters': sum(p.numel() for p in model.parameters()), 'epochs': epochs, 'best_epoch': best_epoch,
         'dataset_sha256': plan.get('dataset_sha256'), 'split_sha256': plan.get('split_sha256'),
         'families': plan.get('families'), 'counts_by_split': plan.get('counts_by_split'),

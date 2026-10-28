@@ -56,3 +56,12 @@ def test_half_band():
     model = build_signnet(stride=4).eval()
     out, _ = model(torch.rand(1, 3, BAND_HEIGHT // 2, BAND_WIDTH // 2))
     assert out.shape == heat[None].shape
+
+
+def test_fuse_kernel_one_gives_the_same_maps():
+    model = build_signnet(stride=4, fuse_kernel=1).eval()
+    heat, shape = model(torch.rand(1, 3, BAND_HEIGHT // 2, BAND_WIDTH // 2))
+    assert heat.shape == (1, 1, BAND_HEIGHT // 8, BAND_WIDTH // 8) and shape.shape[1] == 4
+    assert model.fuse[0].kernel_size == (1, 1)
+    with pytest.raises(ValueError):
+        build_signnet(fuse_kernel=2)

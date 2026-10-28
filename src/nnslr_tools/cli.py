@@ -1433,6 +1433,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_signnet.add_argument("--split", default=None, help="default: <data root>/splits/latest.json")
     p_signnet.add_argument("--families", default="all", help="speed or all, as the cutter")
     p_signnet.add_argument("--stride", type=int, default=8, choices=(4, 8))
+    p_signnet.add_argument("--fuse-kernel", type=int, default=3, choices=(1, 3),
+                           help="the convolution that joins the deep map with the skip: 3, or 1 (faster on the Adreno)")
     p_signnet.add_argument("--widths", default="16,32,48,64", help="channels at strides 2,4,8,16")
     p_signnet.add_argument("--band-width", type=int, default=1344,
                            help="the band's width in pixels: 1344 full resolution, 672 half")
@@ -2018,7 +2020,7 @@ def _cmd_train_signnet(args: argparse.Namespace) -> int:
     widths = tuple(int(value) for value in args.widths.split(","))
     result = train_signnet(plan, root, Path(args.run_dir), widths=widths, stride=args.stride, epochs=args.epochs,
                            batch=args.batch, learning_rate=args.learning_rate, workers=args.workers,
-                           band_width=args.band_width)
+                           band_width=args.band_width, fuse_kernel=args.fuse_kernel)
     summary = {split: {budget: {key: result[split]["by_box_budget"][budget][key]
                                 for key in ("recall_iou", "false_positives_per_image")}
                        for budget in result[split]["by_box_budget"]}
