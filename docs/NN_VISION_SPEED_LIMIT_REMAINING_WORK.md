@@ -1040,9 +1040,14 @@ What it says:
   12 px (41 % of the speed signs, 34 % of all); clear speed values are fine (60 → 95 %, 40 → 94 %, 100 → 8 of 8).
 - **How much data there is per value** (confirmed speed signs, whole dataset): 60 → 279, 80 → 110, 100 → 102, 50 →
   77, 40 → 41, 20 → 28, 30 → 13, 120 → none (two boxes, not confirmed yet); 557 with a number that cannot be read.
-  80 and 100 come from two routes. The learning curve (25 % and 50 % of the
-  training frames against all of them, runs `2026-10-28_1100-signnet-twothirds-s4-share25` and `-share50`) tells
-  whether more of the same data still pays; its result goes here when the runs end.
+  80 and 100 come from two routes.
+- **The learning curve** (a quarter, half and all of the training segments, same net, same test, 5 boxes a frame;
+  runs `2026-10-28_1100-signnet-twothirds-s4-share25`, `-share50`; half is 4,057 of 8,188 training frames and
+  1,547 of 3,289 boxes): speed signs 56 → 63 → 64 %, all signs 40 → 50 → 54 %, other signs 21 → 34 → 43 %, big
+  signs (≥ 40 px) 27 → 41 → 46 %. Doubling the data from half to all buys one point on the speed signs and nine on
+  the other signs: for the speed signs the limit is no longer the quantity but the labels and the net's precision;
+  the other signs, whose boxes are the ones missing most, still gain from every frame. More of the same roads will
+  not move the speed signs; new values (30, 40, 120) and corrected labels will.
 - **The split leaked between train and validation**, not between train and test: `place-v3` put a buffer around the
   test only, so the validation shared its areas (and signs) with the training; the epoch it picked and the recall it
   reported were optimistic. The test (one route, 15 %, buffered) was sound.
