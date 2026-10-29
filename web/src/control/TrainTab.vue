@@ -257,7 +257,7 @@ const numbers = computed(() => {
       </template>
       <template v-else-if="section === 'classifier'">
         <div v-if="mapillaryState?.available" class="seg-row">
-          <Segmented v-model="mapillary" :options="MAPILLARY_OPTIONS" label="Signs the classifier learns from"/>
+          <Segmented v-model="mapillary" class="mly-seg" :options="MAPILLARY_OPTIONS" label="Signs the classifier learns from"/>
         </div>
         <div v-if="mapillaryState?.available && withMapillary" class="mly-choice" id="train-mapillary-choice">
           <RegionPicker v-model="region" :regions="mapillaryRegions" :locate="status?.actions.mapillary_locations ?? null"
