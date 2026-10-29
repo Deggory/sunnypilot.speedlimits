@@ -163,6 +163,8 @@ export interface Job {
   ended_at?: string | null;
   /** Who proposes (a preparation) or is measured; null when the helpers' default was used. */
   proposer?: Proposer | null;
+  /** The networks of Our networks it proposes with, by part: {cutter: "cutter:2026-10-26_1638-cutter/…", …}. */
+  networks?: Record<string, string> | null;
   /** How a training of the cutter, classifier or decider was launched, from the head of its log:
    * ["1344 × 760", "speed signs only", "20 epochs", "batch 8", …]; empty for the other jobs. */
   settings?: string[];

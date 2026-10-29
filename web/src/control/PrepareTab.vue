@@ -134,6 +134,14 @@ const notReady = computed(() => (props.status?.routes ?? []).filter((row) => WAI
 /** The drives with frames left to review (in progress or not started), and those reviewed to the end. */
 const review = computed(() => reviewSummary(props.status));
 const toReview = computed(() => review.value.inProgress + review.value.toStart);
+/** Who proposes in a preparation, with Our networks' parts by their run: "Our networks: cutter 2026-10-26_1638, …". */
+function proposerLine(job: Job): string {
+  const name = PROPOSERS.find((item) => item.key === job.proposer)?.label ?? String(job.proposer);
+  const parts = Object.entries(job.networks ?? {}).map(([part, id]) =>
+    part + ' ' + ((id.split(':')[1] ?? id).split('/')[0] ?? id).replace('-' + part, ''));
+  return parts.length ? name + ': ' + parts.join(', ') : name;
+}
+
 /** The comma pill of the top bar, opened as a click on it would: Download new drives is there. */
 function openComma(): void {
   const pill = document.querySelector<HTMLButtonElement>('#comma-pill .tm-pill');
@@ -180,6 +188,7 @@ function openComma(): void {
     <h2 class="section-title" id="prepare-job-title">{{ running ? 'Running' : 'Last job failed' }}</h2>
     <div class="jp-list" aria-live="polite">
       <JobProgress v-if="bigJob" :job="bigJob" @details="$emit('details', $event)" @stop="$emit('stop', $event)">
+        <p v-if="bigJob.proposer" class="figure-note prep-by">Found by {{ proposerLine(bigJob) }}</p>
         <PrepRoutes v-if="(bigJob.action === 'prepare' || bigJob.action === 'prepare_again') && bigJob.state === 'running' && status?.preparation" :routes="status.preparation.working"/>
       </JobProgress>
       <TerminalActivity v-for="activity in activities" :key="activity.pid + activity.label" :activity="activity" :preparation="status?.preparation ?? null"/>

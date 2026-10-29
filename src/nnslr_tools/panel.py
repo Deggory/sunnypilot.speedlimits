@@ -525,6 +525,7 @@ class Panel:
                            'run': _run_of(path, action) if ACTIONS[action]['group'] == 'train'
                            or action in SIGNNET_ACTIONS else None,
                            'proposer': proposer,
+                           'networks': _networks_of(self.root, path) if proposer == 'ours' else None,
                            'settings': _settings_of(path, action),
                            'started': started.strftime('%Y-%m-%d %H:%M:%S'),
                            # The same moment with the server's offset, for the elapsed time in the page.
@@ -1509,7 +1510,9 @@ class Panel:
                 environment[FETCH_PYTHON_ENV] = fetch_python
             if proposer is not None:
                 # Who proposes, for the page (the running job's choice) and Try again: the log does not always say.
-                path.with_suffix('.json').write_text(json.dumps({'proposer': proposer}) + '\n', encoding='utf-8')
+                # Our networks: the parts in use now, by name (the Models tab can change them while it runs).
+                kept = {'proposer': proposer, **({'networks': _active_parts(self.root)} if proposer == 'ours' else {})}
+                path.with_suffix('.json').write_text(json.dumps(kept) + '\n', encoding='utf-8')
             with path.open('wb') as log:
                 log.write(('== ' + ' '.join(command) + '\n').encode())
                 log.flush()
@@ -1619,6 +1622,21 @@ def _exit_code(path: Path) -> int | None:
         return None
     match = FINISHED.search(tail)
     return int(match.group(1)) if match else None
+
+
+def _active_parts(root: Path) -> dict[str, str]:
+    """The cutter, classifier and decider in use (models/active.json) by id: what Our networks propose with."""
+    from nnslr_tools.preannotate import OUR_PARTS
+    active = _read_json(root / 'models' / 'active.json') or {}
+    return {part: active[part]['id'] for part in OUR_PARTS
+            if isinstance(active.get(part), dict) and isinstance(active[part].get('id'), str)}
+
+
+def _networks_of(root: Path, log: Path) -> dict[str, str]:
+    """The networks a preparation of Our networks proposes with: kept next to its log when it started, else (a job
+    started before they were kept) the ones in use now."""
+    kept = (_read_json(log.with_suffix('.json')) or {}).get('networks')
+    return kept if isinstance(kept, dict) else _active_parts(root)
 
 
 def _proposer_of(log: Path) -> str | None:

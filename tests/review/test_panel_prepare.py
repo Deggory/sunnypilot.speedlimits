@@ -137,11 +137,18 @@ def test_qwen_is_refused_and_said_so_when_the_gpu_is_taken(root, checkout, monke
 
 def test_a_job_knows_its_proposer_and_when_it_ended(root, checkout, monkeypatch):
     monkeypatch.setattr('nnslr_tools.preannotate.ours_missing', lambda root: None)
+    (root / 'models').mkdir(parents=True, exist_ok=True)
+    (root / 'models' / 'active.json').write_text(json.dumps({'cutter': {'id': 'cutter:c/x'}, 'classifier': {'id': 'classifier:k/y'},
+                                                             'decider': {'id': 'decider:d/z'}}))
     panel = Panel(root, repo=checkout)
     job = panel.start('prepare_again', {'proposer': 'ours'})
     done = finished(panel, job['id'])
     assert done['proposer'] == 'ours' and done['ended_at'] and done['ended_at'] >= done['started_at']
     assert (panel.logs / (job['id'] + '.json')).is_file()
+    # Its networks are the ones in use when it started, even after the Models tab changes them.
+    (root / 'models' / 'active.json').write_text(json.dumps({'cutter': {'id': 'cutter:new/x'}}))
+    assert next(item for item in panel.jobs() if item['id'] == job['id'])['networks'] == {
+        'cutter': 'cutter:c/x', 'classifier': 'classifier:k/y', 'decider': 'decider:d/z'}
     # A measure started before the options were kept: its log names the proposer, and the label says it.
     (panel.logs / '20261025-115313-measure_proposer.log').write_text(
         '== helpers/measure_proposer.sh\nMeasuring the proposer qwen on the test frames...\n'
