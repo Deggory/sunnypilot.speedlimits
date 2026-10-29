@@ -183,7 +183,7 @@ def _read_json(path: Path) -> Any:
 
 
 def label_name(label: str) -> str:
-    """'maximum_speed:60' -> 'Speed limit 60', 'variable_display:unknown' -> 'Variable display, value unknown',
+    """'maximum_speed:60' -> 'Speed limit 60', 'variable_display:unknown' -> 'Variable speed limit, value unknown',
     'other_sign:give_way' -> 'Other sign: give way', 'not_a_sign' -> 'Not a sign'."""
     from nnslr_tools.panel import FAMILY_LABELS
     family, _, value = str(label).partition(':')

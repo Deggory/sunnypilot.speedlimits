@@ -165,7 +165,7 @@ export function shortLabel(label: string | null | undefined): string {
     case 'maximum_speed': return value === 'unknown' ? 'speed ?' : shown || 'speed';
     case 'cancellation': return 'end' + (shown ? ' ' + shown : '');
     case 'zone': return 'zone' + (shown ? ' ' + shown : '');
-    case 'variable_display': return 'display' + (shown ? ' ' + shown : '');
+    case 'variable_display': return 'variable' + (shown ? ' ' + shown : '');
     case 'other_sign': return shown || 'other';
     case 'unreadable': return 'unreadable';
     default: return label.replace(/_/g, ' ');

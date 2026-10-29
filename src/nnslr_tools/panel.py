@@ -1687,7 +1687,7 @@ def _qwen_gpu_reason(gpu: dict | None) -> str:
 
 
 # English names of the sign families of the dataset (sign_family of objects.jsonl).
-FAMILY_LABELS = {'maximum_speed': 'Speed limit', 'variable_display': 'Variable display', 'zone': 'Zone',
+FAMILY_LABELS = {'maximum_speed': 'Speed limit', 'variable_display': 'Variable speed limit', 'zone': 'Zone',
                  'cancellation': 'End of limit', 'other_sign': 'Other sign', 'not_a_sign': 'Not a sign',
                  'unreadable': 'Unreadable', 'road_marking': 'Road marking'}
 SPEED_FAMILIES = ('maximum_speed', 'variable_display', 'zone', 'cancellation', 'road_marking')

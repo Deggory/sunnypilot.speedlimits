@@ -556,7 +556,7 @@ def test_names_of_the_labels_of_the_classifier():
     assert runs_module.label_name('other_sign') == 'Other sign'
     assert runs_module.label_name('not_a_sign') == 'Not a sign'
     assert runs_module.label_name('maximum_speed:60') == 'Speed limit 60'
-    assert runs_module.label_name('variable_display:unknown') == 'Variable display, value unknown'
+    assert runs_module.label_name('variable_display:unknown') == 'Variable speed limit, value unknown'
 
 
 def test_a_classifier_run_is_a_kind_of_its_own_with_its_headline_numbers(root, index):

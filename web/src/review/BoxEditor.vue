@@ -78,7 +78,7 @@ const SELECT_CHOICES: Record<SelectField, [string, string][]> = {
 const SELECT_LABELS: Record<SelectField, string> = {
   visibility: 'Visibility', occlusion: 'Occlusion', supplementary_panel: 'Panel below',
 };
-const BOOLEAN_LABELS: Record<BooleanField, string> = {temporary: 'Temporary', variable_display: 'Variable display'};
+const BOOLEAN_LABELS: Record<BooleanField, string> = {temporary: 'Temporary', variable_display: 'Variable speed limit'};
 
 function selectValue(key: SelectField): string {
   return props.detection?.[key] ?? 'unknown';

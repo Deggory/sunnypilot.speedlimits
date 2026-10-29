@@ -16,7 +16,7 @@ export const FAMILIES: readonly Family[] = [
   // The crossed number of an end of limit goes in the notes: the box has no value (review rules).
   {id: 'cancellation', label: 'End of limit', hasValue: false, minor: false},
   {id: 'unreadable', label: 'Unreadable', hasValue: false, minor: false},
-  {id: 'variable_display', label: 'Variable display', hasValue: true, minor: false},
+  {id: 'variable_display', label: 'Variable speed limit', hasValue: true, minor: false},
   {id: 'zone', label: 'Zone', hasValue: true, minor: false},
   {id: 'road_marking_candidate', label: 'Road marking', hasValue: true, minor: true},
   {id: 'other_sign', label: 'Other sign', hasValue: false, minor: true},
@@ -129,7 +129,7 @@ const HINT_TYPES: readonly HintType[] = [
   {id: 'cancellation', label: 'End of limit', short: 'end'},
   {id: 'zone', label: 'Zone', short: 'zone'},
   {id: 'zone_end', label: 'End of zone', short: 'zone end'},
-  {id: 'variable_display', label: 'Variable display', short: 'display'},
+  {id: 'variable_display', label: 'Variable speed limit', short: 'variable'},
   {id: 'road_marking', label: 'Road marking', short: 'road'},
   UNSURE,
 ];
