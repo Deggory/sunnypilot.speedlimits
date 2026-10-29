@@ -302,3 +302,143 @@ def release_summary(found: list[dict]) -> dict:
             'held_by_sign': sum(1 for item in found if item['held_by'] and 'sign' in item['held_by']),
             **counts, 'median_release': float(np.median(timely)) if timely else None,
             'releases': [item['release'] for item in found]}
+
+
+# -- the junction head: when the car has passed an intersection ------------------------------------------------------
+# A false "passed" lifts the limit of a sign (Poland: a sign holds to the next intersection), the dangerous error: it is
+# counted per hour and per 10 km, in town and outside. An event is the moment the decode says "passed"; it matches a
+# labelled "passed" (the first frame after the intersection) within a tolerance, one to one, the closest first.
+JUNCTION_TOLERANCES = (2.0, 4.0)
+JUNCTION_THRESHOLDS = (0.3, 0.5, 0.7)
+JUNCTION_GAP_SECONDS = 3.0  # a new event only this long after the last one (the same intersection said twice)
+# 'passed': the passed probability rises to the threshold; 'exit': the in-junction probability falls below it after at
+# least one second at or above it (the event is the first second below).
+JUNCTION_DECODES = ('passed', 'exit')
+
+
+def junction_events(p_passed: np.ndarray, p_in: np.ndarray, threshold: float, decode: str = 'passed',
+                    gap: float = JUNCTION_GAP_SECONDS, seconds: np.ndarray | None = None) -> list[int]:
+    """The positions of the "passed" events of a sequence (see JUNCTION_DECODES)."""
+    seconds = np.arange(len(p_in), dtype=np.float64) if seconds is None else np.asarray(seconds, dtype=np.float64)
+    if decode == 'passed':
+        above = np.asarray(p_passed) >= threshold
+        starts = [t for t in range(len(above)) if above[t] and (t == 0 or not above[t - 1])]
+    elif decode == 'exit':
+        inside = np.asarray(p_in) >= threshold
+        starts = [t for t in range(1, len(inside)) if inside[t - 1] and not inside[t]]
+    else:
+        raise ValueError(f'unknown junction decode {decode!r}')
+    events, last = [], -np.inf
+    for t in starts:
+        if seconds[t] - last >= gap:
+            events.append(t)
+            last = seconds[t]
+    return events
+
+
+def match_events(events: list[float], truth: list[float], tolerance: float) -> list[tuple[int, int]]:
+    """One-to-one pairs (event, truth) within tolerance seconds, the closest pairs first."""
+    pairs = sorted((abs(e - t), i, j) for i, e in enumerate(events) for j, t in enumerate(truth)
+                   if abs(e - t) <= tolerance)
+    used_e, used_t, found = set(), set(), []
+    for _, i, j in pairs:
+        if i not in used_e and j not in used_t:
+            used_e.add(i)
+            used_t.add(j)
+            found.append((i, j))
+    return found
+
+
+def _ratio(a: float, b: float, digits: int = 4) -> float | None:
+    return round(a / b, digits) if b else None
+
+
+def junction_area(label: int, predicted: int, town: int) -> str:
+    """town or outside, by the road type of the frame (the network's answer where the map has none)."""
+    return 'town' if (label if label >= 0 else predicted) == town else 'outside'
+
+
+def junction_metrics(sequences: list[dict], classes: tuple[str, ...], *,
+                     thresholds: tuple[float, ...] = JUNCTION_THRESHOLDS) -> dict:
+    """The junction head over whole sequences (each run from zeros, as the car): sequences [{'seconds', 'p_in',
+    'p_passed', 'in', 'passed', 'known', 'ignore', 'labels', 'predicted', 'speed' (m/s, nan unknown)}].
+
+    Per decode and threshold: events, recall of the labelled "passed" within 2 and 4 s, precision and F1 at 2 s, false
+    events (matched to no "passed" within 4 s; an event on a frame without junction labels or just after a passage
+    whose exit was not seen is not judged) per hour and per 10 km, in town and outside. Plus the in-junction frames
+    (precision, recall, F1 at 0.5)."""
+    town = classes.index('town')
+    areas = {'town': {'seconds': 0.0, 'metres': 0.0}, 'outside': {'seconds': 0.0, 'metres': 0.0}}
+    truth_count, tp, fp, fn = 0, 0, 0, 0
+    prepared = []
+    for item in sequences:
+        known = np.asarray(item['known'], dtype=bool)
+        labels, predicted = np.asarray(item['labels']), np.asarray(item['predicted'])
+        speed = np.nan_to_num(np.asarray(item['speed'], dtype=np.float64), nan=0.0)
+        area = [junction_area(int(labels[t]), int(predicted[t]), town) for t in range(len(known))]
+        for t in np.flatnonzero(known):
+            areas[area[t]]['seconds'] += 1.0
+            areas[area[t]]['metres'] += float(speed[t])
+        seconds = np.asarray(item['seconds'], dtype=np.float64)
+        truth = [float(seconds[t]) for t in np.flatnonzero(np.asarray(item['passed'], dtype=bool) & known)]
+        truth_count += len(truth)
+        inside, said = np.asarray(item['in'], dtype=bool), np.asarray(item['p_in']) >= 0.5
+        tp += int((inside & said & known).sum())
+        fp += int((~inside & said & known).sum())
+        fn += int((inside & ~said & known).sum())
+        judged = known & ~np.asarray(item['ignore'], dtype=bool)
+        prepared.append((item, seconds, truth, judged, area))
+    hours = sum(a['seconds'] for a in areas.values()) / 3600
+    km = sum(a['metres'] for a in areas.values()) / 1000
+    decodes = {}
+    for decode in JUNCTION_DECODES:
+        decodes[decode] = {}
+        for threshold in thresholds:
+            matched = {tolerance: 0 for tolerance in JUNCTION_TOLERANCES}
+            events = false = 0
+            false_area = {'town': 0, 'outside': 0}
+            for item, seconds, truth, judged, area in prepared:
+                found = [t for t in junction_events(item['p_passed'], item['p_in'], threshold, decode,
+                                                    seconds=seconds) if judged[t]]
+                times = [float(seconds[t]) for t in found]
+                events += len(found)
+                for tolerance in JUNCTION_TOLERANCES:
+                    matched[tolerance] += len(match_events(times, truth, tolerance))
+                hit = {i for i, _ in match_events(times, truth, max(JUNCTION_TOLERANCES))}
+                for i, t in enumerate(found):
+                    if i not in hit:
+                        false += 1
+                        false_area[area[t]] += 1
+            precision = _ratio(matched[2.0], events)
+            recall = _ratio(matched[2.0], truth_count)
+            f1 = (round(2 * precision * recall / (precision + recall), 4)
+                  if precision is not None and recall is not None and precision + recall > 0 else
+                  0.0 if truth_count else None)
+            decodes[decode][f'{threshold:g}'] = {
+                'events': events, 'recall_2s': recall, 'recall_4s': _ratio(matched[4.0], truth_count),
+                'precision_2s': precision, 'f1_2s': f1, 'false': false,
+                'false_per_hour': _ratio(false, hours, 2), 'false_per_10km': _ratio(false, km / 10, 2),
+                **{name: {'false': false_area[name],
+                          'per_hour': _ratio(false_area[name], areas[name]['seconds'] / 3600, 2),
+                          'per_10km': _ratio(false_area[name], areas[name]['metres'] / 10000, 2)}
+                   for name in areas}}
+    in_precision, in_recall = _ratio(tp, tp + fp), _ratio(tp, tp + fn)
+    in_f1 = (round(2 * in_precision * in_recall / (in_precision + in_recall), 4)
+             if in_precision and in_recall else 0.0 if tp + fn else None)
+    return {'passed': truth_count, 'hours': round(hours, 3), 'km': round(km, 2),
+            'areas': {name: {'hours': round(a['seconds'] / 3600, 3), 'km': round(a['metres'] / 1000, 2)}
+                      for name, a in areas.items()},
+            'in_junction': {'precision': in_precision, 'recall': in_recall, 'f1': in_f1},
+            'decodes': decodes}
+
+
+def operating_point(metrics: dict) -> dict:
+    """The decode and threshold of the car, chosen on validation: the best F1 at 2 s; on a tie the fewer false events.
+    {'decode', 'threshold', ...its numbers}."""
+    best = None
+    for decode, by_threshold in metrics['decodes'].items():
+        for threshold, numbers in by_threshold.items():
+            key = (numbers['f1_2s'] or 0.0, -(numbers['false_per_hour'] or 0.0), float(threshold))
+            if best is None or key > best[0]:
+                best = (key, {'decode': decode, 'threshold': float(threshold), **numbers})
+    return best[1] if best else {}

@@ -340,3 +340,89 @@ Checked against PyTorch with onnxruntime: largest error 5e-7 on random inputs. O
 - **Ramps, for interchanges.** Ramps need more drives with on-ramps, off-ramps and interchanges. With 12 ramps in train the class does not generalise, whatever the weights or the oversampling.
 - **Merges and signs.** There are 8 merges in validation and test, and only 4 with a sign. Train has 2 entries with a sign. One merge moves a whole row of the table, and seeds of the same training differ by as much as the versions do. The numbers above are a trend, not a measure.
 - **Long entry ramps.** On the 40 s two-lane entry ramp of the test, 7 of the 8 networks above release the 120 on the ramp, between 4 and 29 s before the merge. The sign's age alone cannot place the merge, because entry ramps here last from 8 to 40 s.
+
+### Third version: the junction head (29 October 2026)
+
+**Why.** In Poland, and in Switzerland by OSStr art. 16 cpv. 2, a speed sign holds at most to the end of the next intersection. Poland has no end sign: the car must know by itself that it crossed an intersection, so that the limit goes back to the general one. The map gives the labels; the camera, with the network's memory over the seconds before, gives the answer on the car. The comma reads nothing new from the map.
+
+**The labels, from the map** (`src/nnslr_tools/junctions.py`, `nnslr junctions --all`, step 3 of the script; `data/derived/junctions/<route>.json`). For every frame of every drive: `in_junction` (the car is inside an at-grade intersection of public roads) and `passed` (the first frame after it left one). From the GPS track and the road the car is on (`map_context.our_road`):
+- an intersection is a node of the map where at least three arms of public roads meet: trunk, primary, secondary, tertiary, unclassified, residential, living_street and their `_link`. A node where only motorways, expressways and their ramps meet is the diverge or merge of an interchange, never an intersection;
+- service roads, tracks, paths, footways, cycleways, pedestrian ways, steps, bridleways and roads with `access` or `motor_vehicle` private (or no, agricultural, forestry, customers, delivery, permit, emergency) are not roads here: the law leaves out driveways and the exits of internal and unpaved roads;
+- two arms of one road within 50° of each other, one of them one-way, are one arm: the start of a dual carriageway, a lane that splits and joins again, a roundabout's bypass;
+- a roundabout is one intersection, from where the car enters it to where it leaves it. Nodes closer than 25 m of road, or joined by a turning lane of at most 80 m, are one intersection (a dual carriageway crossed, a staggered crossing), at most 60 m across;
+- a bridge or a tunnel shares no node with our road, so it is never an intersection by itself. The car passes an intersection when the track comes within 12 m of a node of it and the road it is on, within 3 s, is one of its roads; a passage near a node of another road (a bridge above, a road beside) is kept apart as "maybe" for the review page.
+
+**The area** of an intersection along the track: from a radius before its first node to a radius after its last one. The radius is half the width of the widest road (its `lanes` × 3.25 m, or 2 lanes, 1 for a one-way road or a ramp) plus 4 m for the stop line and the corner, kept between 10 and 20 m: 10 m for two two-lane roads, 10.5 m with a four-lane road, 13.75 m with six. The distance along the track is the integral of the GPS speed (a car waiting at a light does not move; its GPS position does), and each node is placed at the track's closest point to it. A frame is `in_junction` when its time is inside the area; `passed` is the first frame after the area, within 1.5 s.
+
+| Drive | km | Intersections | Roundabouts | Passed | Maybe (another road) | Frames inside |
+|---|---|---|---|---|---|---|
+| 0000011e | 9.3 | 14 | 4 | 14 | 0 | 60 |
+| 0000011f | 9.6 | 12 | 3 | 12 | 1 | 56 |
+| 00000122 | 9.0 | 12 | 4 | 11 | 0 | 70 |
+| 00000123 | 10.8 | 15 | 3 | 15 | 1 | 173 |
+| 00000125 | 39.2 | 20 | 0 | 20 | 3 | 113 |
+| 00000126 | 36.2 | 27 | 4 | 27 | 5 | 175 |
+| 00000128 | 17.7 | 43 | 4 | 42 | 1 | 168 |
+| 0000012a | 40.8 | 29 | 0 | 29 | 8 | 179 |
+| 0000012c | 40.6 | 25 | 0 | 24 | 6 | 62 |
+| 0000012d (test) | 40.2 | 21 | 0 | 21 | 7 | 115 |
+| 0000012e | 39.7 | 26 | 0 | 26 | 7 | 68 |
+| 00000147 | 5.4 | 18 | 0 | 17 | 0 | 91 |
+| **All** | **298.5** | **262** | **22** | **258** | **39** | **1,330** |
+
+Four passages have no `passed`: the GPS stops inside them. Every passage has at least one frame inside.
+
+**Checked by eye** before training: 24 intersections on sheets of their frames (before, inside, passed) with the map around them. The first 12 had 3 wrong: a lane that merges back, and the bypass of a roundabout counted as two intersections. The rule of the one-way arms within 50° fixes them; the second 12 were all right. Two things the labels do on purpose: a car queued at a red light within the radius is "inside" (`frames_inside` up to 111 s), and a car that takes a roundabout's bypass passes no intersection. A test of the labeller then found that the end of a track segment, clamped, counted as a touch of the node and widened areas by up to 12 m a side; version 2 places each node at the closest point only (1,799 frames inside became 1,330).
+
+**1 Hz.** The derived frames are one a second, so 2 Hz would need the 394,000 frames of the drives decoded again from HEVC. It is also not needed for the labels: at 50 km/h a two-lane crossing (20 m) lasts 1.4 s, and every passage of the 12 drives has at least one frame inside. The road type's memory runs at 1 Hz on the car, and a faster step would make its memory faster too. So the junction head stays at 1 Hz, and 2 Hz was not measured.
+
+**The network.** The same encoder and memory, one more head: `Linear(128 → 2)` on the GRU's state, the sigmoid of `in_junction` and `passed`. Its loss is a binary cross-entropy beside the road type's, positives weighed by √(negatives / positives); the `passed` output is not taught 1 s around a labelled "passed", since the map's timing is ±1 s. A fifth of the train windows are cut around a "passed". The best epoch is chosen by the mean of the road-type macro F1 and the junction F1 on validation. The version without memory has the same head per frame (128 → 128 → 2). Frames without a GPS fix have no junction label and are not taught.
+
+**The measure** (`road_type_metrics.junction_metrics`; each drive of test run whole from zeros, as on the car). A "passed" event is when the `passed` probability rises to the threshold (decode `passed`), or when the `in_junction` probability falls below it (decode `exit`), at most one event every 3 s. An event matches a labelled "passed" within 2 or 4 s, one to one. An event matched to nothing within 4 s is a **false "passed"**, the dangerous error since it lifts a limit; it is counted per hour and per 10 km, in town and outside (by the frame's road type). Events in the 4 s after a passage whose exit was not seen are not judged. The car's decode and threshold are those with the best F1 at 2 s on validation.
+
+**Results** (run `2026-10-29_1412-road-type-junction`). Test is the areas of the held-out drive. It holds 83 intersections passed in 1.59 h and 92.5 km: 0.49 h and 11.7 km in town, 1.10 h and 80.8 km outside. Validation has only 28, in 0.50 h, with 6 minutes of town. Each version runs at its operating point, chosen on validation. "Needed" counts the intersections of the test that come within 300 m after a number sign the car's own code confirmed (the replay of `SpeedLimitMemory` over the sign readings of step 4). Those are the ones where, in Poland, the limit would end. 35 of the 83 are needed.
+
+| Test, at the operating point | Rule | Recall 2 s | Recall 4 s | F1 2 s | False "passed" /h | /10 km | Town /h, /10 km | Outside /h, /10 km | Needed caught (2 s, 4 s) |
+|---|---|---|---|---|---|---|---|---|---|
+| With memory and the sign (epoch 14) | exit, in < 0.3 | 30.1 % | 31.3 % | 0.281 | 43.4 | 7.5 | 91.4, 38.6 | 21.8, 3.0 | 11, 12 of 35 |
+| With memory, no sign (epoch 16) | passed ≥ 0.3 | 15.7 % | 20.5 % | 0.182 | 27.0 | 4.7 | 75.6, 31.9 | 5.4, 0.7 | 7, 8 of 35 |
+| Without memory (epoch 37) | exit, in < 0.3 | 26.5 % | 34.9 % | 0.216 | 57.8 | 10.0 | 138.5, 58.3 | 21.8, 3.0 | 9, 12 of 35 |
+
+The network with memory and the sign at three thresholds (test):
+
+| Rule | Recall 2 s | Recall 4 s | False /h | /10 km | Town /h | Outside /h |
+|---|---|---|---|---|---|---|
+| passed ≥ 0.3 | 38.6 % | 43.4 % | 49.0 | 8.4 | 115.8 | 19.1 |
+| passed ≥ 0.5 | 26.5 % | 28.9 % | 32.1 | 5.5 | 75.2 | 12.7 |
+| passed ≥ 0.7 | 21.7 % | 24.1 % | 21.4 | 3.7 | 52.8 | 7.3 |
+| exit, in < 0.3 (the operating point) | 30.1 % | 31.3 % | 43.4 | 7.5 | 91.4 | 21.8 |
+| exit, in < 0.5 | 25.3 % | 27.7 % | 37.7 | 6.5 | 85.3 | 16.4 |
+| exit, in < 0.7 | 18.1 % | 21.7 % | 28.3 | 4.9 | 67.0 | 10.9 |
+
+- **It is not usable on the car.** At the operating point it finds 3 intersections in 10 and says "passed" falsely 43 times an hour: 91 an hour in town, more than one a minute. Each false "passed" would lift a limit. The strictest threshold still makes 21 false events an hour, and finds a fifth of the intersections.
+- **The memory helps a little.** At the same rule (exit, in < 0.3), with memory: 30 % recall at 2 s and 43 false an hour. Without memory: 27 % and 58 false. Inside the intersection (frames, at 0.5), F1 is 0.24 with memory and 0.18 without. The memory makes the moment sharper, not the finding: within 4 s the version without memory finds more (35 % against 31 %).
+- **Validation says much more than test**: F1 0.62 and 24 false an hour on validation, 0.28 and 43 on test. Validation has 28 intersections and 6 minutes of town, so the choice of epoch and threshold rests on very little.
+- **The false events were not looked at yet.** Some may be real intersections the rules leave out (a car park exit, a service road, a farm track), which look like one from the camera. That would make the measure stricter than the law, but the car still could not tell them apart.
+
+**The road type changed too.** The same encoder and memory now serve two heads, and the best epoch is chosen on the mean of both F1. Against the second version (`2026-10-29_1231-road-type`, with the sign; test):
+
+| | Macro F1 | Ramp F1 | After a merge | Ramp limit ends in time (of 7) | Never held | False switches /h (raw, debounced) | Other roads called ramp |
+|---|---|---|---|---|---|---|---|
+| v2, with the sign | 0.561 | 0.000 | 90.7 % | 2 | 4 | 80, 48 | 16 s |
+| v3, with the sign and the junctions | 0.623 | 0.105 | 62.4 % | 3 | 3 | 171, 69 | 202 s |
+| v3, no sign | 0.633 | 0.076 | 79.1 % | 1 | 4 | 157, 66 | 159 s |
+| v3, without memory | 0.590 | 0.030 | 85.4 % | 1 | 4 | 498, 70 | 69 s |
+
+The third version says ramp sometimes, for 29 of the 319 ramp seconds of test, and holds one interchange in time. But it also calls 202 s of other roads a ramp, its answer switches twice as often, and after a merge it is right 62 % of the time instead of 91 %. A first run of this version, killed before it finished and trained with the first labeller's wider areas, chose a later epoch: after a merge 98.6 %, macro F1 0.684, junction F1 0.214 with 25 false an hour. The epoch the junction head picks moves the road type a lot. **For the road type, the second version stays the one to use.**
+
+**On the car.** The ONNX step has one more output, after the road type's, which keep their names and order: `probabilities` (1, 6), `hidden_out` (1, 128), `junction` (1, 2) = sigmoid of `in_junction` and `passed`. The contract has `outputs.junction` (names, the decode, the operating point chosen on validation), `step.junctions` and `car_input.junction_decode`, the line the car runs. Checked against PyTorch with onnxruntime: largest error 5e-6 on random inputs, 9e-6 over 60 s of a real drive with the same answer in all 60. The network has 1,102,504 parameters (258 more); a step still costs 84 MFLOPs.
+
+**Corrections in Data › Roads.** The review page of a drive shows the map's intersections as dots under the strip: filled for an intersection, an orange ring for one to check (the GPS stops inside, the track passes more than 8 m from it, the car stays more than 30 s inside, or a "maybe" on another road), a gray ring for one dropped. Next to check stops on the rings. Under the road-type buttons, "Junction here" and "Not a junction" (and Undo) correct the picture shown. The corrections are appended to `annotations/junctions/<route>.jsonl` (the last line wins) and are never touched by a new map run; the training labels are the map's with the corrections over them. Today 56 are to check: 39 "maybe" and 17 of the map's intersections.
+
+**What is missing.**
+- **Look at the false "passed"**: the 69 of test at the operating point, on the frames. Are they driveways and car park exits (the rules leave them out, the camera does not), stretches the map lacks, or plain mistakes? That decides between more rules, more data and another input.
+- **More intersections in validation**: 28, and 6 minutes of town, are not enough to choose an epoch or a threshold.
+- **The epoch for two heads**: choose the road type's epoch by its own measure, and train or fine-tune the junction head apart, so that one does not spoil the other.
+- **A person's pass over the 56 to check** in Data › Roads, then train again.
+- **Poland**: there is no Polish drive yet. The head is trained on Swiss intersections, which look alike but are not the same.
+- **The car**: nothing uses it, and it should not until the false "passed" are rare. `SpeedLimitMemory` would end a sign's number at a "passed" only where the law says so (Poland; in Switzerland, some signs).

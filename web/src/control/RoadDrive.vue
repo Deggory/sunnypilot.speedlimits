@@ -6,10 +6,14 @@
 // person corrects the map: the type of the stretch shown (or from a marked start to here), saved at once (POST, the drive
 // comes back), after a question when it is longer than a minute; Next to check goes to the next stretch the map is
 // unsure about. On a phone the loop (Next to check, look, tap a type) fits one screen; the rest is under it.
+// The intersections of the drive (nnslr junctions: the map's, with a person's corrections over them) are dots under the
+// strip; under the type buttons and Next to check (which also stops on the junctions to check) a person marks the
+// picture shown "Junction here" or "Not a junction" (POST .../junction, kept apart from the map; Undo takes the last
+// back).
 import {computed, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import {plural, thousands} from '../common/format';
-import type {RoadDriveView, RoadType} from '../common/panel-types';
+import type {RoadDriveView, RoadJunction, RoadType} from '../common/panel-types';
 import {askConfirm} from '../composables/confirm';
 import {toast} from '../composables/toast';
 import {checkStretches, frameTime, nextToCheck, reasonOf, ROAD_LABEL, ROAD_TYPES, roadRuns, stretchAt} from './roads';
@@ -164,10 +168,79 @@ onBeforeUnmount(() => {
   window.clearTimeout(timer);
 });
 
+// -- the junctions: dots under the strip, the one at the picture shown, and a person's correction --------------------------
+const junctions = computed(() => payload.value?.junctions?.marks ?? []);
+/** The junctions to check (a GPS that stops in one, a track far from it, a long wait in it, the map's on another road):
+ * Next to check stops on them too. */
+const junctionChecks = computed(() => junctions.value.filter((mark) => mark.doubt !== null));
+/** The dots of the strip: those that are not junctions under, the junctions over them, those to check on top. */
+const dots = computed(() => {
+  const order = (mark: RoadJunction): number => mark.doubt !== null ? 2 : mark.label === 'junction' ? 1 : 0;
+  return [...junctions.value].sort((a, b) => order(a) - order(b))
+    .map((mark) => ({key: mark.id + '/' + mark.first, left: 100 * (mark.first + mark.last + 1) / 2 / frames.value.length,
+      kind: mark.doubt !== null ? 'check' : mark.label === 'junction' ? 'on' : 'not'}));
+});
+/** Where Next to check stops: the first frame of each stretch to check and of each junction to check, in drive order. */
+const stops = computed(() => [...new Set([...checks.value.map((item) => item.first),
+  ...junctionChecks.value.map((mark) => mark.first)])].sort((a, b) => a - b).map((first) => ({first})));
+/** What is left to check, in the title of its count: "3 stretches · 2 junctions". */
+const left = computed(() => [checks.value.length ? plural(checks.value.length, 'stretch', 'stretches') : '',
+  junctionChecks.value.length ? plural(junctionChecks.value.length, 'junction') : ''].filter(Boolean).join(' · '));
+/** The junction at the picture shown: one it is inside, else the one it is just after (its "passed" frame), else a
+ * junction of the map on another road right next to it (two pictures, as the server counts it). */
+const junctionHere = computed((): RoadJunction | null => {
+  const at = shown.value;
+  return junctions.value.find((mark) => mark.label !== 'maybe' && mark.first <= at && at <= mark.last)
+    ?? junctions.value.find((mark) => mark.label !== 'maybe' && mark.passed === at)
+    ?? junctions.value.find((mark) => mark.label === 'maybe' && Math.abs(mark.first - at) <= 2) ?? null;
+});
+/** The junction at the picture shown in a few words: "Roundabout · from the map", "No junction here". */
+const junctionText = computed((): string => {
+  const mark = junctionHere.value;
+  if (!payload.value?.junctions?.found) return 'Not found yet: Find the road types reads them';
+  if (mark === null) return 'No junction here';
+  if (mark.label === 'dropped') return 'Not a junction, set by you (the map has one)';
+  if (mark.label === 'maybe') return mark.reviewed ? 'Not a junction, set by you' : 'Maybe a junction';
+  const what = mark.kind === 'roundabout' ? 'Roundabout' : 'Junction';
+  const by = mark.by === 'person' ? 'set by you' : mark.reviewed ? 'checked by you' : 'from the map';
+  return (mark.passed === shown.value ? 'Just past a ' + what.toLowerCase() + ': a sign\'s limit ends here' : what)
+    + ' · ' + by;
+});
+/** Why to check it, or the roads that meet there. */
+const junctionDetail = computed((): string => {
+  const mark = junctionHere.value;
+  if (mark === null) return '';
+  if (mark.doubt !== null) return mark.doubt;
+  if (mark.label !== 'junction' || !mark.arms || !mark.roads) return '';
+  return mark.arms + ' roads meet: ' + mark.roads.map((road) => road.replace('_', ' ')).join(', ');
+});
+/** A person's choice at the picture shown (a solid ring on its button), and the map's (a dashed one). */
+const junctionSet = computed((): 'here' | 'none' | null => {
+  const mark = junctionHere.value;
+  if (mark === null || !mark.reviewed) return null;
+  return mark.label === 'junction' ? 'here' : 'none';
+});
+const junctionMap = computed((): boolean => junctionHere.value?.label === 'junction' && !junctionHere.value.reviewed);
+async function setJunction(choice: 'here' | 'none'): Promise<void> {
+  const target = frame.value;
+  if (!target || saving.value) return;
+  saving.value = true;
+  try {
+    payload.value = await post<RoadDriveView>('/api/panel/road-types/' + encodeURIComponent(props.route) + '/junction',
+      {frame_key: target.key, junction: choice});
+    toast(choice === 'here' ? 'Junction saved' : 'Not a junction · saved');
+  } catch (problem) {
+    toast(messageOf(problem), true);
+  } finally {
+    saving.value = false;
+  }
+}
+
 const stage = useTemplateRef<HTMLElement>('stage');
-/** Next to check: the next stretch no person set where the map says nothing or is often wrong. */
+/** Next to check: the next stretch no person set where the map says nothing or is often wrong, or the next junction
+ * to check. */
 function nextCheck(): void {
-  const index = nextToCheck(checks.value, cursor.value);
+  const index = nextToCheck(stops.value, cursor.value);
   if (index === null) {
     toast('Nothing else to check on this drive.');
     return;
@@ -180,7 +253,7 @@ function nextCheck(): void {
 }
 
 // -- the strip: a tap or a drag goes to that point of the drive ----------------------------------------------------------
-const strip = useTemplateRef<SVGSVGElement>('strip');
+const strip = useTemplateRef<HTMLElement>('strip');
 let dragging = false;
 function stripAt(event: PointerEvent): void {
   const box = strip.value?.getBoundingClientRect();
@@ -264,12 +337,13 @@ async function setType(type: RoadType | null): Promise<void> {
     saving.value = false;
   }
 }
-async function undo(): Promise<void> {
+/** Undo the last road type (what '/undo'), or the last junction ('/junction/undo'). */
+async function undo(what: '/undo' | '/junction/undo' = '/undo'): Promise<void> {
   if (saving.value) return;
   saving.value = true;
   try {
-    payload.value = await post<RoadDriveView>('/api/panel/road-types/' + encodeURIComponent(props.route) + '/undo');
-    toast('Last change undone');
+    payload.value = await post<RoadDriveView>('/api/panel/road-types/' + encodeURIComponent(props.route) + what);
+    toast(what === '/undo' ? 'Last change undone' : 'Last junction change undone');
   } catch (problem) {
     toast(messageOf(problem), true);
   } finally {
@@ -300,19 +374,26 @@ async function undo(): Promise<void> {
       </div>
 
       <div class="rt-time">
-        <svg ref="strip" class="rt-track" :viewBox="'0 0 ' + frames.length + ' 20'" preserveAspectRatio="none" role="slider"
-             :aria-valuemin="1" :aria-valuemax="frames.length" :aria-valuenow="cursor + 1" aria-label="Where in the drive"
-             @pointerdown="stripDown" @pointermove="stripMove" @pointerup="dragging = false" @pointercancel="dragging = false">
-          <rect v-for="run in runs" :key="run.first" :x="run.first" y="3" :width="run.count" height="11" :class="'rt-' + run.kind"/>
-          <template v-for="run in runs" :key="'r' + run.first">
-            <rect v-if="run.reviewed" :x="run.first" y="16" :width="run.count" height="3" class="rt-done"/>
-          </template>
-          <rect v-for="item in checks" :key="'c' + item.first" :x="item.first" y="16" :width="Math.max(item.count, thin)" height="3"
-                class="rt-tocheck"/>
-          <rect v-if="span" :x="span[0]" y="0" :width="Math.max(span[1] - span[0] + 1, 3 * thin)" height="2.2" class="rt-marked"/>
-          <rect :x="cursor" y="0" :width="thin" height="20" class="rt-head"/>
-          <rect v-if="splittable && part !== 'all'" :x="cursor" y="-2" :width="Math.max(thin, 1)" height="24" class="rt-cut"/>
-        </svg>
+        <div ref="strip" class="rt-scrub" role="slider" :aria-valuemin="1" :aria-valuemax="frames.length"
+             :aria-valuenow="cursor + 1" aria-label="Where in the drive" @pointerdown="stripDown" @pointermove="stripMove"
+             @pointerup="dragging = false" @pointercancel="dragging = false">
+          <svg class="rt-track" :viewBox="'0 0 ' + frames.length + ' 20'" preserveAspectRatio="none" aria-hidden="true">
+            <rect v-for="run in runs" :key="run.first" :x="run.first" y="3" :width="run.count" height="11" :class="'rt-' + run.kind"/>
+            <template v-for="run in runs" :key="'r' + run.first">
+              <rect v-if="run.reviewed" :x="run.first" y="16" :width="run.count" height="3" class="rt-done"/>
+            </template>
+            <rect v-for="item in checks" :key="'c' + item.first" :x="item.first" y="16" :width="Math.max(item.count, thin)" height="3"
+                  class="rt-tocheck"/>
+            <rect v-if="span" :x="span[0]" y="0" :width="Math.max(span[1] - span[0] + 1, 3 * thin)" height="2.2" class="rt-marked"/>
+            <rect :x="cursor" y="0" :width="thin" height="20" class="rt-head"/>
+            <rect v-if="splittable && part !== 'all'" :x="cursor" y="-2" :width="Math.max(thin, 1)" height="24" class="rt-cut"/>
+          </svg>
+          <!-- The junctions: round dots in HTML, as the strip's SVG is stretched. -->
+          <div v-if="dots.length" class="rt-jrow" aria-hidden="true">
+            <i v-for="dot in dots" :key="dot.key" class="rt-jdot" :class="dot.kind" :style="{left: dot.left + '%'}"></i>
+            <i class="rt-jhead" :style="{left: 100 * (cursor + 0.5) / frames.length + '%'}"></i>
+          </div>
+        </div>
         <div class="rt-controls">
           <button type="button" class="btn small primary rt-play" :aria-pressed="playing" @click="toggle"><svg class="icon"
             viewBox="0 0 24 24" aria-hidden="true"><path :d="playing ? MARKS.pause : MARKS.play" fill="currentColor"/></svg>{{ playing ? 'Pause' : 'Play' }}</button>
@@ -352,14 +433,31 @@ async function undo(): Promise<void> {
           </div>
         </div>
 
-        <button type="button" class="btn rt-next" :disabled="checks.length === 0" @click="nextCheck">{{ checks.length ? 'Next to check'
-          : 'Nothing left to check' }}<span v-if="checks.length" class="rt-left">{{ plural(checks.length, 'stretch', 'stretches') }}</span></button>
+        <button type="button" class="btn rt-next" :disabled="stops.length === 0" @click="nextCheck">{{ stops.length ? 'Next to check'
+          : 'Nothing left to check' }}<span v-if="stops.length" class="rt-left" :title="left">{{ thousands(stops.length) }} left</span></button>
+
+        <!-- The junction at the picture shown: a person adds one the map misses, or drops one that is not (a driveway,
+             a car park's exit, a bridge). -->
+        <div class="rt-jx">
+          <div class="rt-jx-head"><strong>Junction</strong> <span :class="{'rt-jx-doubt': junctionHere?.doubt}">{{ junctionText }}</span>
+            <button v-if="(payload.junctions?.corrections ?? 0) > 0" type="button" class="link-button rt-jx-undo"
+                    :disabled="saving || readOnly" aria-label="Undo the last junction change" @click="undo('/junction/undo')">Undo</button></div>
+          <p v-if="junctionDetail" class="rt-jx-why">{{ junctionDetail }}</p>
+          <div class="rt-jx-pick" role="group" aria-label="Junction at this picture">
+            <button type="button" class="btn rt-type" :aria-pressed="junctionSet === 'here'" :class="{'rt-map': junctionMap}"
+                    :disabled="saving || readOnly || !payload.junctions?.found" @click="setJunction('here')"><i class="rt-jdot on"
+                    aria-hidden="true"></i>Junction here</button>
+            <button type="button" class="btn rt-type" :aria-pressed="junctionSet === 'none'"
+                    :disabled="saving || readOnly || !payload.junctions?.found" @click="setJunction('none')"><i class="rt-jdot not"
+                    aria-hidden="true"></i>Not a junction</button>
+          </div>
+        </div>
 
         <div class="rt-more">
           <Segmented v-model="speedKey" :options="speedOptions" label="Speed" class="rt-speed"/>
           <div class="rt-fix-row">
             <button type="button" class="btn small" :disabled="readOnly" @click="mark = mark === null ? shown : null">{{ mark === null ? 'Mark start' : 'Clear the mark' }}</button>
-            <button v-if="payload.corrections > 0" type="button" class="btn small" :disabled="saving || readOnly" @click="undo">Undo last change</button>
+            <button v-if="payload.corrections > 0" type="button" class="btn small" :disabled="saving || readOnly" @click="undo()">Undo last change</button>
           </div>
           <p class="rt-hint">{{ readOnly ? 'Read-only: corrections are turned off on this server.'
             : mark === null ? 'Tap the right type: the stretch marked in blue on the strip is saved at once, a long one after a question. Up to here or From here split it at the picture shown; Mark start chooses any start.'
@@ -369,6 +467,9 @@ async function undo(): Promise<void> {
             <li><span class="rt-line rt-tocheck" aria-hidden="true"></span>To check</li>
             <li><span class="rt-line rt-done" aria-hidden="true"></span>Set by you</li>
             <li><span class="rt-line rt-marked" aria-hidden="true"></span>What a tap sets</li>
+            <li><span class="rt-jdot on" aria-hidden="true"></span>Junction</li>
+            <li><span class="rt-jdot check" aria-hidden="true"></span>Junction to check</li>
+            <li><span class="rt-jdot not" aria-hidden="true"></span>Not a junction</li>
           </ul>
         </div>
       </aside>

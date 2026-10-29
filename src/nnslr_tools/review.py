@@ -651,7 +651,7 @@ def make_handler(app: ReviewApp):
                 if by_key is not None:
                     self._json(200, road_types.drive_view(app.root, match.group(1), by_key))
                 return
-            if re.fullmatch(r'/api/panel/road-types/[^/]+/undo', path):
+            if re.fullmatch(r'/api/panel/road-types/[^/]+(/junction)?/undo|/api/panel/road-types/[^/]+/junction', path):
                 self._problem(405, 'method_not_allowed', 'Use POST.', True)
                 return
             if path == '/api/panel/models/active':
@@ -945,6 +945,36 @@ def make_handler(app: ReviewApp):
                       f'({terminal_text(who or via)})', flush=True)
             self._json(200, {'ok': True, **road_types.drive_view(app.root, route, by_key)})
 
+        def _junction_post(self, route, undo, body):
+            """Data › Roads: a person's "Junction here" ({"frame_key", "junction": "here"}) or "Not a junction"
+            ("none") for a frame of a drive, or Undo of the last one; the drive again. Kept apart from the map's
+            junctions (annotations/junctions/<route>.jsonl), as the road types are; a read-only panel refuses it."""
+            from nnslr_tools import junctions, road_types
+            if not app.panel.actions_enabled:
+                raise PanelError(403, 'actions_disabled', 'The panel is read-only on this server.')
+            if not isinstance(body, dict):
+                raise ReviewRejected(400, 'invalid_json', 'A JSON object is required.')
+            by_key = self._prepared_drive(route)
+            if by_key is None:
+                return
+            who, via = self._who()
+            if undo:
+                if not junctions.undo_correction(app.root, route):
+                    raise ReviewRejected(409, 'nothing_to_undo', 'This drive has no junction correction to undo.')
+                print(f'Roads: {route} last junction correction undone ({terminal_text(who or via)})', flush=True)
+            else:
+                if set(body) != {'frame_key', 'junction'}:
+                    raise ReviewRejected(400, 'invalid_correction', 'Send {"frame_key", "junction"}: a frame key of '
+                                                                    'the drive and "here" or "none".')
+                try:
+                    line = junctions.correct(app.root, route, body['frame_key'], body['junction'], who or via)
+                except junctions.CorrectionError as exc:
+                    raise ReviewRejected(400, 'invalid_correction', str(exc)) from None
+                print(f'Roads: {route} {line["frame_key"]} is '
+                      f'{"a junction" if line["junction"] == "here" else "not a junction"} ({terminal_text(who or via)})',
+                      flush=True)
+            self._json(200, {'ok': True, **road_types.drive_view(app.root, route, by_key)})
+
         def _send_route_page(self, route):
             try:
                 directory, run_id, rows, busy, proposer = app.view(route)
@@ -1100,8 +1130,10 @@ def make_handler(app: ReviewApp):
             active = path == '/api/panel/models/active'
             # Who proposes the signs in Prepare ({"proposer"}), kept for every browser.
             chosen = path == '/api/panel/proposer'
-            # A person's road type for a stretch of a drive of Data › Roads ({"from", "to", "road_type"}), or /undo.
-            road = re.fullmatch(r'/api/panel/road-types/([^/]+)(/undo)?', path)
+            # A person's road type for a stretch of a drive of Data › Roads ({"from", "to", "road_type"}), or /undo;
+            # /junction: a person's "Junction here" or "Not a junction" for a frame ({"frame_key", "junction"}), or
+            # /junction/undo.
+            road = re.fullmatch(r'/api/panel/road-types/([^/]+)(/junction)?(/undo)?', path)
             if run or stop or active or chosen or road:
                 # Same protections as saving a frame: same origin, JSON only (no form can send it).
                 if not self._same_origin():
@@ -1144,8 +1176,10 @@ def make_handler(app: ReviewApp):
                     self._json(200, {'ok': True, 'role': role, 'active': entry})
                 elif chosen:
                     self._json(200, {'ok': True, **app.panel.set_proposer(body)})
+                elif road and road.group(2):
+                    self._junction_post(road.group(1), road.group(3) is not None, body)
                 elif road:
-                    self._road_type_post(road.group(1), road.group(2) is not None, body)
+                    self._road_type_post(road.group(1), road.group(3) is not None, body)
                 else:
                     self._json(200, {'ok': True, **app.panel.stop(stop.group(1))})
                 return

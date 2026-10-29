@@ -7,8 +7,9 @@ and the road types (nnslr_tools.road_types).
 Reads every ``derived/gps/<route>/positions.jsonl`` of the data root and keeps the OSM ways with a road
 ``highway`` tag that have a node within about --margin-m of a position. Writes ``derived/osm/roads.jsonl``:
 one line per way, ``{"id", "highway", "service" (parking_aisle, driveway... of a service road), "oneway", "name",
-"ref", "lanes", "maxspeed", "maxspeed_type", "motorroad", "nodes": [[lat, lon], ...]}``. Used by nnslr map-candidates
-and nnslr road-types.
+"ref", "lanes", "maxspeed", "maxspeed_type", "motorroad", "junction" (roundabout, circular...), "access",
+"motor_vehicle", "nodes": [[lat, lon], ...]}``. Used by nnslr map-candidates, nnslr road-types and nnslr junctions (a
+node shared by two ways is the same [lat, lon] in both: an intersection of the map).
 
 The car parks near the drives, by the same rule, go to ``derived/osm/parking.jsonl``: one line per ``amenity=parking``
 outline (a closed way or a multipolygon relation, assembled by osmium), ``{"id", "type" (way or relation), "name",
@@ -116,7 +117,9 @@ def main() -> int:
                                   'oneway': tags.get('oneway'), 'name': tags.get('name'), 'ref': tags.get('ref'),
                                   'lanes': tags.get('lanes'), 'maxspeed': tags.get('maxspeed'),
                                   'maxspeed_type': tags.get('maxspeed:type') or tags.get('source:maxspeed'),
-                                  'motorroad': tags.get('motorroad'), 'nodes': nodes})
+                                  'motorroad': tags.get('motorroad'), 'junction': tags.get('junction'),
+                                  'access': tags.get('access'), 'motor_vehicle': tags.get('motor_vehicle'),
+                                  'nodes': nodes})
 
         def area(self, area):
             # A car park drawn as a closed way or a multipolygon relation; area.id tells the two apart.

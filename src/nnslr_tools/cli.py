@@ -1489,6 +1489,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_road.add_argument("--all", action="store_true", help="every route with GPS positions (nnslr gps)")
     p_road.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_road.set_defaults(func=_cmd_road_types)
+    p_junctions = sub.add_parser("junctions", help="the intersections the car drives through, from its GPS track and "
+                                                   "the OpenStreetMap roads: derived/junctions/<route>.json, the "
+                                                   "labels of the junction head of the road-type network (in the "
+                                                   "intersection, and the first frame after it)")
+    p_junctions.add_argument("--route", action="append", help="route id; repeat for more")
+    p_junctions.add_argument("--all", action="store_true", help="every route with GPS positions (nnslr gps)")
+    p_junctions.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+    p_junctions.set_defaults(func=_cmd_junctions)
     p_signnet = sub.add_parser("train-signnet", help="train SignNet, the sign detector made for the comma's Adreno, on "
                                                      "the cutter's plan (GPU, .venv-gpu); writes signnet-best.pt and "
                                                      "result.json with the cutter's test measures")
@@ -1510,8 +1518,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_signnet.set_defaults(func=_cmd_train_signnet)
     p_road_net = sub.add_parser("train-road-type", help="train the road-type network with memory (town, rural, "
                                                         "expressway, motorway, ramp, parking from the camera, a GRU "
-                                                        "over the seconds) on the road types of the drives; writes "
-                                                        "road-type-best.pt and result.json (GPU, .venv-gpu)")
+                                                        "over the seconds) on the road types of the drives, with the "
+                                                        "junction head (inside an intersection, just passed it) when "
+                                                        "nnslr junctions has run; writes road-type-best.pt and "
+                                                        "result.json (GPU, .venv-gpu)")
     p_road_net.add_argument("--run-dir", required=True, help="output folder, e.g. data/runs/<name>/road-type/gru")
     p_road_net.add_argument("--memory", default="gru", choices=("gru", "none"),
                             help="gru: with memory; none: the same encoder per frame, to compare")
@@ -1527,6 +1537,8 @@ def build_parser() -> argparse.ArgumentParser:
                             help="where the motorway signs of the training come from: map (the start of every entry "
                                  "ramp, where 4.01 stands; default) or car (those the car's code confirmed, nnslr "
                                  "road-type-signs)")
+    p_road_net.add_argument("--no-junctions", action="store_true",
+                            help="without the junction head (the second version's network), to compare")
     p_road_net.add_argument("--dry-run", action="store_true",
                             help="on the CPU, a few short sequences, one epoch of two steps: checks the pipeline")
     p_road_net.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
@@ -1557,7 +1569,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_road_cmp.add_argument("--run-root", required=True, help="the run folder, e.g. data/runs/<name>")
     p_road_cmp.set_defaults(func=_cmd_compare_road_type)
     p_road_onnx = sub.add_parser("export-road-type", help="the road-type network as one ONNX step (image, speed, "
-                                                          "hidden -> probabilities, hidden_out) and its contract")
+                                                          "[sign,] hidden -> probabilities, hidden_out[, junction]) "
+                                                          "and its contract")
     p_road_onnx.add_argument("--checkpoint", required=True, help="road-type-best.pt")
     p_road_onnx.add_argument("--output", required=True, help="the .onnx file; the contract is <output>.contract.json")
     p_road_onnx.add_argument("--no-verify", action="store_true", help="skip the onnxruntime parity check")
@@ -2207,6 +2220,40 @@ def _cmd_road_types(args: argparse.Namespace) -> int:
     return 1 if failed else 0
 
 
+def _cmd_junctions(args: argparse.Namespace) -> int:
+    from nnslr_tools.gps import GPS_RELATIVE_DIR, positions_path
+    from nnslr_tools.junctions import build_junctions, load_map
+    from nnslr_tools.preannotate import resolve_data_root
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    routes = list(args.route or [])
+    if args.all:
+        routes += sorted(path.parent.name for path in (root / GPS_RELATIVE_DIR).glob('*/positions.jsonl'))
+    if not routes:
+        print("nnslr junctions: name a --route or use --all (routes with GPS positions: nnslr gps)", file=sys.stderr)
+        return 2
+    try:
+        junctions = load_map(root)
+    except ValueError as exc:
+        print(f"nnslr junctions: {exc}", file=sys.stderr)
+        return 2
+    if junctions is None:
+        print("nnslr junctions: no map of the roads yet: helpers/road_types.sh", file=sys.stderr)
+        return 2
+    failed = 0
+    for route in routes:
+        try:
+            path = positions_path(root, route)
+            if not path.is_file():
+                raise ValueError(f"no GPS positions yet: nnslr gps --route {route}")
+            positions = [line for line in _read_jsonl(path) if isinstance(line, dict) and "frame_key" in line]
+            result = build_junctions(root, route, positions, junctions)
+        except (ValueError, OSError) as exc:
+            failed += 1
+            result = {"route_id": route, "error": str(exc)}
+        print(json.dumps(result, sort_keys=True), flush=True)
+    return 1 if failed else 0
+
+
 def _cmd_mapillary_crops(args: argparse.Namespace) -> int:
     from nnslr_tools.mapillary import make_crops
     from nnslr_tools.preannotate import resolve_data_root
@@ -2270,10 +2317,16 @@ def _cmd_train_road_type(args: argparse.Namespace) -> int:
     root = resolve_data_root(Path(args.data_root) if args.data_root else None)
     result = train_road_type(root, Path(args.run_dir), memory=args.memory, epochs=args.epochs, patience=args.patience,
                              batch=args.batch, dry_run=args.dry_run, workers=args.workers, seed=args.seed,
-                             signs=not args.no_sign, sign_source=args.sign_source)
+                             signs=not args.no_sign, sign_source=args.sign_source,
+                             junctions=False if args.no_junctions else None)
     test = result["test"]
+    operating = result.get("junction_operating") or {}
+    junction_test = (test.get("junctions", {}).get("decodes", {}).get(operating.get("decode"), {})
+                     .get(f"{operating['threshold']:g}") if operating else None) or {}
     print(json.dumps({"run_dir": args.run_dir, "memory": args.memory, "signs": not args.no_sign,
-                      "sign_source": args.sign_source,
+                      "sign_source": args.sign_source, "junctions": result.get("junctions", False),
+                      "test_junction_f1": junction_test.get("f1_2s"),
+                      "test_false_passed_per_hour": junction_test.get("false_per_hour"),
                       "best_epoch": result["best_epoch"],
                       "parameters": result["parameters"], "flops_per_step": result["flops_per_step"],
                       "test_macro_f1": test["weight_1"]["macro_f1"],

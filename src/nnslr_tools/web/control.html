@@ -1208,6 +1208,37 @@ font-variant-numeric:tabular-nums}
 .rt-cut-head{margin:0 0 6px;font-size:13px;color:var(--muted);line-height:1.35}
 .rt-cut-head strong{color:var(--fg);font-size:14.5px;margin-right:4px}
 .rt-track .rt-cut{fill:var(--surface);stroke:var(--fg);stroke-width:0.6}
+/* The junctions of a drive (RoadDrive.vue): a row of dots under the strip, round in HTML (the strip's SVG is stretched):
+   a solid dot a junction (the map's or a person's), an orange ring one to check (Next to check stops there, the orange
+   of its count), a grey ring one that is not (a person said so, or the map's on another road). Under the type buttons
+   the junction at the picture shown and Junction here / Not a junction / Undo, the same pills as the types. */
+.rt-scrub{position:relative;display:flex;flex-direction:column;gap:3px;cursor:pointer;touch-action:none}
+.rt-jrow{position:relative;height:10px}
+.rt-jdot{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--fg);box-sizing:border-box;flex:none}
+.rt-jrow .rt-jdot{position:absolute;top:0;margin-left:-4.5px}
+.rt-jdot.check{background:var(--surface);border:2px solid var(--todo)}
+.rt-jhead{position:absolute;top:-3px;bottom:0;width:2px;margin-left:-1px;border-radius:1px;background:var(--fg)}
+.rt-jdot.not{background:transparent;border:1.5px solid var(--muted)}
+.rt-jx{display:flex;flex-direction:column;gap:8px;padding-top:12px;border-top:1px solid var(--line)}
+.rt-jx-head{margin:0;display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 8px}
+.rt-jx-undo{margin-left:auto;font-size:13.5px}
+.rt-jx-head strong{font-size:15px;font-weight:600}
+.rt-jx-head span{font-size:13px;color:var(--muted)}
+.rt-jx-head span.rt-jx-doubt{color:var(--todo);font-weight:600}
+.rt-jx-why{margin:-4px 0 0;font-size:12.5px;color:var(--muted);overflow-wrap:anywhere}
+.rt-jx-pick{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px}
+.rt-jx-pick .rt-type{justify-content:center;gap:7px;min-height:44px;padding:8px 10px;font-size:14.5px;white-space:nowrap}
+.rt-jx-pick .rt-type[aria-pressed="true"]{box-shadow:0 0 0 2px var(--fg) inset}
+.rt-jx-pick button.rt-map{outline:1.5px dashed var(--muted);outline-offset:-5px}
+@media (max-width:860px),(pointer:coarse){.rt-jx-undo{min-height:44px;margin:-14px -6px -14px auto;padding:0 6px}}
+@media (max-width:560px){.rt-jx{gap:6px;padding-top:10px}.rt-jx-pick .rt-type{font-size:13.5px;padding:6px 8px;gap:6px}}
+@media (max-height:500px) and (min-width:600px){.rt-jx{gap:6px;padding-top:8px}.rt-jx-pick .rt-type{min-height:38px;font-size:12.5px;padding:4px 6px}}
+/* The junction head of a road-type version (ModelItem.vue): the second number of a cell on its own line, so the table
+   fits a phone. */
+.jx-table small{display:block;font-size:11.5px;font-weight:400;white-space:nowrap}
+/* A phone has room for two numbers in the versions table: the road type keeps Ends in time and After a ramp, its
+   junctions are in the table of each version. */
+@media (max-width:560px){.versions-card[data-role="road_type"] .vt-c-junction{display:none}}
 /* What runs on the comma (Models): a blue mark next to “in use”, its line on the card of a role, its pill. */
 .vt-car{color:var(--accent)}
 .pill.car{background:var(--accent-soft);color:var(--accent)}

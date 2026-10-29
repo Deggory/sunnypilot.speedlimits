@@ -379,3 +379,125 @@ def test_onnx_step_contract_with_the_sign_input(root, tmp_path):
     seen = session.run(None, {**feeds, 'sign': np.array([[0.1, 1.0]], np.float32)})[0]
     unseen = session.run(None, {**feeds, 'sign': np.array([[2.0, 0.0]], np.float32)})[0]
     assert seen.shape == (1, len(data.CLASSES)) and not np.allclose(seen, unseen)
+
+
+# -- the junction head (nnslr_tools.junctions labels, road_type_metrics junction measure) -----------------------------
+def test_junction_events_and_their_matching():
+    import numpy as np
+
+    from nnslr_tools import road_type_metrics as metrics
+    p_passed = np.array([0, .8, .9, 0, .6, 0, .8, 0, 0, 0])
+    p_in = np.array([0, .9, .9, .1, 0, 0, .9, .9, 0, 0])
+    # A rising edge of "passed"; a second one within 3 s is the same intersection said twice.
+    assert metrics.junction_events(p_passed, p_in, .5) == [1, 4]
+    assert metrics.junction_events(p_passed, p_in, .7) == [1, 6]
+    # The exit decode: the first second below the threshold after one at or above it.
+    assert metrics.junction_events(p_passed, p_in, .5, 'exit') == [3, 8]
+    with pytest.raises(ValueError):
+        metrics.junction_events(p_passed, p_in, .5, 'enter')
+    # One to one, the closest pairs first.
+    assert metrics.match_events([10.0, 20.0], [11.0, 25.0], 2.0) == [(0, 0)]
+    assert sorted(metrics.match_events([10.0, 20.0], [11.0, 25.0], 5.0)) == [(0, 0), (1, 1)]
+    assert metrics.match_events([10.0, 10.5], [10.4], 2.0) == [(1, 0)]
+
+
+def test_junction_metrics_count_false_passed_per_hour_and_per_10_km():
+    import numpy as np
+
+    from nnslr_tools import road_type_metrics as metrics
+    # 360 s at 10 m/s (0.1 h, 3.6 km), town then rural; passed at 50 and 250.
+    count = 360
+    labels = np.array([TOWN] * 180 + [RURAL] * 180)
+    passed = np.zeros(count, bool)
+    passed[[50, 250]] = True
+    p_passed = np.zeros(count)
+    p_passed[51] = .9                 # found 1 s late
+    p_passed[120] = p_passed[300] = .6  # false: one in town, one outside
+    p_passed[330] = .9                # on a frame not judged (after a passage whose exit was not seen)
+    ignore = np.zeros(count, bool)
+    ignore[325:335] = True
+    sequence = {'seconds': np.arange(count, dtype=float), 'p_in': np.zeros(count), 'p_passed': p_passed,
+                'in': np.zeros(count, bool), 'passed': passed, 'known': np.ones(count, bool), 'ignore': ignore,
+                'labels': labels, 'predicted': labels, 'speed': np.full(count, 10.0)}
+    found = metrics.junction_metrics([sequence], ROAD_TYPES)
+    assert (found['passed'], found['hours'], found['km']) == (2, 0.1, 3.6)
+    at_half = found['decodes']['passed']['0.5']
+    assert (at_half['events'], at_half['recall_2s'], at_half['recall_4s'], at_half['precision_2s']) == (3, .5, .5, .3333)
+    assert at_half['false'] == 2 and at_half['false_per_hour'] == 20.0 and at_half['false_per_10km'] == 5.56
+    assert at_half['town'] == {'false': 1, 'per_hour': 20.0, 'per_10km': 5.56}
+    assert at_half['outside'] == {'false': 1, 'per_hour': 20.0, 'per_10km': 5.56}
+    strict = found['decodes']['passed']['0.7']
+    assert (strict['events'], strict['false'], strict['f1_2s']) == (1, 0, .6667)
+    # No exit events at all: F1 0, not unknown.
+    assert found['decodes']['exit']['0.5']['f1_2s'] == 0.0
+    # The car's point, chosen on validation: the best F1 at 2 s.
+    chosen = metrics.operating_point(found)
+    assert (chosen['decode'], chosen['threshold'], chosen['false_per_hour']) == ('passed', .7, 0.0)
+
+
+def test_route_frames_carry_the_junction_labels_with_a_persons_corrections(root):
+    from nnslr_tools import road_type_data as data
+    from nnslr_tools.junctions import VERSION, correct, junctions_path
+    route = OTHER_ROUTES[0]
+    # Without nnslr junctions: no junction label is known.
+    assert not any(frame['junction_known'] for frame in data.route_frames(root, route))
+    frames = [{'frame_key': f'{s}/{i}', 'segment_index': s, 'output_index': i, 'known': True, 'in_junction': False,
+               'passed': False, 'junction': None, 'distance_m': float(20 * (60 * s + i))}
+              for s in range(2) for i in range(60)]
+    for i in (10, 11):
+        frames[i].update(in_junction=True, junction='J1')
+    frames[12].update(passed=True, junction='J1')
+    frames[70].update(in_junction=True, junction='J2')
+    frames[90]['known'] = False
+    passages = [{'id': 'J1', 'kind': 'crossing', 't_in': 9.6, 't_out': 11.4, 'passed_key': '0/12', 'closest_m': 1.0,
+                 'frames_inside': 2},
+                # The GPS stops in this one: no "passed" labelled, so none judged up to 4 s after it.
+                {'id': 'J2', 'kind': 'crossing', 't_in': 69.6, 't_out': 70.4, 'passed_key': None, 'closest_m': 1.0,
+                 'frames_inside': 1}]
+    path = junctions_path(root, route)
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({'route_id': route, 'version': VERSION, 'rules': {}, 'passages': passages,
+                                'rejected': [], 'frames': frames}))
+    found = data.route_frames(root, route)
+    assert [i for i, f in enumerate(found) if f['junction_in']] == [10, 11, 70]
+    assert [i for i, f in enumerate(found) if f['junction_passed']] == [12]
+    assert [i for i, f in enumerate(found) if f['junction_ignore']] == list(range(70, 75))
+    assert found[12]['junction'] == 'J1' and found[12]['distance_m'] == 240.0
+    assert found[89]['junction_known'] and not found[90]['junction_known']
+    # "Not a junction" on the review page: its frames are no junction for the training either.
+    correct(root, route, '0/11', 'none', 'admin')
+    found = data.route_frames(root, route)
+    assert [i for i, f in enumerate(found) if f['junction_in'] or f['junction_passed']] == [70]
+
+
+def test_onnx_step_contract_with_the_junction_head(root, tmp_path):
+    torch = pytest.importorskip('torch')
+    pytest.importorskip('onnxruntime')
+    pytest.importorskip('torchvision')
+    import numpy as np
+
+    from nnslr_tools import road_type_data as data
+    from nnslr_tools import road_type_net as net
+    model = net.build_road_type_net('gru', pretrained=False, signs=True, junctions=True).eval()
+    checkpoint = tmp_path / 'road-type-best.pt'
+    torch.save({'task': 'road_type', 'architecture': 'mobilenet_v3_small+gru', 'memory': 'gru', 'signs': True,
+                'junctions': True, 'classes': list(data.CLASSES), 'state_dict': model.state_dict(), 'epoch': 1,
+                'split_sha256': 's', 'dataset_sha256': 'd'}, checkpoint)
+    (tmp_path / 'result.json').write_text(json.dumps({'junction_operating': {'decode': 'exit', 'threshold': 0.3}}))
+    result = net.export_road_type_onnx(checkpoint, tmp_path / 'road-type.onnx', data_root=root)
+    contract = json.loads(Path(result['contract']).read_text())
+    assert contract['verification']['passed'] is True and contract['step']['junctions'] is True
+    # The road type's outputs keep their names and order; the junction comes after them.
+    assert [o['name'] for o in contract['outputs']] == ['probabilities', 'hidden_out', 'junction']
+    junction = contract['outputs'][2]
+    assert junction['names'] == ['in_junction', 'passed'] and junction['operating'] == {'decode': 'exit',
+                                                                                       'threshold': 0.3}
+    assert 'in_junction < 0.3' in junction['decode']
+    import onnxruntime
+    session = onnxruntime.InferenceSession(result['onnx'], providers=['CPUExecutionProvider'])
+    image = np.random.default_rng(0).random((1, 3, data.FRAME_HEIGHT, data.FRAME_WIDTH), dtype=np.float32)
+    probabilities, hidden_out, crossing = session.run(None, {
+        'image': image, 'speed': np.array([[0.5, 1.0]], np.float32), 'sign': np.array([[2.0, 0.0]], np.float32),
+        'hidden': np.zeros((1, net.HIDDEN), np.float32)})
+    assert probabilities.shape == (1, len(data.CLASSES)) and abs(float(probabilities.sum()) - 1) < 1e-5
+    assert crossing.shape == (1, 2) and ((crossing >= 0) & (crossing <= 1)).all()

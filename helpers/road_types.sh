@@ -8,6 +8,8 @@
 #   b. the map roads and car parks near the drives, again when a drive or the map is newer (scripts/osm_roads.py,
 #      osmium from uv's cache for this run only: the environments of the site and of the training stay as they are)
 #   c. the road type of every frame                                                (nnslr road-types --all)
+#   d. the intersections every drive passed: the labels of the road-type network's junction head (nnslr junctions
+#      --all, data/derived/junctions; a person's corrections, annotations/junctions, are never touched)
 #
 # usage: helpers/road_types.sh [--again]   (--again: the map roads read again even when nothing is newer)
 # No network but uv's first download of osmium; about 2 minutes when the map is read, seconds otherwise.
@@ -50,6 +52,9 @@ elif ! grep -q -m 1 '"maxspeed_type"' "$ROADS"; then
 elif [ ! -f "$PARKING" ]; then
     # A map read before the car parks (and the kind of a service road) were kept.
     newer=yes
+elif ! grep -q -m 1 '"junction"' "$ROADS"; then
+    # A map read before the junction and access tags were kept (the intersections need them).
+    newer=yes
 fi
 if [ "$newer" = yes ]; then
     # The site starts this with the service's PATH, without ~/.local/bin where uv usually is.
@@ -66,4 +71,7 @@ fi
 
 echo "== c. Road type of every frame"
 "$NN" road-types --all --data-root "$DATA" < /dev/null
-echo "Done: the road types are in $DATA/derived/road_types/."
+
+echo "== d. Junctions of the drives"
+"$NN" junctions --all --data-root "$DATA" < /dev/null
+echo "Done: the road types are in $DATA/derived/road_types/, the junctions in $DATA/derived/junctions/."

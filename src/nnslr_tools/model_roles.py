@@ -385,6 +385,40 @@ def _road_type_release(summary: Any) -> dict | None:
         'median_release': _num(summary.get('median_release'))}
 
 
+def _junction_numbers(report: Any, operating: dict) -> dict | None:
+    """The junction head on one partition (nnslr_tools.road_type_metrics.junction_metrics) at the car's operating
+    point: F1, recall and precision of the "passed" events within 2 s, recall within 4 s, the false "passed" (a limit
+    lifted where no intersection was) per hour and per 10 km, in town and outside."""
+    if not isinstance(report, dict):
+        return None
+    numbers = _dig(report, ('decodes', operating['decode'], f"{operating['threshold']:g}"))
+    if not isinstance(numbers, dict):
+        return None
+    area = lambda name: numbers.get(name) if isinstance(numbers.get(name), dict) else {}  # noqa: E731
+    return {'passed': _int(report.get('passed')), 'hours': _num(report.get('hours')), 'km': _num(report.get('km')),
+            'f1_2s': _num(numbers.get('f1_2s')), 'recall_2s': _num(numbers.get('recall_2s')),
+            'recall_4s': _num(numbers.get('recall_4s')), 'precision_2s': _num(numbers.get('precision_2s')),
+            'false': _int(numbers.get('false')), 'false_per_hour': _num(numbers.get('false_per_hour')),
+            'false_per_10km': _num(numbers.get('false_per_10km')),
+            'town_per_hour': _num(area('town').get('per_hour')), 'outside_per_hour': _num(area('outside').get('per_hour'))}
+
+
+def _road_type_junctions(result: dict) -> dict | None:
+    """The junction head of a road-type result (since the third version), None without one: the operating point
+    chosen on validation, its numbers on validation and test, and the test's intersections after a number sign."""
+    operating = result.get('junction_operating')
+    if not result.get('junctions') or not isinstance(operating, dict) or operating.get('decode') not in ('passed', 'exit') \
+            or _num(operating.get('threshold')) is None:
+        return None
+    operating = {'decode': operating['decode'], 'threshold': float(operating['threshold'])}
+    needed = result.get('junction_needed') if isinstance(result.get('junction_needed'), dict) else None
+    return {**operating,
+            'validation': _junction_numbers(_dig(result, ('validation', 'junctions')), operating),
+            'test': _junction_numbers(_dig(result, ('test', 'junctions')), operating),
+            'needed': {key: _int(needed.get(key)) or 0 for key in ('junctions', 'needed', 'caught_2s', 'caught_4s')}
+            if needed else None}
+
+
 def road_type_digest(result: Any) -> dict:
     """result.json of ``nnslr train-road-type``: how it was trained (no history) and validation and test as the road
     type is judged; the frame network also with its 5-second majority vote (``test_smoothed``)."""
@@ -408,6 +442,7 @@ def road_type_digest(result: Any) -> dict:
         'signs': bool(result.get('signs')),
         'release': {partition: _road_type_release(_dig(result, ('release', partition)))
                     for partition in ('validation', 'test')} if isinstance(result.get('release'), dict) else None,
+        'junctions': _road_type_junctions(result),
     }
 
 
@@ -810,7 +845,7 @@ class ModelIndex:
                 label, detail = ROAD_TYPE_SIGN
             entry.update({
                 'label': label, 'detail': detail, 'memory': trained.get('memory'), 'signs': trained.get('signs', False),
-                'release': trained.get('release'),
+                'release': trained.get('release'), 'junctions': trained.get('junctions'),
                 'architecture': trained.get('architecture'), 'initialization': 'ImageNet',
                 'best_epoch': trained.get('best_epoch'), 'epochs': trained.get('epochs'),
                 'epochs_run': trained.get('epochs_run'), 'classes': trained.get('classes'),

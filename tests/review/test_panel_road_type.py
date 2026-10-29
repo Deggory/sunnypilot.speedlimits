@@ -211,3 +211,32 @@ def test_the_second_version_shows_its_sign_input_and_when_the_ramp_limit_ends(tm
     assert sign['release']['test'] == {'merges': 7, 'held': 6, 'on_ramp': 1, 'in_time': 4, 'late': 1, 'not_held': 1,
                                        'median_release': 11.0}
     assert road_type_digest(result('none'))['release'] is None
+
+
+def test_the_junction_head_shows_its_f1_and_its_false_passed_per_hour(tmp_path):
+    numbers = {'events': 30, 'recall_2s': 0.8, 'recall_4s': 0.9, 'precision_2s': 0.75, 'f1_2s': 0.7742, 'false': 5,
+               'false_per_hour': 2.5, 'false_per_10km': 0.6, 'town': {'false': 4, 'per_hour': 4.0, 'per_10km': 1.2},
+               'outside': {'false': 1, 'per_hour': 1.0, 'per_10km': 0.2}}
+    value = result('gru')
+    for partition in ('validation', 'test'):
+        value[partition]['junctions'] = {'passed': 28, 'hours': 2.0, 'km': 80.0,
+                                         'decodes': {'passed': {'0.5': numbers}, 'exit': {'0.5': {}}}}
+    value.update(junctions=True, junction_operating={'decode': 'passed', 'threshold': 0.5, 'f1_2s': 0.7742},
+                 junction_needed={'junctions': 20, 'needed': 6, 'caught_2s': 4, 'caught_4s': 5, 'list': [{}]})
+    root = tmp_path / 'data'
+    run = root / 'runs' / '2026-10-29_1600-road-type' / 'road-type'
+    write(run / 'gru' / 'road-type-best.pt', 'weights')
+    write(run / 'gru' / 'result.json', value)
+    runs = RunsIndex(root)
+    runs.running_runs = lambda: {}
+    entry = ModelIndex(runs).artifacts(('road_type',))['road_type'][0]
+    assert entry['junctions'] == {
+        'decode': 'passed', 'threshold': 0.5,
+        'validation': {'passed': 28, 'hours': 2.0, 'km': 80.0, 'f1_2s': 0.7742, 'recall_2s': 0.8, 'recall_4s': 0.9,
+                       'precision_2s': 0.75, 'false': 5, 'false_per_hour': 2.5, 'false_per_10km': 0.6,
+                       'town_per_hour': 4.0, 'outside_per_hour': 1.0},
+        'test': entry['junctions']['validation'],
+        'needed': {'junctions': 20, 'needed': 6, 'caught_2s': 4, 'caught_4s': 5}}
+    # The second version had no junction head; a point that is not a decode is not shown.
+    assert road_type_digest(result('gru'))['junctions'] is None
+    assert road_type_digest({**value, 'junction_operating': {'decode': 'enter', 'threshold': 0.5}})['junctions'] is None

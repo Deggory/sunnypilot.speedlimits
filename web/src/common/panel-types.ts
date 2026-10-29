@@ -1143,6 +1143,36 @@ export interface RoadTypeRelease {
   median_release: number | null;
 }
 
+/** The junction head on one partition at the car's operating point (nnslr_tools.model_roles._junction_numbers). */
+export interface RoadTypeJunctionNumbers {
+  /** The intersections passed, the hours and km of the partition. */
+  passed: number | null;
+  hours: number | null;
+  km: number | null;
+  /** The "passed" events within 2 s of the label (one to one): F1, recall and precision; recall within 4 s. */
+  f1_2s: number | null;
+  recall_2s: number | null;
+  recall_4s: number | null;
+  precision_2s: number | null;
+  /** The false "passed" (none within 4 s: a limit lifted where no intersection was), per hour and per 10 km, and per
+   * hour in town and outside. */
+  false: number | null;
+  false_per_hour: number | null;
+  false_per_10km: number | null;
+  town_per_hour: number | null;
+  outside_per_hour: number | null;
+}
+export interface RoadTypeJunctions {
+  /** The car's rule, chosen on validation: "passed" (the passed output over the threshold) or "exit" (the inside
+   * output falls under it). */
+  decode: 'passed' | 'exit';
+  threshold: number;
+  validation: RoadTypeJunctionNumbers | null;
+  test: RoadTypeJunctionNumbers | null;
+  /** The intersections of the test with a number sign confirmed within 300 m before them, and those caught. */
+  needed: {junctions: number; needed: number; caught_2s: number; caught_4s: number} | null;
+}
+
 export interface RoadTypeModel extends ModelBase {
   role: 'road_type';
   /** gru: with memory; none: the same encoder one frame at a time, to compare. */
@@ -1152,6 +1182,9 @@ export interface RoadTypeModel extends ModelBase {
   signs: boolean;
   /** When the ramp's limit ends by the comma's rule; null for a version measured before it. */
   release: {validation: RoadTypeRelease | null; test: RoadTypeRelease | null} | null;
+  /** The junction head (since the third version): where the car leaves an intersection, at its operating point; null
+   * without one. */
+  junctions: RoadTypeJunctions | null;
   classes: string[] | null;
   parameters: number | null;
   flops_per_step: number | null;
@@ -1283,6 +1316,36 @@ export interface RoadDriveView extends Omit<RoadDrive, 'frames'> {
   frames: RoadFrame[];
   /** The corrections kept for this drive: Undo drops the last. */
   corrections: number;
+  /** The intersections of the drive (nnslr junctions), the map's with a person's corrections over them. */
+  junctions: RoadJunctions;
+}
+/** An intersection of a drive on Data › Roads (nnslr_tools.junctions.drive_marks): frame indices into its frames. */
+export interface RoadJunction {
+  id: string;
+  kind: 'crossing' | 'roundabout';
+  /** The first and last frame inside it. */
+  first: number;
+  last: number;
+  /** The first frame after it (where the limit of a Polish sign ends), null when not labelled. */
+  passed: number | null;
+  /** junction: a label of the training; dropped: a person said it is not one; maybe: the map's, on another road (a
+   * bridge, a road beside), not a label. */
+  label: 'junction' | 'dropped' | 'maybe';
+  by: 'map' | 'person';
+  /** A person settled it. */
+  reviewed: boolean;
+  /** Why it is worth a look (Next to check stops there), null once reviewed or when nothing is odd about it. */
+  doubt: string | null;
+  /** The arms of public roads that meet there and their kinds (the map's), null for one a person added. */
+  arms: number | null;
+  roads: string[] | null;
+}
+export interface RoadJunctions {
+  /** nnslr junctions ran for the drive (Find the road types). */
+  found: boolean;
+  /** The junction corrections kept for this drive: Undo junction drops the last. */
+  corrections: number;
+  marks: RoadJunction[];
 }
 
 /** POST /api/panel/models/active */

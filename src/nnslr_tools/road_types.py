@@ -397,10 +397,12 @@ def _drive(root: Path, route: str) -> dict:
 def drive_view(root: Path, route: str, by_key: dict) -> dict:
     """A drive of Data › Roads opened (GET /api/panel/road-types/<route>): {'route', 'title', 'when', 'start', 'minutes',
     'frames': [{'key', 'image', 'road_type', 'basis', 'sure', 'reviewed'}] in the order of the drive, 'stretches',
-    'types', 'reviewed', 'corrections': how many}; frames [] before nnslr road-types ran for it. by_key: the rows of the
-    drive's pre-annotation report by frame key, whose preview_path names the picture of the frame on the site
-    (/route/<route>/images/<8 digits>.jpg)."""
+    'types', 'reviewed', 'corrections': how many, 'junctions': the intersections of the drive, the map's with a person's
+    corrections over them (junctions.drive_marks: {'found', 'corrections', 'marks'})}; frames [] before nnslr road-types
+    ran for it. by_key: the rows of the drive's pre-annotation report by frame key, whose preview_path names the picture
+    of the frame on the site (/route/<route>/images/<8 digits>.jpg)."""
     from nnslr_tools.drives import drive_of
+    from nnslr_tools.junctions import drive_marks
     lines = map_road_types(root, route)
     corrections = load_corrections(root, route) if lines else []
     lines = corrected(lines, corrections)
@@ -415,7 +417,8 @@ def drive_view(root: Path, route: str, by_key: dict) -> dict:
     drive = drive_of(root, route) or {}
     return {'route': route, 'title': drive.get('title'), 'when': drive.get('when'), 'start': drive.get('start'),
             'minutes': drive.get('minutes'), 'frames': frames, 'stretches': stretches(lines), 'types': type_counts(lines),
-            'reviewed': sum(1 for frame in frames if frame['reviewed']), 'corrections': len(corrections)}
+            'reviewed': sum(1 for frame in frames if frame['reviewed']), 'corrections': len(corrections),
+            'junctions': drive_marks(root, route, [frame['key'] for frame in frames])}
 
 
 def _stamp(path: Path) -> tuple | None:

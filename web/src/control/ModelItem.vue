@@ -121,6 +121,10 @@ const RELEASE_ROWS: {key: 'validation' | 'test'; label: string}[] = [{key: 'vali
 const releaseRows = computed(() => RELEASE_ROWS.filter((row) => (roadType.value?.release?.[row.key]?.merges ?? 0) > 0)
   .map((row) => ({...row, numbers: roadType.value!.release![row.key]!})));
 const seconds = (value: number | null): string => value === null ? '–' : (value > 0 ? '+' : '') + value + ' s';
+/** The junction head on validation and test at the car's operating point (nnslr_tools.model_roles._road_type_junctions). */
+const junctionRows = computed(() => RELEASE_ROWS.filter((row) => roadType.value?.junctions?.[row.key])
+  .map((row) => ({...row, numbers: roadType.value!.junctions![row.key]!})));
+const hourly = (value: number | null): string => value === null ? '–' : value < 10 ? value.toFixed(1) : String(Math.round(value));
 </script>
 
 <template>
@@ -273,6 +277,21 @@ const seconds = (value: number | null): string => value === null ? '–' : (valu
             </tr>
           </tbody>
         </table></div>
+        <div v-if="junctionRows.length" class="table-wrap"><table class="model-table jx-table" aria-label="Intersections passed">
+          <thead><tr><th :title="'The car’s rule, chosen on validation: ' + (roadType.junctions!.decode === 'passed' ? 'the passed output'
+            : 'the inside output falling') + ' at ' + roadType.junctions!.threshold">Junctions</th>
+            <th class="num" title="F1 of “passed” within 2 s of the label · recall within 4 s">F1 2 s</th>
+            <th class="num" title="False “passed” (none within 4 s): a limit lifted where no intersection was, per hour · per 10 km">False/h</th>
+            <th class="num" title="False “passed” per hour in town · outside">In town</th></tr></thead>
+          <tbody>
+            <tr v-for="row in junctionRows" :key="row.key" :data-junctions="row.key">
+              <th scope="row">{{ row.label }}<small class="muted">{{ row.numbers.passed ?? '–' }} passed</small></th>
+              <td class="num">{{ pct(row.numbers.f1_2s) }}<small class="muted">4 s: {{ pct(row.numbers.recall_4s) }}</small></td>
+              <td class="num">{{ hourly(row.numbers.false_per_hour) }}<small class="muted">{{ hourly(row.numbers.false_per_10km) }}/10 km</small></td>
+              <td class="num">{{ hourly(row.numbers.town_per_hour) }}<small class="muted">out {{ hourly(row.numbers.outside_per_hour) }}</small></td>
+            </tr>
+          </tbody>
+        </table></div>
         <div class="table-wrap"><table class="model-table" aria-label="Changes of road type found within a minute">
           <thead><tr><th>Changes</th><th class="num" title="Found within a minute · median delay">Test</th></tr></thead>
           <tbody>
@@ -294,7 +313,10 @@ const seconds = (value: number | null): string => value === null ? '–' : (valu
         </dl>
         <p class="note">Delay: the median seconds from the change in the labels to the network’s; negative: it changes first.<template
           v-if="releaseRows.length"> Ramp limit: the comma’s rule, a number read on the ramp ends after 8 s of motorway in a row; the motorway
-          sign at the start of every entry ramp of the map.</template></p>
+          sign at the start of every entry ramp of the map.</template><template v-if="roadType.junctions?.needed?.needed"> Junctions:
+          {{ roadType.junctions.needed.needed }} of the {{ roadType.junctions.needed.junctions }} intersections of the test come within
+          300 m after a number sign the car confirmed (in Poland its limit ends there); “passed” caught {{ roadType.junctions.needed.caught_2s }}
+          of them within 2 s, {{ roadType.junctions.needed.caught_4s }} within 4 s.</template></p>
         </details>
       </template>
     </template>

@@ -30,6 +30,11 @@ EVALUATION_SHARE of the labelled frames; the areas next to it are the buffer too
 sequence is a run of frames of one drive, without a missing frame, in one partition: the network is trained and
 measured on whole stretches, never on lone frames.
 
+Junction labels (the junction head, nnslr junctions, data/derived/junctions, with a person's corrections from the
+review page over them, annotations/junctions): per frame junction_in (inside an intersection of public roads),
+junction_passed (the first frame after leaving it: where the limit of a Polish sign ends) and junction_known (the
+drive's junctions were found and the frame has a GPS fix; else out of the junction loss).
+
 The pictures: the full road frame (1344 x 760) resized to FRAME_WIDTH x FRAME_HEIGHT with PIL's bilinear resize, the
 same arithmetic as the car's vision.resize, kept as uint8 in data/derived/road_type_frames (build_frame_cache).
 numpy and PIL only: the GPU part is road_type_net.
@@ -44,6 +49,7 @@ from pathlib import Path
 
 import numpy as np
 
+from nnslr_tools.junctions import labelled_junctions
 from nnslr_tools.road_types import ROAD_TYPES, ROAD_TYPES_RELATIVE, load_road_types
 from nnslr_tools.splits import PLACE_CELL
 
@@ -71,6 +77,7 @@ EVALUATION_SHARE = .15
 VALIDATION_CLUSTERS = 2
 # Shorter runs of one partition (frames) are dropped: too short to train or measure a memory.
 MIN_SEQUENCE = 30
+UNSEEN_EXIT_S = 4.0  # seconds after a passage whose exit was not seen in which a "passed" is not judged
 
 
 def frame_label(line: dict) -> tuple[int, float]:
@@ -90,6 +97,10 @@ def speed_features(speed_mps) -> tuple[float, float]:
     if type(speed_mps) not in (int, float) or not math.isfinite(speed_mps):
         return 0.0, 0.0
     return min(max(float(speed_mps), 0.0), SPEED_MAX) / SPEED_SCALE, 1.0
+
+
+def _seconds(line: dict) -> float:
+    return line['segment_index'] * FRAMES_PER_SEGMENT + line['output_index']
 
 
 def frame_path(root: Path, route: str, segment: int, index: int) -> Path:
@@ -116,18 +127,31 @@ def _positions(root: Path, route: str) -> dict[str, dict]:
 
 def route_frames(root: Path, route: str) -> list[dict]:
     """The frames of a drive in drive order: key, segment, index, label, weight, sure, basis, latitude, longitude,
-    speed_mps, image (path) and present (the picture is on disk)."""
+    speed_mps, image (path), present (the picture is on disk) and the junction labels (junction_in, junction_passed,
+    junction_known, junction: the intersection's id; junction_ignore: near the end of a passage whose exit was not
+    seen, where a "passed" is neither right nor wrong; distance_m: metres driven since the start of the drive)."""
     positions = _positions(root, route)
+    record = labelled_junctions(root, route)
+    junctions = {line['frame_key']: line for line in record['frames']} if record else {}
+    # A passage whose exit was not seen (the GPS stops in it): no "passed" is labelled, so none is wrong there.
+    unseen = [(p['t_in'], p['t_out']) for p in record['passages'] if not p['passed_key']] if record else []
     frames = []
     for line in load_road_types(root, route):
         label, weight = frame_label(line)
         gps = positions.get(line['frame_key'], {})
+        junction = junctions.get(line['frame_key'])
         image = frame_path(root, route, line['segment_index'], line['output_index'])
         frames.append({
             'route': route, 'key': line['frame_key'], 'segment': line['segment_index'], 'index': line['output_index'],
             'label': label, 'weight': weight, 'sure': bool(line.get('sure')), 'basis': line.get('basis'),
             'latitude': gps.get('latitude'), 'longitude': gps.get('longitude'), 'speed_mps': gps.get('speed_mps'),
-            'image': str(image), 'present': image.is_file()})
+            'image': str(image), 'present': image.is_file(),
+            'junction_known': bool(junction and junction['known']),
+            'junction_in': bool(junction and junction['in_junction']),
+            'junction_passed': bool(junction and junction['passed']),
+            'junction': junction['junction'] if junction else None,
+            'distance_m': junction['distance_m'] if junction else None,
+            'junction_ignore': any(t_in <= _seconds(line) <= t_out + UNSEEN_EXIT_S for t_in, t_out in unseen)})
     frames.sort(key=lambda frame: (frame['segment'], frame['index']))
     return frames
 

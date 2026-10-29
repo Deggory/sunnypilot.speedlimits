@@ -208,7 +208,8 @@ export interface Metric {
  * crop read right (the kind of an other sign aside), and the chain with the cutter; an old reader: its crops read
  * right; the decider: the “Another” signs found on validation and on the test; the road type: the merges where the
  * ramp's limit ends in time by the comma's rule (since the second version), the motorway said right in the first minute
- * after each ramp, the mean F1 of the road types and the town's F1, on the test. */
+ * after each ramp, the intersections passed (the junction head, since the third version: F1 of "passed" within 2 s, and
+ * the false ones an hour, each a limit lifted too early), the mean F1 of the road types and the town's F1, on the test. */
 export function metricsOf(version: ModelVersion): Metric[] {
   const of = (part: number | null | undefined, whole: number | null | undefined): string =>
     whole ? thousands(part ?? 0) + ' of ' + thousands(whole) : '';
@@ -263,6 +264,9 @@ export function metricsOf(version: ModelVersion): Metric[] {
     const town = test.classes['town'] ?? null;
     const release = version.release?.test ?? null;
     const late = release ? release.late + release.not_held : 0;
+    const junction = version.junctions?.test ?? null;
+    const needed = version.junctions?.needed ?? null;
+    const hourly = (value: number | null): string => value === null ? '–' : value < 10 ? value.toFixed(1) : String(Math.round(value));
     return [
       ...(release ? [{key: 'release', label: 'Ramp limit ends in time', short: 'Ends in time',
         value: release.merges ? release.in_time / release.merges : null,
@@ -276,6 +280,12 @@ export function metricsOf(version: ModelVersion): Metric[] {
         count: merge.merges ? merge.seconds + ' s, ' + merge.merges + (merge.merges === 1 ? ' ramp' : ' ramps') : 'no ramp',
         detail: merge.merges ? 'The first minute on the motorway after each of the ' + merge.merges + ' ramps of the test'
           : 'The test has no ramp onto the motorway'},
+      ...(junction ? [{key: 'junction', label: 'Junctions passed', short: 'Junctions', value: junction.f1_2s,
+        count: hourly(junction.false_per_hour) + ' false/h',
+        detail: 'F1 of “passed” within 2 s on the ' + (junction.passed ?? 0) + ' intersections of the test; '
+          + hourly(junction.false_per_hour) + ' false an hour (town ' + hourly(junction.town_per_hour) + ', outside '
+          + hourly(junction.outside_per_hour) + '): each lifts a limit too early'
+          + (needed?.needed ? '; ' + needed.caught_2s + ' of the ' + needed.needed + ' after a number sign caught' : '')}] : []),
       {key: 'macro', label: 'Road types', value: test.macro_f1, count: test.frames === null ? '' : thousands(test.frames) + ' s',
         detail: 'Mean F1 of the road types the test has'},
       {key: 'town', label: 'Town', value: town?.f1 ?? null, count: town ? thousands(town.support) + ' s' : '',

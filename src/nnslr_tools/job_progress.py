@@ -47,12 +47,13 @@ DECIDER_STEPS = (
     ('experiment_b_crop_geom', 'Crop, position and speed', 32),
     ('experiment_b_full', 'Crop, position and the scene', 32),
 )
-# scripts/run_road_type.sh: the motorway signs read as the car reads them, the road-type network with memory and the
-# sign input, the same without the sign input, the same without memory, then the comparison and the ONNX step (their
-# epoch lines name them: road_type_gru, road_type_gru_nosign, road_type_frame).
+# scripts/run_road_type.sh: the junctions of the drives, the motorway signs read as the car reads them, the road-type
+# network with memory (and its junction head) and the sign input, the same without the sign input, the same without
+# memory, then the comparison and the ONNX step (their epoch lines name them: road_type_gru, road_type_gru_nosign,
+# road_type_frame).
 ROAD_TYPE_STEPS = (
     ('checks', 'Checks and GPU smoke test', 4),
-    ('frames', 'Resize the frames', 4),
+    ('frames', 'Find the junctions, resize the frames', 4),
     ('signs', 'Read the motorway signs', 8),
     ('road_type_gru', 'Train with memory and the sign', 30),
     ('road_type_gru_nosign', 'Train with memory, no sign', 27),
@@ -77,9 +78,10 @@ TRY_STEPS = (('check', 'Check the comma', 3), ('export', 'Export the SignNet and
 RESTORE_STEPS = (('check', 'Check the comma', 50), ('restore', "Put back the build's networks", 50))
 FETCH_STEPS = (('fetch', 'Download the drives from the comma', 100),)
 # helpers/road_types.sh: the GPS of the drives prepared without it, the map roads near the drives (minutes when the map
-# is read again), the road type of every frame.
-ROAD_TYPES_STEPS = (('gps', 'Read the GPS of the drives', 10), ('map_roads', 'Read the map roads near the drives', 70),
-                    ('road_types', 'Find the road type of every picture', 20))
+# is read again), the road type of every frame, the intersections every drive passed.
+ROAD_TYPES_STEPS = (('gps', 'Read the GPS of the drives', 10), ('map_roads', 'Read the map roads near the drives', 65),
+                    ('road_types', 'Find the road type of every picture', 18),
+                    ('junctions', 'Find the junctions the car drove through', 7))
 UPDATE_STEPS = (('update', 'Update the code and restart the site', 100),)
 # [ai-reviewer] - START
 # One step each: nnslr ai-review and nnslr measure-ai-reviewer report their frames (nnslr_tools.progress).
@@ -135,6 +137,7 @@ MARKERS = (
     (re.compile(r'^== a\. GPS of the drives'), 'gps', ()),
     (re.compile(r'^== b\. Map roads'), 'map_roads', ()),
     (re.compile(r'^== c\. Road type'), 'road_types', ()),
+    (re.compile(r'^== d\. Junctions of the drives'), 'junctions', ()),
 )
 SUBSTEP = re.compile(r'^== (\d+)/(\d+) ')
 EPOCH = re.compile(r'^(detector|reader|classifier|experiment_b_crop_geom|experiment_b_crop|experiment_b_full|'

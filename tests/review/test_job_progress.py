@@ -300,10 +300,13 @@ def test_the_road_types_have_their_steps_from_their_own_lines():
     log = ('== helpers/road_types.sh\n== a. GPS of the drives\n{"route_id": "x", "frames": 10}\n'
            '== b. Map roads near the drives\nreading the map\n')
     running = progress('road_types', 'running', log)
-    assert states(running) == {'gps': 'done', 'map_roads': 'current', 'road_types': 'todo'}
+    assert states(running) == {'gps': 'done', 'map_roads': 'current', 'road_types': 'todo', 'junctions': 'todo'}
     assert running['percent'] == 10.0 and running['last_line'] == 'reading the map'
     failed = progress('road_types', 'failed', log + '== c. Road type of every frame\nno map\n')
-    assert states(failed)['road_types'] == 'failed' and failed['percent'] == 80.0
+    assert states(failed)['road_types'] == 'failed' and failed['percent'] == 75.0
+    # The junctions last: the labels of the road-type network's junction head.
+    junctions = progress('road_types', 'running', log + '== c. Road type of every frame\n== d. Junctions of the drives\n')
+    assert states(junctions)['junctions'] == 'current' and junctions['percent'] == 93.0
     # The import's "== b. " is not one of its steps, nor its "== b. Map roads" one of the import's.
     assert states(progress('road_types', 'running', '== b. controllo il dataset\n'))['gps'] == 'current'
     assert states(progress('dataset', 'running', '== a. importo\n== b. Map roads\n'))['split'] == 'current'

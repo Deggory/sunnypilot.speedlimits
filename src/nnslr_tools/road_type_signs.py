@@ -170,6 +170,23 @@ def confirmations(vision, readings: list[tuple[float, list]]) -> list[list]:
     return found
 
 
+def number_confirmations(vision, readings: list[tuple[float, list]]) -> list[list]:
+    """The speed signs SpeedLimitMemory confirms from the readings, as speedvisiond's memory does: [[seconds, km/h],
+    ...], the moments a number (not the end of a limit) became the limit held. The junction head's measure counts the
+    intersections a held number would end at (Poland: a sign holds to the next intersection)."""
+    memory, found, last = vision.SpeedLimitMemory(), [], None
+    for now, signs in readings:
+        classes = [name for name, _ in signs]
+        speeds = [speed for speed in (vision.class_speed(name) for name in classes) if speed is not None]
+        memory.update(float(now), speeds, classes)
+        if memory.sign_read and memory.speed_limit > 0 and float(memory.speed_limit) in [float(v) for v in speeds]:
+            # One sign read for some frames is one confirmation: a new one after a pause or with another number.
+            if last is None or last[1] != memory.speed_limit or float(now) - last[0] > 2.0:
+                found.append([float(now), float(memory.speed_limit)])
+            last = (float(now), float(memory.speed_limit))
+    return found
+
+
 def cache_path(root: Path, route: str) -> Path:
     return Path(root) / SIGNS_RELATIVE / f'{route}.json'
 

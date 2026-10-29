@@ -5,12 +5,16 @@ set -euo pipefail
 # camera, one frame a second (town, rural, expressway, motorway, ramp, parking), with a GRU that remembers the seconds
 # before and how long ago a motorway sign was seen, so that the 60 of a ramp ends where the ramp merges into the
 # motorway (no sign ends it there: the comma's rule, vision.SpeedLimitMemory) and the entry into and exit from a town
-# are seen.
+# are seen. Its junction head says when the car is inside an intersection and when it has just left one: in Poland
+# (and in Switzerland by OSStr art. 16 cpv. 2) a speed sign holds at most to the end of the next intersection, and
+# Poland has no end sign.
 # On one GPU, one step after the other:
 #
 #   1. checks the road types, the split and the whole pipeline on the CPU (nnslr train-road-type --dry-run);
 #   2. a CUDA smoke test;
-#   3. resizes every frame of the drives with road types to 256 x 144 once (data/derived/road_type_frames);
+#   3. finds the intersections every drive passed from its GPS and the map (nnslr junctions --all,
+#      data/derived/junctions: the labels of the junction head, a person's corrections over them) and resizes every
+#      frame of the drives with road types to 256 x 144 once (data/derived/road_type_frames);
 #   4. reads the motorway signs of those drives as the comma does (nnslr road-type-signs: the car's vision.py,
 #      SignNet and classifier from the sunnypilot clone, read only, 5 frames a second of fcamera.hevc, on the CPU;
 #      data/derived/road_type_signs): the comma's rule measured with the signs the car confirms today;
@@ -20,13 +24,17 @@ set -euo pipefail
 #   7. the same with the sign input but without memory, to compare (--memory none);
 #   8. compares them (comparison.txt: the comma's rule on every merge of validation and test, when the ramp's limit
 #      ends; F1 per class and the ramp's confusion; the changes of road type; false switches per hour; the first
-#      minute after a merge), with an earlier version too when NNSLR_ROAD_TYPE_BASELINE names its checkpoint, and
-#      exports the network with memory and the sign as one ONNX step with its contract (nnslr export-road-type).
+#      minute after a merge; the junctions: recall of "passed" within 2 and 4 s, false "passed" per hour and per
+#      10 km in town and outside, the intersections the car needed), with an earlier version too when
+#      NNSLR_ROAD_TYPE_BASELINE names its checkpoint, and exports the network with memory and the sign as one ONNX
+#      step with its contract (nnslr export-road-type).
+# Every training has the junction head when step 3 found the intersections (NNSLR_ROAD_TYPE_JUNCTIONS=0: without it,
+# as the second version).
 #
 # usage: scripts/run_road_type.sh NAME
 #
 # Writes only into $DATA_ROOT/runs/NAME/ (road-type.log, road-type/{dry-run,gru,gru-nosign,frame,baseline,export}/,
-# road-type/comparison.txt), the frame cache and the sign readings. It never imports reviews, changes the road types,
+# road-type/comparison.txt), the junction labels, the frame cache and the sign readings. It never imports reviews, changes the road types,
 # the model in use or the car, never publishes. Run it again with the same NAME to finish: a finished training is not
 # repeated, the signs already read are not read again, an export older than its weights is redone.
 #
@@ -49,6 +57,7 @@ WORKERS_DEFAULT=$(( CORES / 2 < 4 ? 4 : (CORES / 2 > 16 ? 16 : CORES / 2) ))
 NUM_WORKERS="${NNSLR_NUM_WORKERS:-$WORKERS_DEFAULT}"
 SIGN_WORKERS="${NNSLR_SIGN_WORKERS:-$(( CORES > 3 ? CORES - 2 : 1 ))}"
 BASELINE="${NNSLR_ROAD_TYPE_BASELINE:-}"
+JUNCTIONS="${NNSLR_ROAD_TYPE_JUNCTIONS:-1}"
 
 if [[ -z "$RUN_ID" || $# -ne 1 ]]; then
   echo "usage: $0 NAME" >&2
@@ -118,6 +127,9 @@ export NNSLR_DATA_ROOT="$DATA_ROOT"
 export CUDA_VISIBLE_DEVICES="$GPU_INDEX"
 NN="$VENV/bin/nnslr"
 SETTINGS=(--epochs "$EPOCHS" --patience "$PATIENCE" --batch-size "$BATCH" --num-workers "$NUM_WORKERS")
+if [[ "$JUNCTIONS" == "0" ]]; then
+  SETTINGS+=(--no-junctions)
+fi
 
 echo "== Road type with memory =="
 echo "run:          $RUN_ID"
@@ -126,6 +138,7 @@ echo "data root:    $DATA_ROOT"
 echo "physical GPU: $GPU_INDEX"
 echo "settings:     ${SETTINGS[*]}"
 echo "baseline:     ${BASELINE:-none}"
+echo "junctions:    $([[ "$JUNCTIONS" == "0" ]] && echo "no head" || echo "with the junction head")"
 echo
 
 echo "== 1/8 Check the road types, the split and the pipeline (CPU-only) =="
@@ -134,7 +147,10 @@ CUDA_VISIBLE_DEVICES="" "$NN" train-road-type --dry-run --run-dir "$OUT/dry-run"
 echo "== 2/8 Explicit CUDA smoke test =="
 "$NN" env --gpu-smoke --gpu-device 0
 
-echo "== 3/8 Resize the frames to 256x144 =="
+echo "== 3/8 Find the junctions, resize the frames to 256x144 =="
+if [[ "$JUNCTIONS" != "0" ]]; then
+  "$NN" junctions --all --data-root "$DATA_ROOT"
+fi
 "$VENV/bin/python" -c '
 import sys
 from nnslr_tools import road_type_data as data
