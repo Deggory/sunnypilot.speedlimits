@@ -1,5 +1,12 @@
 # Istruzioni per gli agenti
 
+## ⚠️ VISION AND MAP ARE TWO SEPARATE SOURCES
+
+**THE COMMA'S VISION LIMIT (`speedvisiond`, `vision.SpeedLimitMemory`) NEVER READS THE MAP. IT USES ONLY THE CAMERA AND
+THE CAR'S OWN SIGNALS (SPEED, GYRO, STEERING ANGLE, BLINKERS). MAP AND VISION ARE WEIGHED AGAINST EACH OTHER ONLY BY
+SUNNYPILOT'S RESOLVER ("MAP DATA + VISION"). NEVER PROPOSE A MAP FIELD (ITS LIMIT, `roadName`, ITS JUNCTIONS...) AS AN
+INPUT OR A RULE OF THE VISION SIDE.** OpenStreetMap may only make training labels offline (road types, junctions).
+
 - Sul Mac di Cristian, prima di agire, leggere e applicare anche `/Users/cristianku/Gitlab/codex-contexts/AGENTS.md`; se lì non è leggibile, segnalarlo senza inventarne il contenuto. Sul server (il container dove girano i siti) quel file non esiste: non cercarlo e non segnalarlo.
 - Per revisionare i cartelli, dalla pagina web o con MCP/REST API, leggere [review_instructions.md](review_instructions.md): descrive accesso con Playwright, MCP e REST (sezione 10), controllo delle immagini, annotazioni, salvataggio e verifica indipendente sul server.
 - Distinguere una prova del programma da una revisione reale. Salvare conferme nel database soltanto quando Cristian ha autorizzato la revisione con salvataggio. Non confermare immagini non esaminate.
