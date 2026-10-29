@@ -442,3 +442,46 @@ def operating_point(metrics: dict) -> dict:
             if best is None or key > best[0]:
                 best = (key, {'decode': decode, 'threshold': float(threshold), **numbers})
     return best[1] if best else {}
+
+
+# -- a turn as a plain rule, without the network: what the car's own motion alone says ------------------------------
+# A turn at an intersection is a large change of heading on a small radius. Geometry only, no speed threshold: the
+# radius is the path driven during the turn (the speed of each second) over the heading change in radians.
+TURN_DEGREES = 60.0
+TURN_RADIUS_M = 40.0
+TURN_MIN_DPS = 2.0  # deg/s: a second turning less than this (or the other way, or unknown) ends a turn
+
+
+def turns(yaw_dps: np.ndarray, speed_mps: np.ndarray, min_dps: float = TURN_MIN_DPS) -> list[dict]:
+    """The turns of a sequence: runs of consecutive seconds turning the same way at min_dps or more (yaw_dps: the
+    heading change of each 1 s step in degrees, positive left, nan unknown). Each {'start', 'end' (exclusive),
+    'degrees' (signed), 'metres' (nan when a speed is unknown), 'radius_m'}."""
+    yaw = np.asarray(yaw_dps, dtype=np.float64)
+    speed = np.asarray(speed_mps, dtype=np.float64)
+    found, start = [], None
+
+    def close(end: int) -> None:
+        degrees = float(yaw[start:end].sum())
+        metres = float(speed[start:end].sum())
+        radians = abs(degrees) * np.pi / 180
+        found.append({'start': start, 'end': end, 'degrees': degrees, 'metres': metres,
+                      'radius_m': metres / radians if radians > 0 and np.isfinite(metres) else float('nan')})
+
+    for t in range(len(yaw)):
+        turning = np.isfinite(yaw[t]) and abs(yaw[t]) >= min_dps
+        if start is not None and (not turning or np.sign(yaw[t]) != np.sign(yaw[start])):
+            close(t)
+            start = None
+        if turning and start is None:
+            start = t
+    if start is not None:
+        close(len(yaw))
+    return found
+
+
+def turn_events(yaw_dps: np.ndarray, speed_mps: np.ndarray, *, degrees: float = TURN_DEGREES,
+                radius_m: float = TURN_RADIUS_M, min_dps: float = TURN_MIN_DPS) -> list[int]:
+    """The "turned at an intersection" events of the plain rule: the first second after every turn (turns) of at least
+    degrees on a radius of at most radius_m; none for a turn still going at the end of the sequence."""
+    return [turn['end'] for turn in turns(yaw_dps, speed_mps, min_dps)
+            if abs(turn['degrees']) >= degrees and turn['radius_m'] <= radius_m and turn['end'] < len(yaw_dps)]

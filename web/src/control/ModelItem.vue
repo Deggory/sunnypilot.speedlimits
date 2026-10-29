@@ -123,7 +123,19 @@ const releaseRows = computed(() => RELEASE_ROWS.filter((row) => (roadType.value?
 const seconds = (value: number | null): string => value === null ? '–' : (value > 0 ? '+' : '') + value + ' s';
 /** The junction head on validation and test at the car's operating point (nnslr_tools.model_roles._road_type_junctions). */
 const junctionRows = computed(() => RELEASE_ROWS.filter((row) => roadType.value?.junctions?.[row.key])
-  .map((row) => ({...row, numbers: roadType.value!.junctions![row.key]!})));
+  .map((row) => ({...row, note: (roadType.value!.junctions![row.key]!.passed ?? '–') + ' passed',
+    numbers: roadType.value!.junctions![row.key]!})));
+/** The car's turn alone as a plain rule on the test, without the network (since the fourth version). */
+const turnRule = computed(() => roadType.value?.junctions?.turn_rule ?? null);
+const turnRows = computed(() => turnRule.value?.numbers ? [{key: 'turn', label: 'Turn alone',
+  note: '≥ ' + (turnRule.value.degrees ?? 60) + '°, r ≤ ' + (turnRule.value.radius_m ?? 40) + ' m', numbers: turnRule.value.numbers}] : []);
+const caught = (kind: 'turned' | 'straight'): string => {
+  const row = turnRule.value?.caught?.[kind];
+  return row ? row.caught_2s + ' of ' + row.passed : '–';
+};
+/** What the network reads each second. */
+const inputsText = computed(() => roadType.value ? ['camera', roadType.value.speed_source === 'v_ego' ? 'car speed' : 'GPS speed',
+  ...(roadType.value.signs ? ['motorway sign'] : []), ...(roadType.value.motion ? ['turn, steering, blinkers'] : [])].join(', ') : '');
 const hourly = (value: number | null): string => value === null ? '–' : value < 10 ? value.toFixed(1) : String(Math.round(value));
 </script>
 
@@ -284,8 +296,8 @@ const hourly = (value: number | null): string => value === null ? '–' : value 
             <th class="num" title="False “passed” (none within 4 s): a limit lifted where no intersection was, per hour · per 10 km">False/h</th>
             <th class="num" title="False “passed” per hour in town · outside">In town</th></tr></thead>
           <tbody>
-            <tr v-for="row in junctionRows" :key="row.key" :data-junctions="row.key">
-              <th scope="row">{{ row.label }}<small class="muted">{{ row.numbers.passed ?? '–' }} passed</small></th>
+            <tr v-for="row in [...junctionRows, ...turnRows]" :key="row.key" :data-junctions="row.key">
+              <th scope="row">{{ row.label }}<small class="muted">{{ row.note }}</small></th>
               <td class="num">{{ pct(row.numbers.f1_2s) }}<small class="muted">4 s: {{ pct(row.numbers.recall_4s) }}</small></td>
               <td class="num">{{ hourly(row.numbers.false_per_hour) }}<small class="muted">{{ hourly(row.numbers.false_per_10km) }}/10 km</small></td>
               <td class="num">{{ hourly(row.numbers.town_per_hour) }}<small class="muted">out {{ hourly(row.numbers.outside_per_hour) }}</small></td>
@@ -309,6 +321,10 @@ const hourly = (value: number | null): string => value === null ? '–' : value 
           <div><dt title="Multiply-adds of one step, one frame">Work per step</dt><dd>{{ roadType.flops_per_step ? Math.round(roadType.flops_per_step / 1e6) + ' M' : '–' }}</dd></div>
           <div><dt :title="'One step at batch 1 on ' + (roadType.step_device ?? 'this server')">Time per step</dt><dd>{{ roadType.step_ms === null ? '–' : roadType.step_ms + ' ms' }}</dd></div>
           <div><dt>Best epoch</dt><dd>{{ epoch }}</dd></div>
+          <div v-if="roadType.motion !== undefined"><dt title="What it reads each second; never the map">Inputs</dt><dd>{{ inputsText }}</dd></div>
+          <div v-if="roadType.junctions?.branch"><dt title="Chosen on validation after the road type’s epoch">Junction head</dt><dd>{{
+            roadType.junctions.branch === 'separate' ? 'own memory' : 'shared memory' }}<span v-if="roadType.junctions.branch === 'separate'
+            && roadType.junctions.stage_epoch" class="muted"> · epoch {{ roadType.junctions.stage_epoch }}</span></dd></div>
           <div v-if="roadType.memory === 'gru'"><dt>For the car</dt><dd>{{ roadType.onnx ? 'ONNX step exported' : 'not exported yet' }}</dd></div>
         </dl>
         <p class="note">Delay: the median seconds from the change in the labels to the network’s; negative: it changes first.<template
@@ -316,7 +332,11 @@ const hourly = (value: number | null): string => value === null ? '–' : value 
           sign at the start of every entry ramp of the map.</template><template v-if="roadType.junctions?.needed?.needed"> Junctions:
           {{ roadType.junctions.needed.needed }} of the {{ roadType.junctions.needed.junctions }} intersections of the test come within
           300 m after a number sign the car confirmed (in Poland its limit ends there); “passed” caught {{ roadType.junctions.needed.caught_2s }}
-          of them within 2 s, {{ roadType.junctions.needed.caught_4s }} within 4 s.</template></p>
+          of them within 2 s, {{ roadType.junctions.needed.caught_4s }} within 4 s.</template><template v-if="turnRule?.passed"> Turn
+          alone: a turn of {{ turnRule.degrees ?? 60 }}° or more on a radius of {{ turnRule.radius_m ?? 40 }} m or less, from the car’s heading
+          change and the path it drove (the radius), no network. The car turned that much in {{ turnRule.turned_60 ?? 0 }} of the {{ turnRule.passed }} intersections of the
+          test<template v-if="turnRule.caught">; within 2 s the network’s “passed” caught {{ caught('turned') }} turned and
+          {{ caught('straight') }} straight</template>.</template></p>
         </details>
       </template>
     </template>

@@ -422,7 +422,85 @@ The third version says ramp sometimes, for 29 of the 319 ramp seconds of test, a
 **What is missing.**
 - **Look at the false "passed"**: the 69 of test at the operating point, on the frames. Are they driveways and car park exits (the rules leave them out, the camera does not), stretches the map lacks, or plain mistakes? That decides between more rules, more data and another input.
 - **More intersections in validation**: 28, and 6 minutes of town, are not enough to choose an epoch or a threshold.
-- **The epoch for two heads**: choose the road type's epoch by its own measure, and train or fine-tune the junction head apart, so that one does not spoil the other.
+- **The epoch for two heads**: choose the road type's epoch by its own measure, and train or fine-tune the junction head apart, so that one does not spoil the other. Done in the fourth version.
 - **A person's pass over the 56 to check** in Data › Roads, then train again.
 - **Poland**: there is no Polish drive yet. The head is trained on Swiss intersections, which look alike but are not the same.
 - **The car**: nothing uses it, and it should not until the false "passed" are rare. `SpeedLimitMemory` would end a sign's number at a "passed" only where the law says so (Poland; in Switzerland, some signs).
+
+### Fourth version: the car's own motion (29 October 2026)
+
+**Why.** A car that turns at a crossing has passed it: the gyro knows that better than the camera. So the network now also gets the car's own motion, next to the speed and the sign, to tell when the car turned at a junction. Only the car's own signals: the camera's side never reads the map (`AGENTS.md`). The map only makes the labels, offline.
+
+**The inputs** (`src/nnslr_tools/car_motion.py`, `nnslr car-motion --all`, step 4 of the script; `data/derived/car_motion/<route>.json`). From each drive's `rlog.zst`, one row per 1 Hz frame, the samples of the last second (t − 1 s, t]:
+
+| Input | From (cereal) | Each second | Scale |
+|---|---|---|---|
+| `heading_change` | `livePose.angularVelocityDevice.z` (named `deviceMotion` in this sunnypilot; the device z points down, so yaw = −z) when `.valid`; else `carState.yawRate` | the mean yaw rate in deg/s, i.e. the heading change over the step in degrees (left positive) | / 30, clipped to ±3 |
+| `yaw_max` | the same | the largest \|yaw rate\| | / 30, 0 to 3 |
+| `yaw_known` | | 1 with at least 10 samples | |
+| `steer` | `carState.steeringAngleDeg` | the mean (left positive) | / 180, clipped to ±4 |
+| `steer_known` | | 1 with at least 10 samples | |
+| `left_blinker`, `right_blinker` | `carState.leftBlinker`, `rightBlinker` | 1 when on at any sample of the last 2 s | |
+| `blinker_known` | | 1 with at least 10 samples | |
+
+An unknown input is 0 with its flag 0. All 12 drives have it: the yaw from the device 100 % of the seconds (99.9 % of the frames), `carState` 100 %. This car fills `carState.yawRate` with 0, so the fallback was never used. The speed input is now `carState.vEgo` (the GPS speed where it is missing), with the same scaling: `[min(max(v, 0), 60) / 30, 1]`.
+
+**The dropout.** As for the sign: in 20 % of the train windows all the motion is unknown (a car or a log without it), in 10 % one part (the yaw, or the `carState` signals).
+
+**The selection** (item 3 of the brief: the junction head must not drag the road type down). The road type's epoch is chosen on its own measure on validation, `road_score` = macro F1 + 0.1 × the first minute after a merge right (debounced) − 0.0005 × false switches an hour (debounced); the junction head never chooses it, nor stops the training. Then the junction head gets a stage of its own (`train_junction_stage`, up to 30 epochs, half the windows around a "passed"): everything the road type uses is frozen, and the head is trained with a GRU of its own, copied from the road GRU. It is kept only when it beats the shared head of the joint training on validation (F1 at 2 s). With memory and motion: road epoch 43 of 58 (validation road score 0.756, macro F1 0.675), and the junction head kept its own memory (validation F1 0.552 against 0.516 shared, stage epoch 4). Without the motion: road epoch 19 of 34, shared head kept (0.567 against 0.561). Without memory: epoch 42 of 57, its head retrained by the stage (0.344 against 0.298).
+
+**Results** (run `2026-10-29_1533-road-type-motion`, the same split and the same test as the third version: 83 intersections passed in 1.59 h and 92.5 km, 0.49 h and 11.7 km in town, 1.10 h and 80.8 km outside). Each version at its operating point, chosen on validation:
+
+| Test, at the operating point | Rule | Recall 2 s | Recall 4 s | F1 2 s | False "passed" /h | /10 km | Town /h, /10 km | Outside /h, /10 km | Needed caught (2 s, 4 s) |
+|---|---|---|---|---|---|---|---|---|---|
+| v3, with memory and the sign | exit, in < 0.3 | 30.1 % | 31.3 % | 0.281 | 43.4 | 7.5 | 91.4, 38.6 | 21.8, 3.0 | 11, 12 of 35 |
+| v4, with memory, the sign and the motion | passed ≥ 0.5 | 22.9 % | 24.1 % | 0.279 | 20.7 | 3.6 | 47.0, 19.8 | 9.1, 1.2 | 6, 7 of 35 |
+| v4, the same without the motion | exit, in < 0.3 | 32.5 % | 38.6 % | 0.289 | 45.2 | 7.8 | 110.6, 46.5 | 16.3, 2.2 | 9, 10 of 35 |
+| v4, without memory (sign and motion) | exit, in < 0.7 | 13.3 % | 22.9 % | 0.135 | 38.3 | 6.6 | 99.9, 42.0 | 10.9, 1.5 | 4, 8 of 35 |
+
+At the same rule (test):
+
+| Rule | v3 | v4, with the motion | v4, without the motion |
+|---|---|---|---|
+| passed ≥ 0.3: recall 2 s, 4 s; false /h (town, outside) | 38.6 %, 43.4 %; 49.0 (115.8, 19.1) | 28.9 %, 30.1 %; 24.5 (55.2, 10.9) | 30.1 %, 39.8 %; 46.5 (122.9, 12.7) |
+| passed ≥ 0.5 | 26.5 %, 28.9 %; 32.1 (75.2, 12.7) | 22.9 %, 24.1 %; 20.7 (47.0, 9.1) | 26.5 %, 32.5 %; 36.5 (94.3, 10.9) |
+| passed ≥ 0.7 | 21.7 %, 24.1 %; 21.4 (52.8, 7.3) | 16.9 %, 18.1 %; 14.5 (32.7, 6.4) | 22.9 %, 26.5 %; 27.0 (67.6, 9.1) |
+
+**The same network with its motion unknown** (`test_motion_unknown` in `result.json`, the last block of `comparison.txt`): passed ≥ 0.5, recall 21.7 % instead of 22.9 %, 20.1 false an hour instead of 20.7 (town 45.0 instead of 47.0); macro F1 0.661 instead of 0.664, the first minute after a merge 96.2 % both. Without memory, the same: 38.3 false an hour both.
+
+- **The fourth network makes half the false "passed"**: in town 47 an hour at its operating point against 91 (v3) and 111 (the same run without the motion); at passed ≥ 0.3, 24.5 an hour (town 55) against 46.5 (town 123) without the motion, with about the same recall within 2 s (29 % against 30 %). It also finds fewer: 23 % at its operating point, and 6 of the 35 intersections that followed a number sign, against 11 for v3.
+- **But the motion is not what cuts them.** The network barely uses it: with the motion unknown it gives the same numbers. The difference with the run without the motion comes from the rest of its training (its own junction memory, another epoch) and from chance; with one run each, it cannot be split further.
+- **Why the turn tells little here**: 75 of the 83 intersections of test were crossed straight (the car turned 60° or more in 8, 30° or more in 15; in train 36 of 138, in validation 5 of 28). "No turn" says nothing against a false "passed", and the turned ones the camera already sees: the network with the motion caught 5 of the 8 turned (6 within 4 s), the one without it 6.
+- **Still not usable on the car**: 20 false "passed" an hour, 47 in town.
+
+**The car's turn alone, without the network** (`road_type_metrics.turns`, `turn_events`; `turn_rule` in `result.json`). Geometry only, never a speed threshold: a run of seconds turning the same way at 2 deg/s or more; its heading change is the sum of the yaw over the run, its radius the path driven over the run (the speed integrated) divided by the heading change in radians. The event is the second after the run, when the heading changed by at least 60° on a radius of at most 40 m. On the same test:
+
+| Turn | Radius | Events | Recall 2 s, 4 s | False /h (town, outside) |
+|---|---|---|---|---|
+| ≥ 45° | ≤ 40 m | 19 | 3.6 %, 4.8 % | 9.4 (28.5, 0.9) |
+| ≥ 60° | ≤ 25 m | 7 | 0, 0 | 4.4 (14.3, 0) |
+| **≥ 60°** | **≤ 40 m** | **13** | **3.6 %, 4.8 %** | **5.7 (16.3, 0.9)**, 1.0 /10 km |
+| ≥ 60° | ≤ 60 m | 19 | 4.8 %, 7.2 % | 8.2 (18.4, 3.6) |
+| ≥ 90° | ≤ 40 m | 9 | 1.2 %, 2.4 % | 4.4 (12.2, 0.9) |
+
+The rule finds 3 of the 83 intersections within 2 s (4 within 4 s) and says "passed" falsely 9 times in 1.59 h, 8 of them in town. It can see at most the 8 turned crossings, and finds 3 or 4 of those; why it misses the others (the timing of its event, the radius, a roundabout's turns both ways) was not looked at. **What the network adds** are the straight crossings, which no turn can see: 15 of the 75 within 2 s (17 within 4 s) with the motion, 23 without it, 20 for v3. The rule's 9 false events were not looked at yet (a turn into a car park or a driveway would be one).
+
+**The road type** is the best so far (test):
+
+| | Macro F1 | Ramp F1 | After a merge (raw, debounced) | Ramp limit ends in time (of 7) | Released on the ramp | Never held | False switches /h (raw, debounced) | Other roads called ramp |
+|---|---|---|---|---|---|---|---|---|
+| v2, with the sign | 0.561 | 0.000 | 90.7 %, 90.9 % | 2 | 1 | 4 | 80, 48 | 16 s |
+| v3, with the sign and the junctions | 0.623 | 0.105 | 62.4 %, 61.3 % | 3 | 1 | 3 | 171, 69 | 202 s |
+| **v4, with the sign and the motion** | **0.664** | **0.127** | **97.0 %, 96.2 %** | 1 | 2 | 4 | 88, 43 | 36 s |
+| v4, without the motion | 0.647 | 0.069 | 90.9 %, 91.5 % | 1 | 2 | 4 | 81, 37 | 182 s |
+| v4, without memory | 0.577 | 0.055 | 71.2 %, 74.7 % | 1 (and 1 late) | 1 | 4 | 589, 80 | 144 s |
+
+Its own selection fixed what the junction head had spoilt in v3: after a merge 96 % instead of 61 %, 43 false switches an hour instead of 69 (v2: 48), 36 s of other roads called ramp instead of 202. Town F1 0.880, rural 0.737, motorway 0.912; town entries 11 of 11 at 2 s, exits 9 of 10 at 1 s. The motion matters little here too (macro F1 0.661 with it unknown). **The comma's rule on the ramp's limit is not better**: on the 7 merges of test, 1 ends in time and 2 too early on the ramp (v2: 2 and 1, v3: 3 and 1). Seven merges are too few to choose on, and the ramp is still mostly missed (F1 0.13). With the signs the car's code confirms today (0 motorway signs on the 12 drives, read again after `/root/sunnypilot` changed), v4 holds one ramp limit by its own ramp answer and releases it on the ramp; v3 held one in time.
+
+**On the car.** The ONNX step has the motion as one more input and, since the junction head has its own memory, one more input and output for it: inputs `image` (1, 3, 144, 256), `speed` (1, 2), `sign` (1, 2), `motion` (1, 8), `hidden` (1, 128), `junction_hidden` (1, 128); outputs `probabilities` (1, 6), `hidden_out` (1, 128), `junction` (1, 2), `junction_hidden_out` (1, 128). The car feeds each hidden output back as the next step's hidden input, both zeros at the start of a drive (and after more than 5 s without a step). The contract has `car_input.motion`: the field names and order, the cereal fields, the summary (step 1 s, at least 10 samples, the scales and clips, the blinkers' 2 s), and `never: a map field`; `car_input.steps` has the lines `speedvisiond` would run (subscribe to `livePose`/`deviceMotion` at 20 Hz and `carState` at 100 Hz, summarise the last second); `car_input.junction_decode`: passed ≥ 0.5, rising, at most one event in 3 s. Checked with onnxruntime: largest error 1.0e-6 on random inputs, 1.1e-5 over 60 s of a real drive (the motion known all 60 s, the sign 30 s), the same answer in all 60. 1,209,256 parameters: 103,680 for the junction head's own GRU, 3,072 for the motion in the road GRU; a step still costs 84 MFLOPs. Nothing on the car reads it yet: `/root/sunnypilot` was not touched.
+
+**What is missing.**
+- **Make the turn count, or drop it.** The network learnt to do without it. To try: the turn of the last 5 to 10 s straight into the junction head, more turned crossings (most are in town), or a check by eye of whether the false "passed" happen while the car turns at all. If not, the motion can go and the input stays 2 + 2.
+- **Look at the false "passed"**: 33 of v4 on test at its operating point, and the 9 of the turn rule.
+- **The ramp's limit**: 7 merges in test, 1 in validation; more motorway entries are needed to choose between v2, v3 and v4 on the comma's rule.
+- **More intersections in validation** (28), **Poland**, and **the car** (as in the third version).

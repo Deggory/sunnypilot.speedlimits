@@ -7,7 +7,8 @@ set -euo pipefail
 # motorway (no sign ends it there: the comma's rule, vision.SpeedLimitMemory) and the entry into and exit from a town
 # are seen. Its junction head says when the car is inside an intersection and when it has just left one: in Poland
 # (and in Switzerland by OSStr art. 16 cpv. 2) a speed sign holds at most to the end of the next intersection, and
-# Poland has no end sign.
+# Poland has no end sign. The car's own motion (the turn of every second, the steering wheel, the blinkers, from its
+# logs; never the map) tells its memory when the car turned at an intersection.
 # On one GPU, one step after the other:
 #
 #   1. checks the road types, the split and the whole pipeline on the CPU (nnslr train-road-type --dry-run);
@@ -17,32 +18,36 @@ set -euo pipefail
 #      frame of the drives with road types to 256 x 144 once (data/derived/road_type_frames);
 #   4. reads the motorway signs of those drives as the comma does (nnslr road-type-signs: the car's vision.py,
 #      SignNet and classifier from the sunnypilot clone, read only, 5 frames a second of fcamera.hevc, on the CPU;
-#      data/derived/road_type_signs): the comma's rule measured with the signs the car confirms today;
-#   5. trains the network with memory and the sign input (nnslr train-road-type --memory gru; the sign input is the
-#      seconds since a motorway sign, placed at the start of every entry ramp of the map: --sign-source map);
-#   6. the same without the sign input, to compare (--no-sign);
+#      data/derived/road_type_signs): the comma's rule measured with the signs the car confirms today; and the car's
+#      own motion of every second from the drives' rlogs (nnslr car-motion --all: deviceMotion/livePose yaw rate,
+#      carState steering angle, blinkers and vEgo; data/derived/car_motion);
+#   5. trains the network with memory, the sign input and the car's motion (nnslr train-road-type --memory gru; the
+#      sign input is the seconds since a motorway sign, placed at the start of every entry ramp of the map:
+#      --sign-source map; the speed input is carState.vEgo); the road type's epoch is chosen on its own measure, then
+#      the junction head gets a stage of its own;
+#   6. the same without the car's motion, to compare (--no-motion);
 #   7. the same with the sign input but without memory, to compare (--memory none);
 #   8. compares them (comparison.txt: the comma's rule on every merge of validation and test, when the ramp's limit
 #      ends; F1 per class and the ramp's confusion; the changes of road type; false switches per hour; the first
 #      minute after a merge; the junctions: recall of "passed" within 2 and 4 s, false "passed" per hour and per
-#      10 km in town and outside, the intersections the car needed), with an earlier version too when
-#      NNSLR_ROAD_TYPE_BASELINE names its checkpoint, and exports the network with memory and the sign as one ONNX
-#      step with its contract (nnslr export-road-type).
+#      10 km in town and outside, the intersections the car needed; the car's turn alone as a plain rule), with
+#      earlier versions too when NNSLR_ROAD_TYPE_BASELINE names their checkpoints (separated by ":"), and exports the
+#      network with memory, the sign and the motion as one ONNX step with its contract (nnslr export-road-type).
 # Every training has the junction head when step 3 found the intersections (NNSLR_ROAD_TYPE_JUNCTIONS=0: without it,
 # as the second version).
 #
 # usage: scripts/run_road_type.sh NAME
 #
-# Writes only into $DATA_ROOT/runs/NAME/ (road-type.log, road-type/{dry-run,gru,gru-nosign,frame,baseline,export}/,
-# road-type/comparison.txt), the junction labels, the frame cache and the sign readings. It never imports reviews, changes the road types,
+# Writes only into $DATA_ROOT/runs/NAME/ (road-type.log, road-type/{dry-run,gru,gru-nomotion,frame,baseline*,export}/,
+# road-type/comparison.txt), the junction labels, the frame cache, the sign readings and the car's motion. It never imports reviews, changes the road types,
 # the model in use or the car, never publishes. Run it again with the same NAME to finish: a finished training is not
 # repeated, the signs already read are not read again, an export older than its weights is redone.
 #
 # Environment: NNSLR_GPU_INDEX (default 0), NNSLR_GPU_VENV (.venv-gpu), NNSLR_ROAD_TYPE_EPOCHS (60),
 # NNSLR_ROAD_TYPE_PATIENCE (15), NNSLR_ROAD_TYPE_BATCH (12 sequences), NNSLR_NUM_WORKERS (half the cores, 4 to 16),
 # NNSLR_SIGN_WORKERS (processes reading the signs: the cores but two), NNSLR_SUNNYPILOT_CLONE (/root/sunnypilot),
-# NNSLR_ROAD_TYPE_BASELINE (an earlier road-type-best.pt to compare with), NNSLR_ALLOW_BUSY_GPU=1 to share a GPU
-# that already has compute processes.
+# NNSLR_ROAD_TYPE_BASELINE (earlier road-type-best.pt to compare with, separated by ":"), NNSLR_ALLOW_BUSY_GPU=1 to
+# share a GPU that already has compute processes.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DATA_ROOT="${NNSLR_DATA_ROOT:-$ROOT_DIR/data}"
@@ -70,10 +75,16 @@ if [[ ! "$RUN_ID" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
   exit 2
 fi
 
-if [[ -n "$BASELINE" && ! -f "$BASELINE" ]]; then
-  echo "error: NNSLR_ROAD_TYPE_BASELINE is not a file: $BASELINE" >&2
-  exit 2
+BASELINES=()
+if [[ -n "$BASELINE" ]]; then
+  IFS=':' read -r -a BASELINES <<< "$BASELINE"
 fi
+for checkpoint in "${BASELINES[@]}"; do
+  if [[ ! -f "$checkpoint" ]]; then
+    echo "error: NNSLR_ROAD_TYPE_BASELINE is not a file: $checkpoint" >&2
+    exit 2
+  fi
+done
 
 for setting in EPOCHS PATIENCE BATCH NUM_WORKERS SIGN_WORKERS; do
   if [[ ! "${!setting}" =~ ^[0-9]+$ ]]; then
@@ -159,8 +170,9 @@ paths = data.build_frame_cache(sys.argv[1], dataset["frames"], workers=int(sys.a
 print(f"frame cache: {len(paths)} drives ready")
 ' "$DATA_ROOT" "$NUM_WORKERS"
 
-echo "== 4/8 Read the motorway signs as the car does (CPU) =="
+echo "== 4/8 Read the motorway signs as the car does and the car's motion (CPU) =="
 "$NN" road-type-signs --num-workers "$SIGN_WORKERS"
+"$NN" car-motion --all --num-workers "$SIGN_WORKERS"
 
 train() {
   local memory="$1" folder="$2"
@@ -172,19 +184,24 @@ train() {
   "$NN" train-road-type --memory "$memory" --run-dir "$OUT/$folder" "${SETTINGS[@]}" "$@"
 }
 
-echo "== 5/8 Train with memory and the sign (GRU) =="
+echo "== 5/8 Train with memory, the sign and the car's motion (GRU) =="
 train gru gru
 
-echo "== 6/8 Train with memory, without the sign =="
-train gru gru-nosign --no-sign
+echo "== 6/8 Train with memory, without the car's motion =="
+train gru gru-nomotion --no-motion
 
 echo "== 7/8 Train without memory =="
 train none frame
 
 echo "== 8/8 Compare and export the ONNX step =="
-if [[ -n "$BASELINE" ]]; then
-  "$NN" release-road-type --checkpoint "$BASELINE" --output "$OUT/baseline/release.json"
-fi
+for index in "${!BASELINES[@]}"; do
+  folder="baseline$([[ "$index" == "0" ]] || echo "-$(( index + 1 ))")"
+  if [[ -f "$OUT/$folder/release.json" && "$OUT/$folder/release.json" -nt "${BASELINES[$index]}" ]]; then
+    echo "skip measured: $OUT/$folder/release.json"
+  else
+    "$NN" release-road-type --checkpoint "${BASELINES[$index]}" --output "$OUT/$folder/release.json"
+  fi
+done
 "$NN" compare-road-type --run-root "$RUN_ROOT"
 ONNX="$OUT/export/road-type.onnx"
 if [[ -f "$ONNX" && -f "$ONNX.contract.json" && "$ONNX" -nt "$OUT/gru/road-type-best.pt" ]]; then

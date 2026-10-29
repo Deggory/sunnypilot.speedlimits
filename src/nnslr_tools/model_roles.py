@@ -22,10 +22,12 @@ from what the training and the evaluation wrote:
   (the speed signs found and read right, the false boxes per frame that survive it);
 - decider: ``<run>/experiment-b/<variant>/<variant>-best.pt`` with its ``result.json`` (nnslr_tools.context_experiment):
   whom the sign applies to on validation and test, and the reading;
-- road type: ``<run>/road-type/gru/road-type-best.pt`` (with memory) and ``<run>/road-type/frame/road-type-best.pt``
-  (the same encoder without it) of scripts/run_road_type.sh, with their ``result.json`` (nnslr_tools.road_type_net):
-  macro F1 over the road types, the accuracy in the first minute after a merge, the delay of each kind of change and
-  the false switches per hour, on validation and test. Not part of the sign pipeline: nothing uses the one in use yet.
+- road type: ``<run>/road-type/gru/road-type-best.pt`` (with memory), ``<run>/road-type/gru-nomotion/`` (with memory,
+  without the car's motion) and ``<run>/road-type/frame/road-type-best.pt`` (the same encoder without memory) of
+  scripts/run_road_type.sh, with their ``result.json`` (nnslr_tools.road_type_net): macro F1 over the road types, the
+  accuracy in the first minute after a merge, the delay of each kind of change and the false switches per hour, on
+  validation and test; the junction head and the car's turn alone as a plain rule. Not part of the sign pipeline:
+  nothing uses the one in use yet.
 
 Each artifact has a stable id ``<role>:<run>/<part>``: ``cutter:2026-10-24_1452/detector``,
 ``cutter:<run>/detector-sizes/640x360``, ``cutter:<run>/signnet``, ``classifier:<run>/reader``,
@@ -70,12 +72,17 @@ from nnslr_tools.training import DETECTOR_FAMILIES
 ROLES = ('cutter', 'classifier', 'decider', 'road_type')
 ROLE_LABELS = {'cutter': 'Cutter', 'classifier': 'Classifier', 'decider': 'Decider', 'road_type': 'Road type'}
 # The road-type network of scripts/run_road_type.sh: its folders in <run>/road-type, with memory (and the sign input,
-# since the second version), with memory without the sign input, and without memory.
+# since the second version, and the car's own motion, since the fourth), with memory without the car's motion (with
+# memory without the sign input in the runs before), and without memory.
 ROAD_TYPE_PART = 'road-type'
 ROAD_TYPE_FOLDERS = {'gru': ('With memory', 'GRU over the seconds'),
+                     'gru-nomotion': ('With memory, no motion', "GRU over the seconds and the motorway sign, without "
+                                                                "the car's motion"),
                      'gru-nosign': ('With memory, no sign', 'GRU over the seconds, without the motorway sign'),
                      'frame': ('Without memory', 'one frame at a time')}
 ROAD_TYPE_SIGN = ('With memory and the sign', 'GRU over the seconds and the motorway sign')
+ROAD_TYPE_MOTION = ('With memory, sign and motion', "GRU over the seconds, the motorway sign and the car's turn, "
+                                                    'steering and blinkers')
 ROAD_TYPE_KINDS = ('ramp_to_motorway', 'motorway_to_ramp', 'town_entry', 'town_exit', 'other')
 # The cutter must miss nothing: it is judged on recall at a low score (nnslr_tools.evaluation.CUTTER_SCORE_THRESHOLDS).
 CUTTER_SCORE = 0.1
@@ -86,7 +93,7 @@ FAMILIES = ('all', 'speed')
 SIZE_NAME = re.compile(r'[1-9][0-9]{0,4}x[1-9][0-9]{0,4}')
 _RUN = RUN_NAME.pattern
 MODEL_ID = re.compile(rf'(cutter|classifier|decider|road_type):({_RUN})/(detector|detector-sizes/{SIZE_NAME.pattern}|'
-                      rf'reader|classifier|{EXPERIMENT_DIR}/{_RUN}|{ROAD_TYPE_PART}/(?:gru|gru-nosign|frame))')
+                      rf'reader|classifier|{EXPERIMENT_DIR}/{_RUN}|{ROAD_TYPE_PART}/(?:gru|gru-nomotion|gru-nosign|frame))')
 # SignNet: a cutter of the Models tab, never one of active.json (chain.py and Prepare load a detector).
 SIGNNET_PART = 'signnet'
 SIGNNET_ID = re.compile(rf'cutter:({_RUN})/{SIGNNET_PART}')
@@ -412,11 +419,32 @@ def _road_type_junctions(result: dict) -> dict | None:
         return None
     operating = {'decode': operating['decode'], 'threshold': float(operating['threshold'])}
     needed = result.get('junction_needed') if isinstance(result.get('junction_needed'), dict) else None
+    stage = result.get('junction_stage') if isinstance(result.get('junction_stage'), dict) else {}
     return {**operating,
             'validation': _junction_numbers(_dig(result, ('validation', 'junctions')), operating),
             'test': _junction_numbers(_dig(result, ('test', 'junctions')), operating),
             'needed': {key: _int(needed.get(key)) or 0 for key in ('junctions', 'needed', 'caught_2s', 'caught_4s')}
-            if needed else None}
+            if needed else None,
+            'branch': result.get('junction_branch') if result.get('junction_branch') in ('shared', 'separate') else None,
+            'stage_epoch': _int(stage.get('best_epoch')),
+            'turn_rule': _turn_rule(_dig(result, ('turn_rule', 'test')))}
+
+
+def _turn_rule(report: Any) -> dict | None:
+    """The car's turn alone as a plain "passed" detector on the test (nnslr_tools.road_type_net.turn_rule): its rule,
+    its numbers as the junction head's, the intersections the car turned in and those the network caught, turned and
+    straight."""
+    if not isinstance(report, dict) or not isinstance(report.get('metrics'), dict):
+        return None
+    rule = report.get('rule') if isinstance(report.get('rule'), dict) else {}
+    passages = report.get('passages') if isinstance(report.get('passages'), dict) else {}
+    split = report.get('network_by_turn') if isinstance(report.get('network_by_turn'), dict) else {}
+    caught = {kind: {key: _int(_dig(split, (kind, key))) or 0 for key in ('passed', 'caught_2s', 'caught_4s')}
+              for kind in ('turned', 'straight') if isinstance(split.get(kind), dict)}
+    return {'degrees': _num(rule.get('degrees')), 'radius_m': _num(rule.get('radius_m')),
+            'numbers': _junction_numbers(report['metrics'], {'decode': 'passed', 'threshold': 0.5}),
+            'passed': _int(passages.get('passed')), 'turned_60': _int(passages.get('turned_60')),
+            'turned_30': _int(passages.get('turned_30')), 'caught': caught or None}
 
 
 def road_type_digest(result: Any) -> dict:
@@ -440,6 +468,8 @@ def road_type_digest(result: Any) -> dict:
         'test': _road_type_partition(result.get('test')),
         'test_smoothed': _road_type_partition(result.get('test_smoothed')),
         'signs': bool(result.get('signs')),
+        'motion': bool(result.get('motion')),
+        'speed_source': result.get('speed_source') if result.get('speed_source') in ('gps', 'v_ego') else 'gps',
         'release': {partition: _road_type_release(_dig(result, ('release', partition)))
                     for partition in ('validation', 'test')} if isinstance(result.get('release'), dict) else None,
         'junctions': _road_type_junctions(result),
@@ -841,10 +871,13 @@ class ModelIndex:
             trained = result or {}
             entry = self._base('road_type', name, part, checkpoint, result, problems)
             onnx = self.runs._file(run, ROAD_TYPE_PART + '/export/road-type.onnx.contract.json') if folder == 'gru' else None
-            if folder == 'gru' and trained.get('signs'):
+            if folder == 'gru' and trained.get('motion'):
+                label, detail = ROAD_TYPE_MOTION
+            elif folder == 'gru' and trained.get('signs'):
                 label, detail = ROAD_TYPE_SIGN
             entry.update({
                 'label': label, 'detail': detail, 'memory': trained.get('memory'), 'signs': trained.get('signs', False),
+                'motion': trained.get('motion', False), 'speed_source': trained.get('speed_source', 'gps'),
                 'release': trained.get('release'), 'junctions': trained.get('junctions'),
                 'architecture': trained.get('architecture'), 'initialization': 'ImageNet',
                 'best_epoch': trained.get('best_epoch'), 'epochs': trained.get('epochs'),

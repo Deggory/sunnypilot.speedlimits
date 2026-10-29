@@ -1564,6 +1564,12 @@ def build_parser() -> argparse.ArgumentParser:
                                  "road-type-signs)")
     p_road_net.add_argument("--no-junctions", action="store_true",
                             help="without the junction head (the second version's network), to compare")
+    p_road_net.add_argument("--no-motion", action="store_true",
+                            help="without the car's own motion (yaw, steering, blinkers; the speed input stays vEgo), to "
+                                 "compare (default: with it when nnslr car-motion has read every drive)")
+    p_road_net.add_argument("--junction-epochs", type=int, default=30,
+                            help="the junction head's own stage after the road type's epoch is chosen (0: keep the "
+                                 "shared head of the joint training)")
     p_road_net.add_argument("--dry-run", action="store_true",
                             help="on the CPU, a few short sequences, one epoch of two steps: checks the pipeline")
     p_road_net.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
@@ -1579,6 +1585,17 @@ def build_parser() -> argparse.ArgumentParser:
                               help="processes (default: the cores but two)")
     p_road_signs.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_road_signs.set_defaults(func=_cmd_road_type_signs)
+    p_motion = sub.add_parser("car-motion", help="the car's own motion of every second of the drives with road types, "
+                                                 "from their rlogs (deviceMotion/livePose yaw rate, carState "
+                                                 "steering angle, blinkers and vEgo): derived/car_motion/<route>.json, "
+                                                 "the motion input of the road-type network (CPU; never the map)")
+    p_motion.add_argument("--route", action="append", help="a drive (repeatable)")
+    p_motion.add_argument("--all", action="store_true", help="every drive with road types")
+    p_motion.add_argument("--again", action="store_true", help="read the logs again even when cached")
+    p_motion.add_argument("--num-workers", "--workers", dest="workers", type=int, default=0,
+                          help="log readers at a time (default: the cores but two)")
+    p_motion.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+    p_motion.set_defaults(func=_cmd_car_motion)
     p_road_rel = sub.add_parser("release-road-type", help="the comma's rule with a road-type checkpoint: for every "
                                                           "merge of validation and test, when the ramp's limit ends "
                                                           "(release.json beside the checkpoint, or --output)")
@@ -1594,8 +1611,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_road_cmp.add_argument("--run-root", required=True, help="the run folder, e.g. data/runs/<name>")
     p_road_cmp.set_defaults(func=_cmd_compare_road_type)
     p_road_onnx = sub.add_parser("export-road-type", help="the road-type network as one ONNX step (image, speed, "
-                                                          "[sign,] hidden -> probabilities, hidden_out[, junction]) "
-                                                          "and its contract")
+                                                          "[sign,] [motion,] hidden[, junction_hidden] -> "
+                                                          "probabilities, hidden_out[, junction][, "
+                                                          "junction_hidden_out]) and its contract")
     p_road_onnx.add_argument("--checkpoint", required=True, help="road-type-best.pt")
     p_road_onnx.add_argument("--output", required=True, help="the .onnx file; the contract is <output>.contract.json")
     p_road_onnx.add_argument("--no-verify", action="store_true", help="skip the onnxruntime parity check")
@@ -2350,13 +2368,16 @@ def _cmd_train_road_type(args: argparse.Namespace) -> int:
     result = train_road_type(root, Path(args.run_dir), memory=args.memory, epochs=args.epochs, patience=args.patience,
                              batch=args.batch, dry_run=args.dry_run, workers=args.workers, seed=args.seed,
                              signs=not args.no_sign, sign_source=args.sign_source,
-                             junctions=False if args.no_junctions else None)
+                             junctions=False if args.no_junctions else None,
+                             motion=False if args.no_motion else None, junction_epochs=args.junction_epochs)
     test = result["test"]
     operating = result.get("junction_operating") or {}
     junction_test = (test.get("junctions", {}).get("decodes", {}).get(operating.get("decode"), {})
                      .get(f"{operating['threshold']:g}") if operating else None) or {}
     print(json.dumps({"run_dir": args.run_dir, "memory": args.memory, "signs": not args.no_sign,
                       "sign_source": args.sign_source, "junctions": result.get("junctions", False),
+                      "motion": result.get("motion", False), "speed_source": result.get("speed_source"),
+                      "junction_branch": result.get("junction_branch"),
                       "test_junction_f1": junction_test.get("f1_2s"),
                       "test_false_passed_per_hour": junction_test.get("false_per_hour"),
                       "best_epoch": result["best_epoch"],
@@ -2382,6 +2403,27 @@ def _cmd_road_type_signs(args: argparse.Namespace) -> int:
         print(f"{route}: {sum(record['frames'].values())} frames read, {len(record['readings'])} with a sign, "
               f"motorway signs confirmed at {', '.join(f'{t:.0f} s' for t in sign_times(record)) or 'none'}",
               flush=True)
+    return 0
+
+
+def _cmd_car_motion(args: argparse.Namespace) -> int:
+    from nnslr_tools.car_motion import MotionError, build_motion, coverage_text
+    from nnslr_tools.preannotate import resolve_data_root
+    from nnslr_tools.road_type_data import road_type_routes
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    routes = road_type_routes(root) if args.all else list(args.route or [])
+    if not routes:
+        print("nnslr car-motion: name a --route or use --all (drives with road types: nnslr road-types)",
+              file=sys.stderr)
+        return 2
+    try:
+        records = build_motion(root, routes, workers=args.workers or None, again=args.again,
+                               log=lambda line: print(line, flush=True))
+    except MotionError as exc:
+        print(f"nnslr car-motion: {exc}", file=sys.stderr)
+        return 1
+    for route in routes:
+        print(coverage_text(records[route]), flush=True)
     return 0
 
 

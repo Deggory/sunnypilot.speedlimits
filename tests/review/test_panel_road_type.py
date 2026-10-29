@@ -25,8 +25,8 @@ dry run road_type_gru epoch 1/1 train_loss 1.7000 val_macro_f1 0.1000 val_accura
 == 2/8 Explicit CUDA smoke test ==
 == 3/8 Resize the frames to 256x144 ==
 frame cache: 30 drives ready
-== 4/8 Read the motorway signs as the car does (CPU) ==
-== 5/8 Train with memory and the sign (GRU) ==
+== 4/8 Read the motorway signs as the car does and the car's motion (CPU) ==
+== 5/8 Train with memory, the sign and the car's motion (GRU) ==
 road_type_gru epoch 15/60 train_loss 0.8000 val_macro_f1 0.5500 val_accuracy 0.7000 12s
 """
 
@@ -51,20 +51,27 @@ def test_the_progress_counts_the_epochs_of_each_network_and_not_those_of_the_dry
     result = progress('train_road_type', 'running', LOG)
     assert [(step['key'], step['state']) for step in result['steps']] == [
         ('checks', 'done'), ('frames', 'done'), ('signs', 'done'), ('road_type_gru', 'current'),
-        ('road_type_gru_nosign', 'todo'), ('road_type_frame', 'todo'), ('export', 'todo')]
+        ('road_type_gru_nomotion', 'todo'), ('road_type_frame', 'todo'), ('export', 'todo')]
     # 4 + 4 + 8 done, then 15 of the 60 epochs of the 30 of the network with memory and the sign.
     assert result['percent'] == 23.5
-    assert result['detail'] == 'Train with memory and the sign · epoch 15 of 60'
+    assert result['detail'] == 'Train with memory, the sign and the motion · epoch 15 of 60'
     assert list(result['curves']) == ['road_type_gru']
     assert [point['epoch'] for point in result['curves']['road_type_gru']['points']] == [15]
 
-    later = LOG + ('road_type_gru stops early after epoch 52: no better validation macro F1 for 15 epochs\n'
-                   '== 6/8 Train with memory, without the sign ==\n'
-                   'road_type_gru_nosign epoch 30/60 train_loss 0.9000 val_macro_f1 0.5000 val_accuracy 0.7000 10s\n')
+    # The junction head's own stage after the road type's epochs is no curve of its own.
+    later = LOG + ('road_type_gru stops early after epoch 52: no better validation road score for 15 epochs\n'
+                   'road_type_gru junction epoch 3/30 train_loss 0.5000 val_junction_f1 0.3000 '
+                   'val_false_passed_per_hour 20.0 5s\n'
+                   "== 6/8 Train with memory, without the car's motion ==\n"
+                   'road_type_gru_nomotion epoch 30/60 train_loss 0.9000 val_macro_f1 0.5000 val_accuracy 0.7000 10s\n')
     result = progress('train_road_type', 'running', later)
     assert [step['state'] for step in result['steps']] == ['done', 'done', 'done', 'done', 'current', 'todo', 'todo']
-    assert result['percent'] == 59.5 and result['detail'] == 'Train with memory, no sign · epoch 30 of 60'
-    assert list(result['curves']) == ['road_type_gru', 'road_type_gru_nosign']
+    assert result['percent'] == 59.5 and result['detail'] == 'Train with memory, no motion · epoch 30 of 60'
+    assert list(result['curves']) == ['road_type_gru', 'road_type_gru_nomotion']
+    assert [point['epoch'] for point in result['curves']['road_type_gru']['points']] == [15]
+    # A run before the car's motion named its sixth network road_type_gru_nosign: its curve is still drawn.
+    older = progress('train_road_type', 'running', LOG + 'road_type_gru_nosign epoch 3/60 train_loss 0.9 10s\n')
+    assert list(older['curves']) == ['road_type_gru', 'road_type_gru_nosign']
 
     last = later + ('== 7/8 Train without memory ==\n'
                     'road_type_frame epoch 30/60 train_loss 0.9000 val_macro_f1 0.5000 val_accuracy 0.7000 10s\n')
@@ -105,7 +112,7 @@ def test_a_road_type_training_started_from_a_terminal_has_the_progress_of_its_ru
     log.write_text(LOG)
     payload = {'jobs': [], 'activities': [{'group': 'train', 'label': 'road type training', 'pid': 1}]}
     panel._terminal_training(payload)
-    assert payload['activities'][0]['progress']['detail'] == 'Train with memory and the sign · epoch 15 of 60'
+    assert payload['activities'][0]['progress']['detail'] == 'Train with memory, the sign and the motion · epoch 15 of 60'
 
 
 # -- its two networks in Models -----------------------------------------------------------------------------------
@@ -236,7 +243,52 @@ def test_the_junction_head_shows_its_f1_and_its_false_passed_per_hour(tmp_path):
                        'precision_2s': 0.75, 'false': 5, 'false_per_hour': 2.5, 'false_per_10km': 0.6,
                        'town_per_hour': 4.0, 'outside_per_hour': 1.0},
         'test': entry['junctions']['validation'],
-        'needed': {'junctions': 20, 'needed': 6, 'caught_2s': 4, 'caught_4s': 5}}
+        'needed': {'junctions': 20, 'needed': 6, 'caught_2s': 4, 'caught_4s': 5},
+        'branch': None, 'stage_epoch': None, 'turn_rule': None}
     # The second version had no junction head; a point that is not a decode is not shown.
     assert road_type_digest(result('gru'))['junctions'] is None
     assert road_type_digest({**value, 'junction_operating': {'decode': 'enter', 'threshold': 0.5}})['junctions'] is None
+
+
+def test_the_fourth_version_shows_the_cars_motion_its_junction_branch_and_the_turn_rule(tmp_path):
+    numbers = {'events': 30, 'recall_2s': 0.5, 'recall_4s': 0.6, 'precision_2s': 0.5, 'f1_2s': 0.5, 'false': 5,
+               'false_per_hour': 12.5, 'false_per_10km': 1.6, 'town': {'false': 4, 'per_hour': 30.0, 'per_10km': 3.2},
+               'outside': {'false': 1, 'per_hour': 4.0, 'per_10km': 0.2}}
+    junctions = {'passed': 28, 'hours': 2.0, 'km': 80.0, 'decodes': {'passed': {'0.5': numbers}, 'exit': {'0.5': {}}}}
+    value = result('gru')
+    for partition in ('validation', 'test'):
+        value[partition]['junctions'] = junctions
+    turn = {'rule': {'degrees': 60.0, 'radius_m': 40.0, 'min_dps': 2.0}, 'metrics': junctions,
+            'passages': {'passed': 28, 'yaw_known': 28, 'turned_60': 9, 'turned_30': 12},
+            'network_by_turn': {'decode': 'passed', 'threshold': 0.5, 'turned': {'passed': 9, 'caught_2s': 7,
+                                                                                 'caught_4s': 8},
+                                'straight': {'passed': 19, 'caught_2s': 5, 'caught_4s': 6}}}
+    value.update(junctions=True, motion=True, speed_source='v_ego', junction_branch='separate',
+                 junction_operating={'decode': 'passed', 'threshold': 0.5},
+                 junction_stage={'branch': 'separate', 'best_epoch': 12, 'history': []},
+                 turn_rule={'test': turn})
+    root = tmp_path / 'data'
+    run = root / 'runs' / '2026-10-29_1700-road-type-motion' / 'road-type'
+    for folder in ('gru', 'gru-nomotion'):
+        write(run / folder / 'road-type-best.pt', 'weights')
+        write(run / folder / 'result.json', value if folder == 'gru' else {**value, 'motion': False,
+                                                                          'junction_branch': 'shared'})
+    runs = RunsIndex(root)
+    runs.running_runs = lambda: {}
+    found = {entry['part']: entry for entry in ModelIndex(runs).artifacts(('road_type',))['road_type']}
+    assert sorted(found) == ['road-type/gru', 'road-type/gru-nomotion']
+    gru, nomotion = found['road-type/gru'], found['road-type/gru-nomotion']
+    assert (gru['label'], gru['motion'], gru['speed_source']) == ('With memory, sign and motion', True, 'v_ego')
+    assert (nomotion['label'], nomotion['motion']) == ('With memory, no motion', False)
+    assert nomotion['id'] == 'road_type:2026-10-29_1700-road-type-motion/road-type/gru-nomotion'
+    assert (gru['junctions']['branch'], gru['junctions']['stage_epoch']) == ('separate', 12)
+    rule = gru['junctions']['turn_rule']
+    assert (rule['degrees'], rule['radius_m'], rule['passed'], rule['turned_60'], rule['turned_30']) == (60.0, 40.0, 28, 9, 12)
+    assert rule['numbers']['town_per_hour'] == 30.0 and rule['numbers']['recall_4s'] == 0.6
+    assert rule['caught'] == {'turned': {'passed': 9, 'caught_2s': 7, 'caught_4s': 8},
+                              'straight': {'passed': 19, 'caught_2s': 5, 'caught_4s': 6}}
+    # A version before the motion: no turn rule, its speed from the GPS.
+    older = road_type_digest({**value, 'motion': None, 'speed_source': None, 'turn_rule': None,
+                              'junction_branch': None, 'junction_stage': None})
+    assert (older['motion'], older['speed_source']) == (False, 'gps')
+    assert (older['junctions']['turn_rule'], older['junctions']['branch']) == (None, None)

@@ -501,3 +501,125 @@ def test_onnx_step_contract_with_the_junction_head(root, tmp_path):
         'hidden': np.zeros((1, net.HIDDEN), np.float32)})
     assert probabilities.shape == (1, len(data.CLASSES)) and abs(float(probabilities.sum()) - 1) < 1e-5
     assert crossing.shape == (1, 2) and ((crossing >= 0) & (crossing <= 1)).all()
+
+
+# -- the car's own motion (nnslr_tools.car_motion) and the junction head's own memory ---------------------------------
+def test_onnx_step_contract_with_the_cars_motion_and_a_junction_memory_of_its_own(root, tmp_path):
+    torch = pytest.importorskip('torch')
+    pytest.importorskip('onnxruntime')
+    pytest.importorskip('torchvision')
+    import numpy as np
+
+    from nnslr_tools import car_motion
+    from nnslr_tools import road_type_data as data
+    from nnslr_tools import road_type_net as net
+    model = net.build_road_type_net('gru', pretrained=False, signs=True, junctions=True, motion=True).eval()
+    model.separate_junctions()
+    # The junction stage trains its copy of the road GRU on its own (train_junction_stage): here a nudge.
+    generator = torch.Generator().manual_seed(5)
+    with torch.no_grad():
+        for parameter in model.junction_gru.parameters():
+            parameter.add_(0.05 * torch.randn(parameter.shape, generator=generator))
+    assert net.step_input_names(model) == ['image', 'speed', 'sign', 'motion', 'hidden', 'junction_hidden']
+    assert net.step_output_names(model) == ['probabilities', 'hidden_out', 'junction', 'junction_hidden_out']
+    checkpoint = tmp_path / 'road-type-best.pt'
+    torch.save({'task': 'road_type', 'architecture': 'mobilenet_v3_small+gru', 'memory': 'gru', 'signs': True,
+                'junctions': True, 'motion': True, 'junction_branch': 'separate', 'speed_source': 'v_ego',
+                'classes': list(data.CLASSES), 'state_dict': model.state_dict(), 'epoch': 1,
+                'split_sha256': 's', 'dataset_sha256': 'd'}, checkpoint)
+    result = net.export_road_type_onnx(checkpoint, tmp_path / 'road-type.onnx', data_root=root)
+    contract = json.loads(Path(result['contract']).read_text())
+    assert contract['verification']['passed'] is True
+    # Without the drives' logs the rollout runs with the motion unknown.
+    assert contract['verification']['rollout']['checked'] is True
+    assert contract['verification']['rollout']['motion_seconds'] == 0
+    assert [i['name'] for i in contract['inputs']] == ['image', 'speed', 'sign', 'motion', 'hidden', 'junction_hidden']
+    motion = contract['inputs'][3]
+    assert motion['shape'] == [1, car_motion.MOTION_INPUTS] and motion['names'] == list(car_motion.MOTION_FIELDS)
+    assert [o['name'] for o in contract['outputs']] == ['probabilities', 'hidden_out', 'junction',
+                                                        'junction_hidden_out']
+    step = contract['step']
+    assert (step['motion'], step['junction_branch'], step['speed_source']) == (True, 'separate', 'v_ego')
+    cereal = contract['car_input']['motion']['cereal']
+    assert 'livePose.angularVelocityDevice.z' in cereal['yaw'] and 'carState.yawRate' in cereal['yaw']
+    assert (cereal['steer'], cereal['speed']) == ('carState.steeringAngleDeg', 'carState.vEgo')
+    assert 'map' in contract['car_input']['motion']['never']
+    assert any('junction_hidden_out' in line for line in contract['car_input']['steps'])
+    import onnxruntime
+    session = onnxruntime.InferenceSession(result['onnx'], providers=['CPUExecutionProvider'])
+    image = np.random.default_rng(0).random((1, 3, data.FRAME_HEIGHT, data.FRAME_WIDTH), dtype=np.float32)
+    turning = np.array([car_motion.motion_features({'yaw_dps': 25.0, 'yaw_max_dps': 30.0, 'steer_deg': 200.0,
+                                                    'car_known': True, 'left': True, 'right': False})], np.float32)
+    zeros = np.zeros((1, net.HIDDEN), np.float32)
+    probabilities, hidden_out, crossing, junction_hidden = session.run(None, {
+        'image': image, 'speed': np.array([[0.3, 1.0]], np.float32), 'sign': np.array([[0.0, 0.0]], np.float32),
+        'motion': turning, 'hidden': zeros, 'junction_hidden': zeros})
+    assert abs(float(probabilities.sum()) - 1) < 1e-5 and crossing.shape == (1, 2)
+    # The junction memory is its own GRU's: it differs from the road type's.
+    assert junction_hidden.shape == (1, net.HIDDEN) and not np.allclose(junction_hidden, hidden_out)
+
+
+def test_train_windows_carry_the_motion_and_drop_it_now_and_then(root):
+    import random
+
+    import numpy as np
+
+    from nnslr_tools import car_motion
+    from nnslr_tools import road_type_data as data
+    from nnslr_tools import road_type_net as net
+    dataset = data.load_dataset(root)
+    net.attach_signs(dataset, root)
+    coverage = net.attach_motion(dataset, root)
+    # No drive's logs were read: the motion unknown, the speed from the GPS where vEgo is missing.
+    assert coverage['speed_source'] == 'v_ego'
+    runs = [run for run in dataset['sequences'] if run['partition'] == 'train']
+    # Every second turning left at 30 deg/s, the wheel at 90 deg, the left blinker on.
+    turning = np.array(car_motion.motion_features({'yaw_dps': 30.0, 'yaw_max_dps': 30.0, 'steer_deg': 90.0,
+                                                   'car_known': True, 'left': True, 'right': False}), np.float32)
+    sampler = net.WindowSampler(dataset, runs, random.Random(3))
+    for _, arrays in sampler.runs:
+        arrays['motion'][:] = turning
+    kinds = {'kept': 0, 'none': 0, 'no_yaw': 0, 'no_car': 0}
+    for _ in range(400):
+        window = sampler.window(20)
+        assert len(window) == 10
+        motion = window[9]
+        assert motion.shape == (20, car_motion.MOTION_INPUTS)
+        if (motion == turning).all():
+            kinds['kept'] += 1
+        elif not motion.any():
+            kinds['none'] += 1
+        elif not motion[:, 0:3].any():
+            kinds['no_yaw'] += 1
+        else:
+            assert not motion[:, 3:].any() and (motion[:, 0:3] == turning[0:3]).all()
+            kinds['no_car'] += 1
+    assert 0.1 < kinds['none'] / 400 < 0.3
+    assert kinds['no_yaw'] and kinds['no_car'] and kinds['kept'] > 250
+
+
+def test_the_road_types_measure_of_an_epoch_leaves_the_junction_head_out():
+    from nnslr_tools import road_type_net as net
+    metrics = {'weight_1': {'macro_f1': 0.6}, 'after_merge': {'accuracy_debounced': 0.9},
+               'false_switches_per_hour_debounced': 40.0}
+    assert net.road_score(metrics) == round(0.6 + 0.1 * 0.9 - 0.0005 * 40, 4)
+    worse_merge = {**metrics, 'after_merge': {'accuracy_debounced': 0.5}}
+    assert net.road_score(worse_merge) < net.road_score(metrics)
+    assert net.road_score({**metrics, 'junction': {'f1_2s': 0.9}}) == net.road_score(metrics)
+    assert net.road_score({'weight_1': {'macro_f1': None}}) == 0.0
+
+
+def test_the_test_with_the_motion_unknown_reads_side_by_side():
+    from nnslr_tools import road_type_net as net
+
+    def part(macro, passed_recall, false, town):
+        numbers = {'recall_2s': passed_recall, 'false_per_hour': false, 'town': {'per_hour': town}}
+        return {'weight_1': {'macro_f1': macro}, 'after_merge': {'accuracy_debounced': 0.96},
+                'false_switches_per_hour_debounced': 42.0,
+                'junctions': {'decodes': {'passed': {'0.5': numbers}}}}
+    result = {'test': part(0.664, 0.229, 20.7, 47.0), 'test_motion_unknown': part(0.661, 0.217, 20.1, 45.0),
+              'junction_operating': {'decode': 'passed', 'threshold': 0.5}}
+    text = net.motion_unknown_text(result)
+    assert 'macro F1 0.664 -> 0.661' in text
+    assert 'junctions (passed >= 0.5) recall 2 s 0.229 -> 0.217' in text and '(town 47.000 -> 45.000)' in text
+    assert net.motion_unknown_text({'test': result['test']}) == ''

@@ -1173,6 +1173,23 @@ export interface RoadTypeJunctions {
   test: RoadTypeJunctionNumbers | null;
   /** The intersections of the test with a number sign confirmed within 300 m before them, and those caught. */
   needed: {junctions: number; needed: number; caught_2s: number; caught_4s: number} | null;
+  /** shared: on the road type's memory; separate: a memory of its own (since the fourth version); null before. */
+  branch?: 'shared' | 'separate' | null;
+  /** The best epoch of the junction head's own stage (since the fourth version). */
+  stage_epoch?: number | null;
+  /** The car's turn alone as a plain rule on the test, without the network (since the fourth version). */
+  turn_rule?: RoadTypeTurnRule | null;
+}
+/** A turn of at least degrees on a radius of at most radius_m taken as "passed" (nnslr_tools.model_roles._turn_rule):
+ * its numbers on the test, the intersections the car turned in, and those the network caught, turned and straight. */
+export interface RoadTypeTurnRule {
+  degrees: number | null;
+  radius_m: number | null;
+  numbers: RoadTypeJunctionNumbers | null;
+  passed: number | null;
+  turned_60: number | null;
+  turned_30: number | null;
+  caught: Partial<Record<'turned' | 'straight', {passed: number; caught_2s: number; caught_4s: number}>> | null;
 }
 
 export interface RoadTypeModel extends ModelBase {
@@ -1182,6 +1199,11 @@ export interface RoadTypeModel extends ModelBase {
   /** It takes the seconds since a motorway sign (since the second version; trained with the sign where each entry ramp of
    * the map starts, nnslr_tools.road_type_signs). */
   signs: boolean;
+  /** It takes the car's own motion: the turn of each second, the steering wheel, the blinkers (since the fourth
+   * version; never the map). */
+  motion?: boolean;
+  /** Its speed input: carState.vEgo (since the fourth version) or the GPS speed. */
+  speed_source?: 'gps' | 'v_ego';
   /** When the ramp's limit ends by the comma's rule; null for a version measured before it. */
   release: {validation: RoadTypeRelease | null; test: RoadTypeRelease | null} | null;
   /** The junction head (since the third version): where the car leaves an intersection, at its operating point; null
