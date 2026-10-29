@@ -164,3 +164,248 @@ def test_a_classifier_with_mapillary_resumes_with_it():
     flags = resume_arguments({"task": "reader", "config": config})
     assert flags[flags.index("--mapillary") + 1] == "/data/external/mapillary/crops.jsonl"
     assert "--mapillary" not in resume_arguments({"task": "reader", "config": TrainConfig(class_scheme="v2").__dict__})
+
+
+# --- The region and the share of the crops, and where the photos were taken ------------------------------------------
+
+def _locations(root: Path, lines: list[dict]) -> Path:
+    path = root / mapillary.LOCATIONS_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(json.dumps(line) + "\n" for line in lines))
+    return path
+
+
+def _placed(key, country, continent, status="located"):
+    there = status == "located"
+    return {"mtsd_image": key, "image_id": "1", "latitude": 47.0 if there else None,
+            "longitude": 8.0 if there else None, "country": country, "continent": continent, "status": status}
+
+
+def test_a_region_and_a_share_have_one_spelling():
+    assert mapillary.parse_region(None) is None and mapillary.parse_region(" all ") is None
+    assert mapillary.region_text("ch, Europe ,de") == "europe,CH,DE"
+    assert mapillary.region_text("") == "all"
+    for wrong in ("Atlantis", "CHE", "eu"):
+        with pytest.raises(ValueError, match="mapillary_region"):
+            mapillary.parse_region(wrong)
+    assert mapillary.check_share(None) == 100.0 and mapillary.check_share("5") == 5.0
+    for wrong in ("0", "-1", "101", "five"):
+        with pytest.raises(ValueError, match="mapillary_share"):
+            mapillary.check_share(wrong)
+
+
+def test_the_crops_are_chosen_by_region_then_share_then_cap(tmp_path, monkeypatch):
+    rows = [{"image_path": f"c/{n}.jpg", "bbox_xyxy": [1, 2, 3, 4], "label": "maximum_speed:50",
+             "mtsd_image": ("zurich", "paris", "boston", "gone")[n % 4], "mtsd_object": f"o{n}"} for n in range(400)]
+    path = _crops_file(tmp_path, rows)
+    # A region needs the positions: no file, no guess.
+    with pytest.raises(ValueError, match="mapillary_locations_missing"):
+        training_records(path, set(), set(), region="europe")
+    _locations(tmp_path, [_placed("zurich", "CH", "europe"), _placed("paris", "FR", "europe"),
+                          _placed("boston", "US", "north_america"), _placed("gone", None, None, "no_v4_id")])
+    records, summary = training_records(path, set(), set(), region="europe")
+    assert {r["image_path"] for r in records} <= {f"c/{n}.jpg" for n in range(400) if n % 4 in (0, 1)}
+    assert summary["left_out"]["outside_the_region"] == 100 and summary["left_out"]["photo_without_position"] == 100
+    assert (summary["region"], summary["share"], summary["in_region"]) == ("europe", 100.0, 200)
+    assert summary["locations"]["located_photos"] == 3
+    assert training_records(path, set(), set(), region="CH,US")[1]["in_region"] == 200
+    # "all" takes every crop, also the ones without a position, and reads no positions.
+    everything = training_records(path, set(), set())[1]
+    assert everything["in_region"] == 400 and everything["locations"] is None
+    # The share: a fixed part, the same crops every time, a larger share takes them all and more.
+    ten = {r["mtsd_object"] for r in training_records(path, set(), set(), share=10)[0]}
+    twenty = {r["mtsd_object"] for r in training_records(path, set(), set(), share=20)[0]}
+    assert 20 <= len(ten) <= 60 and ten < twenty
+    assert ten == {r["mtsd_object"] for r in training_records(path, set(), set(), share=10)[0]}
+    # The cap comes last: it keeps PER_LABEL of what the region and the share chose.
+    monkeypatch.setattr(mapillary, "PER_LABEL", 5)
+    capped, summary = training_records(path, set(), set(), region="europe", share=50)
+    chosen = {r["mtsd_object"] for r in training_records(path, set(), set(), region="europe", share=50)[0]}
+    assert len(capped) == 5 and {r["mtsd_object"] for r in capped} <= chosen
+    assert summary["left_out"]["over_the_per_label_limit"] > 0 and summary["left_out"]["outside_the_share"] > 0
+    assert summary["selection_sha256"] != training_records(path, set(), set(), region="CH", share=50)[1]["selection_sha256"]
+
+
+def test_the_classifier_plan_records_the_region_and_the_share(tmp_path, capsys):
+    dataset = _classifier_fixture(tmp_path, capsys)
+    latest = tmp_path / "splits" / "latest.json"
+    Image.new("RGB", (40, 40)).save(tmp_path / "s.jpg")
+    path = _crops_file(tmp_path, [
+        {"image_path": "s.jpg", "bbox_xyxy": [10, 10, 30, 30], "label": "maximum_speed:120", "mtsd_image": "zurich",
+         "mtsd_object": "m"},
+        {"image_path": "s.jpg", "bbox_xyxy": [10, 10, 30, 30], "label": "maximum_speed:130", "mtsd_image": "boston",
+         "mtsd_object": "n"}])
+    _locations(tmp_path, [_placed("zurich", "CH", "europe"), _placed("boston", "US", "north_america")])
+    plan = prepare_reader_training(dataset, latest, tmp_path, class_scheme="v2", mapillary_path=path,
+                                   mapillary_region="CH")
+    assert plan["mapillary"]["by_label"] == {"maximum_speed:120": 1} and plan["mapillary"]["region"] == "CH"
+    assert plan["mapillary_selection_sha256"] == plan["mapillary"]["selection_sha256"]
+    every = prepare_reader_training(dataset, latest, tmp_path, class_scheme="v2", mapillary_path=path)
+    assert every["mapillary_selection_sha256"] != plan["mapillary_selection_sha256"]
+    with pytest.raises(ValueError, match="add --mapillary"):
+        prepare_reader_training(dataset, latest, tmp_path, class_scheme="v2", mapillary_region="europe")
+
+
+def test_a_classifier_resumes_with_its_region_and_share():
+    config = TrainConfig(class_scheme="v2", augment=True, mapillary="/m/crops.jsonl", mapillary_region="europe,CH",
+                         mapillary_share=5.0).__dict__
+    flags = resume_arguments({"task": "reader", "config": config})
+    assert flags[flags.index("--mapillary-region") + 1] == "europe,CH"
+    assert flags[flags.index("--mapillary-share") + 1] == "5"
+    plain = resume_arguments({"task": "reader", "config": TrainConfig(class_scheme="v2", mapillary="/m").__dict__})
+    assert "--mapillary-region" not in plain and "--mapillary-share" not in plain
+    # A run saved before the region existed resumes as "all", 100 %.
+    from nnslr_tools.training import READER_CONFIG_BEFORE_SETTINGS
+    assert (READER_CONFIG_BEFORE_SETTINGS["mapillary_region"], READER_CONFIG_BEFORE_SETTINGS["mapillary_share"]) == (
+        TrainConfig().mapillary_region, TrainConfig().mapillary_share)
+
+
+def test_the_train_command_takes_a_region_only_with_mapillary(tmp_path, capsys):
+    from nnslr_tools.cli import main
+    assert main(["train", "--task", "reader", "--classes", "v2", "--mapillary-region", "europe", "--dry-run",
+                 "--data-root", str(tmp_path)]) != 0
+    assert "add --mapillary" in capsys.readouterr().err
+
+
+class _FakeGraph:
+    """Mapillary's Graph API: 111 placed in Zurich, 444 without a position, 222 deleted (a batch with it is
+    refused as a whole), and what each request carried."""
+
+    def __init__(self, answers=None):
+        self.urls, self.headers = [], []
+        self.answers = list(answers or [])
+
+    def __call__(self, url, headers):
+        self.urls.append(url)
+        self.headers.append(headers)
+        if self.answers:
+            return self.answers.pop(0)
+        from urllib.parse import parse_qs, urlparse
+        parsed = urlparse(url)
+        images = {"111": {"id": "111", "computed_geometry": {"type": "Point", "coordinates": [8.5417, 47.3769]}},
+                  "444": {"id": "444"},
+                  "555": {"id": "555", "geometry": {"type": "Point", "coordinates": [-74.006, 40.7128]}}}
+        if parsed.path.strip("/"):
+            item = images.get(parsed.path.strip("/"))
+            return (200, json.dumps(item).encode()) if item else (404, b'{"error": {"message": "does not exist"}}')
+        ids = parse_qs(parsed.query)["ids"][0].split(",")
+        if any(image_id not in images for image_id in ids):
+            return 400, b'{"error": {"message": "Unsupported get request"}}'
+        return 200, json.dumps({image_id: images[image_id] for image_id in ids}).encode()
+
+
+def _ids_table(root: Path, rows: dict[str, str]) -> Path:
+    path = root / mapillary.IMAGE_IDS_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("image_key,image_id\n" + "".join(f"{key},{value}\n" for key, value in rows.items()))
+    return path
+
+
+def test_the_positions_are_fetched_in_batches_and_resume(tmp_path):
+    ids = _ids_table(tmp_path, {"kZurich": "111", "kGone": "222", "kOld": "kOld", "kBlind": "444"})
+    assert mapillary.read_image_ids(ids) == {"kZurich": "111", "kGone": "222", "kOld": None, "kBlind": "444"}
+    graph, waits = _FakeGraph(), []
+    summary = mapillary.fetch_locations(tmp_path, token="secret-token", fetch=graph, sleep=waits.append,
+                                        clock=lambda: 0.0, log=lambda line: None)
+    lines = mapillary.read_locations(tmp_path / mapillary.LOCATIONS_FILE)
+    assert {key: line["status"] for key, line in lines.items()} == {
+        "kZurich": "located", "kGone": "not_found", "kOld": "no_v4_id", "kBlind": "no_position"}
+    zurich = lines["kZurich"]
+    assert (zurich["latitude"], zurich["longitude"], zurich["country"], zurich["continent"]) == (
+        47.3769, 8.5417, "CH", "europe")
+    assert (summary["located"], summary["not_found"], summary["no_v4_id"], summary["no_position"]) == (1, 1, 1, 1)
+    # One batch refused as a whole, then one request each; the token only in the header, never in a URL.
+    assert len(graph.urls) == 4 and "ids=444%2C222%2C111" in graph.urls[0]
+    assert all(h["Authorization"] == "OAuth secret-token" for h in graph.headers)
+    assert not any("secret" in url for url in graph.urls)
+    # At most REQUESTS_PER_SECOND: the clock stands still, so each request after the first waits.
+    assert waits == [1.0 / mapillary.REQUESTS_PER_SECOND] * 3
+    # Again: every photo has its line, nothing is asked.
+    again = _FakeGraph()
+    assert mapillary.fetch_locations(tmp_path, token="t", fetch=again, sleep=lambda s: None,
+                                     log=lambda line: None)["todo"] == 0 and again.urls == []
+    # The table now resolves the old key: only that photo is asked.
+    _ids_table(tmp_path, {"kZurich": "111", "kGone": "222", "kOld": "555", "kBlind": "444"})
+    newer = _FakeGraph()
+    mapillary.fetch_locations(tmp_path, token="t", fetch=newer, sleep=lambda s: None, log=lambda line: None)
+    assert len(newer.urls) == 1
+    assert mapillary.read_locations(tmp_path / mapillary.LOCATIONS_FILE)["kOld"]["country"] == "US"
+    # --limit asks a handful, --again asks the photos already placed too, the new line winning.
+    few = _FakeGraph()
+    assert mapillary.fetch_locations(tmp_path, token="t", again=True, limit=1, fetch=few, sleep=lambda s: None,
+                                     log=lambda line: None)["todo"] == 1
+    assert len(mapillary.read_locations(tmp_path / mapillary.LOCATIONS_FILE)) == 4
+
+
+def test_a_refused_token_stops_and_a_busy_mapillary_is_waited_for(tmp_path):
+    _ids_table(tmp_path, {"kZurich": "111"})
+    with pytest.raises(mapillary.LocationsError, match="mapillary_token_refused") as refused:
+        mapillary.fetch_locations(tmp_path, token="secret-token", fetch=_FakeGraph([(401, b"{}")]),
+                                  sleep=lambda s: None, log=lambda line: None)
+    assert "secret" not in str(refused.value)
+    assert not (tmp_path / mapillary.LOCATIONS_FILE).exists()
+    waits = []
+    busy = _FakeGraph([(429, b""), (503, b"")])
+    mapillary.fetch_locations(tmp_path, token="t", fetch=busy, sleep=waits.append, clock=lambda: 100.0,
+                              log=lambda line: None)
+    assert [wait for wait in waits if wait >= 1] == [2.0, 4.0]
+    assert mapillary.read_locations(tmp_path / mapillary.LOCATIONS_FILE)["kZurich"]["status"] == "located"
+    # Mapillary out of reach: the run stops, nothing is written for the photos it could not ask.
+    _ids_table(tmp_path, {"kZurich": "111", "kBlind": "444"})
+    down = _FakeGraph([(503, b"")] * (mapillary.RETRIES + 1))
+    with pytest.raises(mapillary.LocationsError, match="mapillary_unreachable"):
+        mapillary.fetch_locations(tmp_path, token="t", fetch=down, sleep=lambda s: None, log=lambda line: None)
+    assert "kBlind" not in mapillary.read_locations(tmp_path / mapillary.LOCATIONS_FILE)
+
+
+def test_a_write_cut_short_costs_one_line(tmp_path):
+    path = _locations(tmp_path, [_placed("a", "CH", "europe")])
+    with path.open("a") as handle:
+        handle.write('{"mtsd_image": "b", "lat')
+    mapillary._append(path, [_placed("c", "FR", "europe")])
+    assert set(mapillary.read_locations(path)) == {"a", "c"}
+
+
+def test_the_regions_offered_count_the_crops_of_each_place(tmp_path, monkeypatch):
+    monkeypatch.delenv(mapillary.TOKEN_ENV, raising=False)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    state = mapillary.regions_state(tmp_path / "data", repo)
+    assert (state["fetched"], state["crops"], state["token"], state["continents"]) == (False, 0, False, [])
+    root = tmp_path / "data"
+    _crops_file(root, [{"image_path": "c/1.jpg", "bbox_xyxy": [1, 2, 3, 4], "label": "maximum_speed:50",
+                        "mtsd_image": image, "mtsd_object": f"o{n}"}
+                       for n, image in enumerate(["zurich", "zurich", "paris", "boston", "gone"])])
+    _locations(root, [_placed("zurich", "CH", "europe"), _placed("paris", "FR", "europe"),
+                      _placed("boston", "US", "north_america"), _placed("gone", None, None, "no_v4_id")])
+    (repo / ".env").write_text("NNSLR_REVIEW_TOKEN=x\nMAPILLARY_TOKEN=\n")
+    state = mapillary.regions_state(root, repo)
+    assert (state["fetched"], state["crops"], state["located_crops"], state["photos"], state["located_photos"]) == (
+        True, 5, 4, 4, 3)
+    assert state["continents"] == [{"key": "europe", "name": "Europe", "crops": 3},
+                                   {"key": "north_america", "name": "North America", "crops": 1}]
+    assert state["countries"][0] == {"code": "CH", "name": "Switzerland", "continent": "europe", "crops": 2}
+    assert state["token"] is False
+    (repo / ".env").write_text("MAPILLARY_TOKEN='abc'\n")
+    assert mapillary.regions_state(root, repo)["token"] is True
+
+
+def test_a_place_anywhere_has_its_country_and_continent():
+    from nnslr_tools.gps import world_place
+    assert world_place(47.3769, 8.5417) == ("CH", "europe")
+    assert world_place(40.7128, -74.006) == ("US", "north_america")
+    assert world_place(35.68, 139.69) == ("JP", "asia")
+    assert world_place(-33.87, 151.21) == ("AU", "oceania")
+    assert world_place(-23.55, -46.63) == ("BR", "south_america")
+    assert world_place(0.0, -30.0) == (None, None)
+    assert world_place(None, 8.0) == (None, None)
+
+
+def test_the_locations_command_counts_without_a_token(tmp_path, monkeypatch, capsys):
+    from nnslr_tools.cli import main
+    monkeypatch.delenv(mapillary.TOKEN_ENV, raising=False)
+    ids = _ids_table(tmp_path, {"kZurich": "111", "kOld": "kOld"})
+    assert main(["mapillary-locations", "--dry-run", "--data-root", str(tmp_path)]) == 0
+    assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["todo"] == 2
+    assert main(["mapillary-locations", "--data-root", str(tmp_path), "--ids", str(ids)]) == 2
+    assert "MAPILLARY_TOKEN" in capsys.readouterr().err

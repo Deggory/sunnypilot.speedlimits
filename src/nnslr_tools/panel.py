@@ -68,6 +68,9 @@ CUTTER_SCRIPT = 'scripts/run_detector_sizes.sh'
 DECIDER_SCRIPT = 'scripts/run_experiment_b.sh'
 # The road type of every frame from the map (Data › Roads): the GPS of the drives, the map roads near them, the types.
 ROAD_TYPES_SCRIPT = 'helpers/road_types.sh'
+# Where the photos of the Mapillary Traffic Sign Dataset were taken (Train › Classifier, its region): asked of
+# Mapillary with the token of .env, written into the data root (nnslr mapillary-locations).
+LOCATIONS_SCRIPT = 'helpers/mapillary_locations.sh'
 # Our three networks in use as one package (ONNX, model card), and that package on Hugging Face.
 NETWORKS_SCRIPT = 'scripts/publish_networks.sh'
 NETWORKS_REPO = os.environ.get('HF_REPO', 'cristianku/sunnypilot-speedlimits-models')
@@ -92,7 +95,7 @@ CUTTER_FAMILY = 'all'
 # The options an action takes, besides a training's start and the run to resume (checked by Panel.start).
 # The GPU memory Qwen3-VL-8B takes in float16 (scripts/setup_vlm.sh: 17.5 GB), with a margin for one frame.
 QWEN_GPU_MB = 18 * 1024
-ACTION_OPTIONS = {'train_cutter': ('size', 'families'), 'train_classifier': ('mapillary',),
+ACTION_OPTIONS = {'train_cutter': ('size', 'families'), 'train_classifier': ('mapillary', 'region', 'share'),
                   'prepare': ('proposer',), 'prepare_again': ('proposer',),
                   'measure_proposer': ('proposer',), 'networks_publish': ('package',), 'send_to_car': ('signnet',),
                   'try_on_comma': ('signnet',),
@@ -173,6 +176,10 @@ def _settings_of(log: Path, action: str) -> list[str]:
         chips.append('classes ' + flags['--classes'])
     if '--mapillary' in flags:
         chips.append('Mapillary signs')
+    if flags.get('--mapillary-region'):
+        chips.append('Mapillary ' + _region_words(flags['--mapillary-region']))
+    if flags.get('--mapillary-share'):
+        chips.append('Mapillary ' + flags['--mapillary-share'] + ' %')
     epochs = flags.get('--epochs') or fields.get('epochs')
     if epochs:
         chips.append(epochs + ' epochs')
@@ -197,6 +204,12 @@ def _settings_of(log: Path, action: str) -> list[str]:
     return chips
 
 
+def _region_words(region: str) -> str:
+    """A region of the Mapillary crops in words: "Europe", "CH, DE, IT"."""
+    from nnslr_tools.gps import CONTINENTS
+    return ', '.join(CONTINENTS.get(part, part) for part in region.split(','))
+
+
 ACTIONS = {
     # Every route still on the comma, over ssh with this machine's key (Host comma in ~/.ssh/config).
     'fetch': {'label': 'Download from the comma', 'group': 'fetch', 'command': ['helpers/fetch_comma_segments.sh']},
@@ -207,6 +220,8 @@ ACTIONS = {
     # The road type of every frame of the prepared drives (town, rural, expressway, motorway) from their GPS and the
     # map, read offline (Data › Roads); in the prepare group: it reads the reports a preparation writes.
     'road_types': {'label': 'Find the road types', 'group': 'prepare', 'command': [ROAD_TYPES_SCRIPT]},
+    # Where each Mapillary photo was taken, for the region of "Train the classifier": network only, a few minutes.
+    'mapillary_locations': {'label': 'Locate the Mapillary photos', 'group': 'mapillary', 'command': [LOCATIONS_SCRIPT]},
     'dataset': {'label': 'Import reviews', 'group': 'train',
                 'command': ['helpers/3_train.sh', '--dataset-only']},
     # The whole pipeline: import, split, the detector and the reader, evaluation, export, bundle.
@@ -260,6 +275,7 @@ ACTIVITIES = (
     ('prepare', 'frame extraction', 'nnslr extract-frames'),
     ('prepare', 'pre-annotation', 'nnslr preannotate'),
     ('prepare', 'road types', ROAD_TYPES_SCRIPT),
+    ('mapillary', 'Mapillary positions', 'nnslr mapillary-locations'),
     ('train', 'dataset and training', 'helpers/3_train.sh'),
     ('train', 'GPU training', 'run_v100_baseline.sh'),
     ('train', 'classifier training', 'run_classifier.sh'),
@@ -276,10 +292,10 @@ ACTIVITIES = (
     ('other', 'openpilot.distill training', 'supervised.train'),
 )
 # The groups of this checkout's own helpers (see Panel._ours).
-OWN_GROUPS = ('prepare', 'train', 'update', 'ai', 'publish')
+OWN_GROUPS = ('prepare', 'train', 'update', 'ai', 'publish', 'mapillary')
 GROUP_NAMES = {'fetch': 'a download from the comma', 'prepare': 'a preparation',
                'train': 'an import or a training', 'update': 'a code update', 'ai': 'an AI review',
-               'publish': 'a package of the networks'}
+               'publish': 'a package of the networks', 'mapillary': 'a search for the Mapillary positions'}
 # What runs, in the reason of an action that must wait ("A proposer measurement is running"): the job of the site by
 # its action, the work from a terminal by its label (ACTIVITIES); GROUP_NAMES when neither is known.
 RUNNING_NAMES = {'fetch': 'a download from the comma', 'prepare': 'a preparation', 'prepare_again': 'a preparation',
@@ -291,7 +307,8 @@ RUNNING_NAMES = {'fetch': 'a download from the comma', 'prepare': 'a preparation
                  'send_to_car': 'a send to the car', 'try_on_comma': 'a trial on the comma',
                  'comma_restore': "a return to the build's networks",
                  'ai_review': 'an AI review',
-                 'measure_ai_reviewer': 'an AI reviewer measurement', 'road_types': 'a search for the road types'}
+                 'measure_ai_reviewer': 'an AI reviewer measurement', 'road_types': 'a search for the road types',
+                 'mapillary_locations': 'a search for the Mapillary positions'}
 ACTIVITY_NAMES = {'download from the comma': 'a download from the comma', 'preparation': 'a preparation',
                   'frame extraction': 'a preparation', 'pre-annotation': 'a preparation',
                   'dataset and training': 'an import or a training', 'GPU training': 'a training',
@@ -299,13 +316,15 @@ ACTIVITY_NAMES = {'download from the comma': 'a download from the comma', 'prepa
                   'code update': 'a code update', 'AI review': 'an AI review',
                   'package of the networks': 'a package of the networks', 'send to the car': 'a send to the car',
                   'networks on the comma': 'a copy onto the comma',
-                  'AI reviewer measure': 'an AI reviewer measurement', 'road types': 'a search for the road types'}
+                  'AI reviewer measure': 'an AI reviewer measurement', 'road types': 'a search for the road types',
+                  'Mapillary positions': 'a search for the Mapillary positions'}
 # Groups that never run together with a group, besides itself. The download and the preparation
 # both write the links of data/raw/routes; the update rewrites the helpers under a running bash
-# and restarts this server; a preparation replaces the report an AI review is working on.
+# and restarts this server; a preparation replaces the report an AI review is working on. The search for the
+# Mapillary positions writes a file of its own only (a classifier started meanwhile records the positions it read).
 CONFLICTS = {'fetch': ('prepare', 'update'), 'prepare': ('fetch', 'update', 'ai'), 'train': ('update',),
-             'update': ('fetch', 'prepare', 'train', 'ai', 'publish'), 'ai': ('prepare', 'update'),
-             'publish': ('update',)}
+             'update': ('fetch', 'prepare', 'train', 'ai', 'publish', 'mapillary'), 'ai': ('prepare', 'update'),
+             'publish': ('update',), 'mapillary': ('update',)}
 # The fetch reads the comma logs (trip length, reverse gear) with openpilot's LogReader; the
 # .venv of this repository has it only with the [log-reader] extra and the schema checkouts.
 FETCH_PYTHON_ENV = 'COMMA_FETCH_PYTHON'
@@ -616,9 +635,11 @@ class Panel:
         # The choices of "Train the cutter", for its buttons.
         payload['cutter_options'] = {'sizes': list(CUTTER_SIZES), 'size': CUTTER_SIZE, 'families': list(CUTTER_FAMILIES),
                                      'family': CUTTER_FAMILY}
-        # The Mapillary switch of "Train the classifier": whether its crops are prepared (helpers/mapillary.sh).
-        from nnslr_tools.mapillary import crops_state
-        payload['classifier_options'] = {'mapillary': crops_state(self.root)}
+        # The Mapillary switch of "Train the classifier": whether its crops are prepared (helpers/mapillary.sh), and
+        # the regions its photos can be chosen by (helpers/mapillary_locations.sh).
+        from nnslr_tools.mapillary import crops_state, regions_state
+        payload['classifier_options'] = {'mapillary': crops_state(self.root),
+                                         'mapillary_regions': regions_state(self.root, self.repo)}
         payload['dataset'] = self.dataset_summary()
         payload['training_starts'] = self.training_starts()
         payload['next_step_text'], payload['all_ready'] = _next_step_text(payload)
@@ -762,6 +783,9 @@ class Panel:
             elif name == 'road_types':
                 # It reads the GPS and the map: it needs no confirmed frame.
                 pass
+            elif name == 'mapillary_locations':
+                # Network only (no GPU, no confirmed frame): the script and the token of .env.
+                reason = self._locations_missing()
             elif name == 'train_classifier' and not (self.repo / CLASSIFIER_SCRIPT).is_file():
                 reason = CLASSIFIER_SCRIPT + ' is missing in this installation'
             elif name == 'train_cutter' and not (self.repo / CUTTER_SCRIPT).is_file():
@@ -818,6 +842,15 @@ class Panel:
                 reason = self.models_index.in_use('cutter')[1]
             states[name] = {'label': action['label'], 'allowed': not reason, 'reason': reason}
         return states
+
+    def _locations_missing(self) -> str:
+        """Why the Mapillary positions cannot be fetched now, or ''."""
+        from nnslr_tools.mapillary import token_ready
+        if not (self.repo / LOCATIONS_SCRIPT).is_file():
+            return LOCATIONS_SCRIPT + ' is missing in this installation'
+        if not token_ready(self.repo):
+            return "no Mapillary token: add MAPILLARY_TOKEN to the server's .env"
+        return ''
 
     # -- the dataset and the starting points of a training ----------------------------------------
     def dataset_summary(self) -> dict | None:
@@ -1190,6 +1223,36 @@ class Panel:
         return found
 
     # -- actions -------------------------------------------------------------------------------
+    def _mapillary_choice(self, action: str, options: dict, mapillary: bool) -> dict:
+        """The environment of the region and share of the Mapillary crops ({'region': 'europe,CH', 'share': '5'}):
+        only with the Mapillary signs on; a region other than all needs the positions."""
+        from nnslr_tools.mapillary import FULL_SHARE, LOCATIONS_FILE, check_share, region_text
+        region, share = options.get('region'), options.get('share')
+        if region is None and share is None:
+            return {}
+        if action != 'train_classifier':
+            raise PanelError(400, 'bad_option', 'Only "Train the classifier" takes a region and a share of Mapillary.')
+        if not isinstance(region or '', str) or not isinstance(share or '', str):
+            raise PanelError(400, 'bad_option', 'The region and the share are strings.')
+        try:
+            region, share = region_text(region), check_share(share)
+        except ValueError as error:
+            words = str(error).split(': ', 1)[-1]  # without its code (mapillary_region: ...)
+            raise PanelError(400, 'bad_option', 'Mapillary: ' + words + '.') from None
+        if region == 'all' and share == FULL_SHARE:
+            return {}
+        if not mapillary:
+            raise PanelError(400, 'bad_option', 'The region and the share choose Mapillary signs: turn Mapillary on.')
+        if region != 'all' and not (self.root / LOCATIONS_FILE).is_file():
+            raise PanelError(409, 'not_available', 'The Mapillary positions are not fetched yet: '
+                             'locate the Mapillary photos first.')
+        env = {}
+        if region != 'all':
+            env['NNSLR_CLASSIFIER_MAPILLARY_REGION'] = region
+        if share != FULL_SHARE:
+            env['NNSLR_CLASSIFIER_MAPILLARY_SHARE'] = f'{share:g}'
+        return env
+
     def start(self, action: str, options: dict | None = None) -> dict:
         """Starts an action. The only options are the starting point of a training ({'start': key} of
         training_starts()), turned into a flag or the environment of helpers/3_train.sh, the run to resume, and the
@@ -1260,6 +1323,7 @@ class Panel:
                 if not state['available']:
                     raise PanelError(409, 'not_available', state['reason'][0].upper() + state['reason'][1:] + '.')
                 start_env['NNSLR_CLASSIFIER_MAPILLARY'] = '1'
+        start_env.update(self._mapillary_choice(action, options or {}, mapillary == 'on'))
         package = (options or {}).get('package')
         if package is not None and action != 'networks_publish':
             raise PanelError(400, 'bad_option', 'Only "Publish on Hugging Face" takes a package.')
@@ -1342,6 +1406,12 @@ class Panel:
             raise PanelError(403, 'actions_disabled', NETWORKS_SCRIPT + ' is missing in this installation.')
         if action == 'road_types' and not (self.repo / ROAD_TYPES_SCRIPT).is_file():
             raise PanelError(403, 'actions_disabled', ROAD_TYPES_SCRIPT + ' is missing in this installation.')
+        if action == 'mapillary_locations':
+            missing = self._locations_missing()
+            if missing:
+                raise PanelError(409 if (self.repo / LOCATIONS_SCRIPT).is_file() else 403,
+                                 'not_available' if (self.repo / LOCATIONS_SCRIPT).is_file() else 'actions_disabled',
+                                 missing[0].upper() + missing[1:] + '.')
         # [ai-reviewer] - START
         if action in AI_ACTIONS and not (self.repo / ACTIONS[action]['command'][0]).is_file():
             raise PanelError(403, 'actions_disabled', ACTIONS[action]['command'][0] + ' is missing in this installation.')

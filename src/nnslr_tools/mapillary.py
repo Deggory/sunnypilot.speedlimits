@@ -18,16 +18,34 @@ rare classes without burying the common ones.
 
 MTSD's photos are not the comma's road camera: other lenses, mostly daylight, often closer. The crops are scaled so
 that the sign is at most MAX_SIGN_SIDE pixels, the size of a near sign in a comma frame.
+
+Which part of MTSD comes in is chosen in Train › Classifier (``nnslr train --mapillary-region``,
+``--mapillary-share``): the photos of some continents or countries only, and a share of them. MTSD's annotations say
+nothing of where a photo was taken (width, height, ispano and the signs only), so its position comes from Mapillary
+(``nnslr mapillary-locations``, helpers/mapillary_locations.sh), once, into LOCATIONS_FILE. MTSD names its photos by
+the image keys of Mapillary's old API (v3, 22 characters); the Graph API of today (v4) takes numeric ids only and
+has no lookup by an old key, so the keys go through a table of old keys and new ids (IMAGE_IDS_URL, made by a
+Mapillary user from the redirect of the old app links; a key it has no id for has no position). In training_records
+the crops are chosen in this order: the labels that are ours, the region (a crop whose photo has no position is
+outside every region but "all"), the share (a fixed pseudo-random part of what is left, by a hash of the sign's key:
+the same share always takes the same crops, a larger share takes them all and more), and at last at most PER_LABEL
+of each label, so that the cap keeps the classes balanced whatever was chosen before.
 """
 from __future__ import annotations
 
 from collections import Counter
+import csv
 import hashlib
 import io
 import json
+import os
 from pathlib import Path, PurePosixPath
 import re
-from typing import Any
+import time
+from typing import Any, Callable
+import urllib.error
+import urllib.parse
+import urllib.request
 import zipfile
 import zlib
 
@@ -49,6 +67,28 @@ MAX_SIGN_SIDE = 96
 # The margin cut around the sign, as a share of its side: room for the box jitter of the training (at most 1.2 x
 # the side and 0.1 of it off centre, nnslr_tools.training.CLASSIFIER_BOX_JITTER).
 MARGIN = 0.5
+# Where each photo was taken (nnslr mapillary-locations): one line per MTSD image key, the last one of a key wins.
+LOCATIONS_FILE = Path("external") / "mapillary" / "locations.jsonl"
+# The old image keys of MTSD and their ids of today: a CSV "image_key,image_id" (a key it could not resolve has
+# itself as its id). Made by a Mapillary user in March 2026 from the redirect of the old app links
+# (https://forum.mapillary.com/t/mapillary-traffic-sign-dataset-keys/10282): 32,524 of the 41,909 keys of MTSD's
+# fully annotated train and val have a numeric id. Downloaded once into IMAGE_IDS_FILE.
+IMAGE_IDS_URL = ("https://raw.githubusercontent.com/viajerus/mapillary_keys_ids/refs/heads/main/"
+                 "mapillary_image_key_image_id.csv")
+IMAGE_IDS_FILE = Path("external") / "mapillary" / "image_ids.csv"
+# The Graph API (v4) of Mapillary: several images in one request (?ids=), the client token of the app in the
+# Authorization header, never in a URL or a log.
+GRAPH_URL = "https://graph.mapillary.com/"
+TOKEN_ENV = "MAPILLARY_TOKEN"
+IDS_PER_REQUEST = 50
+# At most this many requests a second, well under the 60,000 a minute Mapillary allows an app.
+REQUESTS_PER_SECOND = 4
+# Every crop, or the photos of some continents or countries (parse_region).
+ALL_REGIONS = "all"
+# A random share of the crops chosen by region, in percent; 100: all of them.
+FULL_SHARE = 100.0
+# What makes the share's hash differ from the cap's (_order), so that the two choices are independent.
+SHARE_SALT = "mapillary-share-1:"
 # MTSD's flags of a sign that make it a poor example: a sign MTSD itself could not name (ambiguous), a fake one
 # (dummy: a sign on an advert), cut by the photo's edge, on the back of something (exterior), inside another sign.
 SKIPPED_PROPERTIES = ("ambiguous", "dummy", "out-of-frame", "exterior", "included")
@@ -287,14 +327,111 @@ def _order(row: dict[str, Any]) -> str:
     return hashlib.sha1(str(row.get("mtsd_object")).encode()).hexdigest()
 
 
-def training_records(path: Path, classes: set[str], other_kinds: set[str]) -> tuple[list[dict[str, Any]], dict]:
+def _share_point(row: dict[str, Any]) -> float:
+    """Where a crop falls in [0, 1) for the share: a crop is in a share of p percent when this is below p / 100."""
+    digest = hashlib.sha1((SHARE_SALT + str(row.get("mtsd_object"))).encode()).hexdigest()
+    return int(digest[:13], 16) / float(16 ** 13)
+
+
+def parse_region(text: str | None) -> frozenset[str] | None:
+    """The region of a classifier plan: None for every crop ("all", empty), else the continents (keys of
+    nnslr_tools.gps.CONTINENTS: europe, north_america...) and countries (ISO codes: CH, DE...) whose photos come in,
+    from a comma-separated text. ValueError on anything else."""
+    from nnslr_tools.gps import CONTINENTS, world_names
+    if text is None or not str(text).strip() or str(text).strip().lower() == ALL_REGIONS:
+        return None
+    parts = set()
+    for part in str(text).split(","):
+        part = part.strip()
+        if part.lower() in CONTINENTS:
+            parts.add(part.lower())
+        elif re.fullmatch(r"[A-Za-z]{2}", part) and part.upper() in world_names():
+            parts.add(part.upper())
+        elif part:
+            raise ValueError(f"mapillary_region: {part!r} is neither a continent ({', '.join(CONTINENTS)}) "
+                             f"nor a country code (CH, DE...)")
+    if not parts:
+        return None
+    return frozenset(parts)
+
+
+def region_text(text: str | None) -> str:
+    """The region in one fixed spelling, for the plan and the resume flags: "all", or its continents then its
+    countries, sorted ("europe,US")."""
+    parts = parse_region(text)
+    if parts is None:
+        return ALL_REGIONS
+    return ",".join(sorted(part for part in parts if part.islower()) + sorted(part for part in parts if part.isupper()))
+
+
+def check_share(share: float | int | str | None) -> float:
+    """The share of the crops, in percent: more than 0, at most 100 (FULL_SHARE when None)."""
+    if share is None:
+        return FULL_SHARE
+    try:
+        value = float(share)
+    except (TypeError, ValueError):
+        raise ValueError(f"mapillary_share: {share!r} is not a percentage") from None
+    if not 0 < value <= 100:
+        raise ValueError(f"mapillary_share: {share!r} must be more than 0 and at most 100")
+    return round(value, 2)
+
+
+def locations_path_of(crops_path: Path) -> Path:
+    """The locations file next to a crops file (LOCATIONS_FILE next to CROPS_FILE)."""
+    return Path(crops_path).parent / LOCATIONS_FILE.name
+
+
+def read_locations(path: Path) -> dict[str, dict[str, Any]]:
+    """{MTSD image key: its line} of a locations file, the last line of a key winning; a broken line (a write cut
+    short) is skipped. {} without the file."""
+    found: dict[str, dict[str, Any]] = {}
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return found
+    for line in text.splitlines():
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict) and isinstance(row.get("mtsd_image"), str):
+            found[row["mtsd_image"]] = row
+    return found
+
+
+def _in_region(location: dict[str, Any] | None, region: frozenset[str]) -> bool:
+    if not location or location.get("latitude") is None:
+        return False
+    return location.get("continent") in region or location.get("country") in region
+
+
+def training_records(path: Path, classes: set[str], other_kinds: set[str], *, region: str | None = ALL_REGIONS,
+                     share: float | None = FULL_SHARE) -> tuple[list[dict[str, Any]], dict]:
     """The train records of the crops file ``path`` for a classifier plan: the speed signs and their end always
     (a value we have never seen becomes a class: the comma reads any value), an other sign only when its kind is
-    one of ``other_kinds`` (our kinds that are classes). At most PER_LABEL of each label. Returns the records and
-    a summary for the plan (file, sha256, crops by label, what was left out)."""
+    one of ``other_kinds`` (our kinds that are classes); then only the photos of ``region`` (parse_region; the
+    positions of the locations file next to the crops file), then ``share`` percent of what is left (a fixed choice
+    by a hash of the sign), then at most PER_LABEL of each label. Returns the records and a summary for the plan
+    (file, sha256, region, share, the locations file, crops by label, what was left out, and the sha256 of the
+    signs chosen, which a resumed run must find again)."""
     header, rows = read_crops(path)
+    wanted = parse_region(region)
+    share = check_share(share)
+    locations_file = None
+    locations: dict[str, dict[str, Any]] = {}
+    if wanted is not None:
+        where = locations_path_of(path)
+        if not where.is_file():
+            raise ValueError(f"mapillary_locations_missing: {where} (fetch the positions first: "
+                             "helpers/mapillary_locations.sh)")
+        locations = read_locations(where)
+        from nnslr_tools.training import _sha256
+        locations_file = {"file": str(where), "sha256": _sha256(where),
+                          "located_photos": sum(1 for row in locations.values() if row.get("latitude") is not None)}
     by_label: dict[str, list[dict[str, Any]]] = {}
     left_out: Counter = Counter()
+    eligible = in_region = 0
     for row in rows:
         label = row.get("label")
         if not isinstance(label, str):
@@ -302,6 +439,19 @@ def training_records(path: Path, classes: set[str], other_kinds: set[str]) -> tu
             continue
         if label.startswith("other_sign:") and label not in other_kinds:
             left_out["kind_not_a_class_of_ours"] += 1
+            continue
+        eligible += 1
+        if wanted is not None:
+            location = locations.get(str(row.get("mtsd_image")))
+            if not location or location.get("latitude") is None:
+                left_out["photo_without_position"] += 1
+                continue
+            if not _in_region(location, wanted):
+                left_out["outside_the_region"] += 1
+                continue
+        in_region += 1
+        if share < FULL_SHARE and _share_point(row) >= share / 100.0:
+            left_out["outside_the_share"] += 1
             continue
         by_label.setdefault(label, []).append(row)
     records = []
@@ -320,8 +470,316 @@ def training_records(path: Path, classes: set[str], other_kinds: set[str]) -> tu
                 "label_basis": LABEL_BASIS, "source": LABEL_BASIS, "mtsd_object": row.get("mtsd_object"),
             })
     from nnslr_tools.training import _sha256
+    chosen = hashlib.sha256("\n".join(sorted(str(r["mtsd_object"]) for r in records)).encode()).hexdigest()
     summary = {"file": str(path), "sha256": _sha256(Path(path)), "crops": len(records),
                "new_classes": sorted({r["label"] for r in records} - classes),
                "by_label": dict(sorted(Counter(r["label"] for r in records).items())),
-               "left_out": dict(sorted(left_out.items())), "per_label": PER_LABEL}
+               "left_out": dict(sorted(left_out.items())), "per_label": PER_LABEL,
+               "region": region_text(region), "share": share, "locations": locations_file,
+               "eligible": eligible, "in_region": in_region, "selection_sha256": chosen,
+               "order": "labels of ours, region, share, per-label cap"}
     return records, summary
+
+
+# --- Where the photos were taken (nnslr mapillary-locations) -------------------------------------------------------
+
+# The statuses of a line of the locations file; each is final (a network error writes nothing, so it is tried again).
+LOCATED = "located"          # a position, and its country and continent when on land
+NO_V4_ID = "no_v4_id"        # the key table has no id of today for this key (a photo deleted since, most likely)
+NOT_FOUND = "not_found"      # Mapillary does not know the id (deleted)
+NO_POSITION = "no_position"  # Mapillary knows the photo but gives no position
+# Retries of a request refused for the moment (429, 5xx, no network), waiting twice as long each time; then the run
+# stops and the next one resumes.
+RETRIES = 5
+FIRST_WAIT = 2.0
+
+
+class LocationsError(RuntimeError):
+    """The fetch cannot go on (a token Mapillary refuses, Mapillary out of reach): what was fetched stays."""
+
+
+def read_image_ids(path: Path) -> dict[str, str | None]:
+    """{old image key: its numeric id of today, or None when the table could not resolve it} of a key table
+    (IMAGE_IDS_URL: a CSV with the columns image_key and image_id)."""
+    found: dict[str, str | None] = {}
+    with Path(path).open(encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle)
+        if not reader.fieldnames or not {"image_key", "image_id"} <= set(reader.fieldnames):
+            raise ValueError(f"mapillary_ids_invalid: {path} has no columns image_key, image_id")
+        for row in reader:
+            key, image_id = (row.get("image_key") or "").strip(), (row.get("image_id") or "").strip()
+            if key:
+                found[key] = image_id if image_id.isdigit() else None
+    return found
+
+
+def download_image_ids(data_root: Path, url: str = IMAGE_IDS_URL, *, timeout: float = 120) -> Path:
+    """Download the key table into IMAGE_IDS_FILE (once: a table already there is kept) and return its path."""
+    path = Path(data_root) / IMAGE_IDS_FILE
+    if path.is_file():
+        return path
+    with urllib.request.urlopen(url, timeout=timeout) as response:
+        payload = response.read()
+    text = payload.decode("utf-8")
+    if not text.startswith("image_key,image_id"):
+        raise ValueError(f"mapillary_ids_invalid: {url} is not a table image_key,image_id")
+    atomic_write(path, payload)
+    return path
+
+
+def wanted_keys(data_root: Path, ids: dict[str, str | None]) -> list[str]:
+    """The photos whose position is wanted: every key of the table (MTSD's train and val photos, so the positions can
+    be fetched before the crops are cut) and every photo of the crops file."""
+    keys = set(ids)
+    crops = Path(data_root) / CROPS_FILE
+    if crops.is_file():
+        try:
+            keys.update(str(row["mtsd_image"]) for row in read_crops(crops)[1] if row.get("mtsd_image"))
+        except (OSError, ValueError):
+            pass
+    return sorted(keys)
+
+
+def token_ready(repo: Path | None = None) -> bool:
+    """Whether a Mapillary token is set: in the environment or as a MAPILLARY_TOKEN= line of the repository's .env.
+    Only whether; its value is never read out of here."""
+    if os.environ.get(TOKEN_ENV, "").strip():
+        return True
+    if repo is None:
+        return False
+    try:
+        lines = (Path(repo) / ".env").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return False
+    for line in lines:
+        name, _, value = line.strip().removeprefix("export ").partition("=")
+        if name.strip() == TOKEN_ENV and value.strip().strip("'\""):
+            return True
+    return False
+
+
+Fetch = Callable[[str, dict[str, str]], tuple[int, bytes]]
+
+
+def _http_get(url: str, headers: dict[str, str]) -> tuple[int, bytes]:
+    """GET ``url``: (status, body), an HTTP error too; OSError when Mapillary is out of reach."""
+    request = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            return response.status, response.read()
+    except urllib.error.HTTPError as error:
+        return error.code, error.read()
+
+
+def _position(item: dict[str, Any]) -> tuple[float, float] | None:
+    """(latitude, longitude) of a Graph API image: computed_geometry (where Mapillary's reconstruction put it) or
+    else geometry (the camera's GPS); GeoJSON points are [longitude, latitude]."""
+    for name in ("computed_geometry", "geometry"):
+        geometry = item.get(name)
+        if isinstance(geometry, dict) and geometry.get("type") == "Point":
+            coordinates = geometry.get("coordinates") or []
+            if len(coordinates) >= 2 and all(isinstance(value, (int, float)) for value in coordinates[:2]):
+                return round(float(coordinates[1]), 6), round(float(coordinates[0]), 6)
+    return None
+
+
+class _Graph:
+    """The Graph API requests of a fetch: at most REQUESTS_PER_SECOND, a refused request tried again later."""
+
+    def __init__(self, token: str, fetch: Fetch, sleep: Callable[[float], None], clock: Callable[[], float], log):
+        self._headers = {"Authorization": f"OAuth {token}", "Accept": "application/json"}
+        self._fetch, self._sleep, self._clock, self._log = fetch, sleep, clock, log
+        self._last = None
+        self.requests = 0
+
+    def get(self, path: str, query: dict[str, str]) -> tuple[int, Any]:
+        url = GRAPH_URL + path + "?" + urllib.parse.urlencode(query)
+        wait = FIRST_WAIT
+        for attempt in range(RETRIES + 1):
+            if self._last is not None:
+                gap = 1.0 / REQUESTS_PER_SECOND - (self._clock() - self._last)
+                if gap > 0:
+                    self._sleep(gap)
+            self._last = self._clock()
+            self.requests += 1
+            try:
+                status, body = self._fetch(url, self._headers)
+            except OSError as error:
+                status, body = None, str(error).encode()
+            if status in (401, 403):
+                raise LocationsError(f"mapillary_token_refused: Mapillary answered {status}; check {TOKEN_ENV} in .env")
+            if status is not None and status != 429 and status < 500:
+                try:
+                    return status, json.loads(body or b"null")
+                except ValueError:
+                    return status, None
+            if attempt < RETRIES:
+                self._log(f"mapillary-locations: Mapillary answered {status or 'nothing'}, again in {wait:.0f} s")
+                self._sleep(wait)
+                wait *= 2
+        raise LocationsError(f"mapillary_unreachable: Mapillary answered {status or 'nothing'} {RETRIES + 1} times; "
+                             "run again later, it resumes")
+
+
+FIELDS = "id,geometry,computed_geometry"
+# What the Graph API answers for an id it does not have (a photo deleted since).
+GONE = (400, 404, 410)
+
+
+def _locate_batch(graph: _Graph, ids: list[str]) -> dict[str, dict[str, Any] | None]:
+    """{id: its Graph API image, or None when Mapillary does not know it} of a batch: one request for all; when the
+    batch is refused as a whole (an id of it deleted), one request each."""
+    status, payload = graph.get("", {"ids": ",".join(ids), "fields": FIELDS})
+    if status == 200 and isinstance(payload, dict) and "error" not in payload:
+        return {image_id: payload.get(image_id) if isinstance(payload.get(image_id), dict) else None for image_id in ids}
+    found: dict[str, dict[str, Any] | None] = {}
+    for image_id in ids:
+        status, payload = graph.get(image_id, {"fields": FIELDS})
+        if status == 200 and isinstance(payload, dict) and "error" not in payload:
+            found[image_id] = payload
+        elif status in GONE:
+            found[image_id] = None
+        else:
+            raise LocationsError(f"mapillary_unexpected: Mapillary answered {status} for one photo; nothing of this "
+                                 "batch was written")
+    return found
+
+
+def _append(path: Path, lines: list[dict[str, Any]]) -> None:
+    """Add lines to the locations file, on a line of their own even after a write cut short."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("ab") as handle:
+        if handle.tell():
+            with path.open("rb") as reader:
+                reader.seek(-1, os.SEEK_END)
+                if reader.read(1) != b"\n":
+                    handle.write(b"\n")
+        handle.write("".join(json.dumps(line, sort_keys=True) + "\n" for line in lines).encode("utf-8"))
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def fetch_locations(data_root: Path, *, token: str | None, ids_path: Path | None = None, again: bool = False,
+                    limit: int | None = None, dry_run: bool = False, fetch: Fetch | None = None,
+                    sleep: Callable[[float], None] = time.sleep, clock: Callable[[], float] = time.monotonic,
+                    log=print) -> dict[str, Any]:
+    """Fetch where MTSD's photos were taken into LOCATIONS_FILE: for each wanted photo (wanted_keys) its id of today
+    from the key table, its position from Mapillary's Graph API (IDS_PER_REQUEST a request, REQUESTS_PER_SECOND at
+    most), its country and continent from our borders (nnslr_tools.gps.world_place). A line is written after each
+    batch, so a run stopped resumes where it was: a photo with a line is not asked again (but one the table could not
+    resolve is, once the table has its id), unless ``again`` (asked again, the new line winning over the old).
+    ``limit``: at most that many photos (a first try with a handful). ``dry_run``: only count. Returns the counts."""
+    from nnslr_tools.gps import world_place
+    data_root = Path(data_root)
+    ids_path = Path(ids_path) if ids_path else data_root / IMAGE_IDS_FILE
+    if not ids_path.is_file():
+        raise ValueError(f"mapillary_ids_missing: no key table {ids_path} (download it: nnslr mapillary-locations "
+                         "without --ids does)")
+    ids = read_image_ids(ids_path)
+    path = data_root / LOCATIONS_FILE
+    known = {} if again else read_locations(path)
+    todo = [key for key in wanted_keys(data_root, ids)
+            if key not in known or (known[key].get("status") == NO_V4_ID and ids.get(key))]
+    if limit is not None:
+        todo = todo[:max(0, limit)]
+    counts: Counter = Counter()
+    summary = {"file": str(path), "wanted": len(wanted_keys(data_root, ids)), "already": len(known), "todo": len(todo),
+               "requests": 0}
+    if dry_run:
+        summary["requests"] = -(-sum(1 for key in todo if ids.get(key)) // IDS_PER_REQUEST)
+        return summary
+    if not token:
+        raise LocationsError(f"mapillary_token_missing: no {TOKEN_ENV} (a client token of a Mapillary app, in .env)")
+    graph = _Graph(token, fetch or _http_get, sleep, clock, log)
+    without = [key for key in todo if not ids.get(key)]
+    if without:
+        _append(path, [{"mtsd_image": key, "image_id": None, "latitude": None, "longitude": None, "country": None,
+                        "continent": None, "status": NO_V4_ID} for key in without])
+        counts[NO_V4_ID] += len(without)
+    with_id = [key for key in todo if ids.get(key)]
+    try:
+        for start in range(0, len(with_id), IDS_PER_REQUEST):
+            batch = with_id[start:start + IDS_PER_REQUEST]
+            found = _locate_batch(graph, [str(ids[key]) for key in batch])
+            lines = []
+            for key in batch:
+                image_id = str(ids[key])
+                item = found.get(image_id)
+                position = _position(item) if item else None
+                country, continent = world_place(*position, root=data_root) if position else (None, None)
+                status = LOCATED if position else (NOT_FOUND if item is None else NO_POSITION)
+                counts[status] += 1
+                lines.append({"mtsd_image": key, "image_id": image_id,
+                              "latitude": position[0] if position else None,
+                              "longitude": position[1] if position else None,
+                              "country": country, "continent": continent, "status": status})
+            _append(path, lines)
+            done = start + len(batch)
+            if done % (IDS_PER_REQUEST * 20) == 0 or done == len(with_id):
+                log(f"mapillary-locations: {done}/{len(with_id)} photos, {counts[LOCATED]} placed")
+    finally:
+        summary["requests"] = graph.requests
+        summary.update({name: counts[name] for name in (LOCATED, NO_V4_ID, NOT_FOUND, NO_POSITION)})
+    return summary
+
+
+_REGIONS_CACHE: dict[str, Any] = {}
+
+
+def _stamp(path: Path) -> tuple | None:
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return stat.st_mtime_ns, stat.st_size
+
+
+def regions_state(data_root: Path, repo: Path | None = None) -> dict[str, Any]:
+    """What the region choice of Train › Classifier offers: whether the positions were fetched, how many crops have
+    one, and the continents and countries with their crops (most first). Read again only when a file changed."""
+    from nnslr_tools.gps import CONTINENTS, world_names
+    data_root = Path(data_root)
+    crops, where = data_root / CROPS_FILE, data_root / LOCATIONS_FILE
+    stamp = (str(data_root), _stamp(crops), _stamp(where))
+    if _REGIONS_CACHE.get("stamp") != stamp:
+        state: dict[str, Any] = {"fetched": where.is_file(), "crops": 0, "located_crops": 0, "photos": 0,
+                                 "located_photos": 0, "continents": [], "countries": []}
+        try:
+            rows = read_crops(crops)[1] if crops.is_file() else []
+        except (OSError, ValueError):
+            rows = []
+        locations = read_locations(where)
+        by_continent: Counter = Counter()
+        by_country: Counter = Counter()
+        continent_of_country: dict[str, str | None] = {}
+        photos: set[str] = set()
+        placed: set[str] = set()
+        for row in rows:
+            image = str(row.get("mtsd_image"))
+            photos.add(image)
+            location = locations.get(image)
+            if not location or location.get("latitude") is None:
+                continue
+            placed.add(image)
+            state["located_crops"] += 1
+            if location.get("continent"):
+                by_continent[location["continent"]] += 1
+            if location.get("country"):
+                by_country[location["country"]] += 1
+                continent_of_country.setdefault(location["country"], location.get("continent"))
+        names = world_names() if by_country else {}
+        state.update({
+            "crops": len(rows), "photos": len(photos), "located_photos": len(placed),
+            "fetched_photos": sum(1 for row in locations.values() if row.get("status") != NO_V4_ID),
+            "continents": [{"key": key, "name": CONTINENTS.get(key, key), "crops": count}
+                           for key, count in sorted(by_continent.items(), key=lambda item: (-item[1], item[0]))],
+            "countries": [{"code": code, "name": names.get(code, code), "continent": continent_of_country.get(code),
+                           "crops": count}
+                          for code, count in sorted(by_country.items(), key=lambda item: (-item[1], item[0]))],
+        })
+        _REGIONS_CACHE.clear()
+        _REGIONS_CACHE.update({"stamp": stamp, "state": state})
+    state = dict(_REGIONS_CACHE["state"])
+    state["token"] = token_ready(repo)
+    state["ids_table"] = (data_root / IMAGE_IDS_FILE).is_file()
+    return state

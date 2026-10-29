@@ -398,6 +398,8 @@ def prepare_reader_training(
     class_scheme: str = "v1",
     negatives_path: Path | None = None,
     mapillary_path: Path | None = None,
+    mapillary_region: str = "all",
+    mapillary_share: float = 100.0,
 ) -> dict[str, Any]:
     """Validate inputs and build the immutable reader-training plan.
 
@@ -406,7 +408,8 @@ def prepare_reader_training(
     class_scheme v1 is the reader as it always was. v2 (the classifier) adds the kinds of the other signs and
     the not_a_sign crops (see _classifier_negatives); negatives_path is the file of nnslr mine-negatives for
     the cutter's false boxes (without it, only the removed proposals and the boxes marked "not a sign");
-    mapillary_path is the crops file of nnslr mapillary-crops, extra train crops of v2 (nnslr_tools.mapillary).
+    mapillary_path is the crops file of nnslr mapillary-crops, extra train crops of v2 (nnslr_tools.mapillary);
+    mapillary_region and mapillary_share choose which of them (the photos of some continents or countries, a share).
     """
     if class_scheme not in CLASS_SCHEMES:
         raise ValueError(f"unknown class scheme {class_scheme!r}: one of {', '.join(CLASS_SCHEMES)}")
@@ -414,6 +417,9 @@ def prepare_reader_training(
         raise ValueError("negatives are crops of the v2 classifier: use --classes v2")
     if mapillary_path is not None and class_scheme != "v2":
         raise ValueError("the Mapillary crops are for the v2 classifier: use --classes v2")
+    from nnslr_tools.mapillary import FULL_SHARE, check_share, region_text
+    if mapillary_path is None and (region_text(mapillary_region) != "all" or check_share(mapillary_share) != FULL_SHARE):
+        raise ValueError("--mapillary-region and --mapillary-share choose Mapillary crops: add --mapillary")
     dataset_path = Path(dataset_path)
     split_path = Path(split_path)
     data_root = Path(data_root)
@@ -425,7 +431,8 @@ def prepare_reader_training(
     assignments = loaded["assignments"]
     if class_scheme == "v2":
         return _prepare_classifier(loaded, dataset_path, split_path, data_root, dataset_kind=dataset_kind,
-                                   negatives_path=negatives_path, mapillary_path=mapillary_path)
+                                   negatives_path=negatives_path, mapillary_path=mapillary_path,
+                                   mapillary_region=mapillary_region, mapillary_share=mapillary_share)
 
     records: list[dict[str, Any]] = []
     skipped = Counter()
@@ -593,10 +600,12 @@ def _mined_negatives(negatives_path: Path, loaded: dict[str, Any], frames: list[
 
 def _prepare_classifier(loaded: dict[str, Any], dataset_path: Path, split_path: Path, data_root: Path, *,
                         dataset_kind: str, negatives_path: Path | None,
-                        mapillary_path: Path | None = None) -> dict[str, Any]:
+                        mapillary_path: Path | None = None, mapillary_region: str = "all",
+                        mapillary_share: float = 100.0) -> dict[str, Any]:
     """The v2 plan (see prepare_reader_training): the sign crops with their v2 labels, the kinds too rare to
     learn folded into other_sign, the not_a_sign crops of each partition from its own frames only, and the
-    Mapillary crops in train when asked (after the folding, which counts our crops only)."""
+    Mapillary crops in train when asked (after the folding, which counts our crops only), of the region and share
+    asked (nnslr_tools.mapillary.training_records)."""
     rows = loaded["rows"]
     assignments = loaded["assignments"]
     frames = reviewed_frames(rows, assignments)
@@ -641,7 +650,8 @@ def _prepare_classifier(loaded: dict[str, Any], dataset_path: Path, split_path: 
         from nnslr_tools.mapillary import training_records
         ours = {r["label"] for r in records if r["split"] == TRAIN_SPLIT}
         extra, mapillary = training_records(Path(mapillary_path), ours,
-                                            {label for label in ours if label.startswith(OTHER_SIGN + ":")})
+                                            {label for label in ours if label.startswith(OTHER_SIGN + ":")},
+                                            region=mapillary_region, share=mapillary_share)
         for path in sorted({record["image_path"] for record in extra}):
             if not _safe_image_path(data_root, path).is_file():
                 raise ValueError(f"missing_image: {path} (prepare Mapillary again: helpers/mapillary.sh)")
@@ -712,6 +722,8 @@ def _prepare_classifier(loaded: dict[str, Any], dataset_path: Path, split_path: 
         "negatives_sha256": None if negatives_file is None else negatives_file["sha256"],
         "mapillary": mapillary,
         "mapillary_sha256": None if mapillary is None else mapillary["sha256"],
+        # Which Mapillary crops were chosen (region, share, cap): a resumed run must choose the same ones.
+        "mapillary_selection_sha256": None if mapillary is None else mapillary["selection_sha256"],
         "folded_labels": folded,
         "min_kind_train_crops": MIN_KIND_TRAIN_CROPS,
         "negative_max_iou": NEGATIVE_MAX_IOU,
@@ -963,10 +975,15 @@ class TrainConfig:
     augment: bool = False
     # v2 only: the crops file of nnslr mapillary-crops whose signs join train (nnslr_tools.mapillary), or None.
     mapillary: str | None = None
+    # v2 with mapillary only: the photos of these continents and countries (nnslr_tools.mapillary.region_text), and
+    # this share of them in percent (a fixed choice: the same share takes the same crops).
+    mapillary_region: str = "all"
+    mapillary_share: float = 100.0
 
 
 # The settings a reader run saved before they existed was trained with: resuming such a run compares against these.
-READER_CONFIG_BEFORE_SETTINGS = {"class_scheme": "v1", "augment": False, "mapillary": None}
+READER_CONFIG_BEFORE_SETTINGS = {"class_scheme": "v1", "augment": False, "mapillary": None,
+                                 "mapillary_region": "all", "mapillary_share": 100.0}
 
 # The box of a training crop moved and resized before the crop, as the cutter's boxes are never exact: each side
 # scaled by a factor in "scale", the centre moved by up to "shift" of the box's size, with this probability.
@@ -1265,6 +1282,10 @@ def resume_arguments(state: dict[str, Any]) -> list[str]:
             flags.append("--no-augment")
         if config.get("mapillary"):
             flags += ["--mapillary", str(config["mapillary"])]
+            if config.get("mapillary_region", "all") != "all":
+                flags += ["--mapillary-region", str(config["mapillary_region"])]
+            if float(config.get("mapillary_share", 100.0)) != 100.0:
+                flags += ["--mapillary-share", f"{float(config['mapillary_share']):g}"]
     return flags
 
 
@@ -2057,6 +2078,9 @@ def train_reader(
             raise ValueError("resume negatives mismatch: the run started with another negatives file")
         if classifier and saved.get("mapillary_sha256") != plan.get("mapillary_sha256"):
             raise ValueError("resume Mapillary mismatch: the run started with other Mapillary crops")
+        if (classifier and "mapillary_selection_sha256" in saved
+                and saved["mapillary_selection_sha256"] != plan.get("mapillary_selection_sha256")):
+            raise ValueError("resume Mapillary mismatch: the region or the positions now choose other crops")
         start_epoch = saved.get("epoch")
         if not isinstance(start_epoch, int) or not 0 <= start_epoch < config.epochs:
             raise ValueError("invalid or already completed resume epoch")
@@ -2084,6 +2108,7 @@ def train_reader(
             "class_scheme": scheme,
             "negatives_sha256": plan.get("negatives_sha256"),
             "mapillary_sha256": plan.get("mapillary_sha256"),
+            "mapillary_selection_sha256": plan.get("mapillary_selection_sha256"),
             "classes": classes,
             "input_size": config.input_size,
             "best_accuracy": best_accuracy,

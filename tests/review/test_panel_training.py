@@ -496,3 +496,90 @@ def test_the_classifier_takes_the_mapillary_signs_only_when_prepared(root, check
     job = panel.start('train_classifier', {'mapillary': 'off'})
     finished(panel, job['id'])
     assert 'mapillary=0\n' in full_log(panel, job['id'])
+
+
+def test_the_classifier_takes_a_region_and_a_share_of_mapillary(root, checkout, monkeypatch):
+    from nnslr_tools.mapillary import CROPS_FILE, LOCATIONS_FILE
+    classifier_script(checkout, FAKE_CLASSIFIER.replace(
+        'echo "args $*"', 'echo "args $* region=${NNSLR_CLASSIFIER_MAPILLARY_REGION:-} '
+                          'share=${NNSLR_CLASSIFIER_MAPILLARY_SHARE:-}"'))
+    panel = Panel(root, repo=checkout)
+    monkeypatch.setattr(panel, 'activities', lambda: [])
+    cutter_in_use(root, panel)
+    (root / CROPS_FILE).parent.mkdir(parents=True)
+    (root / CROPS_FILE).write_text('\n'.join(json.dumps(line) for line in [
+        {'kind': 'mapillary_crops', 'version': 1, 'crops': 2, 'by_label': {'maximum_speed:50': 2}},
+        {'image_path': 'c/1.jpg', 'label': 'maximum_speed:50', 'mtsd_image': 'zurich', 'mtsd_object': 'a'},
+        {'image_path': 'c/2.jpg', 'label': 'maximum_speed:50', 'mtsd_image': 'boston', 'mtsd_object': 'b'}]) + '\n')
+    regions = panel.status()['classifier_options']['mapillary_regions']
+    assert (regions['fetched'], regions['crops'], regions['continents']) == (False, 2, [])
+    # A region needs the positions; a share alone does not.
+    with pytest.raises(PanelError) as missing:
+        panel.start('train_classifier', {'mapillary': 'on', 'region': 'europe'})
+    assert missing.value.status == 409 and 'not fetched' in missing.value.message
+    for options in ({'mapillary': 'on', 'region': 'Atlantis'}, {'mapillary': 'on', 'share': '0'},
+                    {'mapillary': 'off', 'share': '5'}, {'mapillary': 'on', 'share': 5}):
+        with pytest.raises(PanelError) as refused:
+            panel.start('train_classifier', options)
+        assert refused.value.status == 400, options
+    with pytest.raises(PanelError) as other:
+        panel.start('train_cutter', {'region': 'europe'})
+    assert other.value.status == 400
+    job = panel.start('train_classifier', {'mapillary': 'on', 'region': 'all', 'share': '5'})
+    finished(panel, job['id'])
+    assert re.search(r'region= share=5$', full_log(panel, job['id']), re.M)
+    (root / LOCATIONS_FILE).write_text(''.join(json.dumps(line) + '\n' for line in [
+        {'mtsd_image': 'zurich', 'latitude': 47.4, 'longitude': 8.5, 'country': 'CH', 'continent': 'europe',
+         'status': 'located'},
+        {'mtsd_image': 'boston', 'latitude': 42.4, 'longitude': -71.1, 'country': 'US', 'continent': 'north_america',
+         'status': 'located'}]))
+    regions = panel.status()['classifier_options']['mapillary_regions']
+    assert [item['key'] for item in regions['continents']] == ['europe', 'north_america']
+    assert {item['code'] for item in regions['countries']} == {'CH', 'US'}
+    time.sleep(1.1)  # a job's log is named by its second
+    job = panel.start('train_classifier', {'mapillary': 'on', 'region': 'ch,europe', 'share': '100'})
+    finished(panel, job['id'])
+    assert re.search(r'region=europe,CH share=$', full_log(panel, job['id']), re.M)
+
+
+def test_the_mapillary_positions_need_the_script_and_a_token(root, checkout, monkeypatch):
+    monkeypatch.delenv('MAPILLARY_TOKEN', raising=False)
+    panel = Panel(root, repo=checkout)
+    monkeypatch.setattr(panel, 'activities', lambda: [])
+    state = panel.status()['actions']['mapillary_locations']
+    assert state['reason'] == 'helpers/mapillary_locations.sh is missing in this installation'
+    with pytest.raises(PanelError) as missing:
+        panel.start('mapillary_locations')
+    assert missing.value.status == 403
+    script = checkout / 'helpers' / 'mapillary_locations.sh'
+    script.write_text('#!/usr/bin/env bash\necho "== Mapillary: where the photos were taken"\nsleep "${FAKE_SLEEP:-0}"\n')
+    script.chmod(0o755)
+    assert panel.status()['actions']['mapillary_locations']['reason'] == (
+        "no Mapillary token: add MAPILLARY_TOKEN to the server's .env")
+    with pytest.raises(PanelError) as no_token:
+        panel.start('mapillary_locations')
+    assert no_token.value.status == 409
+    (checkout / '.env').write_text('MAPILLARY_TOKEN=MLY|1|x\n')
+    # No confirmed frame and no GPU needed: the token is enough.
+    assert panel.status()['actions']['mapillary_locations'] == {'label': 'Locate the Mapillary photos', 'allowed': True,
+                                                                'reason': ''}
+    assert panel.status()['classifier_options']['mapillary_regions']['token'] is True
+    monkeypatch.setenv('FAKE_SLEEP', '30')
+    job = panel.start('mapillary_locations')
+    try:
+        status = panel.status()
+        assert status['actions']['update']['reason'] == 'A search for the Mapillary positions is running'
+        assert status['actions']['mapillary_locations']['reason'] == 'A search for the Mapillary positions is running'
+        assert status['actions']['prepare']['reason'] != 'A search for the Mapillary positions is running'
+    finally:
+        panel.stop(job['id'])
+        finished(panel, job['id'])
+
+
+def test_a_classifier_job_shows_its_mapillary_region_and_share(tmp_path):
+    from nnslr_tools.panel import _settings_of
+    log = tmp_path / 'job.log'
+    log.write_text('== scripts/run_classifier.sh r\nrun:          r\nsettings:     --classes v2 --epochs 30 --mapillary '
+                   '/d/crops.jsonl --mapillary-region europe,CH --mapillary-share 5\n')
+    assert _settings_of(log, 'train_classifier') == ['classes v2', 'Mapillary signs', 'Mapillary Europe, CH',
+                                                     'Mapillary 5 %', '30 epochs']

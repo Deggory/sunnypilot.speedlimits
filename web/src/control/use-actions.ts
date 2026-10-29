@@ -4,6 +4,7 @@ import {messageOf, post} from '../common/api';
 import type {ActionName, ActionOptions, ActionState, Job, StartedJob, TrainingStart} from '../common/panel-types';
 import {askConfirm, type ConfirmOptions} from '../composables/confirm';
 import {toast} from '../composables/toast';
+import {regionWords} from './mapillary';
 import type {InjectionKey} from 'vue';
 
 /** The resume() of the control app, for the job cards (provided by ControlApp.vue). */
@@ -13,7 +14,7 @@ export const RESUME_JOB: InjectionKey<(job: Job) => Promise<void>> = Symbol('res
 export const RETRY_JOB: InjectionKey<{can: (job: Job) => boolean; run: (job: Job) => void}> = Symbol('retry-job');
 /** The actions whose failed job can simply run again: no option but the proposer (a training has Resume). */
 export const RETRY_ACTIONS: ActionName[] = ['fetch', 'prepare', 'prepare_again', 'setup_vlm', 'dataset', 'measure_proposer',
-  'networks_prepare', 'road_types'];
+  'networks_prepare', 'road_types', 'mapillary_locations'];
 
 /** The question before an action; null: it starts at the click (preparing, importing the reviews, the road types). */
 /** The proposer as the Prepare tab names it. */
@@ -39,7 +40,10 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
         + 'about 15 minutes. Its run is a new one, named by the time it starts.'};
   }
   if (name === 'train_classifier') {
-    const mapillary = options?.mapillary === 'on' ? ' The signs of Mapillary join its training crops, not its measures.' : '';
+    const where = options?.region && options.region !== 'all' ? ' taken in ' + regionWords(options.region) : '';
+    const share = options?.share && options.share !== '100' ? options.share + ' % of the' : 'The';
+    const mapillary = options?.mapillary === 'on' ? ' ' + share + ' signs of Mapillary' + where
+      + ' join its training crops, not its measures.' : '';
     return {title: 'Train the classifier?', action: 'Start training',
       text: 'Mines the false boxes of the cutter in use, trains the classifier with “not a sign” on the GPU, then measures it '
         + 'alone and in the chain: it takes hours. Its run is a new one, named by the time it starts.' + mapillary};
@@ -114,6 +118,7 @@ const STOP_TEXT: Partial<Record<ActionName, string>> = {
   networks_prepare: 'Nothing is kept: preparing again starts over.',
   networks_publish: 'What Hugging Face already received may stay there.',
   road_types: 'The drives done stay; the next run does them all again in a minute.',
+  mapillary_locations: 'The photos already located stay: locating again carries on from there.',
   send_to_car: 'What was already published or pushed stays. Sending again carries on: what is in place is skipped, '
     + 'and a build not finished runs then.',
   try_on_comma: 'Stopped before the copy, nothing on the comma changed. Stopped during the copy or the wait, the networks '

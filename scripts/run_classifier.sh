@@ -40,6 +40,9 @@ set -euo pipefail
 # NNSLR_OLD_READER_RUN (2026-10-24_1452; empty: no comparison), NNSLR_CLASSIFIER_AUGMENT=0 to train without the
 # darker crops and box jitter, NNSLR_CLASSIFIER_MAPILLARY=1 to add the signs of the Mapillary Traffic Sign Dataset
 # to train (the crops of helpers/mapillary.sh, $DATA_ROOT/external/mapillary/crops.jsonl; nnslr_tools.mapillary),
+# with NNSLR_CLASSIFIER_MAPILLARY_REGION (all; or continents and countries, comma-separated: europe or CH,DE,IT; needs
+# the positions of helpers/mapillary_locations.sh) and NNSLR_CLASSIFIER_MAPILLARY_SHARE (100: the percentage of the
+# region's crops, always the same ones for the same share),
 # NNSLR_TRAIN_INIT=random, NNSLR_ALLOW_BUSY_GPU=1 to share a GPU that already has compute processes.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -181,7 +184,20 @@ if [[ "${NNSLR_CLASSIFIER_MAPILLARY:-0}" == "1" ]]; then
     exit 2
   fi
   MAPILLARY=(--mapillary "$DATA_ROOT/external/mapillary/crops.jsonl")
+  if [[ -n "${NNSLR_CLASSIFIER_MAPILLARY_REGION:-}" && "${NNSLR_CLASSIFIER_MAPILLARY_REGION}" != "all" ]]; then
+    if [[ ! -s "$DATA_ROOT/external/mapillary/locations.jsonl" ]]; then
+      echo "error: the positions of the Mapillary photos are not fetched: run helpers/mapillary_locations.sh first" >&2
+      exit 2
+    fi
+    MAPILLARY+=(--mapillary-region "$NNSLR_CLASSIFIER_MAPILLARY_REGION")
+  fi
+  if [[ -n "${NNSLR_CLASSIFIER_MAPILLARY_SHARE:-}" && "${NNSLR_CLASSIFIER_MAPILLARY_SHARE}" != "100" ]]; then
+    MAPILLARY+=(--mapillary-share "$NNSLR_CLASSIFIER_MAPILLARY_SHARE")
+  fi
   SETTINGS+=("${MAPILLARY[@]}")
+elif [[ "${NNSLR_CLASSIFIER_MAPILLARY_REGION:-all}" != "all" || "${NNSLR_CLASSIFIER_MAPILLARY_SHARE:-100}" != "100" ]]; then
+  echo "error: NNSLR_CLASSIFIER_MAPILLARY_REGION and _SHARE choose Mapillary crops: add NNSLR_CLASSIFIER_MAPILLARY=1" >&2
+  exit 2
 fi
 
 echo "== Classifier (cutter -> classifier -> decider) =="

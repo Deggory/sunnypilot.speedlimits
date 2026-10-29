@@ -14,7 +14,9 @@ import ActionList from './ActionList.vue';
 import JobProgress from './JobProgress.vue';
 import {CHARTED_ACTIONS, JOB_STATE, jobOf, PIPELINE_ACTIONS, startedWhen, terminalActivities} from './jobs';
 import {pct} from './evaluate';
+import {regionCrops, shareOf} from './mapillary';
 import {sizeText, useModels} from './models';
+import RegionPicker from './RegionPicker.vue';
 import Segmented from './Segmented.vue';
 import TerminalActivity from './TerminalActivity.vue';
 import TrainingCharts from './TrainingCharts.vue';
@@ -125,11 +127,32 @@ const mapillary = computed({
   get: (): 'off' | 'on' => mapillaryState.value?.available ? pickedMapillary.value ?? 'off' : 'off',
   set: (value: 'off' | 'on') => { pickedMapillary.value = value; },
 });
+/** Which Mapillary signs: the places their photos were taken (none chosen: all the world) and a share of them, in percent
+ * (status.classifier_options.mapillary_regions; the server then keeps at most 300 of each kind). */
+const mapillaryRegions = computed(() => props.status?.classifier_options?.mapillary_regions ?? null);
+const region = ref<string[]>([]);
+const shareText = ref('100');
+const share = computed(() => shareOf(shareText.value));
+const locateJob = computed(() => jobOf(props.status, ['mapillary_locations']));
+const locating = computed(() => locateJob.value?.state === 'running'
+  || terminalActivities(props.status, ['mapillary']).length > 0);
+/** About how many Mapillary signs join: those of the places chosen, times the share. */
+const mapillarySigns = computed(() => Math.round(regionCrops(mapillaryRegions.value, region.value) * (share.value ?? 0) / 100));
+const mapillaryOptions = computed((): ActionOptions => mapillary.value === 'on'
+  ? {mapillary: 'on', region: region.value.length ? region.value.join(',') : 'all', share: String(share.value ?? shareText.value)}
+  : {mapillary: 'off'});
 const CLASSIFIER_ACTIONS = computed((): [ActionName, string][] => [
   ['train_classifier', 'A new classifier, taught on the signs and on the cutter’s mistakes'
-    + (mapillary.value === 'on' ? ', with ' + thousands(mapillaryState.value?.crops ?? 0) + ' signs of Mapillary' : '')
+    + (mapillary.value === 'on' ? ', with about ' + thousands(mapillarySigns.value) + ' signs of Mapillary' : '')
     + '. Takes a few hours on the GPU.'],
 ]);
+/** The classifier's button: also not with a share that is not a percentage. */
+const classifierActions = computed(() => {
+  const actions = props.status?.actions ?? null;
+  if (actions === null || mapillary.value !== 'on' || share.value !== null) return actions;
+  return {...actions, train_classifier: {...actions.train_classifier, allowed: false,
+    reason: 'the share of Mapillary is a percentage, more than 0 and at most 100'}};
+});
 const activities = computed(() => terminalActivities(props.status, ['train']));
 const sectionActivities = computed(() => activitiesFor(section.value));
 /** The curves of a training: while it runs (a placeholder before the first epoch), or of the last one if it has any. */
@@ -205,12 +228,26 @@ const numbers = computed(() => {
         <div v-if="mapillaryState?.available" class="seg-row">
           <Segmented v-model="mapillary" :options="MAPILLARY_OPTIONS" label="Signs the classifier learns from"/>
         </div>
-        <ActionList :items="CLASSIFIER_ACTIONS" :actions="status?.actions ?? null"
-                    @run="(name, state) => emit('run', name, state, undefined, {mapillary})"/>
+        <div v-if="mapillaryState?.available && mapillary === 'on'" class="mly-choice" id="train-mapillary-choice">
+          <RegionPicker v-model="region" :regions="mapillaryRegions" :locate="status?.actions.mapillary_locations ?? null"
+                        :locating="locating"
+                        @locate="status && emit('run', 'mapillary_locations', status.actions.mapillary_locations)"/>
+          <label class="picker mly-share" :class="{bad: share === null}">
+            <span class="picker-label">Share</span>
+            <span class="mly-share-field"><input v-model="shareText" id="mapillary-share" type="text" inputmode="decimal"
+                   maxlength="6" autocomplete="off" aria-describedby="train-mapillary-note">%</span>
+            <span class="picker-sub">{{ share === null ? 'from 0.1 to 100' : 'about ' + thousands(mapillarySigns) + ' signs' }}</span>
+          </label>
+        </div>
+        <ActionList :items="CLASSIFIER_ACTIONS" :actions="classifierActions"
+                    @run="(name, state) => emit('run', name, state, undefined, mapillaryOptions)"/>
         <p v-if="mapillaryState?.available" class="latest-none" id="train-mapillary-note">Mapillary: {{ thousands(mapillaryState.crops) }}
-          street-photo signs of {{ plural(mapillaryState.labels, 'kind') }}, added to train only: every measure stays on your drives.</p>
+          street-photo signs of {{ plural(mapillaryState.labels, 'kind') }}, added to train only: every measure stays on your drives.<template
+          v-if="mapillary === 'on'"> The same share always takes the same signs; then at most 300 of each kind.</template></p>
         <p v-else-if="mapillaryState" class="latest-none" id="train-mapillary-note">Mapillary signs: not prepared yet
           (helpers/mapillary.sh).</p>
+        <p v-if="mapillaryState?.available && locateJob?.state === 'failed'" class="latest-none warn-text" id="train-locate-failed">Locating the
+          photos failed · <button type="button" class="link-button" @click="emit('details', locateJob)">Details</button></p>
       </template>
       <template v-else-if="section === 'decider'">
         <ActionList :items="DECIDER_ACTIONS" :actions="status?.actions ?? null" @run="(name, state) => emit('run', name, state)"/>

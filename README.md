@@ -120,7 +120,7 @@ The review page is the picture at the top of this page. This is the one step don
 The Train tab has one card per network:
 
 - **Cutter.** Pick the input size (640 × 360, 960 × 544 or the full 1344 × 760, the default) and whether it boxes every sign or only speed signs, then press **Train the cutter**.
-- **Classifier.** **Train the classifier** collects the cutter's false boxes, trains the classifier with "not a sign", and measures it on its own and together with the cutter. Once `helpers/mapillary.sh` has cut the signs of the Mapillary Traffic Sign Dataset, a switch adds them to its training crops (**With Mapillary**); the measures stay on our drives.
+- **Classifier.** **Train the classifier** collects the cutter's false boxes, trains the classifier with "not a sign", and measures it on its own and together with the cutter. Once `helpers/mapillary.sh` has cut the signs of the Mapillary Traffic Sign Dataset, a switch adds them to its training crops (**With Mapillary**); the measures stay on our drives. **Where** keeps the signs of some continents or countries (Europe, or only Switzerland, Germany and Italy), once **Locate the photos** has found where each photo was taken; **Share** takes a fixed random part of them (5 %, say).
 - **Decider.** **Train the decider** trains experiment B's three variants (the crop alone, with position and speed, with the scene) in about 15 minutes, and compares them. It is a prototype; the one in use (Models) sets OURS or another on the speed signs Our networks propose.
 
 Two more buttons cover the dataset and the older pipeline. **Import reviews** turns the confirmed frames into the dataset. **Whole pipeline** runs the older detector-and-reader baseline, from the import to a packaged model.
@@ -277,6 +277,8 @@ Day-to-day work happens in the portal, whose buttons run a few helper scripts an
 
 Two helpers belong to the AI reviewer. `helpers/ai_review.sh` (**Review with AI**) reviews a route with the provider chosen in Settings. `helpers/measure_ai_reviewer.sh` (**Measure** in Evaluate → AI reviewers) measures a provider on the same frames people reviewed. Neither takes a key as an argument: the providers and their keys stay on the server, in `data/web/private/llm-providers.json`. An AI review saved by **Review and save** waits for a person: the import leaves it out until you confirm the frame. Providers can also be added from a terminal with `nnslr llm-provider add` ([docs/INSTALL.md](docs/INSTALL.md)).
 
+Two helpers prepare the Mapillary signs of the classifier. `helpers/mapillary.sh` cuts the signs of ours out of the Mapillary Traffic Sign Dataset. `helpers/mapillary_locations.sh` (**Locate the photos** in Train › Classifier) asks Mapillary where each photo was taken, so that **Where** can choose a continent or a country; it needs a Mapillary client token in `.env` (`MAPILLARY_TOKEN`) and resumes where it stopped.
+
 Two scripts take a SignNet to the comma, from its card on Models › Versions. `scripts/send_to_car.sh` (**Send to the car**) publishes it with the classifier in use in `speed-limits-models`, moves the sunnypilot `speed-limits` branch and builds `psa-torque-sunny-testing`; the comma then installs the update. `scripts/try_on_comma.sh` (**Try on the comma now**) copies them straight onto the comma over ssh after checking them with the comma's own code, until its next software update; `--restore` (**Back to the build's networks**) undoes it.
 
 ## Data, privacy, licences and credits
@@ -309,5 +311,6 @@ Two scripts take a SignNet to the comma, from its card on Models › Versions. `
   - [RapidOCR](https://github.com/RapidAI/RapidOCR) 3.4.0 with the PaddleOCR PP-OCRv4 models (Apache-2.0), for numbers painted on the road.
 - The [Mapillary Traffic Sign Dataset](https://www.mapillary.com/dataset/trafficsign) (CC BY-NC-SA 4.0), whose street photos can add sign crops to the classifier's training (`helpers/mapillary.sh`, off by default). It is never committed, and a classifier trained with it carries its non-commercial terms.
 - Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), under the ODbL, read offline to find the roads near the drives.
-- Country borders from [Natural Earth](https://www.naturalearthdata.com) (public domain).
+- Country borders from [Natural Earth](https://www.naturalearthdata.com) (public domain), 1:10m for Europe and 1:50m for the rest of the world (where the Mapillary photos were taken).
+- The table of the Mapillary Traffic Sign Dataset's old image keys and their current ids, [viajerus/mapillary_keys_ids](https://github.com/viajerus/mapillary_keys_ids), shared on the [Mapillary forum](https://forum.mapillary.com/t/mapillary-traffic-sign-dataset-keys/10282); downloaded at run time, never committed. The positions come from the [Mapillary API](https://www.mapillary.com/developer/api-documentation).
 - The portal is built with [Vue 3](https://vuejs.org) (MIT, bundled into the built pages), Vite and TypeScript.

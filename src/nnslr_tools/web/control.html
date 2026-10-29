@@ -604,6 +604,52 @@ animation:seg-pulse 1.6s ease-in-out infinite}
 .train-slot .jp{padding:0;box-shadow:none;background:none;border-radius:0;overflow:visible}
 .train-slot .jp-running::before{display:none}
 .train-slot .last-line{margin:0}
+/* The Mapillary signs of the classifier (TrainTab.vue): where their photos were taken (RegionPicker.vue, a menu that
+   opens downwards over the card) and the share, side by side; one under the other on a narrow phone. */
+.mly-choice{display:flex;flex-wrap:wrap;gap:10px 12px;align-items:stretch;max-width:640px}
+.rp{position:relative;flex:1 1 230px;min-width:0;display:flex}
+.rp-button{flex:1;min-width:0}
+.rp-button[aria-expanded="true"] .picker-chev{transform:translateY(-50%) rotate(-90deg)}
+.rp-menu{position:absolute;top:calc(100% + 6px);left:0;right:0;z-index:15;scroll-margin:16px;
+max-height:min(64vh,520px);display:flex;flex-direction:column;border-radius:14px;background:var(--surface);
+border:1px solid var(--line-strong);box-shadow:var(--pop-shadow);overflow:hidden}
+.rp-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:4px 8px 4px 16px;flex:none;
+border-bottom:.5px solid var(--line)}
+.rp-head-title{font-size:14px;font-weight:650;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rp-scroll{overflow-y:auto;overscroll-behavior:contain;padding:10px 10px 12px;-webkit-overflow-scrolling:touch}
+.rp-scroll .sheet-section{margin:12px 6px 6px}
+.rp-scroll .picker-row{min-height:48px;padding:9px 14px}
+.rp-scroll .picker-row-title{font-size:15px}
+.rp-search{width:100%;margin:10px 0 0;padding:9px 12px;border-radius:10px;border:0;background:var(--surface-2);color:var(--fg);
+font:inherit;font-size:15px;min-height:40px}
+.rp-search:focus{outline:2px solid var(--accent);outline-offset:-2px}
+.rp-empty{margin-top:10px;padding:14px 16px;border-radius:14px;background:var(--surface-2);display:flex;flex-direction:column;
+gap:8px;align-items:flex-start}
+.rp-empty p{margin:0}
+.rp-empty-title{font-size:15px;font-weight:650}
+.rp-empty-text,.rp-reason{font-size:13px;color:var(--muted)}
+.rp-foot{margin:12px 6px 0;font-size:12.5px;color:var(--muted)}
+.rp-foot .link-button{font-size:12.5px}
+.mly-share{flex:0 0 164px;cursor:text}
+.mly-share-field{display:flex;align-items:baseline;gap:4px;font-size:15px;font-weight:600}
+.mly-share input{width:4.2ch;min-width:0;border:0;background:none;color:inherit;font:inherit;padding:0;
+font-variant-numeric:tabular-nums;appearance:textfield}
+.mly-share input:focus{outline:none}
+@supports (field-sizing:content){.mly-share input{width:auto;min-width:1ch;max-width:7ch;field-sizing:content}}
+.mly-share:focus-within{outline:2px solid var(--accent);outline-offset:-2px}
+.mly-share.bad .picker-sub{color:var(--bad)}
+.rp-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rp-backdrop{display:none}
+@media (max-width:420px){.mly-share{flex:1 1 100%}.rp{flex-basis:100%}}
+/* On a phone the menu is a sheet from the bottom, over the tab bar, the page dimmed behind it. */
+@media (max-width:767px){
+  .rp-backdrop{display:block;position:fixed;inset:0;z-index:14;background:var(--backdrop)}
+  .rp-menu{position:fixed;top:auto;bottom:0;max-height:min(80dvh,640px);border-radius:16px 16px 0 0;border-width:.5px 0 0;
+    padding-bottom:env(safe-area-inset-bottom,0px);animation:rp-up .22s cubic-bezier(.2,.8,.2,1)}
+  .rp-head{padding:8px 10px 8px 18px}
+}
+@keyframes rp-up{from{transform:translateY(24px);opacity:0}to{transform:none;opacity:1}}
+@media (prefers-reduced-motion:reduce){.rp-menu{animation:none}}
 /* The latest version of the network: one row (name, when, its main number), opened its whole card. */
 .latest-row{border-radius:12px;background:var(--surface-2)}
 .latest-row>summary{list-style:none;display:flex;align-items:center;gap:12px;padding:10px 14px;cursor:pointer;min-width:0}

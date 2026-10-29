@@ -179,6 +179,102 @@ def country_names() -> dict[str, str]:
     return {country['code']: country['name'] for country in _borders()}
 
 
+# Every country of the world, coarser (Natural Earth 1:50m, public domain), each with its continent
+# (scripts/make_country_borders.py --world): where a photo of the Mapillary Traffic Sign Dataset was taken.
+WORLD_BORDERS = Path(__file__).resolve().parent / 'data' / 'world.json.gz'
+# The continents, in the order the portal lists them, with their names.
+CONTINENTS = {'europe': 'Europe', 'asia': 'Asia', 'africa': 'Africa', 'north_america': 'North America',
+              'south_america': 'South America', 'oceania': 'Oceania', 'antarctica': 'Antarctica'}
+# The countries of the European borders that the world borders do not draw.
+EXTRA_CONTINENTS = {'GI': 'europe'}
+
+
+def _world() -> tuple:
+    return _read_borders(str(WORLD_BORDERS), None)
+
+
+def _country_in(countries: tuple, latitude: float, longitude: float) -> dict | None:
+    for country in countries:
+        west, south, east, north = country['bbox']
+        if not (west <= longitude <= east and south <= latitude <= north):
+            continue
+        for polygon in country['polygons']:
+            if _inside(longitude, latitude, polygon[0]) and not any(_inside(longitude, latitude, hole)
+                                                                      for hole in polygon[1:]):
+                return country
+    return None
+
+
+# A photo on a coast the coarse world borders cut off (in the sea on their map) takes the country nearest to it, up to
+# this far (degrees of latitude: about 10 km).
+COAST_DEGREES = 0.1
+
+
+def _segment_distance(px: float, py: float, ax: float, ay: float, bx: float, by: float) -> float:
+    dx, dy = bx - ax, by - ay
+    length = dx * dx + dy * dy
+    t = 0.0 if length == 0 else max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / length))
+    x, y = ax + t * dx - px, ay + t * dy - py
+    return x * x + y * y
+
+
+def _nearest_country(countries: tuple, latitude: float, longitude: float, within: float = COAST_DEGREES) -> dict | None:
+    """The country whose border is nearest to a position outside every country, if at most ``within`` away (the
+    longitude scaled to the latitude)."""
+    import math
+    scale = max(0.1, math.cos(math.radians(latitude)))
+    best, best_distance = None, (within * within)
+    for country in countries:
+        west, south, east, north = country['bbox']
+        reach = within / scale
+        if not (west - reach <= longitude <= east + reach and south - within <= latitude <= north + within):
+            continue
+        for polygon in country['polygons']:
+            ring = polygon[0]
+            for (ax, ay), (bx, by) in zip(ring, ring[1:]):
+                if min(ax, bx) - reach > longitude or max(ax, bx) + reach < longitude:
+                    continue
+                if min(ay, by) - within > latitude or max(ay, by) + within < latitude:
+                    continue
+                distance = _segment_distance(longitude * scale, latitude, ax * scale, ay, bx * scale, by)
+                if distance <= best_distance:
+                    best, best_distance = country, distance
+    return best
+
+
+def continent_of(code: str | None) -> str | None:
+    """The continent key (CONTINENTS) of an ISO country code, as Natural Earth has it (Russia in Europe, Turkey and
+    Cyprus in Asia), or None for a code it does not know."""
+    if not code:
+        return None
+    for country in _world():
+        if country['code'] == code:
+            return country['continent']
+    return EXTRA_CONTINENTS.get(code)
+
+
+def world_place(latitude: float | None, longitude: float | None, root: Path | None = None) -> tuple[str | None, str | None]:
+    """(country code, continent key) of a position anywhere: the European borders first (country_of, finer), then
+    the world's, then the country nearest to a coast they cut (COAST_DEGREES); (None, None) at sea, or without a
+    position."""
+    if latitude is None or longitude is None:
+        return None, None
+    code = country_of(latitude, longitude, root)
+    if code is None:
+        found = _country_in(_world(), latitude, longitude) or _nearest_country(_world(), latitude, longitude)
+        if found is None:
+            return None, None
+        return found['code'], found['continent']
+    return code, continent_of(code)
+
+
+def world_names() -> dict[str, str]:
+    """{code: English name} of every country of the world borders (and of the European ones)."""
+    names = {country['code']: country['name'] for country in _world()}
+    names.update({code: name for code, name in country_names().items() if code not in names})
+    return names
+
+
 def positions_path(root: Path, route: str) -> Path:
     parse_route_id(route)
     return Path(root) / GPS_RELATIVE_DIR / route / 'positions.jsonl'

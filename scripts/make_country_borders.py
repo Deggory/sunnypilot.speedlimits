@@ -16,6 +16,12 @@ Natural Earth is coarse where a border follows a river (along the Rhine it puts 
 used by nnslr_tools.gps when there; then `nnslr gps --all --countries` gives the frames their country again.
 
   python scripts/make_country_borders.py --gisco [--data-root DIR] [<file.geojson>]
+
+--world writes src/nnslr_tools/data/world.json.gz: every country of the world, coarser (Natural Earth 1:50m, public
+domain, 3 decimals: about 100 m), each with its continent. It places the photos of the Mapillary Traffic Sign Dataset
+outside Europe (nnslr_tools.gps.world_place, nnslr mapillary-locations); Europe keeps the finer borders above.
+
+  python scripts/make_country_borders.py --world [<file.geojson>]
 """
 from __future__ import annotations
 
@@ -32,10 +38,10 @@ AREA = (-32.0, 27.0, 50.0, 72.0)
 OUTPUT = Path(__file__).resolve().parents[1] / 'src/nnslr_tools/data/countries.json.gz'
 
 
-def rounded(ring: list) -> list:
+def rounded(ring: list, digits: int = 4) -> list:
     points = []
     for lon, lat, *_ in ring:
-        point = [round(lon, 4), round(lat, 4)]
+        point = [round(lon, digits), round(lat, digits)]
         if not points or points[-1] != point:
             points.append(point)
     return points
@@ -106,9 +112,58 @@ def gisco(arguments: list[str]) -> int:
     return 0
 
 
+WORLD_SOURCE = ('https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/'
+                'ne_50m_admin_0_countries.geojson')
+WORLD_OUTPUT = OUTPUT.with_name('world.json.gz')
+# Natural Earth's continents, as the keys of nnslr_tools.gps.CONTINENTS.
+CONTINENT_KEYS = {'Europe': 'europe', 'Asia': 'asia', 'Africa': 'africa', 'North America': 'north_america',
+                  'South America': 'south_america', 'Oceania': 'oceania', 'Antarctica': 'antarctica'}
+
+
+def world_continent(properties: dict) -> str | None:
+    """The continent of a Natural Earth country; the small islands it puts in "Seven seas (open ocean)" by their UN
+    region (Mauritius in Africa, the Maldives in Asia)."""
+    continent = CONTINENT_KEYS.get(properties.get('CONTINENT'))
+    if continent:
+        return continent
+    region, subregion = properties.get('REGION_UN'), properties.get('SUBREGION')
+    if region == 'Americas':
+        return 'south_america' if subregion == 'South America' else 'north_america'
+    return CONTINENT_KEYS.get(region)
+
+
+def world(arguments: list[str]) -> int:
+    if arguments:
+        data = json.loads(Path(arguments[0]).read_text())
+    else:
+        with urllib.request.urlopen(WORLD_SOURCE, timeout=300) as response:
+            data = json.loads(response.read())
+    countries = []
+    for feature in data['features']:
+        properties = feature['properties']
+        code = properties.get('ISO_A2_EH') or properties.get('ISO_A2')
+        geometry = feature['geometry']
+        if not code or code == '-99' or geometry is None:
+            continue
+        polygons = geometry['coordinates'] if geometry['type'] == 'MultiPolygon' else [geometry['coordinates']]
+        kept = [[rounded(ring, 3) for ring in polygon] for polygon in polygons]
+        lons = [point[0] for polygon in kept for point in polygon[0]]
+        lats = [point[1] for polygon in kept for point in polygon[0]]
+        countries.append({'code': code.upper(), 'name': properties.get('NAME_EN') or properties.get('NAME'),
+                          'continent': world_continent(properties),
+                          'bbox': [min(lons), min(lats), max(lons), max(lats)], 'polygons': kept})
+    countries.sort(key=lambda country: country['code'])
+    payload = {'source': WORLD_SOURCE, 'license': 'Natural Earth, public domain', 'countries': countries}
+    WORLD_OUTPUT.write_bytes(gzip.compress(json.dumps(payload, separators=(',', ':')).encode(), mtime=0))
+    print(f'{len(countries)} countries -> {WORLD_OUTPUT} ({WORLD_OUTPUT.stat().st_size // 1024} KiB)')
+    return 0
+
+
 def main() -> int:
     if len(sys.argv) > 1 and sys.argv[1] == '--gisco':
         return gisco(sys.argv[2:])
+    if len(sys.argv) > 1 and sys.argv[1] == '--world':
+        return world(sys.argv[2:])
     if len(sys.argv) > 1:
         data = json.loads(Path(sys.argv[1]).read_text())
     else:

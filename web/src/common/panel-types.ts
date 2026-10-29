@@ -3,7 +3,7 @@ import type {AiState} from './ai-types';
 
 export type ActionName = 'fetch' | 'prepare' | 'prepare_again' | 'measure_proposer' | 'setup_vlm' | 'dataset' | 'train' | 'train_continue' | 'train_resume' | 'train_classifier'
   | 'train_cutter' | 'train_decider' | 'update' | 'ai_review' | 'measure_ai_reviewer' | 'networks_prepare' | 'networks_publish'
-  | 'road_types' | 'send_to_car' | 'try_on_comma' | 'comma_restore';
+  | 'road_types' | 'send_to_car' | 'try_on_comma' | 'comma_restore' | 'mapillary_locations';
 /** What a cutter learns to find: every sign (the speed signs and the other signs) or the speed signs only. */
 export type CutterFamilies = 'all' | 'speed';
 /** The options of “Train the cutter” (POST /api/panel/run/train_cutter {"size", "families"}). */
@@ -60,6 +60,25 @@ export interface ActionOptions {
   signnet?: string;
   /** Whether the classifier's training adds the signs of the Mapillary dataset to train (train_classifier). */
   mapillary?: 'on' | 'off';
+  /** With mapillary on: the continents and countries whose photos come in ("europe,CH"; "all": every one), and the
+   * percentage of their signs ("5"). */
+  region?: string;
+  share?: string;
+}
+/** Where the Mapillary photos were taken (nnslr_tools.mapillary.regions_state), for the region of “Train the
+ * classifier”: whether the positions were fetched, how many signs have one, and the signs of each place. */
+export interface MapillaryRegions {
+  fetched: boolean;
+  crops: number;
+  located_crops: number;
+  photos: number;
+  located_photos: number;
+  fetched_photos?: number;
+  continents: {key: string; name: string; crops: number}[];
+  countries: {code: string; name: string; continent: string | null; crops: number}[];
+  /** Whether MAPILLARY_TOKEN is set in the server's .env (never its value). */
+  token: boolean;
+  ids_table: boolean;
 }
 export type JobState = 'running' | 'ok' | 'failed' | 'interrupted';
 export type RouteState = 'collegare' | 'estrarre' | 'preannotare' | 'revisionare' | 'importare' | 'pronta';
@@ -338,7 +357,8 @@ export interface PanelStatus {
   cutter_options?: {sizes: string[]; size: string; families: CutterFamilies[]; family: CutterFamilies};
   /** The Mapillary switch of “Train the classifier”: whether its crops are prepared (helpers/mapillary.sh), how many
    * and of how many labels, and why not when they are not. */
-  classifier_options?: {mapillary: {available: boolean; crops: number; labels: number; reason: string}};
+  classifier_options?: {mapillary: {available: boolean; crops: number; labels: number; reason: string};
+    mapillary_regions?: MapillaryRegions};
   /** Why a proposer cannot run on this server (null: it can): qwen not installed, or qwen_gpu, the GPU memory it
    * needs taken now. */
   /** Why a proposer cannot run here: qwen not installed, its GPU memory taken, Our networks not whole yet. */

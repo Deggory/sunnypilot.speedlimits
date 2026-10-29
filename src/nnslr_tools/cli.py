@@ -722,7 +722,19 @@ def _train_config(args: argparse.Namespace):
         class_scheme=classes,
         augment=classes == "v2" and not args.no_augment,
         mapillary=str(Path(args.mapillary).resolve()) if getattr(args, "mapillary", None) else None,
+        **_mapillary_choice(args),
     )
+
+
+def _mapillary_choice(args: argparse.Namespace) -> dict:
+    """The region and share of the Mapillary crops of nnslr train (--mapillary-region, --mapillary-share), each in
+    its one spelling; only with --mapillary."""
+    from nnslr_tools.mapillary import FULL_SHARE, check_share, region_text
+    region = region_text(getattr(args, "mapillary_region", None))
+    share = check_share(getattr(args, "mapillary_share", None))
+    if (region != "all" or share != FULL_SHARE) and not getattr(args, "mapillary", None):
+        raise ValueError("--mapillary-region and --mapillary-share choose Mapillary crops: add --mapillary")
+    return {"mapillary_region": region, "mapillary_share": share}
 
 
 def _evaluated_families(args: argparse.Namespace) -> str:
@@ -752,6 +764,9 @@ def _reader_plan_options(args: argparse.Namespace) -> dict:
         if args.task != "reader" or args.classes != "v2":
             raise ValueError("--mapillary adds crops to the classifier: --task reader --classes v2")
         options["mapillary_path"] = Path(args.mapillary)
+        options.update(_mapillary_choice(args))
+    elif getattr(args, "mapillary_region", None) or getattr(args, "mapillary_share", None) is not None:
+        _mapillary_choice(args)
     return options
 
 
@@ -1503,6 +1518,22 @@ def build_parser() -> argparse.ArgumentParser:
                                                           "archives (may be the annotations folder)")
     p_mapillary.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_mapillary.set_defaults(func=_cmd_mapillary_crops)
+    p_places = sub.add_parser("mapillary-locations", help="fetch from Mapillary where each photo of the Mapillary "
+                                                          "Traffic Sign Dataset was taken, with its country and "
+                                                          "continent, into <data root>/external/mapillary/"
+                                                          "locations.jsonl (the region of nnslr train "
+                                                          "--mapillary-region); resumes where it stopped")
+    p_places.add_argument("--ids", help="the table of MTSD's old image keys and their ids of today (CSV image_key,"
+                                        "image_id); default: <data root>/external/mapillary/image_ids.csv, downloaded "
+                                        "from --ids-url when missing")
+    p_places.add_argument("--ids-url", help="where the table is downloaded from (default: the table of the Mapillary "
+                                            "forum, nnslr_tools.mapillary.IMAGE_IDS_URL)")
+    p_places.add_argument("--again", action="store_true", help="ask again for the photos that already have a line")
+    p_places.add_argument("--limit", type=int, help="at most this many photos (a test with a handful)")
+    p_places.add_argument("--dry-run", action="store_true", help="only count what would be asked; nothing is "
+                                                                 "downloaded or written")
+    p_places.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+    p_places.set_defaults(func=_cmd_mapillary_locations)
     p_tracks = sub.add_parser("tracks", help="the same sign followed across consecutive confirmed frames "
                                              "(derived/tracks/<route>/tracks.jsonl), with the matching of Apply previous")
     p_tracks.add_argument("--route", action="append", help="route id; repeat for more")
@@ -1619,6 +1650,13 @@ def build_parser() -> argparse.ArgumentParser:
                                              "mine-negatives (mined on this dataset and split)")
     p_train.add_argument("--mapillary", help="reader --classes v2: the crops file of nnslr mapillary-crops, whose "
                                              "signs join train (never validation or test)")
+    p_train.add_argument("--mapillary-region", help="with --mapillary: only the photos taken in these continents "
+                                                    "(europe, asia, africa, north_america, south_america, oceania) or "
+                                                    "countries (CH, DE...), comma-separated; default all (needs nnslr "
+                                                    "mapillary-locations, except all)")
+    p_train.add_argument("--mapillary-share", type=float, help="with --mapillary: this percentage of the crops of the "
+                                                               "region (more than 0, at most 100, default 100), always "
+                                                               "the same ones for the same share")
     # [classifier-chain] - END
     p_train.set_defaults(func=_cmd_train)
     # [training-baseline] - END
@@ -2121,6 +2159,34 @@ def _cmd_mapillary_crops(args: argparse.Namespace) -> int:
     header = make_crops(Path(args.annotations), Path(args.images), root, log=lambda line: print(line, flush=True))
     print(json.dumps(header, sort_keys=True), flush=True)
     return 0 if header["crops"] else 1
+
+
+def _cmd_mapillary_locations(args: argparse.Namespace) -> int:
+    """nnslr mapillary-locations: the token only from the environment (MAPILLARY_TOKEN), never printed."""
+    from nnslr_tools.mapillary import (IMAGE_IDS_FILE, IMAGE_IDS_URL, TOKEN_ENV, LocationsError, download_image_ids,
+                                       fetch_locations)
+    from nnslr_tools.preannotate import resolve_data_root
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    ids = Path(args.ids) if args.ids else root / IMAGE_IDS_FILE
+    if not args.ids and not ids.is_file():
+        if args.dry_run:
+            print(json.dumps({"ids_table": "missing, would be downloaded", "file": str(ids)}), flush=True)
+            return 0
+        ids = download_image_ids(root, args.ids_url or IMAGE_IDS_URL)
+        print(f"mapillary-locations: key table downloaded into {ids}", flush=True)
+    token = os.environ.get(TOKEN_ENV, "").strip() or None
+    if not token and not args.dry_run:
+        print(f"mapillary-locations: no {TOKEN_ENV}: put the client token of a Mapillary app in the repository's "
+              ".env (helpers/mapillary_locations.sh loads it)", file=sys.stderr, flush=True)
+        return 2
+    try:
+        summary = fetch_locations(root, token=token, ids_path=ids, again=args.again, limit=args.limit,
+                                  dry_run=args.dry_run, log=lambda line: print(line, flush=True))
+    except LocationsError as error:
+        print(f"mapillary-locations: {error}", file=sys.stderr, flush=True)
+        return 1
+    print(json.dumps(summary, sort_keys=True), flush=True)
+    return 0
 
 
 def _cmd_train_signnet(args: argparse.Namespace) -> int:
