@@ -246,3 +246,136 @@ def test_onnx_step_contract(root, tmp_path):
                                                    'hidden': hidden})
     assert probabilities.shape == (1, len(data.CLASSES)) and abs(float(probabilities.sum()) - 1) < 1e-5
     assert hidden_out.shape == (1, net.HIDDEN) and np.abs(hidden_out).max() <= 1
+
+
+# -- the motorway sign the car confirmed (nnslr_tools.road_type_signs) ------------------------------------------------
+def test_sign_features_age_out_after_two_minutes():
+    from nnslr_tools import road_type_signs as signs
+    assert signs.sign_features(None) == signs.NO_SIGN == (2.0, 0.0)
+    assert signs.sign_features(-1) == signs.NO_SIGN and signs.sign_features(float('inf')) == signs.NO_SIGN
+    assert signs.sign_features(0) == (0.0, 1.0) and signs.sign_features(30) == (0.5, 1.0)
+    assert signs.sign_features(120) == (2.0, 1.0) and signs.sign_features(120.5) == signs.NO_SIGN
+    # A dataset frame is its segment's minute and its index; a sign counts from the frame it was confirmed at.
+    frames = [{'segment': segment, 'index': index} for segment in range(4) for index in range(60)]
+    found = signs.frame_sign_features(frames, [61.0, 10.0])
+    assert found.dtype.name == 'float32' and found.shape == (240, 2)
+    assert found[9].tolist() == [2.0, 0.0] and found[10].tolist() == [0.0, 1.0]
+    assert found[60].tolist() == pytest.approx([50 / 60, 1.0]) and found[61].tolist() == [0.0, 1.0]
+    assert found[181].tolist() == [2.0, 1.0] and found[182].tolist() == [2.0, 0.0]
+
+
+def test_the_map_puts_the_motorway_sign_at_the_start_of_every_entry_ramp():
+    from nnslr_tools import road_type_signs as signs
+    road = [TOWN] * 30 + [RAMP] * 10 + [MOTORWAY] * 40 + [RAMP] * 10 + [MOTORWAY] * 30  # an entry, then an interchange
+    frames = [{'segment': i // 60, 'index': i % 60, 'label': label} for i, label in enumerate(road)]
+    assert signs.map_sign_times(frames, ROAD_TYPES) == [30.0]
+    ages = signs.sign_ages([29, 30, 31.5, 200], [30.0])
+    assert ages[0] == float('inf') and list(ages[1:]) == [0.0, 1.5, 170.0]
+    assert signs.features_at([29, 30, 150, 151], [30.0]).tolist() == [[2.0, 0.0], [0.0, 1.0], [2.0, 1.0], [2.0, 0.0]]
+    assert signs.features_at([1, 2], []).tolist() == [[2.0, 0.0], [2.0, 0.0]]
+
+
+def test_confirmations_are_those_of_the_cars_memory():
+    from nnslr_tools import road_type_signs as signs
+    package = signs.package_path()
+    if not (package / 'vision.py').is_file():
+        pytest.skip('no sunnypilot clone with the car code')
+    vision = signs.load_vision(package)
+    start = [['other_sign:motorway_start', 0.9]]
+    readings = [(10.0, start), (10.2, start), (10.4, start),  # a sign read three times: confirmed at its 2nd and 3rd
+                (30.0, start),  # once only: not confirmed
+                (50.0, [['other_sign:town_entry', 0.9]]), (50.2, [['other_sign:town_entry', 0.9]]),  # not a motorway
+                (70.0, start), (72.0, start)]  # twice but 2 s apart: not confirmed
+    assert signs.confirmations(vision, readings) == [[10.2, 'motorway'], [10.4, 'motorway']]
+    assert signs.sign_times({'confirmed': [[10.2, 'motorway'], [50.2, 'town']]}) == [10.2]
+
+
+# -- the comma's rule on the merges (road_type_metrics) ---------------------------------------------------------------
+def _entry_drive():
+    """60 s of town, 20 s of ramp, 100 s of motorway."""
+    import numpy as np
+    return np.array([TOWN] * 60 + [RAMP] * 20 + [MOTORWAY] * 100)
+
+
+def test_ramp_entries_find_the_ramp_and_what_came_before():
+    import numpy as np
+
+    from nnslr_tools import road_type_metrics as metrics
+    labels = _entry_drive()
+    assert metrics.ramp_entries(labels, ROAD_TYPES) == [{'ramp': 60, 'merge': 80, 'before': 'town'}]
+    # A ramp of two seconds, or one that leaves the motorway, is no entry.
+    assert metrics.ramp_entries(np.array([TOWN] * 5 + [RAMP] * 2 + [MOTORWAY] * 5), ROAD_TYPES) == []
+    assert metrics.ramp_entries(np.array([MOTORWAY] * 5 + [RAMP] * 5 + [TOWN] * 5), ROAD_TYPES) == []
+
+
+def test_comma_release_on_time_on_the_ramp_late_and_not_held():
+    import numpy as np
+
+    from nnslr_tools import road_type_metrics as metrics
+    entry = {'ramp': 60, 'merge': 80, 'before': 'town'}
+    no_sign = np.full(180, np.inf)
+    # The road type says ramp at the number (second 62) and motorway from the merge: released 8 s later.
+    found = metrics.comma_release(_entry_drive(), no_sign, entry, ROAD_TYPES)
+    assert found == {'number_at': -18, 'held_by': 'ramp', 'release': 8, 'outcome': 'in_time'}
+    # Motorway from second 65, still on the ramp: a false general limit on the ramp.
+    early = _entry_drive()
+    early[65:80] = MOTORWAY
+    assert metrics.comma_release(early, no_sign, entry, ROAD_TYPES)['release'] == -7
+    assert metrics.comma_release(early, no_sign, entry, ROAD_TYPES)['outcome'] == 'on_ramp'
+    # The road type says town at the number and no sign: the number is not a ramp's, nothing to release.
+    town = _entry_drive()
+    town[60:70] = TOWN
+    assert metrics.comma_release(town, no_sign, entry, ROAD_TYPES)['outcome'] == 'not_held'
+    # A motorway sign 20 s before the number holds it; town after the merge breaks the 8 s, so it is late.
+    sign = np.full(180, np.inf)
+    sign[42:] = np.arange(180 - 42)
+    late = town.copy()
+    late[80:] = np.where(np.arange(100) % 6 == 5, TOWN, MOTORWAY)
+    result = metrics.comma_release(late, sign, entry, ROAD_TYPES)
+    assert result['held_by'] == 'sign' and result['release'] is None and result['outcome'] == 'late'
+    both = metrics.comma_release(_entry_drive(), sign, entry, ROAD_TYPES)
+    assert both['held_by'] == 'ramp+sign' and both['outcome'] == 'in_time'
+    summary = metrics.release_summary([found, result, both,
+                                       metrics.comma_release(town, no_sign, entry, ROAD_TYPES)])
+    assert summary['merges'] == 4 and summary['held'] == 3 and summary['held_by_sign'] == 2
+    assert (summary['in_time'], summary['late'], summary['not_held'], summary['on_ramp']) == (2, 1, 1, 0)
+    assert summary['median_release'] == 8.0 and summary['releases'] == [8, None, 8, None]
+
+
+def test_confusion_counts_the_masked_frames_by_truth_and_answer():
+    import numpy as np
+
+    from nnslr_tools import road_type_metrics as metrics
+    truth = np.array([0, 0, 1, 1, 2, -1])
+    answer = np.array([0, 1, 1, 1, 0, 2])
+    mask = np.array([1, 1, 1, 0, 1, 1])
+    assert metrics.confusion(truth, answer, mask, 3) == [[1, 1, 0], [0, 1, 0], [1, 0, 0]]
+
+
+def test_onnx_step_contract_with_the_sign_input(root, tmp_path):
+    torch = pytest.importorskip('torch')
+    pytest.importorskip('onnxruntime')
+    pytest.importorskip('torchvision')
+    import numpy as np
+
+    from nnslr_tools import road_type_data as data
+    from nnslr_tools import road_type_net as net
+    model = net.build_road_type_net('gru', pretrained=False, signs=True).eval()
+    assert model.gru.input_size == net.FEATURES + 2 + net.SIGN_INPUTS
+    checkpoint = tmp_path / 'road-type-best.pt'
+    torch.save({'task': 'road_type', 'architecture': 'mobilenet_v3_small+gru', 'memory': 'gru', 'signs': True,
+                'classes': list(data.CLASSES), 'state_dict': model.state_dict(), 'epoch': 1,
+                'split_sha256': 's', 'dataset_sha256': 'd'}, checkpoint)
+    result = net.export_road_type_onnx(checkpoint, tmp_path / 'road-type.onnx', data_root=root)
+    contract = json.loads(Path(result['contract']).read_text())
+    assert contract['verification']['passed'] is True and contract['step']['signs'] is True
+    assert [i['name'] for i in contract['inputs']] == ['image', 'speed', 'sign', 'hidden']
+    assert any('_road_sign_at' in line for line in contract['car_input']['steps'])
+    import onnxruntime
+    session = onnxruntime.InferenceSession(result['onnx'], providers=['CPUExecutionProvider'])
+    image = np.random.default_rng(0).random((1, 3, data.FRAME_HEIGHT, data.FRAME_WIDTH), dtype=np.float32)
+    feeds = {'image': image, 'speed': np.array([[0.5, 1.0]], np.float32),
+             'hidden': np.zeros((1, net.HIDDEN), np.float32)}
+    seen = session.run(None, {**feeds, 'sign': np.array([[0.1, 1.0]], np.float32)})[0]
+    unseen = session.run(None, {**feeds, 'sign': np.array([[2.0, 0.0]], np.float32)})[0]
+    assert seen.shape == (1, len(data.CLASSES)) and not np.allclose(seen, unseen)

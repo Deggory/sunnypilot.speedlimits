@@ -42,8 +42,9 @@ export const ROLE_TEXT: Record<ModelRole, {what: string; today: string; empty: s
   },
   road_type: {
     what: 'Says from the camera what road the car is on, once a second: town, rural, expressway, motorway, ramp or parking. '
-      + 'With memory it remembers the seconds before, so the motorway after a ramp is seen without a sign.',
-    today: 'Today: prototypes, with memory and without, judged on the test drives.',
+      + 'With memory it remembers the seconds before, and how long ago a motorway sign was read, so the 60 of a ramp ends '
+      + 'on the motorway without a sign.',
+    today: 'Today: prototypes, with memory and the sign, without the sign and without memory, judged on the test drives.',
     empty: 'No road type trained yet.',
     emptyMore: '“Train the road type” on the Train tab; its two networks appear here.',
     uses: 'Nothing uses the road type yet: the choice is only noted for the car.',
@@ -205,8 +206,9 @@ export interface Metric {
  * every sign found on the test at its score, and the speed signs among its 5 best boxes a frame (what the car reads:
  * a detector passes on a couple of hundred boxes a frame at that score, SignNet a few); the classifier with “not a sign”: the speed-sign crops and every sign
  * crop read right (the kind of an other sign aside), and the chain with the cutter; an old reader: its crops read
- * right; the decider: the “Another” signs found on validation and on the test; the road type: the motorway said right
- * in the first minute after each ramp, the mean F1 of the road types and the town's F1, on the test. */
+ * right; the decider: the “Another” signs found on validation and on the test; the road type: the merges where the
+ * ramp's limit ends in time by the comma's rule (since the second version), the motorway said right in the first minute
+ * after each ramp, the mean F1 of the road types and the town's F1, on the test. */
 export function metricsOf(version: ModelVersion): Metric[] {
   const of = (part: number | null | undefined, whole: number | null | undefined): string =>
     whole ? thousands(part ?? 0) + ' of ' + thousands(whole) : '';
@@ -259,7 +261,17 @@ export function metricsOf(version: ModelVersion): Metric[] {
     if (test === null) return [];
     const merge = test.after_merge;
     const town = test.classes['town'] ?? null;
+    const release = version.release?.test ?? null;
+    const late = release ? release.late + release.not_held : 0;
     return [
+      ...(release ? [{key: 'release', label: 'Ramp limit ends in time', short: 'Ends in time',
+        value: release.merges ? release.in_time / release.merges : null,
+        count: release.merges ? of(release.in_time, release.merges) + (release.merges === 1 ? ' merge' : ' merges') : 'no merge',
+        detail: release.merges ? 'The comma’s rule on the ' + release.merges + ' merges of the test: '
+          + (release.on_ramp ? release.on_ramp + ' ended on the ramp, ' : 'none on the ramp, ')
+          + (late ? late + ' late or never' : 'none late')
+          + (release.median_release === null ? '' : ', median ' + release.median_release + ' s after the merge')
+          : 'The test has no merge'}] : []),
       {key: 'merge', label: 'Motorway after a ramp', short: 'After a ramp', value: merge.merges ? merge.accuracy : null,
         count: merge.merges ? merge.seconds + ' s, ' + merge.merges + (merge.merges === 1 ? ' ramp' : ' ramps') : 'no ramp',
         detail: merge.merges ? 'The first minute on the motorway after each of the ' + merge.merges + ' ramps of the test'

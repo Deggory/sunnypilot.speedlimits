@@ -47,14 +47,17 @@ DECIDER_STEPS = (
     ('experiment_b_crop_geom', 'Crop, position and speed', 32),
     ('experiment_b_full', 'Crop, position and the scene', 32),
 )
-# scripts/run_road_type.sh: the road-type network with memory, then the same network without it, then the comparison
-# and the ONNX step (their epoch lines name them: road_type_gru, road_type_frame).
+# scripts/run_road_type.sh: the motorway signs read as the car reads them, the road-type network with memory and the
+# sign input, the same without the sign input, the same without memory, then the comparison and the ONNX step (their
+# epoch lines name them: road_type_gru, road_type_gru_nosign, road_type_frame).
 ROAD_TYPE_STEPS = (
-    ('checks', 'Checks and GPU smoke test', 5),
-    ('frames', 'Resize the frames', 5),
-    ('road_type_gru', 'Train with memory', 45),
-    ('road_type_frame', 'Train without memory', 40),
-    ('export', 'Compare and export the ONNX step', 5),
+    ('checks', 'Checks and GPU smoke test', 4),
+    ('frames', 'Resize the frames', 4),
+    ('signs', 'Read the motorway signs', 8),
+    ('road_type_gru', 'Train with memory and the sign', 30),
+    ('road_type_gru_nosign', 'Train with memory, no sign', 27),
+    ('road_type_frame', 'Train without memory', 23),
+    ('export', 'Compare and export the ONNX step', 4),
 )
 PREPARE_STEPS = (('link', 'Link the videos', 5), ('frames', 'Extract the frames and propose the signs', 95))
 # scripts/publish_networks.sh: "== 1/4 Export the cutter" ... (prepare), "== 1/3 Check the package" ... (upload).
@@ -112,8 +115,8 @@ CUTTER_TITLES = ((re.compile(r'Validate the training'), 'checks'), (re.compile(r
 DECIDER_PIPELINE = {1: 'checks', 2: 'checks', 3: 'experiment_b_crop', 4: 'experiment_b_crop_geom', 5: 'experiment_b_full'}
 SUBSTEPS = {'train_classifier': (7, CLASSIFIER_PIPELINE), 'train_cutter': (None, CUTTER_PIPELINE),
             'train_decider': (5, DECIDER_PIPELINE),
-            'train_road_type': (6, {1: 'checks', 2: 'checks', 3: 'frames', 4: 'road_type_gru', 5: 'road_type_frame',
-                                    6: 'export'}),
+            'train_road_type': (8, {1: 'checks', 2: 'checks', 3: 'frames', 4: 'signs', 5: 'road_type_gru',
+                                    6: 'road_type_gru_nosign', 7: 'road_type_frame', 8: 'export'}),
             'networks_prepare': (4, {1: 'cutter', 2: 'classifier', 3: 'decider', 4: 'package'}),
             'networks_publish': (3, {1: 'check', 2: 'catalog', 3: 'upload'}),
             'send_to_car': (5, {1: 'export', 2: 'publish', 3: 'record', 4: 'move', 5: 'build'}),
@@ -135,9 +138,10 @@ MARKERS = (
 )
 SUBSTEP = re.compile(r'^== (\d+)/(\d+) ')
 EPOCH = re.compile(r'^(detector|reader|classifier|experiment_b_crop_geom|experiment_b_crop|experiment_b_full|'
-                   r'road_type_gru|road_type_frame) epoch (\d+)/(\d+)\b')
+                   r'road_type_gru_nosign|road_type_gru|road_type_frame) epoch (\d+)/(\d+)\b')
 # "classifier stops early after epoch 12: ...": the training ends before its planned epochs.
-EARLY = re.compile(r'^(detector|reader|classifier|road_type_gru|road_type_frame) stops early after epoch (\d+)\b')
+EARLY = re.compile(r'^(detector|reader|classifier|road_type_gru_nosign|road_type_gru|road_type_frame) stops early '
+                   r'after epoch (\d+)\b')
 # The values of an epoch line: "train_loss 0.5000 val_loss 0.6000 ... 40s" (the detector also writes
 # val_recall, its validation recall at score 0.1, which chooses its best epoch; the classifier with "not a sign"
 # val_sign_accuracy, the sign crops read right, and val_rejection, the "not a sign" crops it rejects: their mean,

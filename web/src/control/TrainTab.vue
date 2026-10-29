@@ -74,9 +74,9 @@ const latest = (role: ModelRole): ModelVersion | null => roleOf(role)?.versions[
 const latestCutter = computed(() => latest('cutter'));
 const latestClassifier = computed(() => latest('classifier'));
 const latestDecider = computed(() => latest('decider'));
-/** The road type: the newest network with memory (the one for the car), else the newest. */
+/** The road type: the newest network with memory and the sign (road-type/gru, the one for the car), else the newest. */
 const latestRoad = computed(() => roleOf('road_type')?.versions.find((version) => version.role === 'road_type'
-  && version.memory === 'gru') ?? latest('road_type'));
+  && version.id.endsWith('/road-type/gru')) ?? latest('road_type'));
 const roleLabel = (role: ModelRole): string => roleOf(role)?.label ?? role;
 const sectionLatest = computed(() => section.value === 'cutter' ? latestCutter.value : section.value === 'classifier'
   ? latestClassifier.value : section.value === 'decider' ? latestDecider.value : section.value === 'road' ? latestRoad.value : null);
@@ -96,6 +96,9 @@ function headlineOf(version: ModelVersion): {value: string; text: string} | null
     return null;
   }
   if (version.role === 'road_type') {
+    const release = version.release?.test;
+    if (release?.merges) return {value: release.in_time + ' of ' + release.merges, text: 'ramp limits ended in time on the test, '
+      + release.on_ramp + ' on the ramp'};
     const merge = version.test?.after_merge;
     if (merge?.merges) return {value: pct(merge.accuracy), text: 'motorway said right in the minute after a ramp'};
     return version.test ? {value: pct(version.test.macro_f1), text: 'road types, mean F1 on the test'} : null;
@@ -132,8 +135,9 @@ const DECIDER_ACTIONS: [ActionName, string][] = [
 ];
 /** The road type's training, in its card: with memory and without, compared, the one with memory exported. */
 const ROAD_ACTIONS: [ActionName, string][] = [
-  ['train_road_type', 'With memory and without, compared on the test drives; the one with memory is exported for the car. '
-    + 'About 15 minutes on the GPU.'],
+  ['train_road_type', 'Trains with memory and the motorway sign (where each entry ramp of the map starts), without the sign '
+    + 'and without memory, compared by when the ramp’s limit ends; the first is exported for the car. '
+    + 'About 20 minutes, 40 the first time.'],
 ];
 /** The classifier: our signs only, or with the signs of the Mapillary dataset in train (status.classifier_options). */
 const mapillaryState = computed(() => props.status?.classifier_options?.mapillary ?? null);

@@ -69,9 +69,13 @@ from nnslr_tools.training import DETECTOR_FAMILIES
 
 ROLES = ('cutter', 'classifier', 'decider', 'road_type')
 ROLE_LABELS = {'cutter': 'Cutter', 'classifier': 'Classifier', 'decider': 'Decider', 'road_type': 'Road type'}
-# The road-type network of scripts/run_road_type.sh: its folders in <run>/road-type, with memory and without.
+# The road-type network of scripts/run_road_type.sh: its folders in <run>/road-type, with memory (and the sign input,
+# since the second version), with memory without the sign input, and without memory.
 ROAD_TYPE_PART = 'road-type'
-ROAD_TYPE_FOLDERS = {'gru': ('With memory', 'GRU over the seconds'), 'frame': ('Without memory', 'one frame at a time')}
+ROAD_TYPE_FOLDERS = {'gru': ('With memory', 'GRU over the seconds'),
+                     'gru-nosign': ('With memory, no sign', 'GRU over the seconds, without the motorway sign'),
+                     'frame': ('Without memory', 'one frame at a time')}
+ROAD_TYPE_SIGN = ('With memory and the sign', 'GRU over the seconds and the motorway sign')
 ROAD_TYPE_KINDS = ('ramp_to_motorway', 'motorway_to_ramp', 'town_entry', 'town_exit', 'other')
 # The cutter must miss nothing: it is judged on recall at a low score (nnslr_tools.evaluation.CUTTER_SCORE_THRESHOLDS).
 CUTTER_SCORE = 0.1
@@ -82,7 +86,7 @@ FAMILIES = ('all', 'speed')
 SIZE_NAME = re.compile(r'[1-9][0-9]{0,4}x[1-9][0-9]{0,4}')
 _RUN = RUN_NAME.pattern
 MODEL_ID = re.compile(rf'(cutter|classifier|decider|road_type):({_RUN})/(detector|detector-sizes/{SIZE_NAME.pattern}|'
-                      rf'reader|classifier|{EXPERIMENT_DIR}/{_RUN}|{ROAD_TYPE_PART}/(?:gru|frame))')
+                      rf'reader|classifier|{EXPERIMENT_DIR}/{_RUN}|{ROAD_TYPE_PART}/(?:gru|gru-nosign|frame))')
 # SignNet: a cutter of the Models tab, never one of active.json (chain.py and Prepare load a detector).
 SIGNNET_PART = 'signnet'
 SIGNNET_ID = re.compile(rf'cutter:({_RUN})/{SIGNNET_PART}')
@@ -373,6 +377,14 @@ def _road_type_partition(report: Any) -> dict | None:
     }
 
 
+def _road_type_release(summary: Any) -> dict | None:
+    """The comma's rule on one partition (nnslr_tools.road_type_metrics.release_summary): when the ramp's limit ends."""
+    if not isinstance(summary, dict):
+        return None
+    return {key: _int(summary.get(key)) or 0 for key in ('merges', 'held', 'on_ramp', 'in_time', 'late', 'not_held')} | {
+        'median_release': _num(summary.get('median_release'))}
+
+
 def road_type_digest(result: Any) -> dict:
     """result.json of ``nnslr train-road-type``: how it was trained (no history) and validation and test as the road
     type is judged; the frame network also with its 5-second majority vote (``test_smoothed``)."""
@@ -393,6 +405,9 @@ def road_type_digest(result: Any) -> dict:
         'validation': _road_type_partition(result.get('validation')),
         'test': _road_type_partition(result.get('test')),
         'test_smoothed': _road_type_partition(result.get('test_smoothed')),
+        'signs': bool(result.get('signs')),
+        'release': {partition: _road_type_release(_dig(result, ('release', partition)))
+                    for partition in ('validation', 'test')} if isinstance(result.get('release'), dict) else None,
     }
 
 
@@ -791,8 +806,11 @@ class ModelIndex:
             trained = result or {}
             entry = self._base('road_type', name, part, checkpoint, result, problems)
             onnx = self.runs._file(run, ROAD_TYPE_PART + '/export/road-type.onnx.contract.json') if folder == 'gru' else None
+            if folder == 'gru' and trained.get('signs'):
+                label, detail = ROAD_TYPE_SIGN
             entry.update({
-                'label': label, 'detail': detail, 'memory': trained.get('memory'),
+                'label': label, 'detail': detail, 'memory': trained.get('memory'), 'signs': trained.get('signs', False),
+                'release': trained.get('release'),
                 'architecture': trained.get('architecture'), 'initialization': 'ImageNet',
                 'best_epoch': trained.get('best_epoch'), 'epochs': trained.get('epochs'),
                 'epochs_run': trained.get('epochs_run'), 'classes': trained.get('classes'),

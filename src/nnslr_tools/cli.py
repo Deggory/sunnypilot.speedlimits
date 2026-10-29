@@ -1521,10 +1521,37 @@ def build_parser() -> argparse.ArgumentParser:
     p_road_net.add_argument("--num-workers", "--workers", dest="workers", type=int, default=8,
                             help="processes resizing the frames for the cache")
     p_road_net.add_argument("--seed", type=int, default=0)
+    p_road_net.add_argument("--no-sign", action="store_true",
+                            help="without the sign input (the seconds since a motorway sign), to compare")
+    p_road_net.add_argument("--sign-source", default="map", choices=("map", "car"),
+                            help="where the motorway signs of the training come from: map (the start of every entry "
+                                 "ramp, where 4.01 stands; default) or car (those the car's code confirmed, nnslr "
+                                 "road-type-signs)")
     p_road_net.add_argument("--dry-run", action="store_true",
                             help="on the CPU, a few short sequences, one epoch of two steps: checks the pipeline")
     p_road_net.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_road_net.set_defaults(func=_cmd_train_road_type)
+    p_road_signs = sub.add_parser("road-type-signs", help="read the motorway signs of the drives with road types as the "
+                                                          "comma does (its vision.py, SignNet and classifier from the "
+                                                          "sunnypilot clone, 5 frames a second of fcamera.hevc): "
+                                                          "derived/road_type_signs/<route>.json, the sign input of the "
+                                                          "road-type network (CPU)")
+    p_road_signs.add_argument("--sunnypilot", help="the sunnypilot clone (default: NNSLR_SUNNYPILOT_CLONE or "
+                                                   "/root/sunnypilot); read only")
+    p_road_signs.add_argument("--num-workers", "--workers", dest="workers", type=int, default=0,
+                              help="processes (default: the cores but two)")
+    p_road_signs.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+    p_road_signs.set_defaults(func=_cmd_road_type_signs)
+    p_road_rel = sub.add_parser("release-road-type", help="the comma's rule with a road-type checkpoint: for every "
+                                                          "merge of validation and test, when the ramp's limit ends "
+                                                          "(release.json beside the checkpoint, or --output)")
+    p_road_rel.add_argument("--checkpoint", required=True, help="road-type-best.pt (any version)")
+    p_road_rel.add_argument("--output", help="default: release.json beside the checkpoint")
+    p_road_rel.add_argument("--sign-source", default="map", choices=("map", "car"),
+                            help="the motorway signs of the rule and of the sign input (the car's are measured too "
+                                 "when read)")
+    p_road_rel.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+    p_road_rel.set_defaults(func=_cmd_release_road_type)
     p_road_cmp = sub.add_parser("compare-road-type", help="the road-type network with and without memory on test: "
                                                           "<run>/road-type/comparison.txt")
     p_road_cmp.add_argument("--run-root", required=True, help="the run folder, e.g. data/runs/<name>")
@@ -2242,13 +2269,47 @@ def _cmd_train_road_type(args: argparse.Namespace) -> int:
     from nnslr_tools.road_type_net import train_road_type
     root = resolve_data_root(Path(args.data_root) if args.data_root else None)
     result = train_road_type(root, Path(args.run_dir), memory=args.memory, epochs=args.epochs, patience=args.patience,
-                             batch=args.batch, dry_run=args.dry_run, workers=args.workers, seed=args.seed)
+                             batch=args.batch, dry_run=args.dry_run, workers=args.workers, seed=args.seed,
+                             signs=not args.no_sign, sign_source=args.sign_source)
     test = result["test"]
-    print(json.dumps({"run_dir": args.run_dir, "memory": args.memory, "best_epoch": result["best_epoch"],
+    print(json.dumps({"run_dir": args.run_dir, "memory": args.memory, "signs": not args.no_sign,
+                      "sign_source": args.sign_source,
+                      "best_epoch": result["best_epoch"],
                       "parameters": result["parameters"], "flops_per_step": result["flops_per_step"],
                       "test_macro_f1": test["weight_1"]["macro_f1"],
                       "test_after_merge_accuracy": test["after_merge"]["accuracy"],
                       "test_false_switches_per_hour": test["false_switches_per_hour"]}, sort_keys=True), flush=True)
+    return 0
+
+
+def _cmd_road_type_signs(args: argparse.Namespace) -> int:
+    from nnslr_tools.preannotate import resolve_data_root
+    from nnslr_tools.road_type_data import road_type_routes
+    from nnslr_tools.road_type_signs import build_signs, package_path, sign_times
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    routes = road_type_routes(root)
+    if not routes:
+        print("nnslr road-type-signs: no drive with road types (nnslr road-types)", file=sys.stderr)
+        return 2
+    records = build_signs(root, routes, package=package_path(Path(args.sunnypilot) if args.sunnypilot else None),
+                          workers=args.workers or None, log=lambda line: print(line, flush=True))
+    for route, record in records.items():
+        print(f"{route}: {sum(record['frames'].values())} frames read, {len(record['readings'])} with a sign, "
+              f"motorway signs confirmed at {', '.join(f'{t:.0f} s' for t in sign_times(record)) or 'none'}",
+              flush=True)
+    return 0
+
+
+def _cmd_release_road_type(args: argparse.Namespace) -> int:
+    from nnslr_tools.preannotate import resolve_data_root
+    from nnslr_tools.road_type_net import release_of_checkpoint, release_text
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    checkpoint = Path(args.checkpoint)
+    output = Path(args.output) if args.output else checkpoint.with_name("release.json")
+    result = release_of_checkpoint(root, checkpoint, output, sign_source=args.sign_source)
+    for key, title in (("release", f"{args.sign_source} signs"), ("release_car", "the car's signs")):
+        for partition in ("validation", "test") if result.get(key) else ():
+            print(f"{partition} ({title}): {release_text(result[key][partition])}", flush=True)
     return 0
 
 

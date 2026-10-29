@@ -256,3 +256,87 @@ Unsure frames, by class (to confirm first in Data › Roads): town 343, rural 1,
 - More merges in validation and test, to make the after-merge number a measure.
 - The stretches of motorway taken as rural, to look at (the frames, or the map's labels there).
 - The car: nothing uses it. It needs `SpeedLimitMemory` to take the road type, the timing on Chestnut, and a decision on how the network and the map combine.
+
+### Second version: the motorway sign, and when the ramp's limit ends (29 October 2026)
+
+**Why.** What matters on the car is one moment: when the 60 of an entry ramp ends and the motorway's 120 comes back. The comma's rule (`vision.SpeedLimitMemory` in sunnypilot) is:
+- a number read on a ramp (the road type says ramp) or within 45 s of a confirmed motorway or expressway sign is the ramp's limit;
+- it ends once the road type says motorway or expressway 8 steps in a row.
+
+In Switzerland the motorway sign (4.01) stands where the entry ramp starts. So the network does not need to tell the ramp itself on an entry. It must say "on the carriageway" only after the merge, and keep saying it, with its memory, when the first frames of the motorway look like a town or a rural road. Ramp recognition is still needed for interchanges, which have no 4.01; it comes second. No rule on the speed.
+
+**The sign input** (`src/nnslr_tools/road_type_signs.py`). One more input of two numbers a step:
+- `[min(t, 120) / 60, 1]`, where t is the seconds since a motorway or expressway sign was confirmed;
+- `[2, 0]` when no such sign was confirmed in the last 120 s.
+
+On the car t is `now - SpeedLimitMemory._road_sign_at`. The network grows to 1,102,246 parameters; the cost per step is unchanged (84 MFLOPs, 4.0 ms on the V100).
+
+**Where the signs come from.** There are two sources (`--sign-source`):
+- **The car's own code** (`nnslr road-type-signs`, step 4 of the script). It runs the car's `vision.py`, SignNet and classifier from the sunnypilot clone, read only, over `fcamera.hevc` at 5 frames a second, with speedvisiond's confirmation (2 frames within 1.5 s). On all 12 drives it read 99,000 frames, 15,587 of them with a sign read sure enough, and confirmed **no motorway sign at all**. At the three reviewed 4.01 signs, the classifier gives `motorway_start` at most 0.022 on every box: it reads the sign as a generic other sign, or the cutter leaves it out. The classifier has seen only 8 reviewed frames of 4.01. So today the car would give this input nothing. The readings are cached in `data/derived/road_type_signs/`; about 16 minutes on 30 processes the first time.
+- **The map** (the default, used for training and as "the car reading every 4.01"). The sign is placed at the first second of every OSM ramp that leads onto the motorway from another road. A ramp from the motorway itself is an interchange and gets no sign. This gives 8 signs on 7 of the 12 drives: only 2 fall in train, 1 in validation and 5 in test areas. Of those 5, 3 are on merges that lie whole in test. The three reviewed 4.01 signs were seen from 7 s before to 6 s after that second, so in training the time moves by up to ±4 s. In a quarter of the windows the sign is missed, and in 5 % of the windows without one a sign is invented, as a misreading.
+
+**Training changes.** A quarter of the windows are cut around a merge. The ramp and the first 60 s of carriageway after it weigh 3 times in the loss. Everything else is as in the first version, and the best epoch is still chosen by validation macro F1.
+
+**The comma's rule, measured** (`road_type_metrics.comma_release`, `nnslr release-road-type` for any checkpoint). Every ramp → motorway merge of validation and test is measured:
+- each drive is run whole from zeros, as on the car, and the answer goes through the 3-step debounce;
+- the ramp's number is read at the ramp's third second;
+- it is held when the road type says ramp then, or a sign was confirmed in the 45 s before;
+- it is released at the 8th motorway or expressway answer in a row.
+
+Each merge has one of four outcomes:
+- **on the ramp**: released before the merge, so a false 120 on the ramp;
+- **in time**: released within 60 s after the merge;
+- **late**: not released by 60 s after the merge;
+- **not held**: the ramp's number is kept as an ordinary limit, until another sign ends it, which is today's stuck 60.
+
+There are two scenarios: the map's signs, and the signs the car's code confirms today.
+
+**Results** (run `2026-10-29_1231-road-type`; v1 is `2026-10-29_0937-road-type`, measured again with `release-road-type`). Seconds are relative to the merge.
+
+| Merge | Before | Ramp | v1 | v2 without the sign | v2 with the sign |
+|---|---|---|---|---|---|
+| validation 00000128 17/20 → 17/34 | rural | 14 s | +4 | +17 | +2 |
+| test 0000012d 6/20 → 7/0 | rural | 40 s | −21 on the ramp | −17 on the ramp | −29 on the ramp |
+| test 0000012d 25/30 → 25/38 | town | 8 s | +19 | +37 | +21 |
+| test 0000012e 25/54 → 26/22 | rural | 28 s | +5 | late (town for 80 s) | +8 |
+| test, 4 interchanges (0000012d 18/6, 18/14, 29/37, 31/14) | motorway | 4–36 s | not held | not held | not held |
+
+| Test, 7 merges, map signs | On the ramp | In time (median) | Late | Not held | Macro F1 | After a merge |
+|---|---|---|---|---|---|---|
+| v1 | 1 | 2 (+12 s) | 0 | 4 | 0.584 | 91.5 % |
+| v2 without the sign (epoch 44) | 1 | 1 (+37 s) | 1 | 4 | 0.517 | 71.4 % |
+| v2 with the sign (epoch 54) | 1 | 2 (+14.5 s) | 0 | 4 | 0.561 | 90.7 % |
+
+- **Without memory** (with the sign, epoch 24): on the ramp 1 (−4 s), in time 1 (+19 s), late 1, not held 4. Macro F1 0.441, after a merge 59.9 %.
+
+The same trainings with two more seeds (test, map signs; trained beside the run, not part of it). "Motorway called ramp" counts the seconds of motorway said ramp. A motorway limit read then would end after 8 s, wrongly.
+
+| Version, seed | On the ramp | In time (median) | Late | Not held | Ramp F1 | Motorway called ramp |
+|---|---|---|---|---|---|---|
+| v1 | 1 | 2 (+12 s) | 0 | 4 | 0.000 | 46 s |
+| with the sign, seed 0 (the run) | 1 | 2 (+14.5 s) | 0 | 4 | 0.000 | 2 s |
+| with the sign, seed 1 | 1 | 1 (+24 s) | 1 | 4 | 0.065 | 95 s |
+| with the sign, seed 2 | 0 | 2 (+35 s) | 1 | 4 | 0.083 | 183 s |
+| without the sign, seed 0 (the run) | 1 | 1 (+37 s) | 1 | 4 | 0.005 | 57 s |
+| without the sign, seed 1 | 1 | 4 (+17.5 s) | 1 | 1 | 0.120 | 575 s |
+| without the sign, seed 2 | 1 | 1 (+20 s) | 1 | 4 | 0.040 | 73 s |
+
+- **The three entry ramps with a sign, over the three seeds** (9 merges): with the sign, 5 in time, 2 on the ramp and 2 late; without it, 3, 3 and 3. The sign helps a little, and only where it stands.
+- **Seed 1 without the sign** stopped at epoch 7, before it learnt the ramps by heart. It says ramp often enough to hold 3 of the 4 interchanges, all in time. But it calls 575 s of motorway a ramp, which is the opposite error.
+
+- **With the car's signs of today**, every merge of every version is "not held", 1 in validation and 7 in test: no sign is confirmed, and no version ever says ramp.
+- **The sign helps the memory, not the moment.** Against v2 without it, the sign keeps "motorway" after the merge. On 0000012e the version without the sign says town for 80 s, while the one with it releases at +8 s. Against v1, the sign changes nothing on the release. On the long ramp it even makes things worse: it says motorway from the sign on, for the whole 40 s, which is a two-lane ramp with crash barriers on both sides.
+- **The ramp is still not recognised.** The run's version scores F1 0.000 on test and on validation, where none of the 82 ramp seconds is said ramp; over the seeds the best is 0.12. Of the 319 ramp seconds of test, the version with the sign says 202 motorway, 72 town and 45 rural. Train has about 12 ramps and 2 entries with a sign, and the training loss falls to 0.01: it learns them by heart. So the 4 interchanges of test stay "not held" in every version.
+- False switches per hour on test (raw, debounced): v1 58 and 33, v2 with the sign 80 and 48, without it 119 and 52.
+
+**On the car** (`road-type/export/road-type.onnx` and its contract in the run). The step has one more input:
+- `sign` (1, 2), next to `image`, `speed` and `hidden`;
+- the contract's `car_input.steps` say how to make it: `age = now - memory._road_sign_at`, then `sign = [[min(age, 120) / 60, 1.0]]` when the age is at most 120 s, else `[[2.0, 0.0]]`.
+
+Checked against PyTorch with onnxruntime: largest error 5e-7 on random inputs. Over 60 s of a real drive (00000125 from 4/30, with the sign for 30 of them) the largest error is 4e-6, and the answer is the same in all 60 s.
+
+**What is missing.**
+- **The car must read 4.01.** Without it the sign input is empty, and the rule holds a ramp's number only when the network says ramp, which it almost never does. The classifier needs reviewed 4.01 frames, many more than 8, before the sign input means anything on the car.
+- **Ramps, for interchanges.** Ramps need more drives with on-ramps, off-ramps and interchanges. With 12 ramps in train the class does not generalise, whatever the weights or the oversampling.
+- **Merges and signs.** There are 8 merges in validation and test, and only 4 with a sign. Train has 2 entries with a sign. One merge moves a whole row of the table, and seeds of the same training differ by as much as the versions do. The numbers above are a trend, not a measure.
+- **Long entry ramps.** On the 40 s two-lane entry ramp of the test, 7 of the 8 networks above release the 120 on the ramp, between 4 and 29 s before the merge. The sign's age alone cannot place the merge, because entry ramps here last from 8 to 40 s.

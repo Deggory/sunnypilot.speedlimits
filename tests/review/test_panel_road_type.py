@@ -20,12 +20,13 @@ TOWN, RURAL, EXPRESSWAY, MOTORWAY, RAMP, PARKING = range(6)
 
 LOG = """== Road type with memory ==
 run:          2026-10-29_1200-road-type
-== 1/6 Check the road types, the split and the pipeline (CPU-only) ==
+== 1/8 Check the road types, the split and the pipeline (CPU-only) ==
 dry run road_type_gru epoch 1/1 train_loss 1.7000 val_macro_f1 0.1000 val_accuracy 0.2000 5s
-== 2/6 Explicit CUDA smoke test ==
-== 3/6 Resize the frames to 256x144 ==
+== 2/8 Explicit CUDA smoke test ==
+== 3/8 Resize the frames to 256x144 ==
 frame cache: 30 drives ready
-== 4/6 Train with memory (GRU) ==
+== 4/8 Read the motorway signs as the car does (CPU) ==
+== 5/8 Train with memory and the sign (GRU) ==
 road_type_gru epoch 15/60 train_loss 0.8000 val_macro_f1 0.5500 val_accuracy 0.7000 12s
 """
 
@@ -39,7 +40,7 @@ def road_type_script(checkout):
     script = checkout / 'scripts' / 'run_road_type.sh'
     script.parent.mkdir(parents=True, exist_ok=True)
     script.write_text('#!/usr/bin/env bash\necho "== Road type with memory =="\necho "run:          $1"\n'
-                      'echo "== 4/6 Train with memory (GRU) =="\n'
+                      'echo "== 5/8 Train with memory and the sign (GRU) =="\n'
                       'echo "road_type_gru epoch 2/60 train_loss 1.0 val_macro_f1 0.4 val_accuracy 0.6 6s"\n')
     script.chmod(0o755)
     return script
@@ -49,19 +50,27 @@ def road_type_script(checkout):
 def test_the_progress_counts_the_epochs_of_each_network_and_not_those_of_the_dry_run():
     result = progress('train_road_type', 'running', LOG)
     assert [(step['key'], step['state']) for step in result['steps']] == [
-        ('checks', 'done'), ('frames', 'done'), ('road_type_gru', 'current'), ('road_type_frame', 'todo'), ('export', 'todo')]
-    # 5 + 5 done, then 15 of the 60 epochs of the 45 of the network with memory.
-    assert result['percent'] == 21.2
-    assert result['detail'] == 'Train with memory · epoch 15 of 60'
+        ('checks', 'done'), ('frames', 'done'), ('signs', 'done'), ('road_type_gru', 'current'),
+        ('road_type_gru_nosign', 'todo'), ('road_type_frame', 'todo'), ('export', 'todo')]
+    # 4 + 4 + 8 done, then 15 of the 60 epochs of the 30 of the network with memory and the sign.
+    assert result['percent'] == 23.5
+    assert result['detail'] == 'Train with memory and the sign · epoch 15 of 60'
     assert list(result['curves']) == ['road_type_gru']
     assert [point['epoch'] for point in result['curves']['road_type_gru']['points']] == [15]
 
     later = LOG + ('road_type_gru stops early after epoch 52: no better validation macro F1 for 15 epochs\n'
-                   '== 5/6 Train without memory ==\n'
-                   'road_type_frame epoch 30/60 train_loss 0.9000 val_macro_f1 0.5000 val_accuracy 0.7000 10s\n')
+                   '== 6/8 Train with memory, without the sign ==\n'
+                   'road_type_gru_nosign epoch 30/60 train_loss 0.9000 val_macro_f1 0.5000 val_accuracy 0.7000 10s\n')
     result = progress('train_road_type', 'running', later)
-    assert [step['state'] for step in result['steps']] == ['done', 'done', 'done', 'current', 'todo']
-    assert result['percent'] == 75.0 and result['detail'] == 'Train without memory · epoch 30 of 60'
+    assert [step['state'] for step in result['steps']] == ['done', 'done', 'done', 'done', 'current', 'todo', 'todo']
+    assert result['percent'] == 59.5 and result['detail'] == 'Train with memory, no sign · epoch 30 of 60'
+    assert list(result['curves']) == ['road_type_gru', 'road_type_gru_nosign']
+
+    last = later + ('== 7/8 Train without memory ==\n'
+                    'road_type_frame epoch 30/60 train_loss 0.9000 val_macro_f1 0.5000 val_accuracy 0.7000 10s\n')
+    result = progress('train_road_type', 'running', last)
+    assert [step['state'] for step in result['steps']] == ['done'] * 5 + ['current', 'todo']
+    assert result['percent'] == 84.5 and result['detail'] == 'Train without memory · epoch 30 of 60'
 
 
 # -- "Train the road type" ----------------------------------------------------------------------------------------
@@ -96,7 +105,7 @@ def test_a_road_type_training_started_from_a_terminal_has_the_progress_of_its_ru
     log.write_text(LOG)
     payload = {'jobs': [], 'activities': [{'group': 'train', 'label': 'road type training', 'pid': 1}]}
     panel._terminal_training(payload)
-    assert payload['activities'][0]['progress']['detail'] == 'Train with memory · epoch 15 of 60'
+    assert payload['activities'][0]['progress']['detail'] == 'Train with memory and the sign · epoch 15 of 60'
 
 
 # -- its two networks in Models -----------------------------------------------------------------------------------
@@ -178,3 +187,27 @@ def test_a_result_of_another_task_is_no_road_type():
     except ValueError:
         return
     raise AssertionError('a detector result was read as a road type')
+
+
+def test_the_second_version_shows_its_sign_input_and_when_the_ramp_limit_ends(tmp_path):
+    root = tmp_path / 'data'
+    run = root / 'runs' / '2026-10-29_1500-road-type' / 'road-type'
+    release = {'merges': 7, 'held': 6, 'held_by_ramp': 4, 'held_by_sign': 3, 'on_ramp': 1, 'in_time': 4, 'late': 1,
+               'not_held': 1, 'median_release': 11.0, 'releases': [10, 11, -3, None, 12, 9, None]}
+    for folder, signs in (('gru', True), ('gru-nosign', False)):
+        write(run / folder / 'road-type-best.pt', 'weights')
+        write(run / folder / 'result.json', {**result('gru'), 'name': 'road_type_gru' + ('' if signs else '_nosign'),
+                                             'signs': signs, 'release': {'validation': release, 'test': release,
+                                                                         'merges': [{'route': 'r'}]}})
+    runs = RunsIndex(root)
+    runs.running_runs = lambda: {}
+    found = {entry['part']: entry for entry in ModelIndex(runs).artifacts(('road_type',))['road_type']}
+    assert sorted(found) == ['road-type/gru', 'road-type/gru-nosign']
+    sign, nosign = found['road-type/gru'], found['road-type/gru-nosign']
+    assert (sign['signs'], sign['label'], sign['detail']) == (True, 'With memory and the sign',
+                                                           'GRU over the seconds and the motorway sign')
+    assert (nosign['signs'], nosign['label']) == (False, 'With memory, no sign')
+    assert nosign['id'] == 'road_type:2026-10-29_1500-road-type/road-type/gru-nosign'
+    assert sign['release']['test'] == {'merges': 7, 'held': 6, 'on_ramp': 1, 'in_time': 4, 'late': 1, 'not_held': 1,
+                                       'median_release': 11.0}
+    assert road_type_digest(result('none'))['release'] is None

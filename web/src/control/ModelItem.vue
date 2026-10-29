@@ -116,6 +116,11 @@ function changeCell(numbers: RoadTypeNumbers | null, key: string): string {
   return row.found + ' of ' + row.count + delay;
 }
 const perHour = (value: number | null | undefined): string => value === null || value === undefined ? '–' : String(Math.round(value));
+/** When the ramp's limit ends by the comma's rule (nnslr_tools.road_type_metrics.comma_release), per partition. */
+const RELEASE_ROWS: {key: 'validation' | 'test'; label: string}[] = [{key: 'validation', label: 'Validation'}, {key: 'test', label: 'Test'}];
+const releaseRows = computed(() => RELEASE_ROWS.filter((row) => (roadType.value?.release?.[row.key]?.merges ?? 0) > 0)
+  .map((row) => ({...row, numbers: roadType.value!.release![row.key]!})));
+const seconds = (value: number | null): string => value === null ? '–' : (value > 0 ? '+' : '') + value + ' s';
 </script>
 
 <template>
@@ -254,6 +259,20 @@ const perHour = (value: number | null | undefined): string => value === null || 
             </tr>
           </tbody>
         </table></div>
+        <div v-if="releaseRows.length" class="table-wrap"><table class="model-table" aria-label="When the ramp’s limit ends">
+          <thead><tr><th title="Merges: a ramp, then the motorway or expressway">Ramp limit</th><th class="num" title="Merges">Merges</th>
+            <th class="num" title="Ended after 8 s of motorway, on the ramp: a 120 shown too early">On the ramp</th>
+            <th class="num" title="Ended within 60 s of the merge · median seconds after it">In time</th>
+            <th class="num" title="Ended more than 60 s after the merge, or never (also when the number was not taken as the ramp’s)">Late</th></tr></thead>
+          <tbody>
+            <tr v-for="row in releaseRows" :key="row.key" :data-release="row.key">
+              <th scope="row">{{ row.label }}</th><td class="num">{{ row.numbers.merges }}</td>
+              <td class="num">{{ row.numbers.on_ramp }}</td>
+              <td class="num">{{ row.numbers.in_time }}<span class="muted"> · {{ seconds(row.numbers.median_release) }}</span></td>
+              <td class="num">{{ row.numbers.late + row.numbers.not_held }}</td>
+            </tr>
+          </tbody>
+        </table></div>
         <div class="table-wrap"><table class="model-table" aria-label="Changes of road type found within a minute">
           <thead><tr><th>Changes</th><th class="num" title="Found within a minute · median delay">Test</th></tr></thead>
           <tbody>
@@ -273,7 +292,9 @@ const perHour = (value: number | null | undefined): string => value === null || 
           <div><dt>Best epoch</dt><dd>{{ epoch }}</dd></div>
           <div v-if="roadType.memory === 'gru'"><dt>For the car</dt><dd>{{ roadType.onnx ? 'ONNX step exported' : 'not exported yet' }}</dd></div>
         </dl>
-        <p class="note">Delay: the median seconds from the change in the labels to the network’s; negative: it changes first.</p>
+        <p class="note">Delay: the median seconds from the change in the labels to the network’s; negative: it changes first.<template
+          v-if="releaseRows.length"> Ramp limit: the comma’s rule, a number read on the ramp ends after 8 s of motorway in a row; the motorway
+          sign at the start of every entry ramp of the map.</template></p>
         </details>
       </template>
     </template>

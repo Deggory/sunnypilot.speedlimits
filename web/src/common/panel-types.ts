@@ -1128,10 +1128,30 @@ export interface RoadTypeNumbers {
   false_switches_per_hour_debounced: number | null;
 }
 
+/** The comma's rule on one partition (nnslr_tools.road_type_metrics.release_summary): for every merge (a ramp, then the
+ * motorway or expressway), a number read on the ramp is held as the ramp's limit (the road type said ramp, or a motorway
+ * sign was confirmed within 45 s) and ends after 8 s of motorway in a row: on the ramp (too early), in time (within
+ * 60 s of the merge), late, or never held. */
+export interface RoadTypeRelease {
+  merges: number;
+  held: number;
+  on_ramp: number;
+  in_time: number;
+  late: number;
+  not_held: number;
+  /** Seconds after the merge, of the releases in time. */
+  median_release: number | null;
+}
+
 export interface RoadTypeModel extends ModelBase {
   role: 'road_type';
   /** gru: with memory; none: the same encoder one frame at a time, to compare. */
   memory: 'gru' | 'none' | null;
+  /** It takes the seconds since a motorway sign (since the second version; trained with the sign where each entry ramp of
+   * the map starts, nnslr_tools.road_type_signs). */
+  signs: boolean;
+  /** When the ramp's limit ends by the comma's rule; null for a version measured before it. */
+  release: {validation: RoadTypeRelease | null; test: RoadTypeRelease | null} | null;
   classes: string[] | null;
   parameters: number | null;
   flops_per_step: number | null;

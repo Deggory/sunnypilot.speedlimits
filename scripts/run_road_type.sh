@@ -3,28 +3,38 @@ set -euo pipefail
 
 # The road-type network with memory (docs/NEURAL_NETWORK.md, "The road type with memory"): the kind of road from the
 # camera, one frame a second (town, rural, expressway, motorway, ramp, parking), with a GRU that remembers the seconds
-# before, so that the end of a ramp on the motorway (where no sign ends the ramp's 60) and the entry into and exit
-# from a town are seen. On one GPU, one step after the other:
+# before and how long ago a motorway sign was seen, so that the 60 of a ramp ends where the ramp merges into the
+# motorway (no sign ends it there: the comma's rule, vision.SpeedLimitMemory) and the entry into and exit from a town
+# are seen.
+# On one GPU, one step after the other:
 #
 #   1. checks the road types, the split and the whole pipeline on the CPU (nnslr train-road-type --dry-run);
 #   2. a CUDA smoke test;
 #   3. resizes every frame of the drives with road types to 256 x 144 once (data/derived/road_type_frames);
-#   4. trains the network with memory (nnslr train-road-type --memory gru);
-#   5. trains the same network without memory, to compare (--memory none);
-#   6. compares them on test (comparison.txt: F1 per class, the delay of each kind of change, false switches per
-#      hour, the accuracy in the first minute after a merge) and exports the network with memory as one ONNX step
-#      with its contract (nnslr export-road-type).
+#   4. reads the motorway signs of those drives as the comma does (nnslr road-type-signs: the car's vision.py,
+#      SignNet and classifier from the sunnypilot clone, read only, 5 frames a second of fcamera.hevc, on the CPU;
+#      data/derived/road_type_signs): the comma's rule measured with the signs the car confirms today;
+#   5. trains the network with memory and the sign input (nnslr train-road-type --memory gru; the sign input is the
+#      seconds since a motorway sign, placed at the start of every entry ramp of the map: --sign-source map);
+#   6. the same without the sign input, to compare (--no-sign);
+#   7. the same with the sign input but without memory, to compare (--memory none);
+#   8. compares them (comparison.txt: the comma's rule on every merge of validation and test, when the ramp's limit
+#      ends; F1 per class and the ramp's confusion; the changes of road type; false switches per hour; the first
+#      minute after a merge), with an earlier version too when NNSLR_ROAD_TYPE_BASELINE names its checkpoint, and
+#      exports the network with memory and the sign as one ONNX step with its contract (nnslr export-road-type).
 #
 # usage: scripts/run_road_type.sh NAME
 #
-# Writes only into $DATA_ROOT/runs/NAME/ (road-type.log, road-type/{dry-run,gru,frame,export}/, road-type/comparison.txt)
-# and the frame cache. It never imports reviews, changes the road types, the model in use or the car, never publishes.
-# Run it again with the same NAME to finish: a finished training is not repeated, an export older than its weights is
-# redone.
+# Writes only into $DATA_ROOT/runs/NAME/ (road-type.log, road-type/{dry-run,gru,gru-nosign,frame,baseline,export}/,
+# road-type/comparison.txt), the frame cache and the sign readings. It never imports reviews, changes the road types,
+# the model in use or the car, never publishes. Run it again with the same NAME to finish: a finished training is not
+# repeated, the signs already read are not read again, an export older than its weights is redone.
 #
 # Environment: NNSLR_GPU_INDEX (default 0), NNSLR_GPU_VENV (.venv-gpu), NNSLR_ROAD_TYPE_EPOCHS (60),
 # NNSLR_ROAD_TYPE_PATIENCE (15), NNSLR_ROAD_TYPE_BATCH (12 sequences), NNSLR_NUM_WORKERS (half the cores, 4 to 16),
-# NNSLR_ALLOW_BUSY_GPU=1 to share a GPU that already has compute processes.
+# NNSLR_SIGN_WORKERS (processes reading the signs: the cores but two), NNSLR_SUNNYPILOT_CLONE (/root/sunnypilot),
+# NNSLR_ROAD_TYPE_BASELINE (an earlier road-type-best.pt to compare with), NNSLR_ALLOW_BUSY_GPU=1 to share a GPU
+# that already has compute processes.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DATA_ROOT="${NNSLR_DATA_ROOT:-$ROOT_DIR/data}"
@@ -37,6 +47,8 @@ BATCH="${NNSLR_ROAD_TYPE_BATCH:-12}"
 CORES="$(nproc 2>/dev/null || echo 8)"
 WORKERS_DEFAULT=$(( CORES / 2 < 4 ? 4 : (CORES / 2 > 16 ? 16 : CORES / 2) ))
 NUM_WORKERS="${NNSLR_NUM_WORKERS:-$WORKERS_DEFAULT}"
+SIGN_WORKERS="${NNSLR_SIGN_WORKERS:-$(( CORES > 3 ? CORES - 2 : 1 ))}"
+BASELINE="${NNSLR_ROAD_TYPE_BASELINE:-}"
 
 if [[ -z "$RUN_ID" || $# -ne 1 ]]; then
   echo "usage: $0 NAME" >&2
@@ -49,7 +61,12 @@ if [[ ! "$RUN_ID" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
   exit 2
 fi
 
-for setting in EPOCHS PATIENCE BATCH NUM_WORKERS; do
+if [[ -n "$BASELINE" && ! -f "$BASELINE" ]]; then
+  echo "error: NNSLR_ROAD_TYPE_BASELINE is not a file: $BASELINE" >&2
+  exit 2
+fi
+
+for setting in EPOCHS PATIENCE BATCH NUM_WORKERS SIGN_WORKERS; do
   if [[ ! "${!setting}" =~ ^[0-9]+$ ]]; then
     echo "error: $setting must be a whole number: ${!setting}" >&2
     exit 2
@@ -108,15 +125,16 @@ echo "output:       $OUT"
 echo "data root:    $DATA_ROOT"
 echo "physical GPU: $GPU_INDEX"
 echo "settings:     ${SETTINGS[*]}"
+echo "baseline:     ${BASELINE:-none}"
 echo
 
-echo "== 1/6 Check the road types, the split and the pipeline (CPU-only) =="
+echo "== 1/8 Check the road types, the split and the pipeline (CPU-only) =="
 CUDA_VISIBLE_DEVICES="" "$NN" train-road-type --dry-run --run-dir "$OUT/dry-run" --num-workers "$NUM_WORKERS"
 
-echo "== 2/6 Explicit CUDA smoke test =="
+echo "== 2/8 Explicit CUDA smoke test =="
 "$NN" env --gpu-smoke --gpu-device 0
 
-echo "== 3/6 Resize the frames to 256x144 =="
+echo "== 3/8 Resize the frames to 256x144 =="
 "$VENV/bin/python" -c '
 import sys
 from nnslr_tools import road_type_data as data
@@ -125,22 +143,32 @@ paths = data.build_frame_cache(sys.argv[1], dataset["frames"], workers=int(sys.a
 print(f"frame cache: {len(paths)} drives ready")
 ' "$DATA_ROOT" "$NUM_WORKERS"
 
+echo "== 4/8 Read the motorway signs as the car does (CPU) =="
+"$NN" road-type-signs --num-workers "$SIGN_WORKERS"
+
 train() {
   local memory="$1" folder="$2"
+  shift 2
   if [[ -f "$OUT/$folder/result.json" ]]; then
     echo "skip trained: $OUT/$folder/result.json"
     return
   fi
-  "$NN" train-road-type --memory "$memory" --run-dir "$OUT/$folder" "${SETTINGS[@]}"
+  "$NN" train-road-type --memory "$memory" --run-dir "$OUT/$folder" "${SETTINGS[@]}" "$@"
 }
 
-echo "== 4/6 Train with memory (GRU) =="
+echo "== 5/8 Train with memory and the sign (GRU) =="
 train gru gru
 
-echo "== 5/6 Train without memory =="
+echo "== 6/8 Train with memory, without the sign =="
+train gru gru-nosign --no-sign
+
+echo "== 7/8 Train without memory =="
 train none frame
 
-echo "== 6/6 Compare and export the ONNX step =="
+echo "== 8/8 Compare and export the ONNX step =="
+if [[ -n "$BASELINE" ]]; then
+  "$NN" release-road-type --checkpoint "$BASELINE" --output "$OUT/baseline/release.json"
+fi
 "$NN" compare-road-type --run-root "$RUN_ROOT"
 ONNX="$OUT/export/road-type.onnx"
 if [[ -f "$ONNX" && -f "$ONNX.contract.json" && "$ONNX" -nt "$OUT/gru/road-type-best.pt" ]]; then

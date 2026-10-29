@@ -32,7 +32,12 @@ from pathlib import Path
 import numpy as np
 
 from nnslr_tools import road_type_data as data
-from nnslr_tools.road_type_metrics import AFTER_MERGE_SECONDS, change_points, majority, sequence_metrics
+from nnslr_tools import road_type_signs as signs_data
+from nnslr_tools.road_type_metrics import (AFTER_MERGE_SECONDS, LATE_SECONDS, change_points, comma_release, debounced,
+                                           majority, ramp_entries, release_summary, sequence_metrics)
+from nnslr_tools.road_type_signs import NO_SIGN
+
+SIGN_INPUTS = 2
 
 FEATURES = 128
 HIDDEN = 128
@@ -43,6 +48,21 @@ BURN_IN = 32
 FOCUS_SHARE = 0.35
 DROP_FRAME = 0.04
 NO_SPEED_SHARE = 0.1
+# The merge, where the ramp's limit ends (road_type_metrics.comma_release): MERGE_SHARE of the windows hold one (the
+# ramp in the window or in its burn-in, the carriageway after it), and the loss weighs the ramp and the first
+# AFTER_MERGE_SECONDS of the carriageway MERGE_WEIGHT times.
+MERGE_SHARE = 0.25
+MERGE_WEIGHT = 3.0
+# The sign input (road_type_signs): in SIGN_DROP_SHARE of the windows the car missed the sign (none seen), in
+# SIGN_FAKE_SHARE of those without one a sign is confirmed where there is none (a misreading).
+SIGN_DROP_SHARE = 0.25
+SIGN_FAKE_SHARE = 0.05
+# The sign of a train window comes up to SIGN_JITTER seconds earlier or later: the reviewed 4.01 signs were seen from
+# 7 s before to 6 s after the first second of the map's ramp, and the car confirms a sign while it sees it.
+SIGN_JITTER = 4.0
+MIN_DRIVE = 30
+# One letter a second for the answers around a merge in the result (release_evaluation).
+ANSWER_LETTERS = {'town': 'T', 'rural': 'R', 'expressway': 'E', 'motorway': 'M', 'ramp': '/', 'parking': 'P'}
 BATCH = 12
 EPOCHS = 60
 PATIENCE = 15
@@ -56,6 +76,11 @@ CHECKPOINT = 'road-type-best.pt'
 MEMORY_NAMES = {'gru': 'road_type_gru', 'none': 'road_type_frame'}
 
 
+def network_name(memory: str, signs: bool = True) -> str:
+    """The name of a training in its log lines (job_progress reads them): road_type_gru, road_type_gru_nosign, ..."""
+    return MEMORY_NAMES[memory] + ('' if signs else '_nosign')
+
+
 def _torch():
     import torch
     return torch
@@ -65,43 +90,54 @@ def _print(text: str) -> None:
     print(text, flush=True)
 
 
-def build_road_type_net(memory: str = 'gru', pretrained: bool = True, features: int = FEATURES, hidden: int = HIDDEN):
+def build_road_type_net(memory: str = 'gru', pretrained: bool = True, features: int = FEATURES, hidden: int = HIDDEN,
+                        signs: bool = False):
     """The network (torch.nn.Module): forward(images (B, T, 3, H, W) float 0..1, speed (B, T, 2), hidden (B, hidden)
-    or None) -> (logits (B, T, classes), hidden (B, hidden))."""
+    or None, sign (B, T, 2) or None) -> (logits (B, T, classes), hidden (B, hidden)). With signs, the input of the
+    memory has the sign input too (road_type_signs.sign_features; None: no sign seen)."""
     torch = _torch()
     from torch import nn
     from torchvision.models import MobileNet_V3_Small_Weights, mobilenet_v3_small
 
     if memory not in MEMORY_NAMES:
         raise ValueError(f'memory must be one of {sorted(MEMORY_NAMES)}')
+    extra = 2 + (SIGN_INPUTS if signs else 0)
 
     class RoadTypeNet(nn.Module):
         def __init__(self):
             super().__init__()
             backbone = mobilenet_v3_small(weights=MobileNet_V3_Small_Weights.IMAGENET1K_V1 if pretrained else None)
-            self.memory, self.hidden_size = memory, hidden
+            self.memory, self.hidden_size, self.signs = memory, hidden, signs
             self.register_buffer('mean', torch.tensor(IMAGENET_MEAN).view(1, 3, 1, 1))
             self.register_buffer('std', torch.tensor(IMAGENET_STD).view(1, 3, 1, 1))
             self.backbone = backbone.features
             self.project = nn.Sequential(nn.Linear(576, features), nn.Hardswish(), nn.Dropout(0.2))
             if memory == 'gru':
-                self.gru = nn.GRU(features + 2, hidden, batch_first=True)
+                self.gru = nn.GRU(features + extra, hidden, batch_first=True)
                 self.head = nn.Linear(hidden, len(data.CLASSES))
             else:
-                self.head = nn.Sequential(nn.Linear(features + 2, hidden), nn.ReLU(), nn.Linear(hidden, len(data.CLASSES)))
+                self.head = nn.Sequential(nn.Linear(features + extra, hidden), nn.ReLU(), nn.Linear(hidden, len(data.CLASSES)))
 
         def encode(self, images):
             """(N, 3, H, W) 0..1 -> (N, features)."""
             x = self.backbone((images - self.mean) / self.std)
             return self.project(x.mean(dim=(2, 3)))
 
-        def forward(self, images, speed, hidden=None):
+        def inputs(self, encoded, speed, sign=None):
+            """The input of the memory (..., features + 2 [+ 2]): the frame's numbers, the speed, the sign input."""
+            parts = [encoded, speed.to(encoded.dtype)]
+            if self.signs:
+                if sign is None:
+                    sign = encoded.new_tensor(NO_SIGN).expand(*encoded.shape[:-1], SIGN_INPUTS)
+                parts.append(sign.to(encoded.dtype))
+            return torch.cat(parts, dim=-1)
+
+        def forward(self, images, speed, hidden=None, sign=None):
             b, t = images.shape[:2]
-            x = torch.cat([self.encode(images.flatten(0, 1)).view(b, t, -1), speed.to(images.dtype)], dim=-1)
-            return self.run(x, hidden)
+            return self.run(self.inputs(self.encode(images.flatten(0, 1)).view(b, t, -1), speed, sign), hidden)
 
         def run(self, x, hidden=None):
-            """Features + speed (B, T, features + 2) -> (logits, hidden)."""
+            """The memory's input (B, T, features + 2 [+ 2]) -> (logits, hidden)."""
             if self.memory == 'gru':
                 out, last = self.gru(x, None if hidden is None else hidden[None].contiguous())
                 return self.head(out), last[0]
@@ -127,10 +163,20 @@ def gru_step(gru, x, hidden):
 
 
 def step_module(model):
-    """The one-second step of the car: (image (1, 3, H, W) 0..1, speed (1, 2), hidden (1, hidden)) ->
-    (probabilities (1, classes), hidden_out (1, hidden))."""
+    """The one-second step of the car: (image (1, 3, H, W) 0..1, speed (1, 2), [sign (1, 2),] hidden (1, hidden)) ->
+    (probabilities (1, classes), hidden_out (1, hidden)); the sign input only for a network trained with it."""
     torch = _torch()
     from torch import nn
+
+    def advance(image, speed, sign, hidden):
+        x = model.inputs(model.encode(image), speed, sign)
+        if model.memory == 'gru':
+            hidden_out = gru_step(model.gru, x, hidden)
+            logits = model.head(hidden_out)
+        else:
+            hidden_out = hidden * 1.0
+            logits = model.head(x)
+        return torch.softmax(logits, dim=1), hidden_out
 
     class RoadTypeStep(nn.Module):
         def __init__(self):
@@ -138,16 +184,22 @@ def step_module(model):
             self.model = model
 
         def forward(self, image, speed, hidden):
-            x = torch.cat([self.model.encode(image), speed], dim=1)
-            if self.model.memory == 'gru':
-                hidden_out = gru_step(self.model.gru, x, hidden)
-                logits = self.model.head(hidden_out)
-            else:
-                hidden_out = hidden * 1.0
-                logits = self.model.head(x)
-            return torch.softmax(logits, dim=1), hidden_out
+            return advance(image, speed, None, hidden)
 
-    return RoadTypeStep().eval()
+    class RoadTypeSignStep(RoadTypeStep):
+        def forward(self, image, speed, sign, hidden):
+            return advance(image, speed, sign, hidden)
+
+    return (RoadTypeSignStep() if getattr(model, 'signs', False) else RoadTypeStep()).eval()
+
+
+def step_example(model, torch=None):
+    """Zero inputs of one step, in the order of step_module's forward."""
+    torch = torch or _torch()
+    image, speed, hidden = torch.zeros(1, 3, data.FRAME_HEIGHT, data.FRAME_WIDTH), torch.zeros(1, 2), torch.zeros(1, model.hidden_size)
+    if getattr(model, 'signs', False):
+        return image, speed, torch.tensor([NO_SIGN]), hidden
+    return image, speed, hidden
 
 
 def count_parameters(model) -> int:
@@ -161,9 +213,9 @@ def step_flops(model, width: int = data.FRAME_WIDTH, height: int = data.FRAME_HE
     import copy
     from torch.utils.flop_counter import FlopCounterMode
     step = step_module(copy.deepcopy(model).cpu())
-    image, speed, hidden = torch.zeros(1, 3, height, width), torch.zeros(1, 2), torch.zeros(1, model.hidden_size)
+    example = step_example(model, torch)
     with torch.no_grad(), FlopCounterMode(display=False) as counter:
-        step(image, speed, hidden)
+        step(*example)
     return int(counter.get_total_flops())
 
 
@@ -188,12 +240,55 @@ class FrameStore:
         return self.pixels[index].permute(0, 1, 4, 2, 3).float().div_(255)
 
 
+def attach_signs(dataset: dict, root: Path, source: str = signs_data.DEFAULT_SOURCE) -> dict:
+    """The sign input of every frame (dataset['signs'][route], (frames, 2)) from the motorway signs of source
+    (road_type_signs.SIGN_SOURCES: 'car', those the car's code confirmed, read before by nnslr road-type-signs, a drive
+    without them: none seen; 'map', the first second of every entry ramp of the map), their times
+    (dataset['sign_times']), the time of every frame (dataset['seconds']) and the loss emphasis of the merges
+    (dataset['emphasis'][route]). Returns the coverage."""
+    if source not in signs_data.SIGN_SOURCES:
+        raise ValueError(f'unknown sign source {source!r}: one of {", ".join(signs_data.SIGN_SOURCES)}')
+    dataset['signs'], dataset['sign_times'], dataset['emphasis'], dataset['seconds'] = {}, {}, {}, {}
+    read = []
+    for route, frames in dataset['frames'].items():
+        if source == 'car':
+            record = signs_data.load_signs(root, route)
+            if record:
+                read.append(route)
+            times = signs_data.sign_times(record)
+        else:
+            read.append(route)
+            times = signs_data.map_sign_times(frames, data.CLASSES)
+        dataset['sign_times'][route] = times
+        dataset['seconds'][route] = np.array([signs_data.frame_seconds(f) for f in frames], dtype=np.float64)
+        dataset['signs'][route] = signs_data.frame_sign_features(frames, times)
+        labels = np.array([f['label'] for f in frames], dtype=np.int64)
+        emphasis = np.ones(len(frames), dtype=np.float32)
+        for entry in ramp_entries(labels, data.CLASSES):
+            emphasis[entry['ramp']:entry['merge'] + AFTER_MERGE_SECONDS] = MERGE_WEIGHT
+        dataset['emphasis'][route] = emphasis
+    coverage = {'source': source, 'drives': len(dataset['frames']), 'read': len(read),
+                'signs': sum(len(t) for t in dataset['sign_times'].values()),
+                'drives_with_signs': sum(1 for t in dataset['sign_times'].values() if t)}
+    dataset['sign_coverage'] = coverage
+    return coverage
+
+
 def _sequence_arrays(dataset: dict, run: dict) -> dict:
-    frames = dataset['frames'][run['route']]
-    chosen = [frames[p] for p in run['positions']]
+    route, positions = run['route'], run['positions']
+    frames = dataset['frames'][route]
+    chosen = [frames[p] for p in positions]
+    signs = dataset.get('signs', {}).get(route)
+    emphasis = dataset.get('emphasis', {}).get(route)
+    seconds = dataset.get('seconds', {}).get(route)
     return {'labels': np.array([f['label'] for f in chosen], dtype=np.int64),
             'weights': np.array([f['weight'] for f in chosen], dtype=np.float32),
             'speed': np.array([data.speed_features(f['speed_mps']) for f in chosen], dtype=np.float32),
+            'sign': (signs[positions] if signs is not None else np.tile(np.float32(NO_SIGN), (len(chosen), 1))
+                     ).astype(np.float32),
+            'emphasis': (emphasis[positions] if emphasis is not None else np.ones(len(chosen))).astype(np.float32),
+            'seconds': (seconds[positions] if seconds is not None else
+                        np.array([signs_data.frame_seconds(f) for f in chosen], dtype=np.float64)),
             'keys': [f['key'] for f in chosen]}
 
 
@@ -244,14 +339,19 @@ def _augment(torch, images, generator_seed: int | None = None):
 
 
 class WindowSampler:
-    """Train windows: (route, positions, labels, weights, speed) of length burn + window, a second dropped now and
-    then, FOCUS_SHARE of them around a change of road type."""
+    """Train windows: (route, positions, labels, weights, speed, sign, emphasis) of length burn + window, a second
+    dropped now and then, MERGE_SHARE of them around a merge and FOCUS_SHARE around a change of road type; the sign
+    input missed or misread now and then (SIGN_DROP_SHARE, SIGN_FAKE_SHARE) and confirmed up to SIGN_JITTER seconds
+    earlier or later."""
 
     def __init__(self, dataset: dict, runs: list[dict], rng: random.Random):
         self.rng = rng
+        self.times = dataset.get('sign_times', {})
         self.runs = [(run, _sequence_arrays(dataset, run)) for run in runs]
         self.changes = [(i, change['time']) for i, (run, arrays) in enumerate(self.runs)
                         for change in change_points(arrays['labels'], data.CLASSES)]
+        self.merges = [(i, entry['merge']) for i, (run, arrays) in enumerate(self.runs)
+                       for entry in ramp_entries(arrays['labels'], data.CLASSES)]
         self.lengths = [len(run['positions']) for run, _ in self.runs]
 
     def window(self, length: int):
@@ -261,7 +361,13 @@ class WindowSampler:
             raise ValueError(f'no train sequence of {length} frames')
         fitting = set(fits)
         focus = [(i, t) for i, t in self.changes if i in fitting]
-        if focus and rng.random() < FOCUS_SHARE:
+        merges = [(i, t) for i, t in self.merges if i in fitting]
+        draw = rng.random()
+        if merges and draw < MERGE_SHARE:
+            index, moment = rng.choice(merges)
+            start = min(max(moment - rng.randrange(min(10, length - 1), max(length - 10, 11)), 0),
+                        self.lengths[index] - length)
+        elif focus and draw < MERGE_SHARE + FOCUS_SHARE:
             index, moment = rng.choice(focus)
             start = min(max(moment - rng.randrange(length), 0), self.lengths[index] - length)
         else:
@@ -278,7 +384,27 @@ class WindowSampler:
             else:
                 picks.append(picks[-1])
         return (run['route'], [run['positions'][p] for p in picks], arrays['labels'][picks],
-                arrays['weights'][picks], arrays['speed'][picks].copy())
+                arrays['weights'][picks], arrays['speed'][picks].copy(),
+                self._sign(arrays['sign'][picks].copy(), arrays['seconds'][picks], self.times.get(run['route'], [])),
+                arrays['emphasis'][picks])
+
+    def _sign(self, sign: np.ndarray, seconds: np.ndarray, times: list[float]) -> np.ndarray:
+        """The sign input of a window, missed (SIGN_DROP_SHARE) or with a misreading (SIGN_FAKE_SHARE) now and then,
+        its signs moved by up to SIGN_JITTER seconds."""
+        rng = self.rng
+        if rng.random() < SIGN_DROP_SHARE:
+            sign[:] = NO_SIGN
+            return sign
+        if len(times) and SIGN_JITTER:
+            shift = rng.uniform(-SIGN_JITTER, SIGN_JITTER)
+            sign = signs_data.features_at(seconds, [t + shift for t in times])
+        if rng.random() < SIGN_FAKE_SHARE:
+            at = rng.randrange(len(sign))
+            for k in range(at, len(sign)):
+                fake = signs_data.sign_features(float(k - at))
+                if sign[k, 1] == 0 or sign[k, 0] > fake[0]:
+                    sign[k] = fake
+        return sign
 
 
 def _speed_noise(rng: random.Random, speed: np.ndarray) -> np.ndarray:
@@ -289,7 +415,7 @@ def _speed_noise(rng: random.Random, speed: np.ndarray) -> np.ndarray:
 
 
 def _predict_sequence(torch, model, store: FrameStore, route: str, positions: list[int], speed: np.ndarray,
-                      device, chunk: int = 256) -> np.ndarray:
+                      device, chunk: int = 256, sign: np.ndarray | None = None) -> np.ndarray:
     """Probabilities (T, classes) of a whole sequence run from zeros with its memory, as the car would."""
     model.eval()
     with torch.no_grad():
@@ -297,7 +423,8 @@ def _predict_sequence(torch, model, store: FrameStore, route: str, positions: li
         for start in range(0, len(positions), chunk):
             images = store.batch([(route, positions[start:start + chunk])])[0]
             features.append(model.encode(images))
-        x = torch.cat([torch.cat(features), torch.from_numpy(speed).to(device)], dim=1)[None]
+        x = model.inputs(torch.cat(features), torch.from_numpy(speed).to(device),
+                         None if sign is None else torch.from_numpy(sign).to(device))[None]
         logits, _ = model.run(x)
         return torch.softmax(logits[0].float(), dim=1).cpu().numpy()
 
@@ -308,7 +435,8 @@ def evaluate(torch, model, store: FrameStore, dataset: dict, runs: list[dict], d
     found, smoothed, answers = [], [], []
     for run in runs:
         arrays = _sequence_arrays(dataset, run)
-        probabilities = _predict_sequence(torch, model, store, run['route'], run['positions'], arrays['speed'], device)
+        probabilities = _predict_sequence(torch, model, store, run['route'], run['positions'], arrays['speed'], device,
+                                          sign=arrays['sign'])
         predicted = probabilities.argmax(axis=1)
         found.append({'labels': arrays['labels'], 'weights': arrays['weights'], 'predicted': predicted})
         if smooth:
@@ -320,6 +448,70 @@ def evaluate(torch, model, store: FrameStore, dataset: dict, runs: list[dict], d
     if smooth:
         result['smoothed'] = sequence_metrics(smoothed, data.CLASSES)
     return result
+
+
+def drive_runs(dataset: dict, min_length: int = MIN_DRIVE) -> list[dict]:
+    """Every drive as the car drives it: the runs of its frames without a missing second, whatever their partition."""
+    return [run for frames in dataset['frames'].values()
+            for run in data.sequences(frames, ['drive'] * len(frames), min_length=min_length)]
+
+
+def merge_partition(partitions: list[str]) -> str | None:
+    """The partition a merge is measured in: none when a second of its ramp or of the LATE_SECONDS after it was
+    trained on, else test or validation (the buffer between them is never trained on)."""
+    if 'train' in partitions:
+        return None
+    return 'test' if 'test' in partitions else 'validation' if 'validation' in partitions else None
+
+
+def release_evaluation(torch, model, store: FrameStore, dataset: dict, device, *, answers: dict | None = None) -> dict:
+    """The comma's rule (road_type_metrics.comma_release) on every merge of validation and test: each drive run whole
+    from zeros, as on the car, the answer debounced; the age of the last motorway sign at each second from the signs
+    attached (attach_signs: dataset['sign_times'], the network's sign input too). {'sign_source', 'sign_coverage',
+    'validation': release_summary, 'test': ..., 'merges': [...]}; answers: the answers per drive run already computed
+    ({(route, start): predicted}), else the model runs."""
+    found = []
+    for run in drive_runs(dataset):
+        route, positions = run['route'], run['positions']
+        arrays = _sequence_arrays(dataset, run)
+        entries = ramp_entries(arrays['labels'], data.CLASSES)
+        partitions = dataset['split']['partitions'][route]
+        measured = [(entry, merge_partition([partitions[positions[t]] for t in
+                                             range(entry['ramp'], min(len(positions), entry['merge'] + LATE_SECONDS))]))
+                    for entry in entries]
+        measured = [(entry, partition) for entry, partition in measured if partition]
+        if not measured:
+            continue
+        key = (route, positions[0])
+        if answers is not None and key in answers:
+            predicted = np.asarray(answers[key])
+        else:
+            predicted = _predict_sequence(torch, model, store, route, positions, arrays['speed'], device,
+                                          sign=arrays['sign']).argmax(axis=1)
+        held = debounced(predicted)
+        age = signs_data.sign_ages(arrays['seconds'], dataset.get('sign_times', {}).get(route, []))
+        for entry, partition in measured:
+            result = comma_release(held, age, entry, data.CLASSES)
+            said = [data.CLASSES[int(v)] for v in held[entry['ramp']:min(len(held), entry['merge'] + LATE_SECONDS)]]
+            found.append({'route': route, 'partition': partition, 'ramp_key': arrays['keys'][entry['ramp']],
+                          'merge_key': arrays['keys'][entry['merge']], 'before': entry['before'],
+                          'ramp_seconds': entry['merge'] - entry['ramp'], **result,
+                          'held_answers': ''.join(ANSWER_LETTERS[name] for name in said)})
+    out = {partition: release_summary([m for m in found if m['partition'] == partition])
+           for partition in ('validation', 'test')}
+    coverage = dataset.get('sign_coverage') or {}
+    out.update(merges=found, sign_source=coverage.get('source'), sign_coverage=coverage)
+    return out
+
+
+def car_release(torch, model, store: FrameStore, dataset: dict, root: Path, device) -> dict | None:
+    """release_evaluation with the signs the car's code confirmed (nnslr road-type-signs), the network's sign input
+    too: the comma's rule as the car runs today. None when those signs were not read on every drive."""
+    view = dict(dataset)
+    coverage = attach_signs(view, root, 'car')
+    if coverage['read'] < coverage['drives']:
+        return None
+    return release_evaluation(torch, model, store, view, device)
 
 
 def _dataset_sha256(dataset: dict) -> str:
@@ -360,7 +552,8 @@ def _dry_runs(runs: list[dict]) -> list[dict]:
 
 def train_road_type(data_root: Path, run_dir: Path, *, memory: str = 'gru', epochs: int = EPOCHS,
                     patience: int = PATIENCE, batch: int = BATCH, device: str | None = None, dry_run: bool = False,
-                    pretrained: bool | None = None, workers: int = 8, seed: int = 0, log=_print) -> dict:
+                    pretrained: bool | None = None, workers: int = 8, seed: int = 0, signs: bool = True,
+                    sign_source: str = signs_data.DEFAULT_SOURCE, log=_print) -> dict:
     """Train the road-type network on the drives with road types and measure it on validation and test (see the
     module's text). Writes into run_dir: split.json, dataset.json, road-type-best.pt, result.json and the answers on
     test and validation (answers-test.json, answers-validation.json). A dry run: the CPU, a few short sequences, one
@@ -374,6 +567,10 @@ def train_road_type(data_root: Path, run_dir: Path, *, memory: str = 'gru', epoc
     device = torch.device(device or ('cpu' if dry_run else 'cuda'))
     pretrained = (not dry_run) if pretrained is None else pretrained
     dataset = data.load_dataset(data_root)
+    coverage = attach_signs(dataset, data_root, sign_source)
+    if signs and coverage['read'] < coverage['drives'] and not dry_run:
+        raise ValueError(f"the motorway signs were read on {coverage['read']} of {coverage['drives']} drives: run "
+                         'nnslr road-type-signs first')
     runs = _dry_runs(dataset['sequences']) if dry_run else dataset['sequences']
     by_partition = {name: [run for run in runs if run['partition'] == name] for name in data.PARTITIONS}
     if not by_partition['train'] or not by_partition['validation']:
@@ -383,11 +580,14 @@ def train_road_type(data_root: Path, run_dir: Path, *, memory: str = 'gru', epoc
     (run_dir / 'dataset.json').write_text(json.dumps(dataset['summary'], indent=2, sort_keys=True) + '\n',
                                           encoding='utf-8')
     # A dry run's lines start with "dry run": the panel draws the curves of the real epochs only (job_progress).
-    name = ('dry run ' if dry_run else '') + MEMORY_NAMES[memory]
+    name = ('dry run ' if dry_run else '') + network_name(memory, signs)
     log(f'{name}: {len(by_partition["train"])} train, {len(by_partition["validation"])} validation, '
-        f'{len(by_partition["test"])} test sequences; split {dataset["split_sha256"][:12]}')
-    store = FrameStore(_load_pictures(data_root, dataset, runs, dry_run=dry_run, workers=workers, log=log), device)
-    model = build_road_type_net(memory, pretrained=pretrained).to(device)
+        f'{len(by_partition["test"])} test sequences; split {dataset["split_sha256"][:12]}; '
+        + (f"sign input ({sign_source}): {coverage['signs']} motorway signs on {coverage['drives_with_signs']} of "
+           f"{coverage['drives']} drives" if signs else 'no sign input'))
+    pictures = runs if dry_run else runs + drive_runs(dataset)
+    store = FrameStore(_load_pictures(data_root, dataset, pictures, dry_run=dry_run, workers=workers, log=log), device)
+    model = build_road_type_net(memory, pretrained=pretrained, signs=signs).to(device)
     weights_of_class = torch.tensor(class_weights(dataset, by_partition['train']), device=device)
     backbone = list(model.backbone.parameters())
     others = [p for n, p in model.named_parameters() if not n.startswith('backbone.')]
@@ -408,7 +608,10 @@ def train_road_type(data_root: Path, run_dir: Path, *, memory: str = 'gru', epoc
     history, best, best_epoch, since = [], None, 0, 0
     config = {'memory': memory, 'epochs': epochs, 'patience': patience, 'batch': batch, 'steps_per_epoch': steps,
               'window': window, 'burn_in': burn, 'focus_share': FOCUS_SHARE, 'drop_frame': DROP_FRAME,
-              'no_speed_share': NO_SPEED_SHARE, 'learning_rate': LEARNING_RATE,
+              'no_speed_share': NO_SPEED_SHARE, 'merge_share': MERGE_SHARE, 'merge_weight': MERGE_WEIGHT,
+              'signs': signs, 'sign_source': sign_source, 'sign_drop_share': SIGN_DROP_SHARE,
+              'sign_fake_share': SIGN_FAKE_SHARE, 'sign_jitter': SIGN_JITTER, 'sign_coverage': coverage,
+              'learning_rate': LEARNING_RATE,
               'backbone_learning_rate': BACKBONE_LEARNING_RATE, 'weight_decay': WEIGHT_DECAY, 'seed': seed,
               'pretrained': pretrained, 'width': data.FRAME_WIDTH, 'height': data.FRAME_HEIGHT,
               'features': FEATURES, 'hidden': HIDDEN, 'unsure_weight': data.UNSURE_WEIGHT,
@@ -423,17 +626,18 @@ def train_road_type(data_root: Path, run_dir: Path, *, memory: str = 'gru', epoc
             images = store.batch([(route, positions) for route, positions, *_ in windows])
             images = _augment(torch, images)
             speed = torch.from_numpy(np.stack([_speed_noise(rng, w[4]) for w in windows])).to(device)
+            sign = torch.from_numpy(np.stack([w[5] for w in windows])).to(device)
             labels = torch.from_numpy(np.stack([w[2] for w in windows])).to(device)
-            frame_weights = torch.from_numpy(np.stack([w[3] for w in windows])).to(device)
+            frame_weights = torch.from_numpy(np.stack([w[3] * w[6] for w in windows])).to(device)
             hidden = None
             if warm:
                 with torch.no_grad(), torch.autocast(device.type, enabled=use_amp):
-                    _, hidden = model(images[:, :burn], speed[:, :burn])
+                    _, hidden = model(images[:, :burn], speed[:, :burn], None, sign[:, :burn])
                 hidden = hidden.float()
-                images, speed, labels, frame_weights = (images[:, burn:], speed[:, burn:], labels[:, burn:],
-                                                        frame_weights[:, burn:])
+                images, speed, sign, labels, frame_weights = (images[:, burn:], speed[:, burn:], sign[:, burn:],
+                                                              labels[:, burn:], frame_weights[:, burn:])
             with torch.autocast(device.type, enabled=use_amp):
-                logits, _ = model(images, speed, hidden)
+                logits, _ = model(images, speed, hidden, sign)
             known = labels >= 0
             per_frame = torch.nn.functional.cross_entropy(logits.float().flatten(0, 1), labels.clamp(min=0).flatten(),
                                                           reduction='none').view_as(frame_weights)
@@ -459,7 +663,8 @@ def train_road_type(data_root: Path, run_dir: Path, *, memory: str = 'gru', epoc
         if best is None or score > best:
             best, best_epoch, since = score, epoch, 0
             torch.save({'task': 'road_type', 'architecture': f'mobilenet_v3_small+{memory}', 'memory': memory,
-                        'classes': list(data.CLASSES), 'state_dict': model.state_dict(), 'epoch': epoch,
+                        'signs': signs, 'sign_source': sign_source, 'classes': list(data.CLASSES),
+                        'state_dict': model.state_dict(), 'epoch': epoch,
                         'config': config, 'split_sha256': dataset['split_sha256'],
                         'dataset_sha256': _dataset_sha256(dataset)}, run_dir / CHECKPOINT)
         else:
@@ -469,7 +674,8 @@ def train_road_type(data_root: Path, run_dir: Path, *, memory: str = 'gru', epoc
                 break
     saved = torch.load(run_dir / CHECKPOINT, map_location=device, weights_only=False)
     model.load_state_dict(saved['state_dict'])
-    result = {'task': 'road_type', 'memory': memory, 'name': name, 'dry_run': dry_run,
+    result = {'task': 'road_type', 'memory': memory, 'signs': signs, 'sign_source': sign_source, 'name': name,
+              'dry_run': dry_run,
               'architecture': saved['architecture'], 'classes': list(data.CLASSES), 'best_epoch': best_epoch,
               'history': history, 'config': config, 'parameters': count_parameters(model),
               'flops_per_step': step_flops(model), 'split_sha256': dataset['split_sha256'],
@@ -481,6 +687,14 @@ def train_road_type(data_root: Path, run_dir: Path, *, memory: str = 'gru', epoc
         if 'smoothed' in measured:
             result[f'{partition}_smoothed'] = measured['smoothed']
         (run_dir / f'answers-{partition}.json').write_text(json.dumps(measured['answers']) + '\n', encoding='utf-8')
+    if not dry_run:
+        result['release'] = release_evaluation(torch, model, store, dataset, device)
+        log(f"{name}: the comma's rule on test ({sign_source} signs): " + release_text(result['release']['test']))
+        if sign_source != 'car':
+            today = car_release(torch, model, store, dataset, data_root, device)
+            if today:
+                result['release_car'] = today
+                log(f"{name}: the comma's rule on test (the car's signs): " + release_text(today['test']))
     result['step_seconds'] = _step_seconds(torch, model, device)
     (run_dir / 'result.json').write_text(json.dumps(result, indent=2, sort_keys=True) + '\n', encoding='utf-8')
     log(f"{name}: best epoch {best_epoch}, test macro F1 {result['test']['weight_1']['macro_f1']}, "
@@ -491,16 +705,16 @@ def train_road_type(data_root: Path, run_dir: Path, *, memory: str = 'gru', epoc
 def _step_seconds(torch, model, device) -> dict:
     """The time of one step at batch 1 on this machine's device (warm), a hint only: the car's GPU is another."""
     step = step_module(model).to(device)
-    image = torch.rand(1, 3, data.FRAME_HEIGHT, data.FRAME_WIDTH, device=device)
-    speed, hidden = torch.zeros(1, 2, device=device), torch.zeros(1, model.hidden_size, device=device)
+    example = [t.to(device) for t in step_example(model, torch)]
+    example[0] = torch.rand_like(example[0])
     with torch.no_grad():
         for _ in range(3):
-            step(image, speed, hidden)
+            step(*example)
         if device.type == 'cuda':
             torch.cuda.synchronize()
         started = time.perf_counter()
         for _ in range(20):
-            step(image, speed, hidden)
+            step(*example)
         if device.type == 'cuda':
             torch.cuda.synchronize()
     return {'device': str(device), 'milliseconds': round((time.perf_counter() - started) / 20 * 1000, 2)}
@@ -512,73 +726,191 @@ def load_road_type(checkpoint: Path, device: str = 'cpu'):
     saved = torch.load(Path(checkpoint), map_location=device, weights_only=False)
     if saved.get('task') != 'road_type':
         raise ValueError(f'{checkpoint} is not a road-type checkpoint')
-    model = build_road_type_net(saved['memory'], pretrained=False)
+    model = build_road_type_net(saved['memory'], pretrained=False, signs=bool(saved.get('signs', False)))
     model.load_state_dict(saved['state_dict'])
     return model.to(device).eval(), saved
+
+
+def release_of_checkpoint(data_root: Path, checkpoint: Path, output: Path | None = None, device: str | None = None,
+                          sign_source: str = signs_data.DEFAULT_SOURCE) -> dict:
+    """The comma's rule (release_evaluation) and the measure per class (with the confusion) on validation and test for
+    any road-type checkpoint, the first version too: {'checkpoint', 'memory', 'signs', 'release' (with the signs of
+    sign_source), 'release_car' (with the car's, when read), 'metrics': {partition: sequence_metrics}}, written to
+    output when given."""
+    torch = _torch()
+    data_root = Path(data_root)
+    device = torch.device(device or ('cuda' if torch.cuda.is_available() else 'cpu'))
+    model, saved = load_road_type(checkpoint, device=str(device))
+    dataset = data.load_dataset(data_root)
+    attach_signs(dataset, data_root, sign_source)
+    store = FrameStore(_load_pictures(data_root, dataset, dataset['sequences'] + drive_runs(dataset), dry_run=False,
+                                      workers=8, log=_print), device)
+    result = {'checkpoint': str(checkpoint), 'memory': saved['memory'], 'signs': bool(saved.get('signs', False)),
+              'split_sha256': dataset['split_sha256'], 'metrics': {},
+              'release': release_evaluation(torch, model, store, dataset, device)}
+    if sign_source != 'car':
+        today = car_release(torch, model, store, dataset, data_root, device)
+        if today:
+            result['release_car'] = today
+    for partition in ('validation', 'test'):
+        runs = [run for run in dataset['sequences'] if run['partition'] == partition]
+        result['metrics'][partition] = evaluate(torch, model, store, dataset, runs, device)['metrics']
+    if output is not None:
+        Path(output).parent.mkdir(parents=True, exist_ok=True)
+        Path(output).write_text(json.dumps(result, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+    return result
+
+
+def release_text(summary: dict) -> str:
+    """One line of release_summary: 'N merges: held H (ramp R, sign S); on the ramp O, in time I (median M s), late
+    L, not held X'."""
+    median = summary['median_release']
+    return (f"{summary['merges']} merges: held {summary['held']} (ramp {summary['held_by_ramp']}, sign "
+            f"{summary['held_by_sign']}); released on the ramp {summary['on_ramp']}, in time {summary['in_time']}"
+            + (f' (median {median:g} s after the merge)' if median is not None else '')
+            + f", late {summary['late']}, never held {summary['not_held']}")
 
 
 def _numbers(value: float) -> str:
     return '-' if value is None else f'{value:.3f}' if isinstance(value, float) else str(value)
 
 
+COMPARED = (('gru', 'gru'), ('gru-nosign', 'gru-nosign'), ('frame', 'frame'))
+# The comma's rule with the signs of the map (where 4.01 stands: what the sign input gives once the car reads it) and
+# with the signs the car's code confirms today.
+_SCENARIOS = (('release', 'With the sign at the start of every entry ramp of the map (the car reading every 4.01):'),
+              ('release_car', "With the signs the car's code confirms today:"))
+BASELINE = 'baseline'  # <run>/road-type/baseline/release.json: an earlier version measured by nnslr release-road-type
+
+
+def _variant_label(result: dict) -> str:
+    if result.get('memory') == 'none':
+        return 'without memory' + (' (sign)' if result.get('signs') else '')
+    return 'with memory and the sign' if result.get('signs') else 'with memory, no sign'
+
+
 def compare_road_type(run_root: Path) -> str:
-    """The comparison of the network with memory and without (and its 5-second majority vote) on test, as text, also
-    written to run_root/road-type/comparison.txt."""
+    """The comparison on test (and validation for the comma's rule), as text, also written to
+    run_root/road-type/comparison.txt: the comma's rule (when the ramp's limit ends) of every variant and of the
+    baseline (an earlier version, road-type/baseline/release.json), the F1 per class and the confusion of the ramp, the
+    changes of road type, the false switches and the first minute after a merge."""
     run_root = Path(run_root)
+    out_dir = run_root / 'road-type'
     results = {}
-    for memory, folder in (('gru', 'gru'), ('none', 'frame')):
-        path = run_root / 'road-type' / folder / 'result.json'
+    for key, folder in COMPARED:
+        path = out_dir / folder / 'result.json'
         if path.is_file():
-            results[memory] = json.loads(path.read_text(encoding='utf-8'))
-    rows = []
-    if 'gru' in results:
-        rows.append(('with memory (GRU)', results['gru']['test']))
-    if 'none' in results:
-        rows.append(('without memory', results['none']['test']))
-        if 'test_smoothed' in results['none']:
-            rows.append((f'without memory, {SMOOTH_SECONDS} s majority', results['none']['test_smoothed']))
-    lines = ['Road type on test (areas of the held-out drive, weight-1 frames)', '']
-    header = f"{'':32} {'macro F1':>8} " + ' '.join(f'{name[:9]:>9}' for name in data.CLASSES)
-    lines.append(header)
-    for label, metrics in rows:
+            results[key] = json.loads(path.read_text(encoding='utf-8'))
+    baseline = None
+    if (out_dir / BASELINE / 'release.json').is_file():
+        baseline = json.loads((out_dir / BASELINE / 'release.json').read_text(encoding='utf-8'))
+    rows = []  # (label, test metrics, validation metrics, {scenario: release})
+    if baseline:
+        rows.append((f"baseline ({Path(baseline['checkpoint']).parent.parent.parent.name})",
+                     baseline['metrics']['test'], baseline['metrics']['validation'],
+                     {'release': baseline.get('release'), 'release_car': baseline.get('release_car')}))
+    for key, result in results.items():
+        rows.append((_variant_label(result), result['test'], result['validation'],
+                     {'release': result.get('release'), 'release_car': result.get('release_car')}))
+    for key, result in results.items():
+        if 'test_smoothed' in result:
+            rows.append((_variant_label(result) + f', {SMOOTH_SECONDS} s majority', result['test_smoothed'],
+                         result.get('validation_smoothed'), {}))
+    width = max([32] + [len(row[0]) + 1 for row in rows])
+    lines = ["The comma's rule: a number read on the ramp (its 3rd second) is the ramp's limit when the road type says "
+             f'ramp then or a motorway sign was confirmed within 45 s; it ends after 8 s of motorway in a row '
+             '(debounced answer). Per merge: released on the ramp (a 120 too early), in time (within 60 s of the '
+             'merge, median seconds after it), late (later or never), never held.']
+    for scenario, title in _SCENARIOS:
+        if not any((releases.get(scenario) or {}).get('test') for *_, releases in rows):
+            continue
+        lines += ['', title]
+        for partition in ('test', 'validation'):
+            for label, _, _, releases in rows:
+                release = releases.get(scenario)
+                if release and release.get(partition):
+                    lines.append(f'{partition:<10} {label:{width}} {release_text(release[partition])}')
+    lines += ['', 'Per merge (test and validation): release seconds after the merge, how it was held, the debounced '
+              'answer from the ramp on (/ ramp, M motorway, E expressway, R rural, T town, P parking)']
+    for scenario, title in _SCENARIOS:
+        for label, _, _, releases in rows:
+            release = releases.get(scenario)
+            if not release:
+                continue
+            lines.append(f"{label} - {title.split(':')[0].lower()}")
+            for merge in release.get('merges', []):
+                when = '-' if merge['release'] is None else f"{merge['release']:+d} s"
+                lines.append(f"  {merge['partition']:<10} {merge['route']} {merge['ramp_key']:>6}->"
+                             f"{merge['merge_key']:<6} {merge['ramp_seconds']:>3} s ramp from {merge['before'] or '?':<10} "
+                             f"held by {merge['held_by'] or '-':<9} {merge['outcome']:<8} {when:>6}  "
+                             f"{merge.get('held_answers', '')}")
+    lines += ['', 'Road type on test (areas of the held-out drive, weight-1 frames): F1']
+    lines.append(f"{'':{width}} {'macro F1':>8} " + ' '.join(f'{name[:9]:>9}' for name in data.CLASSES))
+    for label, metrics, _, _ in rows:
         f1 = metrics['weight_1']
-        lines.append(f'{label:32} {_numbers(f1["macro_f1"]):>8} '
+        lines.append(f'{label:{width}} {_numbers(f1["macro_f1"]):>8} '
                      + ' '.join(f'{_numbers(f1["classes"][c]["f1"]):>9}' for c in data.CLASSES))
-    lines += ['', 'Transitions: found / count, median delay in seconds (negative: early)']
-    for label, metrics in rows:
-        parts = []
-        for kind, entry in metrics['transitions'].items():
-            if entry['count']:
-                parts.append(f"{kind} {entry['found']}/{entry['count']} {_numbers(entry['median_delay'])} s")
-        lines.append(f'{label:32} ' + '; '.join(parts))
-    lines += ['', 'False switches per hour inside one road type (raw / after 3 s debounce)']
-    for label, metrics in rows:
-        lines.append(f"{label:32} {_numbers(metrics['false_switches_per_hour'])} / "
+    ramp = data.CLASSES.index('ramp')
+    lines += ['', 'The ramp on test and validation (weight-1 frames): seconds of ramp answered as each class']
+    for label, test, validation, _ in rows:
+        for partition, metrics in (('test', test), ('validation', validation)):
+            matrix = (metrics or {}).get('confusion')
+            if matrix:
+                said = ', '.join(f'{name} {count}' for name, count in zip(data.CLASSES, matrix[ramp]) if count)
+                taken = sum(row[ramp] for i, row in enumerate(matrix) if i != ramp)
+                lines.append(f'{partition:<10} {label:{width}} {sum(matrix[ramp])} s: {said or "-"}; '
+                             f'other roads called ramp {taken} s')
+    lines += ['', 'Transitions on test: found / count, median delay in seconds (negative: early)']
+    for label, metrics, _, _ in rows:
+        parts = [f"{kind} {entry['found']}/{entry['count']} {_numbers(entry['median_delay'])} s"
+                 for kind, entry in metrics['transitions'].items() if entry['count']]
+        lines.append(f'{label:{width}} ' + '; '.join(parts))
+    lines += ['', 'False switches per hour inside one road type on test (raw / after 3 s debounce)']
+    for label, metrics, _, _ in rows:
+        lines.append(f"{label:{width}} {_numbers(metrics['false_switches_per_hour'])} / "
                      f"{_numbers(metrics['false_switches_per_hour_debounced'])}")
     lines += ['', f'After a merge: the first {AFTER_MERGE_SECONDS} s on the motorway after a ramp, frames right (raw / '
               'after 3 s debounce) and what was said instead']
-    for partition in ('test', 'validation'):
-        for label, key in (('with memory (GRU)', ('gru', partition)), ('without memory', ('none', partition)),
-                           (f'without memory, {SMOOTH_SECONDS} s majority', ('none', partition + '_smoothed'))):
-            merge = (results.get(key[0]) or {}).get(key[1], {}).get('after_merge')
+    for label, test, validation, _ in rows:
+        for partition, metrics in (('test', test), ('validation', validation)):
+            merge = (metrics or {}).get('after_merge')
             if not merge:
                 continue
             said = ', '.join(f'{name} {count}' for name, count in merge['said'].items() if count)
-            lines.append(f"{partition:<10} {label:27} {_numbers(merge['accuracy'])} / "
+            lines.append(f"{partition:<10} {label:{width}} {_numbers(merge['accuracy'])} / "
                          f"{_numbers(merge['accuracy_debounced'])} over {merge['merges']} merges, {merge['frames']} s"
                          + (f' (said: {said})' if said else ''))
-    for memory, result in results.items():
-        lines.append(f"{MEMORY_NAMES[memory]}: {result['parameters']:,} parameters, "
-                     f"{result['flops_per_step'] / 1e6:.0f} MFLOPs a step, best epoch {result['best_epoch']}")
+    lines.append('')
+    for key, result in results.items():
+        coverage = result.get('config', {}).get('sign_coverage') or {}
+        lines.append(f"{result.get('name', key)}: {result['parameters']:,} parameters, "
+                     f"{result['flops_per_step'] / 1e6:.0f} MFLOPs a step, best epoch {result['best_epoch']}"
+                     + (f"; sign input from the {coverage.get('source', 'car')}: {coverage.get('signs')} motorway "
+                        f"signs on {coverage.get('drives_with_signs', coverage.get('read'))} of "
+                        f"{coverage.get('drives')} drives" if result.get('signs') else ''))
+    for releases in ([row[3] for row in rows]):
+        car = (releases.get('release_car') or {}).get('sign_coverage')
+        if car:
+            lines.append(f"The car's own signs (nnslr road-type-signs): {car['signs']} motorway signs confirmed on "
+                         f"{car['drives_with_signs']} of {car['drives']} drives")
+            break
     text = '\n'.join(lines) + '\n'
-    out = run_root / 'road-type' / 'comparison.txt'
+    out = out_dir / 'comparison.txt'
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(text, encoding='utf-8')
     return text
 
 
-def car_input_spec(width: int = data.FRAME_WIDTH, height: int = data.FRAME_HEIGHT) -> dict:
-    """How the car makes the inputs of a step from the narrow road camera (sunnypilot's speed_limits/vision.py)."""
+def car_input_spec(width: int = data.FRAME_WIDTH, height: int = data.FRAME_HEIGHT, signs: bool = False) -> dict:
+    """How the car makes the inputs of a step from the narrow road camera (sunnypilot's speed_limits/vision.py) and,
+    with signs, from speedvisiond's memory of the signs."""
+    sign_steps = [
+        'age = now - memory._road_sign_at  # speedvisiond\'s SpeedLimitMemory: when it last confirmed '
+        'other_sign:motorway_start or expressway_start (read 5 times a second, MIN_CONFIDENCE, CONFIRM_FRAMES within '
+        'CONFIRM_SECONDS); -inf before the first: age inf',
+        f'sign = [[min(age, {signs_data.SIGN_HORIZON:g}) / {signs_data.SIGN_SCALE:g}, 1.0]] if age <= '
+        f'{signs_data.SIGN_HORIZON:g} else [{list(NO_SIGN)}]  # road_type_signs.sign_features',
+    ] if signs else []
     return {
         'camera': 'VISION_STREAM_ROAD (the narrow road camera), the whole frame: 1344 x 760 on the comma 4, as the '
                   'frames of the dataset (frames.jsonl width 1344, height 760, camera_stream narrow_road)',
@@ -592,9 +924,11 @@ def car_input_spec(width: int = data.FRAME_WIDTH, height: int = data.FRAME_HEIGH
             'network normalises inside',
             f'speed = [[min(max(vEgo, 0), {data.SPEED_MAX}) / {data.SPEED_SCALE}, 1.0]]  # carState.vEgo m/s; '
             '[[0, 0]] when unknown',
+            *sign_steps,
             'hidden = zeros((1, 128), float32) at the start of the drive (and after more than 5 s without a step); '
             'then the hidden_out of the previous step',
-            'probabilities, hidden = session.run(None, {"image": image, "speed": speed, "hidden": hidden})',
+            'probabilities, hidden = session.run(None, {"image": image, "speed": speed, '
+            + ('"sign": sign, ' if signs else '') + '"hidden": hidden})',
         ],
         'rate': 'one step a second (the training frames are 1 s apart; 2 Hz would make its memory twice as fast: '
                 'keep 1 Hz)',
@@ -614,11 +948,12 @@ def export_road_type_onnx(checkpoint: Path, output: Path, *, verify: bool = True
     checkpoint, output = Path(checkpoint), Path(output)
     model, saved = load_road_type(checkpoint)
     step = step_module(model)
-    hidden_size = model.hidden_size
+    hidden_size, signs = model.hidden_size, model.signs
     example = (torch.rand(1, 3, data.FRAME_HEIGHT, data.FRAME_WIDTH), torch.tensor([[0.8, 1.0]]),
-               torch.zeros(1, hidden_size))
+               *([torch.tensor([[0.25, 1.0]])] if signs else []), torch.zeros(1, hidden_size))
     output.parent.mkdir(parents=True, exist_ok=True)
-    names_in, names_out = ['image', 'speed', 'hidden'], ['probabilities', 'hidden_out']
+    names_in = ['image', 'speed', *(['sign'] if signs else []), 'hidden']
+    names_out = ['probabilities', 'hidden_out']
     try:
         program = torch.onnx.export(step, example, input_names=names_in, output_names=names_out, dynamo=True,
                                     external_data=False)
@@ -640,7 +975,9 @@ def export_road_type_onnx(checkpoint: Path, output: Path, *, verify: bool = True
         worst, passed = 0.0, True
         for _ in range(4):
             inputs = (torch.rand(1, 3, data.FRAME_HEIGHT, data.FRAME_WIDTH, generator=generator),
-                      torch.rand(1, 2, generator=generator), torch.rand(1, hidden_size, generator=generator) * 2 - 1)
+                      torch.rand(1, 2, generator=generator),
+                      *([torch.rand(1, 2, generator=generator) * 2] if signs else []),
+                      torch.rand(1, hidden_size, generator=generator) * 2 - 1)
             with torch.no_grad():
                 expected = [t.numpy() for t in step(*inputs)]
             actual = session.run(None, dict(zip(names_in, (t.numpy() for t in inputs))))
@@ -649,7 +986,7 @@ def export_road_type_onnx(checkpoint: Path, output: Path, *, verify: bool = True
                 passed = passed and bool(np.allclose(a, e, rtol=1e-4, atol=1e-5))
         verification.update(passed=passed, max_abs_error=worst)
         if data_root is not None:
-            verification['rollout'] = _rollout_check(torch, step, session, Path(data_root), hidden_size)
+            verification['rollout'] = _rollout_check(torch, step, session, Path(data_root), hidden_size, signs=signs)
         if not passed:
             raise ValueError(f'road-type ONNX differs from PyTorch: max abs error {worst}')
     contract = {
@@ -668,6 +1005,11 @@ def export_road_type_onnx(checkpoint: Path, output: Path, *, verify: bool = True
             {'name': 'speed', 'shape': [1, 2], 'dtype': 'float32',
              'meaning': [f'min(max(vEgo m/s, 0), {data.SPEED_MAX}) / {data.SPEED_SCALE}', '1 when the speed is known, '
                          'else 0 (and the first value 0)']},
+            *([{'name': 'sign', 'shape': [1, 2], 'dtype': 'float32',
+                'meaning': [f'min(age, {signs_data.SIGN_HORIZON:g}) / {signs_data.SIGN_SCALE:g}: age = seconds since '
+                            'SpeedLimitMemory last confirmed a motorway or expressway sign (now - _road_sign_at)',
+                            f'1 when that is at most {signs_data.SIGN_HORIZON:g} s ago, else 0; never or longer ago: '
+                            f'{list(NO_SIGN)}']}] if signs else []),
             {'name': 'hidden', 'shape': [1, hidden_size], 'dtype': 'float32',
              'meaning': 'the memory: zeros at the start, then the previous step\'s hidden_out'}],
         'output': {'name': 'probabilities', 'shape': [1, len(data.CLASSES)], 'classes': list(data.CLASSES),
@@ -676,8 +1018,8 @@ def export_road_type_onnx(checkpoint: Path, output: Path, *, verify: bool = True
             {'name': 'probabilities', 'shape': [1, len(data.CLASSES)], 'dtype': 'float32'},
             {'name': 'hidden_out', 'shape': [1, hidden_size], 'dtype': 'float32',
              'meaning': 'give it back as hidden at the next step'}],
-        'step': {'rate_hz': 1.0, 'memory': saved['memory']},
-        'car_input': car_input_spec(),
+        'step': {'rate_hz': 1.0, 'memory': saved['memory'], 'signs': signs},
+        'car_input': car_input_spec(signs=signs),
         'verification': verification,
     }
     contract_path = output.with_name(output.name + '.contract.json')
@@ -686,27 +1028,40 @@ def export_road_type_onnx(checkpoint: Path, output: Path, *, verify: bool = True
             'verification': verification}
 
 
-def _rollout_check(torch, step, session, data_root: Path, hidden_size: int, seconds: int = 120) -> dict:
-    """The step run for seconds of the first test sequence by PyTorch and by onnxruntime, each with its own hidden
-    state fed back: the largest difference of the probabilities and whether the answers agree."""
+def _rollout_check(torch, step, session, data_root: Path, hidden_size: int, seconds: int = 120,
+                   signs: bool = False) -> dict:
+    """The step run for seconds of a test sequence by PyTorch and by onnxruntime, each with its own hidden state fed
+    back: the largest difference of the probabilities and whether the answers agree. With the sign input: from 30 s
+    before the first motorway sign the car confirmed on the test (the first test sequence when there is none)."""
     dataset = data.load_dataset(data_root)
+    attach_signs(dataset, data_root)
     tests = [run for run in dataset['sequences'] if run['partition'] == 'test']
     if not tests:
         return {'checked': False}
-    run = tests[0]
+    run, begin = tests[0], 0
+    if signs:
+        for candidate in tests:
+            seen = np.flatnonzero(_sequence_arrays(dataset, candidate)['sign'][:, 1] > 0)
+            if len(seen):
+                run, begin = candidate, max(0, int(seen[0]) - 30)
+                break
+    arrays = _sequence_arrays(dataset, run)
     frames = dataset['frames'][run['route']]
     hidden_t = torch.zeros(1, hidden_size)
     hidden_o = np.zeros((1, hidden_size), dtype=np.float32)
     worst, agree, count = 0.0, 0, 0
-    for position in run['positions'][:seconds]:
+    for offset, position in enumerate(run['positions'][begin:begin + seconds]):
         frame = frames[position]
         image = data.resized_frame(frame['image']).transpose(2, 0, 1)[None].astype(np.float32) / 255
         speed = np.array([data.speed_features(frame['speed_mps'])], dtype=np.float32)
+        sign = arrays['sign'][begin + offset][None]
+        inputs = {'image': image, 'speed': speed, **({'sign': sign} if signs else {}), 'hidden': hidden_o}
         with torch.no_grad():
-            p_t, hidden_t = step(torch.from_numpy(image), torch.from_numpy(speed), hidden_t)
-        p_o, hidden_o = session.run(None, {'image': image, 'speed': speed, 'hidden': hidden_o})
+            p_t, hidden_t = step(*(torch.from_numpy(inputs[name]) for name in inputs if name != 'hidden'), hidden_t)
+        p_o, hidden_o = session.run(None, inputs)
         worst = max(worst, float(np.abs(p_t.numpy() - p_o).max()))
         agree += int(p_t.numpy().argmax() == p_o.argmax())
         count += 1
-    return {'checked': True, 'route': run['route'], 'seconds': count, 'max_abs_error': worst,
-            'same_answer': agree}
+    return {'checked': True, 'route': run['route'], 'first_key': arrays['keys'][begin], 'seconds': count,
+            'max_abs_error': worst, 'same_answer': agree,
+            'sign_seconds': int((arrays['sign'][begin:begin + seconds, 1] > 0).sum())}
