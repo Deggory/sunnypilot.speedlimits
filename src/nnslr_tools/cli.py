@@ -1497,8 +1497,10 @@ def build_parser() -> argparse.ArgumentParser:
                                                          "ours into <data root>/external/mapillary/crops and "
                                                          "crops.jsonl: extra train crops of the classifier "
                                                          "(nnslr train --mapillary)")
-    p_mapillary.add_argument("--annotations", required=True, help="MTSD's folder of <key>.json annotations")
-    p_mapillary.add_argument("--images", required=True, help="MTSD's folder of <key>.jpg photos")
+    p_mapillary.add_argument("--annotations", required=True, help="MTSD's folder of <key>.json annotations, loose or in "
+                                                               "its .zip archives (subfolders searched)")
+    p_mapillary.add_argument("--images", required=True, help="MTSD's folder of <key>.jpg photos, loose or in its .zip "
+                                                          "archives (may be the annotations folder)")
     p_mapillary.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_mapillary.set_defaults(func=_cmd_mapillary_crops)
     p_tracks = sub.add_parser("tracks", help="the same sign followed across consecutive confirmed frames "

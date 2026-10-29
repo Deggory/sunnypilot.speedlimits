@@ -2,7 +2,8 @@
 
 MTSD (https://www.mapillary.com/dataset/trafficsign, CC BY-NC-SA 4.0) is about 52,000 street photos from all over the
 world with every traffic sign boxed and named (``regulatory--maximum-speed-limit-50--g1``). Its signs that are ours
-are cut once (``nnslr mapillary-crops``, helpers/mapillary.sh) into small crops with a margin around the sign:
+are cut once (``nnslr mapillary-crops``, helpers/mapillary.sh) into small crops with a margin around the sign, read
+straight from the zips of the download (on the server they sit on the TrueNAS share /data/mapillary):
 
     <data root>/external/mapillary/crops/<object key>.jpg
     <data root>/external/mapillary/crops.jsonl    a header line, then one line per crop: path, box, our label
@@ -22,10 +23,13 @@ from __future__ import annotations
 
 from collections import Counter
 import hashlib
+import io
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 from typing import Any
+import zipfile
+import zlib
 
 from nnslr_tools.annotations import atomic_write
 
@@ -113,11 +117,60 @@ def _usable(item: dict[str, Any], ispano: bool) -> tuple[list[float] | None, str
     return box, None
 
 
+class _Files:
+    """The ``<key>.json`` and ``<key>.jpg`` files under some folders, loose or inside the .zip archives of MTSD's
+    download (read from the zip without unzipping it: on a network share a hundred thousand small files cost far
+    more than reading each photo once). A zip that does not open (still being copied) is left out and named; a
+    hidden file (the copy in flight, .part) and one that failed its md5 check (UNVERIFIED-*) are not looked at."""
+
+    SUFFIXES = (".json", ".jpg")
+
+    def __init__(self, folders: list[Path], log) -> None:
+        self.where: dict[str, dict[str, tuple[Path | None, str]]] = {suffix: {} for suffix in self.SUFFIXES}
+        self.broken: list[str] = []
+        self._zips: dict[Path, zipfile.ZipFile] = {}
+        for folder in dict.fromkeys(folders):
+            for path in sorted(folder.rglob("*")):
+                suffix = path.suffix.lower()
+                if path.name.startswith((".", "UNVERIFIED-")) or not path.is_file():
+                    continue
+                if suffix in self.where:
+                    self.where[suffix].setdefault(path.stem, (None, str(path)))
+                elif suffix == ".zip" and path not in self._zips:
+                    try:
+                        archive = zipfile.ZipFile(path)
+                    except (OSError, zipfile.BadZipFile) as error:
+                        log(f"mapillary: {path} left out, it does not open ({error})")
+                        self.broken.append(str(path))
+                        continue
+                    self._zips[path] = archive
+                    for name in archive.namelist():
+                        member = PurePosixPath(name)
+                        if member.suffix.lower() in self.where and not member.name.startswith("._"):
+                            self.where[member.suffix.lower()].setdefault(member.stem, (path, name))
+
+    def keys(self, suffix: str) -> list[str]:
+        return sorted(self.where[suffix])
+
+    def has(self, key: str, suffix: str) -> bool:
+        return key in self.where[suffix]
+
+    def read(self, key: str, suffix: str) -> bytes:
+        archive, name = self.where[suffix][key]
+        return Path(name).read_bytes() if archive is None else self._zips[archive].read(name)
+
+    def close(self) -> None:
+        for archive in self._zips.values():
+            archive.close()
+
+
 def make_crops(annotations: Path, images: Path, data_root: Path, *, log=print) -> dict[str, Any]:
-    """Cut the MTSD signs that are ours (our_label) from the photos of ``images`` (``<key>.jpg``) named by the
-    annotations of ``annotations`` (``<key>.json``) into CROPS_DIR, and write CROPS_FILE. A photo whose
-    annotation has no sign of ours is never opened; one without its photo is counted, not an error (the
-    annotations come in one download, the photos in several). Returns the header written."""
+    """Cut the MTSD signs that are ours (our_label) from the photos (``<key>.jpg``) under ``images`` named by the
+    annotations (``<key>.json``) under ``annotations`` into CROPS_DIR, and write CROPS_FILE. Both are folders
+    searched with their subfolders, loose files or MTSD's .zip archives as downloaded (they may be the same
+    folder). A photo whose annotation has no sign of ours is never opened; one without its photo is counted, not
+    an error (the annotations come in one download, the photos in several). Run again, it resumes: a photo whose
+    crops are all cut already is not read again. Returns the header written."""
     from PIL import Image
 
     annotations, images, data_root = Path(annotations), Path(images), Path(data_root)
@@ -129,54 +182,77 @@ def make_crops(annotations: Path, images: Path, data_root: Path, *, log=print) -
     out_dir.mkdir(parents=True, exist_ok=True)
     rows: list[dict[str, Any]] = []
     skipped: Counter = Counter()
-    paths = sorted(annotations.glob("*.json"))
-    for number, path in enumerate(paths, 1):
-        if number % 2000 == 0:
-            log(f"mapillary: {number}/{len(paths)} annotations, {len(rows)} crops")
-        try:
-            document = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            skipped["unreadable_annotation"] += 1
-            continue
-        wanted = []
-        for item in document.get("objects") or []:
-            label = our_label(str(item.get("label", "")))
-            if label is None:
-                skipped["not_ours"] += 1
+    reused = 0
+    files = _Files([annotations, images], log)
+    try:
+        keys = files.keys(".json")
+        for number, stem in enumerate(keys, 1):
+            if number % 2000 == 0:
+                log(f"mapillary: {number}/{len(keys)} annotations, {len(rows)} crops")
+            try:
+                document = json.loads(files.read(stem, ".json"))
+            except (OSError, ValueError, zipfile.BadZipFile, zlib.error):
+                skipped["unreadable_annotation"] += 1
                 continue
-            box, why = _usable(item, bool(document.get("ispano")))
-            if box is None:
-                skipped[why] += 1
+            if not isinstance(document, dict) or "objects" not in document:
+                continue  # not an annotation (a README, a split list)
+            wanted = []
+            for item in document.get("objects") or []:
+                label = our_label(str(item.get("label", "")))
+                if label is None:
+                    skipped["not_ours"] += 1
+                    continue
+                box, why = _usable(item, bool(document.get("ispano")))
+                if box is None:
+                    skipped[why] += 1
+                    continue
+                key = str(item.get("key") or hashlib.sha1(f"{stem}{box}".encode()).hexdigest()[:22])
+                wanted.append((item, label, box, key))
+            if not wanted:
                 continue
-            wanted.append((item, label, box))
-        if not wanted:
-            continue
-        photo = images / (path.stem + ".jpg")
-        if not photo.is_file():
-            skipped["photo_not_downloaded"] += len(wanted)
-            continue
-        with Image.open(photo) as source:
-            image = source.convert("RGB")
-        for item, label, box in wanted:
-            left, top, right, bottom = _region(box, image.width, image.height)
-            crop = image.crop((left, top, right, bottom))
-            scale = min(1.0, MAX_SIGN_SIDE / max(box[2] - box[0], box[3] - box[1]))
-            if scale < 1.0:
-                crop = crop.resize((max(1, round(crop.width * scale)), max(1, round(crop.height * scale))),
-                                   Image.LANCZOS)
-            key = str(item.get("key") or hashlib.sha1(f"{path.stem}{box}".encode()).hexdigest()[:22])
-            name = CROPS_DIR / (key + ".jpg")
-            crop.save(data_root / name, quality=92)
-            rows.append({
-                "image_path": name.as_posix(),
-                "bbox_xyxy": [round((box[0] - left) * scale, 2), round((box[1] - top) * scale, 2),
-                              round((box[2] - left) * scale, 2), round((box[3] - top) * scale, 2)],
-                "label": label, "mtsd_label": item.get("label"), "mtsd_image": path.stem, "mtsd_object": key,
-                "occluded": bool((item.get("properties") or {}).get("occluded")),
-            })
+            if not files.has(stem, ".jpg"):
+                skipped["photo_not_downloaded"] += len(wanted)
+                continue
+            width, height = document.get("width"), document.get("height")
+            image = None
+            if not (isinstance(width, int) and isinstance(height, int)
+                    and all((out_dir / (key + ".jpg")).is_file() for *_, key in wanted)):
+                try:
+                    with Image.open(io.BytesIO(files.read(stem, ".jpg"))) as source:
+                        image = source.convert("RGB")
+                except (OSError, zipfile.BadZipFile, zlib.error):
+                    skipped["photo_unreadable"] += len(wanted)
+                    continue
+                width, height = image.width, image.height
+            else:
+                reused += len(wanted)
+            for item, label, box, key in wanted:
+                left, top, right, bottom = _region(box, width, height)
+                scale = min(1.0, MAX_SIGN_SIDE / max(box[2] - box[0], box[3] - box[1]))
+                name = CROPS_DIR / (key + ".jpg")
+                if image is not None:
+                    crop = image.crop((left, top, right, bottom))
+                    if scale < 1.0:
+                        crop = crop.resize((max(1, round(crop.width * scale)), max(1, round(crop.height * scale))),
+                                           Image.LANCZOS)
+                    crop.save(data_root / name, quality=92)
+                rows.append({
+                    "image_path": name.as_posix(),
+                    "bbox_xyxy": [round((box[0] - left) * scale, 2), round((box[1] - top) * scale, 2),
+                                  round((box[2] - left) * scale, 2), round((box[3] - top) * scale, 2)],
+                    "label": label, "mtsd_label": item.get("label"), "mtsd_image": stem, "mtsd_object": key,
+                    "occluded": bool((item.get("properties") or {}).get("occluded")),
+                })
+        broken = list(files.broken)
+    finally:
+        files.close()
+    if reused:
+        log(f"mapillary: {reused} crops already cut, kept")
     header = {"kind": CROPS_KIND, "version": CROPS_VERSION, "annotations": str(annotations), "images": str(images),
               "crops": len(rows), "by_label": dict(sorted(Counter(row["label"] for row in rows).items())),
               "skipped": dict(sorted(skipped.items())), "license": "CC BY-NC-SA 4.0, Mapillary Traffic Sign Dataset"}
+    if broken:
+        header["zips_left_out"] = broken
     lines = [json.dumps(header, sort_keys=True)] + [json.dumps(row, sort_keys=True) for row in rows]
     atomic_write(data_root / CROPS_FILE, ("\n".join(lines) + "\n").encode("utf-8"))
     return header

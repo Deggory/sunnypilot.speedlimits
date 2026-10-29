@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import zipfile
 
 import pytest
 from PIL import Image
@@ -74,6 +75,36 @@ def test_the_crops_of_a_tiny_mtsd(tmp_path):
     assert crops_state(root) == {"available": True, "crops": 3, "labels": 3, "reason": ""}
     with pytest.raises(ValueError, match="no photos folder"):
         make_crops(annotations, tmp_path / "nowhere", root)
+
+
+def test_the_crops_straight_from_the_zips_and_a_resume(tmp_path):
+    """MTSD as downloaded: the annotations in one zip, the photos in another, a third still being copied."""
+    annotations, images = _mtsd(tmp_path / "mtsd")
+    share = tmp_path / "share" / "zips"
+    share.mkdir(parents=True)
+    with zipfile.ZipFile(share / "mtsd_v2_fully_annotated_annotation.zip", "w") as archive:
+        for path in annotations.iterdir():
+            archive.write(path, f"mtsd_v2_fully_annotated/annotations/{path.name}")
+        archive.writestr("mtsd_v2_fully_annotated/splits/train.txt", "p1\n")
+    with zipfile.ZipFile(share / "mtsd_fully_annotated_images.train.0.zip", "w") as archive:
+        for path in images.iterdir():
+            archive.write(path, f"images/{path.name}")
+            archive.writestr(f"__MACOSX/images/._{path.name}", b"junk")
+    (share / "mtsd_fully_annotated_images.train.1.zip").write_bytes(b"PK\x03\x04 half copied")
+    root = tmp_path / "data"
+    lines = []
+    header = make_crops(share.parent, share.parent, root, log=lines.append)
+    assert header["by_label"] == {"maximum_speed:50": 1, "maximum_speed:80": 1, "other_sign:give_way": 1}
+    assert header["skipped"] == {"ambiguous": 1, "not_ours": 2, "photo_not_downloaded": 1, "too_small": 1}
+    assert header["zips_left_out"] == [str(share / "mtsd_fully_annotated_images.train.1.zip")]
+    first = (root / CROPS_FILE).read_text()
+    # Run again with photos that do not decode any more: none is read, the crops already cut are kept.
+    with zipfile.ZipFile(share / "mtsd_fully_annotated_images.train.0.zip", "w") as archive:
+        for path in images.iterdir():
+            archive.writestr(f"images/{path.name}", b"not a photo any more")
+    lines.clear()
+    assert make_crops(share.parent, share.parent, root, log=lines.append)["crops"] == 3
+    assert (root / CROPS_FILE).read_text() == first and "mapillary: 3 crops already cut, kept" in lines
 
 
 def _crops_file(root: Path, rows: list[dict]) -> Path:
