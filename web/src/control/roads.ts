@@ -4,7 +4,7 @@ import type {RoadFrame, RoadType} from '../common/panel-types';
 
 /** The kinds of road in the order of the legend, each with its colour (control.html .rt-town ...). */
 export const ROAD_TYPES: [key: RoadType | 'unknown', label: string][] = [['town', 'Town'], ['rural', 'Rural'],
-  ['expressway', 'Expressway'], ['motorway', 'Motorway'], ['parking', 'Parking'], ['unknown', 'Unknown']];
+  ['expressway', 'Expressway'], ['motorway', 'Motorway'], ['ramp', 'Ramp'], ['parking', 'Parking'], ['unknown', 'Unknown']];
 export const ROAD_LABEL = Object.fromEntries(ROAD_TYPES) as Record<RoadType | 'unknown', string>;
 
 /** A run of frames of one kind, the map's or a person's: what the strip draws. */

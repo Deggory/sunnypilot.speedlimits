@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Data › Roads: the type of road of every picture of the prepared drives (town, rural, expressway, motorway, parking),
+// Data › Roads: the type of road of every picture of the prepared drives (town, rural, expressway, motorway, ramp, parking),
 // from where the car was and the map (helpers/road_types.sh, the panel action "road_types"). First the action, with Find the road
 // types or its job running; then each drive as a thin strip of its whole length coloured by road type, from GET
 // /api/panel/road-types, read when the page opens and again when a search for the road types ends. Nothing here needs a

@@ -1095,11 +1095,12 @@ font-variant-numeric:tabular-nums}
    line under the stretches to check (the colour of Next to check), the dark one under those a person set, the blue one
    over the stretch a tap sets; the type buttons and Next to check right under the picture, the speeds, Mark start, Undo
    and the legend under them; 44 px targets on a touch screen; a phone held sideways puts the buttons beside the picture. */
-:root{--rt-parking:#8a57ae;--rt-unknown:#6e6e73}
-:root[data-theme="light"]{--rt-parking:#744399;--rt-unknown:#8e8e93}
-@media (prefers-color-scheme:light){:root[data-theme="auto"]{--rt-parking:#744399;--rt-unknown:#8e8e93}}
-.rt-parking{background:var(--rt-parking)}.rt-unknown{background:var(--rt-unknown);opacity:1}
-.rt-track .rt-parking{fill:var(--rt-parking)}.rt-track .rt-unknown{fill:var(--rt-unknown)}.rt-track .rt-tocheck{fill:var(--bad)}
+:root{--rt-parking:#8a57ae;--rt-unknown:#6e6e73;--rt-ramp:#1fb3c9}
+:root[data-theme="light"]{--rt-parking:#744399;--rt-unknown:#8e8e93;--rt-ramp:#0b8597}
+@media (prefers-color-scheme:light){:root[data-theme="auto"]{--rt-parking:#744399;--rt-unknown:#8e8e93;--rt-ramp:#0b8597}}
+/* A ramp: cyan, the light side of the motorway's blue, so the strip shows where a motorway is entered and left. */
+.rt-parking{background:var(--rt-parking)}.rt-unknown{background:var(--rt-unknown);opacity:1}.rt-ramp{background:var(--rt-ramp)}
+.rt-track .rt-parking{fill:var(--rt-parking)}.rt-track .rt-ramp{fill:var(--rt-ramp)}.rt-track .rt-unknown{fill:var(--rt-unknown)}.rt-track .rt-tocheck{fill:var(--bad)}
 .rt-view-main{grid-template-rows:auto 1fr}
 .rt-fix-head{flex-direction:row;flex-wrap:wrap;align-items:baseline;gap:2px 8px}
 .rt-pick button:last-child{grid-column:auto}
@@ -1151,6 +1152,8 @@ font-variant-numeric:tabular-nums}
 .rt-pick button.rt-map{outline:1.5px dashed var(--muted);outline-offset:-5px}
 .rt-fix-head strong{font-size:15px}
 @media (max-width:860px){.rt-pick{grid-template-columns:repeat(3,minmax(0,1fr))}.rt-pick .rt-type{padding:8px 6px}}
+/* Six types and Can't tell: the last one across the row under them. */
+.rt-pick .rt-type:last-child{grid-column:1/-1}
 /* The cut of a stretch (RoadDrive.vue): a short title over Whole / Before / After, and the cut drawn on the strip. */
 .rt-cut-head{margin:0 0 6px;font-size:13px;color:var(--muted);line-height:1.35}
 .rt-cut-head strong{color:var(--fg);font-size:14.5px;margin-right:4px}

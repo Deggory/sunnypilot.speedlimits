@@ -12,8 +12,10 @@ names its type:
   park). Faster than PARKING_MAX_SPEED an aisle or a service road found is the GPS slipping, not a car park. Sure only when the outline and a service road agree. An underground car park lies under the streets: slow
   on a street over it is not parking. Its limit to sunnypilot is always 15 km/h (a sign read there counts only when lower), and seeing it drops
   the limit remembered from the road before;
-- motorway: ``highway=motorway`` or its ramps;
-- expressway: ``highway=trunk`` or its ramps (the Swiss Autostrasse), unless the map puts it in a town;
+- motorway: ``highway=motorway``;
+- expressway: ``highway=trunk`` (the Swiss Autostrasse), unless the map puts it in a town;
+- ramp: a ramp of a motorway or an expressway (``highway=motorway_link``, ``trunk_link`` out of town), the road
+  where the limit of a ramp holds until the carriageway (the road-type network learns the merge from it);
 - town or rural, for every other road: the kind of limit when the map says it (``CH:urban``, ``CH:zone30`` → town,
   ``CH:rural`` → rural), else its limit (50 or less → town, 60 and more → rural), else its kind (a residential
   street, a living street → town). A road that says none of these stays unknown.
@@ -23,7 +25,7 @@ road of the map without a limit), and a stretch shorter than MIN_RUN frames betw
 takes theirs (the GPS jumping to a side road, a bridge or a car park beside the road for a second).
 
 Writes ``derived/road_types/<route>.jsonl``: one line per frame, ``{"frame_key", "segment_index", "output_index",
-"road_type" (town, rural, expressway, motorway, parking or null), "map_type" (before the drive was looked at), "basis"
+"road_type" (town, rural, expressway, motorway, ramp, parking or null), "map_type" (before the drive was looked at), "basis"
 (why: "maxspeed 50", "highway motorway", "parking aisle", "car park on the map", "filled", "smoothed", "no road", "no
 gps"...), "sure" (false where the map is often wrong: WEAK_BASES, a car park of one signal, filled, smoothed),
 "way_id", "highway", "maxspeed"}`` (the road found, also in a car park).
@@ -52,7 +54,7 @@ from nnslr_tools.map_context import CELL_DEGREES, OUR_ROAD_M, RoadMap, our_road
 ROAD_TYPES_RELATIVE = Path('derived') / 'road_types'
 CORRECTIONS_RELATIVE = Path('annotations') / 'road_types'
 PARKING_RELATIVE = Path('derived') / 'osm' / 'parking.jsonl'
-ROAD_TYPES = ('town', 'rural', 'expressway', 'motorway', 'parking')
+ROAD_TYPES = ('town', 'rural', 'expressway', 'motorway', 'ramp', 'parking')
 # Slower than this (m/s) inside a car park outline: parking, even with a street of the map within OUR_ROAD_M.
 PARKING_SPEED = 3.0
 # Faster than this (36 km/h) an aisle or a service road found is the GPS slipping onto a car park beside the road (a
@@ -107,12 +109,14 @@ def way_type(way: dict) -> tuple[str | None, str]:
     highway = way.get('highway') or ''
     limit = _limit(way.get('maxspeed'))
     kind = _kind(way)
-    if highway in ('motorway', 'motorway_link'):
-        return 'motorway', 'highway ' + highway
+    if highway == 'motorway':
+        return 'motorway', 'highway motorway'
+    if highway == 'motorway_link':
+        return 'ramp', 'highway motorway_link'
     if highway in ('trunk', 'trunk_link'):
         if kind in TOWN_KINDS or (limit is not None and limit <= 50):
             return 'town', 'highway ' + highway + ' in town'
-        return 'expressway', 'highway ' + highway
+        return ('ramp' if highway == 'trunk_link' else 'expressway'), 'highway ' + highway
     if kind in TOWN_KINDS:
         return 'town', 'limit ' + str(way.get('maxspeed_type') or way.get('maxspeed'))
     if kind == 'rural':
@@ -372,7 +376,7 @@ def stretches(lines: list[dict]) -> list[dict]:
 
 
 def type_counts(lines: list[dict]) -> dict[str, int]:
-    """The frames of each type: {town, rural, expressway, motorway, parking, unknown: frames}."""
+    """The frames of each type: {town, rural, expressway, motorway, ramp, parking, unknown: frames}."""
     types = {key: 0 for key in (*ROAD_TYPES, 'unknown')}
     for line in lines:
         key = line.get('road_type') if line.get('road_type') in ROAD_TYPES else 'unknown'
@@ -426,7 +430,7 @@ def _stamp(path: Path) -> tuple | None:
 
 def summary(root: Path) -> dict:
     """The road types of every drive, for Data › Roads (GET /api/panel/road-types): {'routes': [{'route', 'title',
-    'when', 'minutes', 'frames', 'types': {town, rural, expressway, motorway, parking, unknown: frames}, 'reviewed':
+    'when', 'minutes', 'frames', 'types': {town, rural, expressway, motorway, ramp, parking, unknown: frames}, 'reviewed':
     frames a person set, 'stretches'}] newest drive first, 'made_at': when the newest file of the map was written (None
     before the first), 'drives_without': the prepared drives (with a pre-annotation report) that have no road types
     yet}."""
