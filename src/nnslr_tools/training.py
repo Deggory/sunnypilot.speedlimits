@@ -1177,11 +1177,14 @@ DETECTOR_AUGMENTATION = {
 CLASSIFIER_AUGMENTATION = dict(DETECTOR_AUGMENTATION)
 
 
-def detector_photometric(torch, TF, image, generator, ranges=None):
-    """A training frame (3 x H x W, values 0..1, on any device) with random gamma, brightness, contrast,
-    saturation, colour cast and sometimes a light blur (DETECTOR_AUGMENTATION, or the ranges given:
-    CLASSIFIER_AUGMENTATION for the classifier's crops; ranges without the blur's keys never blur); the factors come
-    from the CPU generator."""
+# The values of photometric_draws, in this order: whether it applies (1.0 or 0.0), the factors, whether it blurs.
+PHOTOMETRIC_DRAWS = ("apply", "gamma", "brightness", "contrast", "saturation", "gain_r", "gain_g", "gain_b", "blur",
+                     "sigma")
+
+
+def photometric_draws(torch, generator, ranges=None) -> list[float]:
+    """The random values of detector_photometric (PHOTOMETRIC_DRAWS), from the CPU generator: every factor is drawn
+    either way, so each image uses the same amount of the generator."""
     ranges = DETECTOR_AUGMENTATION if ranges is None else ranges
 
     def draw(name, count=1):
@@ -1189,12 +1192,53 @@ def detector_photometric(torch, TF, image, generator, ranges=None):
         return (torch.rand(count, generator=generator, dtype=torch.float64) * (high - low) + low).tolist()
 
     apply = float(torch.rand(1, generator=generator)) < ranges["probability"]
-    # Every factor is drawn either way, so each frame uses the same amount of the generator.
     gamma, brightness, contrast, saturation = (draw(name)[0] for name in ("gamma", "brightness", "contrast",
                                                                            "saturation"))
     gains = draw("channel_gain", 3)
     blur = float(torch.rand(1, generator=generator)) < ranges.get("blur_probability", 0.0)
     sigma = draw("blur_sigma")[0] if "blur_sigma" in ranges else 0.0
+    return [float(apply), gamma, brightness, contrast, saturation, *gains, float(blur), sigma]
+
+
+def photometric_batch(torch, TF, images, draws):
+    """detector_photometric on a batch (B x 3 x H x W, values 0..1, on the GPU): each image with its own row of
+    photometric_draws (B x len(PHOTOMETRIC_DRAWS)), the same operations in the same order as torchvision's
+    adjust_gamma, adjust_brightness, adjust_contrast and adjust_saturation; an image whose draw does not apply is
+    left as it is. The classifier's loader workers only draw: the GPU changes the pixels."""
+    draws = draws.to(device=images.device, dtype=images.dtype)
+
+    def column(name):
+        return draws[:, PHOTOMETRIC_DRAWS.index(name)].view(-1, 1, 1, 1)
+
+    def grey(batch):
+        red, green, blue = batch.unbind(dim=-3)
+        return (0.2989 * red + 0.587 * green + 0.114 * blue).unsqueeze(dim=-3)
+
+    def blend(first, second, ratio):
+        return (ratio * first + (1.0 - ratio) * second).clamp(0.0, 1.0)
+
+    changed = images.pow(column("gamma")).clamp(0.0, 1.0)
+    changed = blend(changed, torch.zeros_like(changed), column("brightness"))
+    changed = blend(changed, grey(changed).mean(dim=(-3, -2, -1), keepdim=True), column("contrast"))
+    changed = blend(changed, grey(changed), column("saturation"))
+    gains = draws[:, PHOTOMETRIC_DRAWS.index("gain_r"):PHOTOMETRIC_DRAWS.index("gain_b") + 1].view(-1, 3, 1, 1)
+    changed = (changed * gains).clamp(0.0, 1.0)
+    sigmas = draws[:, PHOTOMETRIC_DRAWS.index("sigma")].tolist()
+    blurred = (draws[:, PHOTOMETRIC_DRAWS.index("blur")] > 0.5).tolist()
+    for index, (blur, sigma) in enumerate(zip(blurred, sigmas)):
+        if blur and sigma > 0:
+            side = 2 * math.ceil(3 * sigma) + 1
+            changed[index] = TF.gaussian_blur(changed[index], [side, side], [sigma, sigma])
+    return torch.where(column("apply") > 0.5, changed, images)
+
+
+def detector_photometric(torch, TF, image, generator, ranges=None):
+    """A training frame (3 x H x W, values 0..1, on any device) with random gamma, brightness, contrast,
+    saturation, colour cast and sometimes a light blur (DETECTOR_AUGMENTATION, or the ranges given:
+    CLASSIFIER_AUGMENTATION for the classifier's crops; ranges without the blur's keys never blur); the factors come
+    from the CPU generator (photometric_draws)."""
+    apply, gamma, brightness, contrast, saturation, *rest = photometric_draws(torch, generator, ranges)
+    gains, blur, sigma = rest[:3], rest[3] > 0.5, rest[4]
     if not apply:
         return image
     image = TF.adjust_gamma(image, gamma)
@@ -1897,7 +1941,7 @@ def train_reader(
             "and no validation-only classes" + (" and not_a_sign crops in train" if scheme == "v2" else "")
         )
 
-    torch, Image, DataLoader, Dataset, transforms, Weights, mobilenet_v3_small = _require_training_stack()
+    torch, _, DataLoader, Dataset, transforms, Weights, mobilenet_v3_small = _require_training_stack()
     import torchvision
     from torchvision.transforms import functional as TF
 
@@ -1919,68 +1963,114 @@ def train_reader(
     negative_index = class_to_index.get(NOT_A_SIGN) if classifier else None
     root = Path(data_root).resolve()
 
+    train_records = [r for r in plan["records"] if r["split"] == TRAIN_SPLIT]
+    val_records = [r for r in plan["records"] if r["split"] == VALIDATION_SPLIT]
+    # Every crop cut from its frame once (nnslr_tools.crop_cache): an epoch reads small arrays, not full frames.
+    import numpy as np
+    from torchvision.transforms import InterpolationMode
+
+    from nnslr_tools.crop_cache import EXACT, WINDOW, build_crop_cache
+    cache, cache_summary = build_crop_cache(
+        root, train_records + val_records,
+        [WINDOW if augment else EXACT] * len(train_records) + [EXACT] * len(val_records),
+        size=config.input_size, scheme=scheme, workers=config.num_workers,
+        content={"dataset_sha256": plan["dataset_sha256"], "mapillary_sha256": plan.get("mapillary_sha256")})
+    print(f"crop cache: {'cut' if cache_summary['built'] else 'reused'} {cache_summary['crops']} crops of "
+          f"{cache_summary['frames']} images, {cache_summary['megabytes']} MB, {cache_summary['seconds']}s: "
+          f"{cache_summary['folder']}", flush=True)
+
     class CropDataset(Dataset):
-        def __init__(self, records, *, training: bool):
+        """The crops of train (first 0) or validation (first len(train)) from the cache. A key is
+        epoch * len(records) + index (EpochSampler): the workers stay up from one epoch to the next, so the epoch
+        of the jitter and photometric draws comes with the index."""
+
+        def __init__(self, records, *, first: int, training: bool):
             self.records = records
+            self.first = first
             self.training = training
-            # The epoch whose crops this is (the jitter and the photometric draws depend on it, not on the worker).
-            self.epoch = 0
             pipeline = [transforms.Resize((config.input_size, config.input_size))]
             if training and not augment:
                 pipeline.extend([
                     transforms.ColorJitter(brightness=.15, contrast=.15, saturation=.1),
                     transforms.RandomAffine(degrees=4, translate=(.03, .03), scale=(.95, 1.05)),
                 ])
-            elif training:
-                # The colour comes from the photometric augmentation; the box jitter moves and resizes.
-                pipeline.append(transforms.RandomAffine(degrees=4))
             self.geometry = transforms.Compose(pipeline)
-            self.to_tensor = transforms.ToTensor()
-            self.normalize = transforms.Normalize(mean=READER_NORMALIZE_MEAN, std=READER_NORMALIZE_STD)
 
         def __len__(self):
             return len(self.records)
 
-        def __getitem__(self, index):
+        def __getitem__(self, key):
+            epoch, index = divmod(int(key), len(self.records))
             row = self.records[index]
-            image_path = _safe_image_path(root, row["image_path"])
-            with Image.open(image_path) as source:
-                image = source.convert("RGB")
-                if classifier:
-                    box = row["bbox_xyxy"]
-                    if self.training and augment:
-                        box = jitter_box(box, random.Random(_sample_seed("box", config.seed, self.epoch, index)))
-                    crop = image.crop(crop_rectangle(box, image.width, image.height))
-                else:
-                    x1, y1, x2, y2 = [int(v) for v in row["bbox_xyxy"]]
-                    crop = image.crop((x1, y1, x2, y2))
-            tensor = self.to_tensor(self.geometry(crop))
+            box = row["bbox_xyxy"]
             if self.training and augment:
-                generator = torch.Generator().manual_seed(_sample_seed("photometric", config.seed, self.epoch, index))
-                tensor = detector_photometric(torch, TF, tensor, generator, CLASSIFIER_AUGMENTATION)
-            return self.normalize(tensor), class_to_index[row["label"]]
+                box = jitter_box(box, random.Random(_sample_seed("box", config.seed, epoch, index)))
+            crop = self.geometry(cache.crop(self.first + index, box))
+            if self.training and augment:
+                # The colour comes from the photometric augmentation; the box jitter moves and resizes; a rotation
+                # of up to 4 degrees as RandomAffine(degrees=4) draws it, from the crop's own seed.
+                angle = random.Random(_sample_seed("rotation", config.seed, epoch, index)).uniform(-4.0, 4.0)
+                crop = TF.affine(crop, angle=angle, translate=[0, 0], scale=1.0, shear=[0.0, 0.0],
+                                 interpolation=InterpolationMode.NEAREST, fill=0)
+            # The pixels as they are (uint8, 3 x H x W) and the photometric draws: the GPU applies them to the batch
+            # (photometric_batch) and normalises; a crop without augmentation has the draw that does not apply.
+            pixels = torch.from_numpy(np.asarray(crop, dtype=np.uint8).copy()).permute(2, 0, 1).contiguous()
+            draws = [0.0] * len(PHOTOMETRIC_DRAWS)
+            if self.training and augment:
+                generator = torch.Generator().manual_seed(_sample_seed("photometric", config.seed, epoch, index))
+                draws = photometric_draws(torch, generator, CLASSIFIER_AUGMENTATION)
+            return pixels, torch.tensor(draws, dtype=torch.float32), class_to_index[row["label"]]
 
-    train_records = [r for r in plan["records"] if r["split"] == TRAIN_SPLIT]
-    val_records = [r for r in plan["records"] if r["split"] == VALIDATION_SPLIT]
-    generator = torch.Generator().manual_seed(config.seed)
-    train_dataset = CropDataset(train_records, training=True)
+    class EpochSampler(torch.utils.data.Sampler):
+        """The train crops of an epoch in the order of seed + epoch, as keys of CropDataset."""
+
+        def __init__(self, count: int):
+            self.count = count
+            self.epoch = 0
+
+        def __len__(self):
+            return self.count
+
+        def __iter__(self):
+            order = torch.randperm(self.count, generator=torch.Generator().manual_seed(config.seed + self.epoch))
+            return iter([self.epoch * self.count + index for index in order.tolist()])
+
+    normalize_mean = torch.tensor(READER_NORMALIZE_MEAN, device=device).view(1, 3, 1, 1)
+    normalize_std = torch.tensor(READER_NORMALIZE_STD, device=device).view(1, 3, 1, 1)
+
+    def batch_inputs(pixels, draws):
+        """A batch of uint8 crops on the device: values 0..1 (as ToTensor), the photometric augmentation of each
+        crop (photometric_batch) when draws are given, the ImageNet normalisation."""
+        images = pixels.to(device, non_blocking=True).float().div_(255.0)
+        if draws is not None:
+            images = photometric_batch(torch, TF, images, draws)
+        return (images - normalize_mean) / normalize_std
+
+    loader_options = {"num_workers": config.num_workers, "pin_memory": device.type == "cuda"}
+    if config.num_workers > 0:
+        loader_options.update(persistent_workers=True, prefetch_factor=4)
+    # Each loader seeds its workers from its own generator, not from torch's global one: the dropout draws the same
+    # numbers with or without loader workers (persistent workers seed once, a loader without them every epoch).
+    loader_seeds = {"train": torch.Generator().manual_seed(config.seed),
+                    "validation": torch.Generator().manual_seed(config.seed + 1)}
+    train_dataset = CropDataset(train_records, first=0, training=True)
+    train_sampler = EpochSampler(len(train_records))
     train_loader = DataLoader(
         train_dataset,
         batch_size=config.batch_size,
-        shuffle=True,
-        num_workers=config.num_workers,
-        pin_memory=device.type == "cuda",
-        generator=generator,
+        sampler=train_sampler,
+        generator=loader_seeds["train"],
         # A last batch of one crop fails in BatchNorm when the last feature map is 1 x 1 (small --input-size): that
         # crop, the last of the shuffle, waits for another epoch.
         drop_last=len(train_records) > 1 and len(train_records) % config.batch_size == 1,
+        **loader_options,
     )
     val_loader = DataLoader(
-        CropDataset(val_records, training=False),
+        CropDataset(val_records, first=len(train_records), training=False),
         batch_size=config.batch_size,
         shuffle=False,
-        num_workers=config.num_workers,
-        pin_memory=device.type == "cuda",
+        generator=loader_seeds["validation"],
+        **loader_options,
     )
 
     weights = Weights.IMAGENET1K_V1 if config.pretrained and mode == "fresh" else None
@@ -2149,9 +2239,8 @@ def train_reader(
         for epoch in range(start_epoch, config.epochs):
             epoch_number = epoch + 1
             epoch_start = time.perf_counter()
-            # Reproduce each epoch's DataLoader shuffle (and the crops' augmentation) after an epoch-boundary resume.
-            generator.manual_seed(config.seed + epoch)
-            train_dataset.epoch = epoch
+            # The epoch's shuffle and the crops' augmentation, the same after an epoch-boundary resume.
+            train_sampler.epoch = epoch
             model.train()
             train_loss = 0.0
             train_seen = 0
@@ -2160,12 +2249,12 @@ def train_reader(
             step_start = time.perf_counter()
             batch_count = len(train_loader)
             batch_index = 0
-            for inputs, targets in train_loader:
+            for pixels, draws, targets in train_loader:
                 # Where the training is, batch by batch, for the panel of the review site.
                 batch_index += 1
                 report_progress(name, epoch * batch_count + batch_index, config.epochs * batch_count,
                                 f"epoch {epoch_number} of {config.epochs}, batch {batch_index} of {batch_count}")
-                inputs = inputs.to(device, non_blocking=True)
+                inputs = batch_inputs(pixels, draws if augment else None)
                 targets = targets.to(device, non_blocking=True)
                 optimizer.zero_grad(set_to_none=True)
                 with torch.cuda.amp.autocast(enabled=use_amp):
@@ -2201,8 +2290,8 @@ def train_reader(
             # v2: the sign crops read right and the not_a_sign crops rejected.
             sign_seen = sign_correct = negative_seen = negative_rejected = 0
             with torch.no_grad():
-                for inputs, targets in val_loader:
-                    inputs = inputs.to(device, non_blocking=True)
+                for pixels, _, targets in val_loader:
+                    inputs = batch_inputs(pixels, None)
                     targets = targets.to(device, non_blocking=True)
                     with torch.cuda.amp.autocast(enabled=use_amp):
                         logits = model(inputs)
@@ -2346,6 +2435,7 @@ def train_reader(
                 if config.pretrained else "random"
             ),
             "config": config.__dict__,
+            "crop_cache": {key: cache_summary.get(key) for key in ("folder", "key", "crops", "frames", "megabytes")},
             "history": history,
             "limitations": plan["limitations"],
         }

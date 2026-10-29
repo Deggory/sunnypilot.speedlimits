@@ -532,6 +532,15 @@ assert sum(float(image.mean()) for image in changed) / len(changed) < float(crop
 # The same as the detector's: contrast down to half, and the light blur of rain.
 assert CLASSIFIER_AUGMENTATION == DETECTOR_AUGMENTATION and DETECTOR_AUGMENTATION["contrast"][0] == 0.5
 assert DETECTOR_AUGMENTATION["blur_probability"] > 0
+# The training draws in its loader workers and changes the pixels of the whole batch on the GPU: the same images.
+from nnslr_tools.training import photometric_batch, photometric_draws
+crops = torch.rand(48, 3, 20, 20, generator=torch.Generator().manual_seed(1))
+expected = torch.stack([detector_photometric(torch, TF, crop, torch.Generator().manual_seed(seed),
+                                             CLASSIFIER_AUGMENTATION) for seed, crop in enumerate(crops)])
+draws = torch.tensor([photometric_draws(torch, torch.Generator().manual_seed(seed), CLASSIFIER_AUGMENTATION)
+                      for seed in range(48)], dtype=torch.float32)
+assert 0 < int(draws[:, 0].sum()) < 48 and int((draws[:, 0] * draws[:, 8]).sum()) > 0
+assert torch.allclose(photometric_batch(torch, TF, crops, draws), expected, atol=1e-5)
 print("augment ok")
 """
 
@@ -597,6 +606,7 @@ def test_tiny_cpu_classifier_chain(tmp_path, capsys, torch_python):
                    "--negatives", str(negatives), *base, "--output", str(output), "--epochs", "2", "--batch-size", "4",
                    "--input-size", "32", "--no-amp")
     assert process.returncode == 0, process.stderr[-3000:]
+    process_train = process
     # The epoch line the panel parses: the classifier's measures before the seconds.
     for epoch in (1, 2):
         assert re.search(rf"^classifier epoch {epoch}/2 train_loss \S+ val_loss \S+ train_accuracy \S+ val_accuracy \S+ "
@@ -615,6 +625,17 @@ def test_tiny_cpu_classifier_chain(tmp_path, capsys, torch_python):
     assert all(key in item for item in result["history"] for key in ("validation_sign_accuracy", "validation_rejection", "seconds"))
     process = _run(torch_python, "-c", CHECKPOINT_CHECK, str(output / "reader-best.pt"), str(output / "training-state.pt"))
     assert process.returncode == 0 and "checkpoint ok" in process.stdout, process.stderr[-3000:]
+    # Every crop was cut from its frame once; a run with loader workers reuses them and trains the same.
+    assert re.search(r"^crop cache: cut \d+ crops of \d+ images", process_train.stdout, re.M), process_train.stdout
+    assert result["crop_cache"]["crops"] > 9 and 0 < result["crop_cache"]["frames"] <= 9
+    process = _run(torch_python, "-m", "nnslr_tools.cli", "train", str(dataset), "--task", "reader", "--classes", "v2",
+                   "--negatives", str(negatives), *base[:-1], "2", "--output", str(run / "workers"), "--epochs", "2",
+                   "--batch-size", "4", "--input-size", "32", "--no-amp")
+    assert process.returncode == 0, process.stderr[-3000:]
+    assert re.search(r"^crop cache: reused ", process.stdout, re.M), process.stdout
+    again = json.loads((run / "workers" / "result.json").read_text())
+    assert again["crop_cache"]["folder"] == result["crop_cache"]["folder"]
+    assert [item["train_loss"] for item in again["history"]] == [item["train_loss"] for item in result["history"]]
 
     checkpoint = output / "reader-best.pt"
     report_path = run / "evaluation" / "classifier-test.json"
