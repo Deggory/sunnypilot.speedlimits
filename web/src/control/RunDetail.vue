@@ -28,11 +28,11 @@ const run = computed((): RunSummary => props.summary);
 const detail = computed(() => props.detail?.name === props.summary.name ? props.detail : null);
 
 /** The networks whose curves the run has: the pipeline's two (and the classifier when it was trained into the same
- * run), or the classifier alone. */
+ * run), or the classifier alone (after its pretraining on Mapillary, in two stages). */
 const nets = computed((): CurveNet[] => {
   const value = detail.value;
   if (value === null || value.kind === 'experiment') return [];
-  if (value.kind === 'classifier') return ['classifier'];
+  if (value.kind === 'classifier') return value.curves.pretrain?.points.length ? ['pretrain', 'classifier'] : ['classifier'];
   if (value.kind === 'cutter') return ['detector'];
   return value.curves.classifier?.points.length ? ['detector', 'reader', 'classifier'] : ['detector', 'reader'];
 });

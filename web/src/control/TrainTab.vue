@@ -139,16 +139,21 @@ const ROAD_ACTIONS: [ActionName, string][] = [
     + 'and without memory, compared by when the ramp’s limit ends; the first is exported for the car. '
     + 'About 20 minutes, 40 the first time.'],
 ];
-/** The classifier: our signs only, or with the signs of the Mapillary dataset in train (status.classifier_options). */
+/** The classifier: our signs only, with the signs of the Mapillary dataset in train, or in two stages: first on the
+ * Mapillary signs alone, then on ours from those weights (status.classifier_options). */
+type MapillaryChoice = 'off' | 'on' | 'pretrain';
 const mapillaryState = computed(() => props.status?.classifier_options?.mapillary ?? null);
-const MAPILLARY_OPTIONS: {key: 'off' | 'on'; label: string}[] = [{key: 'off', label: 'Our signs'}, {key: 'on', label: 'With Mapillary'}];
-const pickedMapillary = ref<'off' | 'on' | null>(null);
+const MAPILLARY_OPTIONS: {key: MapillaryChoice; label: string}[] = [{key: 'off', label: 'Our signs'},
+  {key: 'on', label: 'With Mapillary'}, {key: 'pretrain', label: 'Mapillary, then ours'}];
+const pickedMapillary = ref<MapillaryChoice | null>(null);
 const mapillary = computed({
-  get: (): 'off' | 'on' => mapillaryState.value?.available ? pickedMapillary.value ?? 'off' : 'off',
-  set: (value: 'off' | 'on') => { pickedMapillary.value = value; },
+  get: (): MapillaryChoice => mapillaryState.value?.available ? pickedMapillary.value ?? 'off' : 'off',
+  set: (value: MapillaryChoice) => { pickedMapillary.value = value; },
 });
+const withMapillary = computed(() => mapillary.value !== 'off');
 /** Which Mapillary signs: the places their photos were taken (none chosen: all the world) and a share of them, in percent
- * (status.classifier_options.mapillary_regions; the server then keeps at most 300 of each kind). */
+ * (status.classifier_options.mapillary_regions; with Mapillary in train the server then keeps at most 300 of each kind,
+ * its pretraining takes every one). */
 const mapillaryRegions = computed(() => props.status?.classifier_options?.mapillary_regions ?? null);
 const region = ref<string[]>([]);
 const shareText = ref('100');
@@ -158,18 +163,20 @@ const locating = computed(() => locateJob.value?.state === 'running'
   || terminalActivities(props.status, ['mapillary']).length > 0);
 /** About how many Mapillary signs join: those of the places chosen, times the share. */
 const mapillarySigns = computed(() => Math.round(regionCrops(mapillaryRegions.value, region.value) * (share.value ?? 0) / 100));
-const mapillaryOptions = computed((): ActionOptions => mapillary.value === 'on'
-  ? {mapillary: 'on', region: region.value.length ? region.value.join(',') : 'all', share: String(share.value ?? shareText.value)}
+const mapillaryOptions = computed((): ActionOptions => withMapillary.value
+  ? {mapillary: mapillary.value, region: region.value.length ? region.value.join(',') : 'all', share: String(share.value ?? shareText.value)}
   : {mapillary: 'off'});
 const CLASSIFIER_ACTIONS = computed((): [ActionName, string][] => [
   ['train_classifier', 'A new classifier, taught on the signs and on the cutter’s mistakes'
     + (mapillary.value === 'on' ? ', with about ' + thousands(mapillarySigns.value) + ' signs of Mapillary' : '')
+    + (mapillary.value === 'pretrain' ? ', first on about ' + thousands(mapillarySigns.value) + ' signs of Mapillary alone, '
+      + 'then on ours from there' : '')
     + '. Takes a few hours on the GPU.'],
 ]);
 /** The classifier's button: also not with a share that is not a percentage. */
 const classifierActions = computed(() => {
   const actions = props.status?.actions ?? null;
-  if (actions === null || mapillary.value !== 'on' || share.value !== null) return actions;
+  if (actions === null || !withMapillary.value || share.value !== null) return actions;
   return {...actions, train_classifier: {...actions.train_classifier, allowed: false,
     reason: 'the share of Mapillary is a percentage, more than 0 and at most 100'}};
 });
@@ -252,7 +259,7 @@ const numbers = computed(() => {
         <div v-if="mapillaryState?.available" class="seg-row">
           <Segmented v-model="mapillary" :options="MAPILLARY_OPTIONS" label="Signs the classifier learns from"/>
         </div>
-        <div v-if="mapillaryState?.available && mapillary === 'on'" class="mly-choice" id="train-mapillary-choice">
+        <div v-if="mapillaryState?.available && withMapillary" class="mly-choice" id="train-mapillary-choice">
           <RegionPicker v-model="region" :regions="mapillaryRegions" :locate="status?.actions.mapillary_locations ?? null"
                         :locating="locating"
                         @locate="status && emit('run', 'mapillary_locations', status.actions.mapillary_locations)"/>
@@ -267,7 +274,9 @@ const numbers = computed(() => {
                     @run="(name, state) => emit('run', name, state, undefined, mapillaryOptions)"/>
         <p v-if="mapillaryState?.available" class="latest-none" id="train-mapillary-note">Mapillary: {{ thousands(mapillaryState.crops) }}
           street-photo signs of {{ plural(mapillaryState.labels, 'kind') }}, added to train only: every measure stays on your drives.<template
-          v-if="mapillary === 'on'"> The same share always takes the same signs; then at most 300 of each kind.</template></p>
+          v-if="mapillary === 'on'"> The same share always takes the same signs; then at most 300 of each kind.</template><template
+          v-if="mapillary === 'pretrain'"> The classifier first learns on them alone (the same share always takes the same
+          signs), then on your signs and the cutter’s mistakes, starting from there.</template></p>
         <p v-else-if="mapillaryState" class="latest-none" id="train-mapillary-note">Mapillary signs: not prepared yet
           (helpers/mapillary.sh).</p>
         <p v-if="mapillaryState?.available && locateJob?.state === 'failed'" class="latest-none warn-text" id="train-locate-failed">Locating the

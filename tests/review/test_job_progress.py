@@ -206,6 +206,39 @@ def test_the_reports_of_the_mining_the_classifier_and_the_chain():
     assert with_step_progress(chain, 'train_classifier', {'task': 'mine', 'done': 1, 'total': 4})['percent'] == chain['percent']
 
 
+
+# A classifier in two stages (NNSLR_CLASSIFIER_MAPILLARY=pretrain): the Mapillary crops alone, then ours from them.
+TWO_STAGE_LOG = CLASSIFIER_LOG.split('== 1/7')[0] + (
+    'pretraining:  --classes v2 --epochs 30 --pretrained --mapillary /d/crops.jsonl --mapillary-only\n'
+    'settings:     --classes v2 --epochs 20 --init-from /d/runs/r/pretrain/reader-best.pt\n== 1/7'
+) + CLASSIFIER_LOG.split('== 1/7')[1].split('classifier epoch')[0] + (
+    'pretrain epoch 3/30 train_loss 0.4 val_loss 0.9 train_accuracy 0.87 val_accuracy 0.79 val_sign_accuracy 0.79 22s\n')
+
+
+def test_a_classifier_in_two_stages_counts_both_in_its_step():
+    from nnslr_tools.job_progress import with_step_progress
+    first = progress('train_classifier', 'running', TWO_STAGE_LOG)
+    assert states(first)['classifier'] == 'current' and first['two_stages']
+    # The pretraining is the first half of the classifier's 60: 4 + 14 done, and 3 of 60 epochs.
+    assert first['percent'] == 21.0 and first['detail'] == 'classifier · pretraining on Mapillary, epoch 3 of 30'
+    assert first['step_progress']['percent'] == 5.0
+    assert first['curves']['pretrain']['points'][0]['val_sign_accuracy'] == 0.79
+    early = progress('train_classifier', 'running', TWO_STAGE_LOG + 'pretrain stops early after epoch 3: x\n')
+    assert early['percent'] == 48.0 and early['detail'] == 'classifier · pretraining on Mapillary, stopped early after epoch 3'
+    second = progress('train_classifier', 'running', TWO_STAGE_LOG + 'pretrain stops early after epoch 3: x\n'
+                      + CLASSIFIER_LOG.split('== 4/7 Train the classifier ==\n')[1])
+    assert second['detail'] == 'classifier · on our signs after the pretraining, epoch 3 of 20'
+    assert second['step_progress']['percent'] == 57.5 and second['percent'] == 52.5
+    assert set(second['curves']) == {'pretrain', 'classifier'}
+    # The reports of the training: the pretraining's fill the first half, the second stage's the other.
+    report = with_step_progress(first, 'train_classifier', {'task': 'pretrain', 'done': 30, 'total': 100, 'text': 'epoch 3 of 30'})
+    assert report['percent'] == 27.0 and report['step_progress']['percent'] == 15.0
+    assert report['step_progress']['text'] == 'pretraining on Mapillary, epoch 3 of 30'
+    report = with_step_progress(second, 'train_classifier', {'task': 'classifier', 'done': 30, 'total': 100, 'text': 'x'})
+    assert report['percent'] == 57.0 and report['step_progress']['text'] == 'on our signs after the pretraining, x'
+    # A classifier in one stage is not.
+    assert not progress('train_classifier', 'running', CLASSIFIER_LOG)['two_stages']
+
 # -- scripts/run_detector_sizes.sh with one size: "Train the cutter" -------------------------------------------------
 CUTTER_LOG = """== scripts/run_detector_sizes.sh 2026-10-24_1800-cutter 960x544
 == Detector input sizes ==

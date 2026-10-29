@@ -496,6 +496,11 @@ def test_the_classifier_takes_the_mapillary_signs_only_when_prepared(root, check
     job = panel.start('train_classifier', {'mapillary': 'off'})
     finished(panel, job['id'])
     assert 'mapillary=0\n' in full_log(panel, job['id'])
+    # Two stages: the Mapillary crops alone, then ours from those weights.
+    time.sleep(1.1)
+    job = panel.start('train_classifier', {'mapillary': 'pretrain', 'share': '50'})
+    finished(panel, job['id'])
+    assert 'mapillary=pretrain\n' in full_log(panel, job['id'])
 
 
 def test_the_classifier_takes_a_region_and_a_share_of_mapillary(root, checkout, monkeypatch):
@@ -583,3 +588,16 @@ def test_a_classifier_job_shows_its_mapillary_region_and_share(tmp_path):
                    '/d/crops.jsonl --mapillary-region europe,CH --mapillary-share 5\n')
     assert _settings_of(log, 'train_classifier') == ['classes v2', 'Mapillary signs', 'Mapillary Europe, CH',
                                                      'Mapillary 5 %', '30 epochs']
+
+
+def test_a_classifier_job_in_two_stages_shows_them(tmp_path):
+    from nnslr_tools.panel import _settings_of
+    log = tmp_path / 'job.log'
+    log.write_text('== scripts/run_classifier.sh r\nrun:          r\npretraining:  --classes v2 --epochs 20 --pretrained '
+                   '--mapillary /d/crops.jsonl --mapillary-share 5 --mapillary-only\nsettings:     --classes v2 --epochs 30 '
+                   '--init-from /d/runs/r/pretrain/reader-best.pt\n')
+    assert _settings_of(log, 'train_classifier') == ['classes v2', 'Mapillary first, then ours', 'Mapillary 5 %',
+                                                     '30 epochs', 'pretrained']
+    log.write_text('== scripts/run_classifier.sh r\nrun:          r\nsettings:     --classes v2 --epochs 30 '
+                   '--init-from /d/runs/2026-10-29_1602-classifier/classifier/reader-best.pt\n')
+    assert _settings_of(log, 'train_classifier') == ['classes v2', '30 epochs', 'from 2026-10-29_1602-classifier']

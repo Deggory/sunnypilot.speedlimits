@@ -673,7 +673,13 @@ def _train_config(args: argparse.Namespace):
     from nnslr_tools.checkpoints import DEFAULT_DETECTOR_ANCHOR_MIN_RATIO, DEFAULT_DETECTOR_INPUT_SIZE, parse_input_size
     from nnslr_tools.training import DetectorTrainConfig, TrainConfig, _check_detector_config
 
+    init_from = getattr(args, "init_from", None)
+    mode = getattr(args, "mode", "fresh")
     if args.task == "detector":
+        if init_from and mode != "continue":
+            raise ValueError("--init-from starts a detector only with --mode continue")
+        if getattr(args, "mapillary_only", False):
+            raise ValueError("--mapillary-only is a classifier option: --task reader --classes v2 --mapillary")
         defaults = DetectorTrainConfig()
         config = DetectorTrainConfig(
             epochs=args.epochs,
@@ -707,6 +713,18 @@ def _train_config(args: argparse.Namespace):
                          "detector options (--no-augment also of the reader with --classes v2)")
     if args.input_size is not None and not str(args.input_size).isdigit():
         raise ValueError(f"invalid reader --input-size {args.input_size!r}: the side of the square crop in pixels")
+    mapillary_only = bool(getattr(args, "mapillary_only", False))
+    if mapillary_only and not getattr(args, "mapillary", None):
+        raise ValueError("--mapillary-only trains on the Mapillary crops alone: add --mapillary")
+    # --init-from outside continue: the start of a fresh classifier (the second stage of a two-stage run), recorded
+    # in its configuration so that a resumed run finds it again.
+    start = None
+    if init_from and mode != "continue":
+        if classes != "v2":
+            raise ValueError("--init-from starts a fresh reader only with --classes v2 (or use --mode continue)")
+        if args.pretrained and mode == "fresh":
+            raise ValueError("--init-from and --pretrained are two different starts: choose one")
+        start = str(Path(init_from).resolve())
     return TrainConfig(
         epochs=args.epochs,
         patience=args.patience,
@@ -723,6 +741,8 @@ def _train_config(args: argparse.Namespace):
         augment=classes == "v2" and not args.no_augment,
         mapillary=str(Path(args.mapillary).resolve()) if getattr(args, "mapillary", None) else None,
         **_mapillary_choice(args),
+        mapillary_only=mapillary_only,
+        init_from=start,
     )
 
 
@@ -765,6 +785,8 @@ def _reader_plan_options(args: argparse.Namespace) -> dict:
             raise ValueError("--mapillary adds crops to the classifier: --task reader --classes v2")
         options["mapillary_path"] = Path(args.mapillary)
         options.update(_mapillary_choice(args))
+        if getattr(args, "mapillary_only", False):
+            options["mapillary_only"] = True
     elif getattr(args, "mapillary_region", None) or getattr(args, "mapillary_share", None) is not None:
         _mapillary_choice(args)
     return options
@@ -795,6 +817,9 @@ def _cmd_train(args: argparse.Namespace) -> int:
     if args.task == "detector":
         plan = prepare_detector_training(dataset, splits, root, dataset_kind=kind, families=config.families)
     else:
+        if getattr(config, "init_from", None):
+            from nnslr_tools.training import reader_start
+            options["start"] = reader_start(Path(config.init_from))
         plan = prepare_reader_training(dataset, splits, root, dataset_kind=kind, **options)
 
     if args.dry_run:
@@ -817,7 +842,7 @@ def _cmd_train(args: argparse.Namespace) -> int:
     else:
         result = train_reader(plan, root, Path(args.output), config,
                               mode=args.mode, hf_repo=args.hf_repo, hf_revision=args.hf_revision,
-                                init_from=args.init_from)
+                              init_from=args.init_from if args.mode == "continue" else None)
 
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
@@ -1702,7 +1727,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_train.add_argument("--seed", type=int, default=0)
     p_train.add_argument("--init-from", type=Path, default=None,
                          help="continue mode: start from these weights (a <task>-best.pt of an earlier run) "
-                              "instead of the stable ones on Hugging Face")
+                              "instead of the stable ones on Hugging Face; reader --classes v2 in a fresh run: start "
+                              "from this reader-best.pt instead of ImageNet (the second stage after --mapillary-only), "
+                              "its head row by row by class name, the classes its own and ours")
     p_train.add_argument("--pretrained", action="store_true",
                          help="allow torchvision ImageNet weights for the reader/backbone if not cached")
     p_train.add_argument("--no-amp", action="store_true", help="disable CUDA automatic mixed precision")
@@ -1718,6 +1745,11 @@ def build_parser() -> argparse.ArgumentParser:
                                              "mine-negatives (mined on this dataset and split)")
     p_train.add_argument("--mapillary", help="reader --classes v2: the crops file of nnslr mapillary-crops, whose "
                                              "signs join train (never validation or test)")
+    p_train.add_argument("--mapillary-only", action="store_true",
+                         help="with --mapillary: the first stage of a two-stage classifier, trained on every "
+                              "Mapillary crop of a v2 class (no cap per kind; kinds that are no class of ours as "
+                              "other_sign) and none of ours; validation our sign crops; the second stage is a fresh "
+                              "run on ours with --init-from <this run>/reader-best.pt")
     p_train.add_argument("--mapillary-region", help="with --mapillary: only the photos taken in these continents "
                                                     "(europe, asia, africa, north_america, south_america, oceania) or "
                                                     "countries (CH, DE...), comma-separated; default all (needs nnslr "

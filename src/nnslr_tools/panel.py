@@ -168,9 +168,12 @@ def _settings_of(log: Path, action: str) -> list[str]:
         match = SETTING_LINE.match(line)
         if match:
             fields.setdefault(match.group(1).strip(), match.group(2).strip())
-    words = fields.get('settings', '').split()
-    flags = {word: (words[index + 1] if index + 1 < len(words) and not words[index + 1].startswith('--') else '')
-             for index, word in enumerate(words) if word.startswith('--')}
+    flags = _flags(fields.get('settings', ''))
+    # A classifier in two stages (run_classifier.sh, NNSLR_CLASSIFIER_MAPILLARY=pretrain): its Mapillary crops are
+    # chosen in the first ("pretraining:  --classes v2 ... --mapillary-only"), the second starts from it.
+    pretraining = _flags(fields.get('pretraining', ''))
+    if pretraining:
+        flags = {**{key: value for key, value in pretraining.items() if key.startswith('--mapillary')}, **flags}
     chips = []
     if fields.get('sizes'):
         chips += [size.replace('x', ' × ') for size in fields['sizes'].split()]
@@ -178,7 +181,9 @@ def _settings_of(log: Path, action: str) -> list[str]:
         chips.append(FAMILY_TEXT.get(flags['--cutter-families'], flags['--cutter-families']))
     if flags.get('--classes'):
         chips.append('classes ' + flags['--classes'])
-    if '--mapillary' in flags:
+    if pretraining:
+        chips.append('Mapillary first, then ours')
+    elif '--mapillary' in flags:
         chips.append('Mapillary signs')
     if flags.get('--mapillary-region'):
         chips.append('Mapillary ' + _region_words(flags['--mapillary-region']))
@@ -199,13 +204,28 @@ def _settings_of(log: Path, action: str) -> list[str]:
         chips.append('sign-free ' + flags['--negative-frame-fraction'])
     if fields.get('cutter'):
         chips.append('cutter ' + fields['cutter'])
-    if '--pretrained' in flags:
+    if '--pretrained' in flags or '--pretrained' in pretraining:
         chips.append('pretrained')
+    elif flags.get('--init-from') and not pretraining:
+        chips.append('from ' + _start_words(flags['--init-from']))
     elif fields.get('init'):
         chips.append('from ' + fields['init'])
     if fields.get('dataset kind'):
         chips.append(fields['dataset kind'] + ' dataset')
     return chips
+
+
+def _flags(settings: str) -> dict[str, str]:
+    """The flags of a settings line and their values: {'--epochs': '20', '--pretrained': ''}."""
+    words = settings.split()
+    return {word: (words[index + 1] if index + 1 < len(words) and not words[index + 1].startswith('--') else '')
+            for index, word in enumerate(words) if word.startswith('--')}
+
+
+def _start_words(path: str) -> str:
+    """The start of a classifier (--init-from) in words: the run of a .../runs/<run>/classifier/reader-best.pt."""
+    parts = Path(path).parts
+    return parts[-3] if len(parts) >= 3 and parts[-2] in ('classifier', 'pretrain', 'reader') else Path(path).name
 
 
 def _region_words(region: str) -> str:
@@ -1282,7 +1302,8 @@ class Panel:
         """Starts an action. The only options are the starting point of a training ({'start': key} of
         training_starts()), turned into a flag or the environment of helpers/3_train.sh, the run to resume, and the
         cutter's size and families (one of CUTTER_SIZES, CUTTER_FAMILIES), the route, provider, save and limit of an AI
-        action (_ai_arguments), and whether the classifier adds the Mapillary signs ('on' or 'off'): never a command.
+        action (_ai_arguments), and whether the classifier adds the Mapillary signs ('on', 'off', or 'pretrain': first
+        on them alone, then on ours from those weights): never a command.
         The classifier's and the cutter's trainings run on a new run named here (new_run_name)."""
         if action not in ACTIONS:
             raise PanelError(404, 'unknown_action', 'Unknown action.')
@@ -1340,15 +1361,16 @@ class Panel:
         if mapillary is not None:
             if action != 'train_classifier':
                 raise PanelError(400, 'bad_option', 'Only "Train the classifier" takes the Mapillary signs.')
-            if mapillary not in ('on', 'off'):
-                raise PanelError(400, 'bad_option', 'Mapillary is on or off.')
-            if mapillary == 'on':
+            # 'pretrain': two stages, the Mapillary crops alone, then ours from those weights.
+            if mapillary not in ('on', 'off', 'pretrain'):
+                raise PanelError(400, 'bad_option', 'Mapillary is off, on, or pretrain (Mapillary first, then ours).')
+            if mapillary in ('on', 'pretrain'):
                 from nnslr_tools.mapillary import crops_state
                 state = crops_state(self.root)
                 if not state['available']:
                     raise PanelError(409, 'not_available', state['reason'][0].upper() + state['reason'][1:] + '.')
-                start_env['NNSLR_CLASSIFIER_MAPILLARY'] = '1'
-        start_env.update(self._mapillary_choice(action, options or {}, mapillary == 'on'))
+                start_env['NNSLR_CLASSIFIER_MAPILLARY'] = '1' if mapillary == 'on' else 'pretrain'
+        start_env.update(self._mapillary_choice(action, options or {}, mapillary in ('on', 'pretrain')))
         package = (options or {}).get('package')
         if package is not None and action != 'networks_publish':
             raise PanelError(400, 'bad_option', 'Only "Publish on Hugging Face" takes a package.')

@@ -188,6 +188,8 @@ export function epochText(best: number | null, epochs: number | null): string {
 export function initText(initialization: string | null): string {
   if (initialization === 'imagenet1k_v1') return 'ImageNet';
   if (initialization === 'random') return 'random weights';
+  if (initialization === 'mapillary_pretraining') return 'Mapillary pretraining';
+  if (initialization === 'checkpoint') return 'another classifier';
   return initialization ?? '–';
 }
 

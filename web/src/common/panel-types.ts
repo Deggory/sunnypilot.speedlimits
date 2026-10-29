@@ -58,9 +58,10 @@ export interface ActionOptions {
   package?: string;
   /** The run of the SignNet sent to the car (send_to_car) or tried on the comma (try_on_comma). */
   signnet?: string;
-  /** Whether the classifier's training adds the signs of the Mapillary dataset to train (train_classifier). */
-  mapillary?: 'on' | 'off';
-  /** With mapillary on: the continents and countries whose photos come in ("europe,CH"; "all": every one), and the
+  /** Whether the classifier's training adds the signs of the Mapillary dataset to train, or first learns on them alone
+   * and then on ours from those weights (pretrain; train_classifier). */
+  mapillary?: 'on' | 'off' | 'pretrain';
+  /** With mapillary on or pretrain: the continents and countries whose photos come in ("europe,CH"; "all": every one), and the
    * percentage of their signs ("5"). */
   region?: string;
   share?: string;
@@ -121,8 +122,9 @@ export interface TrainingCurve {
   points: EpochPoint[];
 }
 
-/** The networks with curves: the pipeline's detector and reader, the classifier with “not a sign”. */
-export type CurveNet = 'detector' | 'reader' | 'classifier';
+/** The networks with curves: the pipeline’s detector and reader, the classifier with “not a sign” and its pretraining
+ * on the Mapillary signs alone (pretrain). */
+export type CurveNet = 'detector' | 'reader' | 'classifier' | 'pretrain';
 
 export interface StepProgress {
   done: number;

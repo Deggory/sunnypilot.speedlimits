@@ -1968,7 +1968,8 @@ class RunsIndex:
     @staticmethod
     def _curves(gathered: dict) -> dict:
         """The curves of the networks: from the log (with the time of each epoch), else from result.json; the
-        classifier with "not a sign" from its own classifier.log, else from its result.json."""
+        classifier with "not a sign" from its own classifier.log, else from its result.json, and its pretraining on
+        the Mapillary signs alone (two stages, "pretrain") from that log."""
         curves = dict((gathered['log'] or {}).get('curves') or {})
         for net in ('detector', 'reader'):
             result = gathered['digests'][net + '_result']
@@ -1986,6 +1987,9 @@ class RunsIndex:
                     curves['detector'] = {'epochs': history['epochs'] or history['history'][-1]['epoch'],
                                           'points': history['history']}
         logged = ((gathered['classifier_log'] or {}).get('curves') or {}).get('classifier')
+        pretraining = ((gathered['classifier_log'] or {}).get('curves') or {}).get('pretrain')
+        if pretraining:
+            curves['pretrain'] = pretraining
         result = gathered['classifier']['classifier_result']
         if logged:
             curves['classifier'] = logged

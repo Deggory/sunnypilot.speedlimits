@@ -4,7 +4,8 @@ The helpers write a line per phase (``== a. ...`` in helpers/3_train.sh, ``== 4/
 scripts/run_v100_baseline.sh, ``== 3/7 Mine the cutter's false boxes ==`` in scripts/run_classifier.sh,
 ``== 3/4 Train the detector at 960x544 ==`` in scripts/run_detector_sizes.sh, ``== b+c. ...`` in helpers/1_prepare.sh,
 ``== b. Map roads near the drives`` in helpers/road_types.sh) and the training one line per epoch (``detector epoch 3/20 ...``,
-``classifier epoch 3/20 ...``, nnslr_tools.training). Nothing here guesses a time: a percent comes only from
+``classifier epoch 3/20 ...``, ``pretrain epoch 3/20 ...`` for the first stage of a two-stage classifier,
+nnslr_tools.training). Nothing here guesses a time: a percent comes only from
 steps and epochs actually written, or from the preparation's own count of finished routes.
 """
 from __future__ import annotations
@@ -140,10 +141,10 @@ MARKERS = (
     (re.compile(r'^== d\. Junctions of the drives'), 'junctions', ()),
 )
 SUBSTEP = re.compile(r'^== (\d+)/(\d+) ')
-EPOCH = re.compile(r'^(detector|reader|classifier|experiment_b_crop_geom|experiment_b_crop|experiment_b_full|'
+EPOCH = re.compile(r'^(detector|reader|classifier|pretrain|experiment_b_crop_geom|experiment_b_crop|experiment_b_full|'
                    r'road_type_gru_nosign|road_type_gru|road_type_frame) epoch (\d+)/(\d+)\b')
 # "classifier stops early after epoch 12: ...": the training ends before its planned epochs.
-EARLY = re.compile(r'^(detector|reader|classifier|road_type_gru_nosign|road_type_gru|road_type_frame) stops early '
+EARLY = re.compile(r'^(detector|reader|classifier|pretrain|road_type_gru_nosign|road_type_gru|road_type_frame) stops early '
                    r'after epoch (\d+)\b')
 # The values of an epoch line: "train_loss 0.5000 val_loss 0.6000 ... 40s" (the detector also writes
 # val_recall, its validation recall at score 0.1, which chooses its best epoch; the classifier with "not a sign"
@@ -297,6 +298,9 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
         done.update(keys[:keys.index(current)])
 
     inside = _inside_step(current, epoch, substep, pipeline, stopped) if current in keys else None
+    two_stages = action == 'train_classifier' and PRETRAINING.search(text) is not None
+    if two_stages and current == 'classifier':
+        inside = _two_stage_step(epoch, stopped)
     finished_ok = state == 'ok'
     rows = []
     for key, label, _ in steps:
@@ -326,6 +330,8 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
 
     if epoch is not None and epoch[0] == current and state == 'running' and epoch[0] in stopped:
         detail = epoch[0] + ' · stopped early after epoch ' + str(stopped[epoch[0]])
+    elif two_stages and current == 'classifier' and epoch is not None and state == 'running' and inside is not None:
+        detail = 'classifier · ' + inside['text']
     elif epoch is not None and epoch[0] == current and state == 'running':
         # A variant of the decider by its step's label ("Crop, position and speed"), a network by its name.
         name = dict((key, label) for key, label, _ in steps).get(epoch[0], epoch[0]) \
@@ -348,6 +354,7 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
         runs_done = len(CHAIN_RUN_DONE.findall(text))
         runs_total = CHAIN_RUNS - (1 if 'no old reader' in text else 0)
         result['chain_runs'] = {'done': min(runs_done, runs_total), 'total': runs_total}
+        result['two_stages'] = two_stages
     preparing = action in ('prepare', 'prepare_again') and preparation is not None and state == 'running'
     if preparing:
         # Its drives are listed with their phase under the card: the raw line of the helper says it again.
@@ -380,16 +387,38 @@ def _inside_step(current: str, epoch: tuple[str, int, int] | None, substep: tupl
             'text': substep[1] + ' · ' + str(done + 1) + ' of ' + str(len(parts))}
 
 
+def _two_stage_step(epoch: tuple[str, int, int] | None, stopped: dict[str, int]) -> dict | None:
+    """The classifier step of a two-stage run from its epoch lines: the pretraining on Mapillary its first half,
+    the training on our crops its second (an early stop ends a stage). None before the first epoch."""
+    if epoch is None or epoch[0] not in ('pretrain', 'classifier') or not epoch[2]:
+        return None
+    network, number, total = epoch
+    done = total if network in stopped else min(number, total)
+    words = ('stopped early after epoch ' + str(stopped[network]) if network in stopped
+             else 'epoch ' + str(number) + ' of ' + str(total))
+    if network == 'pretrain':
+        return {'done': done, 'total': 2 * total, 'percent': round(done * 50 / total, 1),
+                'text': 'pretraining on Mapillary, ' + words}
+    return {'done': total + done, 'total': 2 * total, 'percent': round(50 + done * 50 / total, 1),
+            'text': 'on our signs after the pretraining, ' + words}
+
+
 # scripts/run_classifier.sh: the runs of nnslr evaluate-chain in its chain step (test and validation, then test with
 # the old reader), and the line each writes when it is done or skipped.
 CHAIN_RUNS = 3
 CHAIN_RUN_DONE = re.compile(r'^(?:evaluated the chain on |skip evaluated chain )', re.M)
+# A classifier run in two stages (scripts/run_classifier.sh with NNSLR_CLASSIFIER_MAPILLARY=pretrain) says so in its
+# head ("pretraining:  --classes v2 ... --mapillary-only"): its classifier step is the pretraining on the Mapillary
+# crops alone ("pretrain epoch 3/30 ..."), then the training on ours from it ("classifier epoch ..."), half each.
+PRETRAINING = re.compile(r'^pretraining:\s', re.MULTILINE)
 
 # The tasks that report their own progress (nnslr_tools.progress) and the step they belong to.
 TASK_STEPS = {'import': 'import', 'validate': 'split', 'split': 'split', 'detector': 'detector',
               'reader': 'reader', 'evaluate': 'evaluate', 'hard_examples': 'export', 'export': 'export',
               # scripts/run_classifier.sh: the mining of the cutter's false boxes, the classifier, the chain.
               'mine': 'mine', 'classifier': 'classifier', 'chain': 'chain',
+              # Its first stage on the Mapillary crops alone (NNSLR_CLASSIFIER_MAPILLARY=pretrain).
+              'pretrain': 'classifier',
               # [ai-reviewer] - START
               # nnslr ai-review and nnslr measure-ai-reviewer: a frame at a time.
               'ai_review': 'review', 'ai_measure': 'measure'}
@@ -410,6 +439,11 @@ def with_step_progress(result: dict, action: str, record: dict | None, setup_lin
         done, total = int(record['done']), int(record['total'])
         share = min(done, total) / total
         text = str(record.get('text') or '')
+        if current == 'classifier' and result.get('two_stages'):
+            # The pretraining on Mapillary is the first half of the step, the training on our crops the second.
+            first = record.get('task') == 'pretrain'
+            share = (share + (0 if first else 1)) / 2
+            text = ('pretraining on Mapillary, ' if first else 'on our signs after the pretraining, ') + text
         runs = result.get('chain_runs') if current == 'chain' else None
         if runs and runs['total'] > 1:
             # One run of several: the runs done count, then this one's frames.

@@ -16,6 +16,12 @@ other signs our classifier already has as classes (a kind we fold into other_sig
 would make a class of photos that are not ours). At most PER_LABEL crops of each label, so that Mapillary helps the
 rare classes without burying the common ones.
 
+Or in two stages (``--mapillary-only``, then ``--init-from``; NNSLR_CLASSIFIER_MAPILLARY=pretrain, the "Mapillary,
+then ours" choice of Train › Classifier): first a classifier is trained on the Mapillary crops alone, every one of
+them (no cap), an other sign whose kind is not a class of ours as other_sign (what our plan folds it into), and our
+validation signs of those classes choosing its epoch; then the classifier is trained on our crops alone, "not a
+sign" included, starting from those weights and keeping their classes.
+
 MTSD's photos are not the comma's road camera: other lenses, mostly daylight, often closer. The crops are scaled so
 that the sign is at most MAX_SIGN_SIDE pixels, the size of a near sign in a comma frame.
 
@@ -60,6 +66,8 @@ CROPS_FILE = Path("external") / "mapillary" / "crops.jsonl"
 LABEL_BASIS = "mapillary"
 # At most this many crops of one label in a training plan (the first by a hash of the object key: always the same).
 PER_LABEL = 300
+# The label of an other sign whose kind is not a class (nnslr_tools.training.OTHER_SIGN).
+OTHER_SIGN = "other_sign"
 # A sign smaller than this (its longer side, in MTSD pixels) is left out: too few pixels to read.
 MIN_SIGN_SIDE = 16
 # A crop is scaled down until its sign is at most this many pixels on its longer side.
@@ -407,14 +415,17 @@ def _in_region(location: dict[str, Any] | None, region: frozenset[str]) -> bool:
 
 
 def training_records(path: Path, classes: set[str], other_kinds: set[str], *, region: str | None = ALL_REGIONS,
-                     share: float | None = FULL_SHARE) -> tuple[list[dict[str, Any]], dict]:
+                     share: float | None = FULL_SHARE, capped: bool = True,
+                     fold_other_kinds: bool = False) -> tuple[list[dict[str, Any]], dict]:
     """The train records of the crops file ``path`` for a classifier plan: the speed signs and their end always
     (a value we have never seen becomes a class: the comma reads any value), an other sign only when its kind is
     one of ``other_kinds`` (our kinds that are classes); then only the photos of ``region`` (parse_region; the
     positions of the locations file next to the crops file), then ``share`` percent of what is left (a fixed choice
-    by a hash of the sign), then at most PER_LABEL of each label. Returns the records and a summary for the plan
-    (file, sha256, region, share, the locations file, crops by label, what was left out, and the sha256 of the
-    signs chosen, which a resumed run must find again)."""
+    by a hash of the sign), then at most PER_LABEL of each label (not ``capped``: every one). With
+    ``fold_other_kinds`` (the pretraining on Mapillary alone, nnslr train --mapillary-only) an other sign whose kind is not a class
+    of ours comes in as other_sign, as our plan folds a kind too rare to learn, instead of staying out. Returns the
+    records and a summary for the plan (file, sha256, region, share, the locations file, crops by label, what was
+    left out or folded, and the sha256 of the signs chosen, which a resumed run must find again)."""
     header, rows = read_crops(path)
     wanted = parse_region(region)
     share = check_share(share)
@@ -431,6 +442,7 @@ def training_records(path: Path, classes: set[str], other_kinds: set[str], *, re
                           "located_photos": sum(1 for row in locations.values() if row.get("latitude") is not None)}
     by_label: dict[str, list[dict[str, Any]]] = {}
     left_out: Counter = Counter()
+    folded: Counter = Counter()
     eligible = in_region = 0
     for row in rows:
         label = row.get("label")
@@ -438,8 +450,12 @@ def training_records(path: Path, classes: set[str], other_kinds: set[str], *, re
             left_out["no_label"] += 1
             continue
         if label.startswith("other_sign:") and label not in other_kinds:
-            left_out["kind_not_a_class_of_ours"] += 1
-            continue
+            if not fold_other_kinds:
+                left_out["kind_not_a_class_of_ours"] += 1
+                continue
+            folded[label] += 1
+            row = {**row, "kind": label.partition(":")[2], "label": OTHER_SIGN}
+            label = OTHER_SIGN
         eligible += 1
         if wanted is not None:
             location = locations.get(str(row.get("mtsd_image")))
@@ -454,16 +470,18 @@ def training_records(path: Path, classes: set[str], other_kinds: set[str], *, re
             left_out["outside_the_share"] += 1
             continue
         by_label.setdefault(label, []).append(row)
+    per_label = PER_LABEL if capped else None
     records = []
     for label, items in sorted(by_label.items()):
         items.sort(key=_order)
-        left_out["over_the_per_label_limit"] += max(0, len(items) - PER_LABEL)
-        for row in items[:PER_LABEL]:
+        kept = items if per_label is None else items[:per_label]
+        left_out["over_the_per_label_limit"] += len(items) - len(kept)
+        for row in kept:
             family, _, value = label.partition(":")
             records.append({
                 "annotation_id": None, "split": "train", "image_path": row["image_path"], "image_sha256": None,
                 "bbox_xyxy": [float(v) for v in row["bbox_xyxy"]], "label": label,
-                "sign_family": family, "sign_type": value if family == "other_sign" else None,
+                "sign_family": family, "sign_type": (row.get("kind") or value or None) if family == "other_sign" else None,
                 "value_state": "read" if value.isdigit() else None,
                 "value_kph": int(value) if value.isdigit() else None,
                 "route_id": None, "segment_index": None, "decoded_frame_index": None,
@@ -474,10 +492,12 @@ def training_records(path: Path, classes: set[str], other_kinds: set[str], *, re
     summary = {"file": str(path), "sha256": _sha256(Path(path)), "crops": len(records),
                "new_classes": sorted({r["label"] for r in records} - classes),
                "by_label": dict(sorted(Counter(r["label"] for r in records).items())),
-               "left_out": dict(sorted(left_out.items())), "per_label": PER_LABEL,
+               "left_out": dict(sorted(left_out.items())), "per_label": per_label,
                "region": region_text(region), "share": share, "locations": locations_file,
                "eligible": eligible, "in_region": in_region, "selection_sha256": chosen,
-               "order": "labels of ours, region, share, per-label cap"}
+               "order": ("labels of ours, region, share" + (", per-label cap" if per_label is not None else ", no cap"))}
+    if fold_other_kinds:
+        summary["folded_into_other_sign"] = dict(sorted(folded.items()))
     return records, summary
 
 

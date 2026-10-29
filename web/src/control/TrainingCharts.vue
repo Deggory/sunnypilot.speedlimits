@@ -2,7 +2,8 @@
 // How a training is going, drawn: a few figures (the epoch now, the best validation result and when, time
 // per epoch and about how long the network still needs), the detector's loss, the reader's accuracy and
 // loss, train against validation; for the classifier with “not a sign”, the sign crops read right and the “not a
-// sign” crops rejected on validation, their mean that chooses its best epoch, and its loss. Data: progress.curves of
+// sign” crops rejected on validation, their mean that chooses its best epoch, and its loss; before it, in two stages,
+// its pretraining on the Mapillary signs alone (accuracy on our validation signs, and loss). Data: progress.curves of
 // the job, one point per finished epoch.
 import {computed} from 'vue';
 import type {CurveNet, EpochPoint, JobProgress, TrainingCurve} from '../common/panel-types';
@@ -13,8 +14,11 @@ import {elapsedText, roughText} from './jobs';
 // those of the job's steps, else those with curves, else the detector and the reader.
 const props = defineProps<{progress: JobProgress; running: boolean; title?: string; nets?: CurveNet[]}>();
 type Net = CurveNet;
-const ALL_NETS: Net[] = ['detector', 'reader', 'classifier'];
-const NET_NAME: Record<Net, string> = {detector: 'Detector', reader: 'Reader', classifier: 'Classifier'};
+const ALL_NETS: Net[] = ['detector', 'reader', 'pretrain', 'classifier'];
+const NET_NAME: Record<Net, string> = {detector: 'Detector', reader: 'Reader', pretrain: 'Pretraining on Mapillary',
+  classifier: 'Classifier'};
+/** A network in a sentence ("the classifier ends in ..."). */
+const NET_WORD: Record<Net, string> = {detector: 'detector', reader: 'reader', pretrain: 'pretraining', classifier: 'classifier'};
 const TRAIN = 'var(--c-train)';
 const VAL = 'var(--c-val)';
 const REJECT = 'var(--split-3)';
@@ -25,13 +29,16 @@ const curves = computed(() => props.progress.curves ?? {});
 const detector = computed(() => curves.value.detector ?? null);
 const reader = computed(() => curves.value.reader ?? null);
 const classifier = computed(() => curves.value.classifier ?? null);
+const pretrain = computed(() => curves.value.pretrain ?? null);
 const hasPoints = (curve: TrainingCurve | null | undefined): curve is TrainingCurve => curve !== null && curve !== undefined
   && curve.points.length > 0;
 /** The networks shown, in the order they train. */
 const nets = computed((): Net[] => {
   if (props.nets?.length) return props.nets;
   const stepKeys = props.progress.steps.map((step) => step.key);
-  const fromSteps = ALL_NETS.filter((net) => stepKeys.includes(net));
+  // The pretraining is inside the classifier's step: shown once it has a curve.
+  const fromSteps = ALL_NETS.filter((net) => stepKeys.includes(net)
+    || (net === 'pretrain' && stepKeys.includes('classifier') && hasPoints(curves.value.pretrain)));
   if (fromSteps.length) return fromSteps;
   const withCurves = ALL_NETS.filter((net) => hasPoints(curves.value[net]));
   return withCurves.length ? withCurves : ['detector', 'reader'];
@@ -105,9 +112,16 @@ const classifierSeries = computed((): ChartSeries[] => {
   ];
 });
 
-/** The network being trained now (from the steps), or the last one with points. */
+/** The pretraining on Mapillary alone: its accuracy on our validation signs chooses its best epoch. */
+const pretrainBest = computed(() => shows('pretrain') && hasPoints(pretrain.value)
+  ? best(pretrain.value, (point) => point.val_accuracy, true) : null);
+const pretrainBestLoss = computed(() => hasPoints(pretrain.value) ? best(pretrain.value, (point) => point.val_loss, false) : null);
+
+/** The network being trained now (from the steps; the pretraining until the classifier's first epoch), or the last
+ * one with points. */
 const current = computed((): Net | null => {
   const step = props.progress.steps.find((item) => item.state === 'current')?.key;
+  if (running.value && step === 'classifier' && shows('pretrain') && !hasPoints(classifier.value)) return 'pretrain';
   if (running.value && nets.value.some((net) => net === step)) return step as Net;
   return [...nets.value].reverse().find((net) => hasPoints(curves.value[net])) ?? null;
 });
@@ -123,7 +137,7 @@ const left = computed(() => {
   const curve = currentCurve.value;
   if (!running.value || curve === null || perEpoch.value === null || curve.stopped_early !== undefined) return '';
   const epochsLeft = curve.epochs - lastEpoch.value;
-  return epochsLeft > 0 ? 'the ' + current.value + ' ends in about ' + roughText(epochsLeft * perEpoch.value * 1000) : '';
+  return epochsLeft > 0 ? 'the ' + NET_WORD[current.value as Net] + ' ends in about ' + roughText(epochsLeft * perEpoch.value * 1000) : '';
 });
 /** Still in the steps before the first network. */
 const beforeEpochs = computed(() => running.value && ['import', 'split', 'gpu_env', 'checks', 'mine']
@@ -154,7 +168,7 @@ const tables = computed(() => nets.value.flatMap((net) => {
         <div class="tile">
           <span class="tile-label">{{ running ? 'Epoch' : 'Epochs done' }}</span>
           <span class="tile-value">{{ lastEpoch }}<small> of {{ currentCurve?.epochs ?? '–' }}</small></span>
-          <span class="tile-note">{{ current === null ? '' : current + (currentCurve?.stopped_early !== undefined
+          <span class="tile-note">{{ current === null ? '' : NET_WORD[current] + (currentCurve?.stopped_early !== undefined
             ? ', stopped early after epoch ' + currentCurve.stopped_early : running ? ', running' : '') }}</span>
         </div>
         <div v-if="detectorBestRecall" class="tile" id="detector-best-recall">
@@ -179,10 +193,15 @@ const tables = computed(() => nets.value.flatMap((net) => {
             && classifierBest.val_rejection !== undefined">: signs {{ percent(classifierBest.val_sign_accuracy * 100) }}, “not a sign” {{
             percent(classifierBest.val_rejection * 100) }}</template></span>
         </div>
+        <div v-if="pretrainBest && !classifierBest" class="tile" id="pretrain-best">
+          <span class="tile-label">Best on our signs</span>
+          <span class="tile-value">{{ percent(pretrainBest.value * 100) }}</span>
+          <span class="tile-note">pretraining on Mapillary, epoch {{ pretrainBest.epoch }}</span>
+        </div>
         <div v-if="perEpoch !== null" class="tile">
           <span class="tile-label">Time per epoch</span>
           <span class="tile-value">{{ elapsedText(perEpoch * 1000) }}</span>
-          <span class="tile-note">{{ left || (current + ', mean of the last epochs') }}</span>
+          <span class="tile-note">{{ left || ((current === null ? '' : NET_WORD[current]) + ', mean of the last epochs') }}</span>
         </div>
       </div>
 
@@ -220,6 +239,22 @@ const tables = computed(() => nets.value.flatMap((net) => {
           : 'The reader did not reach its first epoch.' }}</p>
       </div>
 
+      <div v-if="shows('pretrain')" class="net" id="pretrain-curves">
+        <h3>{{ NET_NAME.pretrain }}<span>the classifier learns on the Mapillary signs alone, measured on our validation signs ·
+          accuracy, higher is better, and loss</span></h3>
+        <div v-if="hasPoints(pretrain)" class="net-charts">
+          <LineChart title="Pretraining accuracy" :top="100" :format="percentAxis" :epochs="span(pretrain)"
+                     :series="[{key: 'train', label: 'train, Mapillary', color: TRAIN, values: column(pretrain, (point) => point.train_accuracy, 100)},
+                               {key: 'val', label: 'validation, our signs', color: VAL, values: column(pretrain, (point) => point.val_accuracy, 100)}]"
+                     :best="pretrainBest ? {series: 'val', epoch: pretrainBest.epoch, label: 'best'} : null"
+                     :running="isRunning('pretrain')"/>
+          <LineChart title="Pretraining loss" :series="lossSeries(pretrain)" :epochs="span(pretrain)" :format="lossAxis"
+                     :best="pretrainBestLoss ? {series: 'val', epoch: pretrainBestLoss.epoch, label: 'lowest'} : null"
+                     :running="isRunning('pretrain')"/>
+        </div>
+        <p class="note">The classifier below starts from its best epoch, then learns on your signs and “not a sign”.</p>
+      </div>
+
       <div v-if="shows('classifier')" class="net" id="classifier-curves">
         <h3>{{ NET_NAME.classifier }}<span>says what each box is, “not a sign” included · on validation, higher is better, and loss</span></h3>
         <div v-if="hasPoints(classifier)" class="net-charts">
@@ -231,7 +266,8 @@ const tables = computed(() => nets.value.flatMap((net) => {
                      :best="classifierBestLoss ? {series: 'val', epoch: classifierBestLoss.epoch, label: 'lowest'} : null"
                      :running="isRunning('classifier')"/>
         </div>
-        <p v-else class="net-wait">{{ running ? 'The classifier starts after the mining of the cutter’s false boxes: its curves appear at the end of its first epoch.'
+        <p v-else class="net-wait">{{ running ? (shows('pretrain') ? 'The classifier starts from the pretraining’s best epoch: its curves appear at the end of its first epoch.'
+          : 'The classifier starts after the mining of the cutter’s false boxes: its curves appear at the end of its first epoch.')
           : 'The classifier did not reach its first epoch.' }}</p>
         <p v-if="withRejection" class="note">Balanced: the mean of the sign crops read right and the “not a sign” crops rejected; it
           chooses the epoch whose weights are kept.</p>

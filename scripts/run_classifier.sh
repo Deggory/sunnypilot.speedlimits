@@ -14,7 +14,12 @@ set -euo pipefail
 #   4. trains the classifier (nnslr train --task reader --classes v2): the reviewed sign crops with their labels and
 #      the kinds of other signs, and "not a sign" from the proposals reviewers removed, the boxes marked not a sign
 #      and the mined boxes; ImageNet start, darker and lower-contrast crops with jittered boxes, best epoch by the
-#      validation balanced accuracy (signs read right, not_a_sign rejected), early stop after 5 epochs without;
+#      validation balanced accuracy (signs read right, not_a_sign rejected), early stop after 5 epochs without.
+#      With NNSLR_CLASSIFIER_MAPILLARY=pretrain, two stages: first the network learns the Mapillary crops alone
+#      (pretrain/: every crop of a v2 class, no cap per label, none of ours, from ImageNet; the epoch chosen on our
+#      validation signs), then our crops alone from those weights (classifier/, --init-from pretrain/reader-best.pt,
+#      the same class list, "not a sign" learnt there); NNSLR_CLASSIFIER_INIT_FROM starts from another v2
+#      reader-best.pt instead of ImageNet;
 #   5. evaluates it alone on test and validation (every crop, the signs, the not_a_sign crops by source, the crops a
 #      person confirmed);
 #   6. evaluates the chain on test and validation (nnslr evaluate-chain): the cutter on every frame, each box cut at
@@ -26,7 +31,8 @@ set -euo pipefail
 # usage: scripts/run_classifier.sh NAME
 #
 # Writes only into $DATA_ROOT/runs/NAME/: classifier.log (everything printed), negatives.jsonl, classifier/
-# (nnslr train --output: training-plan.json, training-state.pt, reader-best.pt, result.json, wandb/),
+# (nnslr train --output: training-plan.json, training-state.pt, reader-best.pt, result.json, wandb/), pretrain/ (the
+# same for the first stage of NNSLR_CLASSIFIER_MAPILLARY=pretrain),
 # evaluation/classifier-{test,validation}.json, evaluation/chain-{test,validation}.json,
 # evaluation/chain-test-old-reader.json and comparison.txt. It never imports reviews, builds splits, changes the
 # model in use, kills GPU processes, exports or deploys anything. Run it again with the same NAME to finish: the
@@ -42,8 +48,10 @@ set -euo pipefail
 # to train (the crops of helpers/mapillary.sh, $DATA_ROOT/external/mapillary/crops.jsonl; nnslr_tools.mapillary),
 # with NNSLR_CLASSIFIER_MAPILLARY_REGION (all; or continents and countries, comma-separated: europe or CH,DE,IT; needs
 # the positions of helpers/mapillary_locations.sh) and NNSLR_CLASSIFIER_MAPILLARY_SHARE (100: the percentage of the
-# region's crops, always the same ones for the same share),
-# NNSLR_TRAIN_INIT=random, NNSLR_ALLOW_BUSY_GPU=1 to share a GPU that already has compute processes.
+# region's crops, always the same ones for the same share), NNSLR_CLASSIFIER_MAPILLARY=pretrain for the two stages
+# (Mapillary alone, then ours from it; region and share choose the crops of the first), NNSLR_CLASSIFIER_PRETRAIN_EPOCHS
+# (the epochs of the first stage, default NNSLR_CLASSIFIER_EPOCHS), NNSLR_CLASSIFIER_INIT_FROM (a v2 reader-best.pt
+# to start from instead of ImageNet), NNSLR_TRAIN_INIT=random, NNSLR_ALLOW_BUSY_GPU=1 to share a GPU that already has compute processes.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DATA_ROOT="${NNSLR_DATA_ROOT:-$ROOT_DIR/data}"
@@ -55,6 +63,9 @@ CUTTER_SPEC="${NNSLR_CUTTER:-active}"
 EPOCHS="${NNSLR_CLASSIFIER_EPOCHS:-30}"
 PATIENCE="${NNSLR_CLASSIFIER_PATIENCE:-5}"
 BATCH_SIZE="${NNSLR_CLASSIFIER_BATCH_SIZE:-64}"
+PRETRAIN_EPOCHS="${NNSLR_CLASSIFIER_PRETRAIN_EPOCHS:-$EPOCHS}"
+MAPILLARY_MODE="${NNSLR_CLASSIFIER_MAPILLARY:-0}"
+INIT_FROM="${NNSLR_CLASSIFIER_INIT_FROM:-}"
 # The processes reading the frames: half the cores, 4 to 16 (nnslr_tools.training.DEFAULT_WORKERS).
 CORES="$(nproc 2>/dev/null || echo 8)"
 WORKERS_DEFAULT=$(( CORES / 2 < 4 ? 4 : (CORES / 2 > 16 ? 16 : CORES / 2) ))
@@ -86,7 +97,7 @@ if [[ "$DATASET_KIND" != "gold" && "$DATASET_KIND" != "training-candidate" ]]; t
   exit 2
 fi
 
-for setting in EPOCHS PATIENCE BATCH_SIZE NUM_WORKERS PER_FRAME; do
+for setting in EPOCHS PRETRAIN_EPOCHS PATIENCE BATCH_SIZE NUM_WORKERS PER_FRAME; do
   if [[ ! "${!setting}" =~ ^[0-9]+$ ]]; then
     echo "error: $setting must be a whole number: ${!setting}" >&2
     exit 2
@@ -99,6 +110,21 @@ for setting in NEGATIVE_SCORE FACTOR; do
     exit 2
   fi
 done
+
+if [[ "$MAPILLARY_MODE" != "0" && "$MAPILLARY_MODE" != "1" && "$MAPILLARY_MODE" != "pretrain" ]]; then
+  echo "error: NNSLR_CLASSIFIER_MAPILLARY must be 0, 1 or pretrain: $MAPILLARY_MODE" >&2
+  exit 2
+fi
+
+if [[ -n "$INIT_FROM" && "$MAPILLARY_MODE" == "pretrain" ]]; then
+  echo "error: NNSLR_CLASSIFIER_INIT_FROM and NNSLR_CLASSIFIER_MAPILLARY=pretrain are two different starts" >&2
+  exit 2
+fi
+
+if [[ -n "$INIT_FROM" && ! -f "$INIT_FROM" ]]; then
+  echo "error: NNSLR_CLASSIFIER_INIT_FROM is not a file: $INIT_FROM" >&2
+  exit 2
+fi
 
 if [[ ! -x "$VENV/bin/nnslr" || ! -x "$VENV/bin/python" ]]; then
   echo "error: GPU environment missing: $VENV/bin/nnslr" >&2
@@ -129,6 +155,7 @@ fi
 
 RUN_ROOT="$DATA_ROOT/runs/$RUN_ID"
 CLASSIFIER_RUN="$RUN_ROOT/classifier"
+PRETRAIN_RUN="$RUN_ROOT/pretrain"
 EVAL_DIR="$RUN_ROOT/evaluation"
 NEGATIVES="$RUN_ROOT/negatives.jsonl"
 # A folder of another kind of run (the training pipeline, experiment B, the detector sizes) is never written into.
@@ -138,11 +165,13 @@ for part in detector reader export bundle experiment-b detector-sizes; do
     exit 3
   fi
 done
-if [[ -e "$CLASSIFIER_RUN" && ! -f "$CLASSIFIER_RUN/result.json" && ! -f "$CLASSIFIER_RUN/training-state.pt" ]]; then
-  echo "error: $CLASSIFIER_RUN exists without result.json or training-state.pt" >&2
-  echo "remove that folder or choose a new NAME" >&2
-  exit 3
-fi
+for folder in "$CLASSIFIER_RUN" "$PRETRAIN_RUN"; do
+  if [[ -e "$folder" && ! -f "$folder/result.json" && ! -f "$folder/training-state.pt" ]]; then
+    echo "error: $folder exists without result.json or training-state.pt" >&2
+    echo "remove that folder or choose a new NAME" >&2
+    exit 3
+  fi
+done
 
 mkdir -p "$EVAL_DIR"
 # Everything printed from here on also goes to the run's own log (the Evaluate tab reads its epochs).
@@ -171,14 +200,16 @@ if [[ -n "$OLD_READER_RUN" && -f "$DATA_ROOT/runs/$OLD_READER_RUN/reader/reader-
 fi
 
 SETTINGS=(--epochs "$EPOCHS" --patience "$PATIENCE" --batch-size "$BATCH_SIZE" --num-workers "$NUM_WORKERS")
+IMAGENET=()
 if [[ "${NNSLR_TRAIN_INIT:-imagenet}" != "random" ]]; then
-  SETTINGS+=(--pretrained)
+  IMAGENET=(--pretrained)
 fi
+AUGMENT=()
 if [[ "${NNSLR_CLASSIFIER_AUGMENT:-1}" == "0" ]]; then
-  SETTINGS+=(--no-augment)
+  AUGMENT=(--no-augment)
 fi
 MAPILLARY=()
-if [[ "${NNSLR_CLASSIFIER_MAPILLARY:-0}" == "1" ]]; then
+if [[ "$MAPILLARY_MODE" != "0" ]]; then
   if [[ ! -s "$DATA_ROOT/external/mapillary/crops.jsonl" ]]; then
     echo "error: Mapillary is not prepared: run helpers/mapillary.sh first" >&2
     exit 2
@@ -194,10 +225,21 @@ if [[ "${NNSLR_CLASSIFIER_MAPILLARY:-0}" == "1" ]]; then
   if [[ -n "${NNSLR_CLASSIFIER_MAPILLARY_SHARE:-}" && "${NNSLR_CLASSIFIER_MAPILLARY_SHARE}" != "100" ]]; then
     MAPILLARY+=(--mapillary-share "$NNSLR_CLASSIFIER_MAPILLARY_SHARE")
   fi
-  SETTINGS+=("${MAPILLARY[@]}")
 elif [[ "${NNSLR_CLASSIFIER_MAPILLARY_REGION:-all}" != "all" || "${NNSLR_CLASSIFIER_MAPILLARY_SHARE:-100}" != "100" ]]; then
   echo "error: NNSLR_CLASSIFIER_MAPILLARY_REGION and _SHARE choose Mapillary crops: add NNSLR_CLASSIFIER_MAPILLARY=1" >&2
   exit 2
+fi
+# The two stages (NNSLR_CLASSIFIER_MAPILLARY=pretrain): the first on the Mapillary crops alone, from ImageNet; the
+# second on ours alone, from the first's best epoch. Otherwise one training, from ImageNet or NNSLR_CLASSIFIER_INIT_FROM.
+PRETRAIN_SETTINGS=()
+if [[ "$MAPILLARY_MODE" == "pretrain" ]]; then
+  PRETRAIN_SETTINGS=(--epochs "$PRETRAIN_EPOCHS" --patience "$PATIENCE" --batch-size "$BATCH_SIZE"
+                     --num-workers "$NUM_WORKERS" "${IMAGENET[@]}" "${AUGMENT[@]}" "${MAPILLARY[@]}" --mapillary-only)
+  SETTINGS+=("${AUGMENT[@]}" --init-from "$PRETRAIN_RUN/reader-best.pt")
+elif [[ -n "$INIT_FROM" ]]; then
+  SETTINGS+=("${AUGMENT[@]}" "${MAPILLARY[@]}" --init-from "$INIT_FROM")
+else
+  SETTINGS+=("${IMAGENET[@]}" "${AUGMENT[@]}" "${MAPILLARY[@]}")
 fi
 
 echo "== Classifier (cutter -> classifier -> decider) =="
@@ -208,6 +250,9 @@ echo "dataset kind: $DATASET_KIND"
 echo "physical GPU: $GPU_INDEX"
 echo "cutter:       $CUTTER_SPEC"
 echo "negatives:    cutter boxes of score >= $NEGATIVE_SCORE overlapping no reviewed box, at most $PER_FRAME per frame and $FACTOR x the sign crops per partition"
+if [[ "$MAPILLARY_MODE" == "pretrain" ]]; then
+  echo "pretraining:  --classes v2 ${PRETRAIN_SETTINGS[*]}"
+fi
 echo "settings:     --classes v2 ${SETTINGS[*]}"
 echo "old reader:   ${OLD_READER:-none (no comparison)}"
 echo "wandb:        project ${WANDB_PROJECT:-sunnypilot.speedlimits}, group $RUN_ID, mode ${WANDB_MODE:-online}"
@@ -215,6 +260,10 @@ echo
 
 echo "== 1/7 Check the dataset, the split and the cutter (CPU-only) =="
 "$NN" train --task reader --classes v2 --dataset-kind "$DATASET_KIND" "${MAPILLARY[@]}" --dry-run > /dev/null
+if [[ "$MAPILLARY_MODE" == "pretrain" ]]; then
+  "$NN" train --task reader --classes v2 --dataset-kind "$DATASET_KIND" "${MAPILLARY[@]}" --mapillary-only \
+    --dry-run > /dev/null
+fi
 "$NN" mine-negatives --dataset-kind "$DATASET_KIND" --per-frame "$PER_FRAME" --total-factor "$FACTOR" --dry-run
 for partition in "${PARTITIONS[@]}"; do
   "$NN" evaluate-chain --dataset-kind "$DATASET_KIND" --partition "$partition" --dry-run
@@ -245,22 +294,33 @@ else
 fi
 
 echo "== 4/7 Train the classifier =="
-if [[ -f "$CLASSIFIER_RUN/result.json" ]]; then
-  echo "skip trained: $CLASSIFIER_RUN/result.json"
-else
-  mode=fresh
-  flags=(--classes v2 "${SETTINGS[@]}")
-  if [[ -f "$CLASSIFIER_RUN/training-state.pt" ]]; then
+# train OUTPUT WHAT FLAGS...: one training, skipped when finished, resumed with its own settings when interrupted.
+train() {
+  local output="$1" what="$2" mode=fresh
+  shift 2
+  local flags=(--classes v2 "$@")
+  if [[ -f "$output/result.json" ]]; then
+    echo "skip trained: $output/result.json"
+    return
+  fi
+  if [[ -f "$output/training-state.pt" ]]; then
     mode=resume
     # A resumed run trains with exactly the settings it started with: they come from its training state.
-    resume_flags="$("$VENV/bin/python" -c 'import sys; from nnslr_tools.training import resume_arguments_file; print("\n".join(resume_arguments_file(sys.argv[1])))' "$CLASSIFIER_RUN/training-state.pt")"
+    resume_flags="$("$VENV/bin/python" -c 'import sys; from nnslr_tools.training import resume_arguments_file; print("\n".join(resume_arguments_file(sys.argv[1])))' "$output/training-state.pt")"
     readarray -t flags <<< "$resume_flags"
-    echo "resume the classifier with the settings of its training state: ${flags[*]}"
+    echo "resume the $what with the settings of its training state: ${flags[*]}"
   fi
-  # The epoch lines ("classifier epoch N/M ...") and the final JSON go to the terminal and to classifier.log.
-  "$NN" train --task reader --dataset-kind "$DATASET_KIND" --device cuda --mode "$mode" --output "$CLASSIFIER_RUN" \
+  # The epoch lines ("classifier epoch N/M ...", "pretrain epoch N/M ...") and the final JSON go to the terminal
+  # and to classifier.log.
+  "$NN" train --task reader --dataset-kind "$DATASET_KIND" --device cuda --mode "$mode" --output "$output" \
     --negatives "$NEGATIVES" "${flags[@]}"
+}
+if [[ "$MAPILLARY_MODE" == "pretrain" ]]; then
+  echo "-- the first stage: the Mapillary crops alone --"
+  train "$PRETRAIN_RUN" pretraining "${PRETRAIN_SETTINGS[@]}"
+  echo "-- the second stage: our crops alone, from the first --"
 fi
+train "$CLASSIFIER_RUN" classifier "${SETTINGS[@]}"
 CHECKPOINT="$CLASSIFIER_RUN/reader-best.pt"
 
 echo "== 5/7 Evaluate the classifier alone =="
@@ -304,6 +364,9 @@ else
 fi
 echo
 {
+  if [[ "$MAPILLARY_MODE" == "pretrain" ]]; then
+    echo "run $RUN_ID: pretraining --classes v2 ${PRETRAIN_SETTINGS[*]}"
+  fi
   echo "run $RUN_ID: classifier --classes v2 ${SETTINGS[*]}; cutter $CUTTER; old reader ${OLD_READER:-none}"
   echo
   "$VENV/bin/python" -c 'import sys; from pathlib import Path; from nnslr_tools.chain import classifier_comparison; print(classifier_comparison(Path(sys.argv[1]), Path(sys.argv[2]) if sys.argv[2] else None), end="")' \

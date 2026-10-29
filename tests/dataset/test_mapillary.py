@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 import zipfile
 
 import pytest
@@ -14,6 +15,7 @@ from nnslr_tools.mapillary import (CROPS_FILE, crops_state, make_crops, our_labe
                                    training_records)
 from nnslr_tools.training import TrainConfig, prepare_reader_training, resume_arguments
 from test_classifier import _classifier_fixture
+from test_detector_sizes import torch_python  # noqa: F401 (fixture)
 
 
 def test_the_mtsd_labels_that_are_ours():
@@ -409,3 +411,164 @@ def test_the_locations_command_counts_without_a_token(tmp_path, monkeypatch, cap
     assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["todo"] == 2
     assert main(["mapillary-locations", "--data-root", str(tmp_path), "--ids", str(ids)]) == 2
     assert "MAPILLARY_TOKEN" in capsys.readouterr().err
+
+
+# --- Two stages: Mapillary alone, then ours from it -------------------------------------------------------------------
+
+def test_the_pretraining_takes_every_crop_and_folds_the_kinds_that_are_not_ours(tmp_path, monkeypatch):
+    monkeypatch.setattr(mapillary, "PER_LABEL", 2)
+    rows = ([{"image_path": f"c/{n}.jpg", "bbox_xyxy": [1, 2, 3, 4], "label": "maximum_speed:120", "mtsd_object": f"a{n}"}
+             for n in range(3)]
+            + [{"image_path": "c/g.jpg", "bbox_xyxy": [1, 2, 3, 4], "label": "other_sign:give_way", "mtsd_object": "g"},
+               {"image_path": "c/s.jpg", "bbox_xyxy": [1, 2, 3, 4], "label": "other_sign:stop", "mtsd_object": "s"}])
+    path = _crops_file(tmp_path, rows)
+    records, summary = training_records(path, {"other_sign:give_way"}, {"other_sign:give_way"}, capped=False,
+                                        fold_other_kinds=True)
+    assert summary["by_label"] == {"maximum_speed:120": 3, "other_sign": 1, "other_sign:give_way": 1}
+    assert summary["per_label"] is None and summary["order"].endswith("no cap")
+    assert summary["left_out"] == {"over_the_per_label_limit": 0}
+    assert summary["folded_into_other_sign"] == {"other_sign:stop": 1}
+    stop = next(r for r in records if r["mtsd_object"] == "s")
+    assert (stop["label"], stop["sign_family"], stop["sign_type"]) == ("other_sign", "other_sign", "stop")
+    # The capped choice of the mixed run is unchanged.
+    assert "folded_into_other_sign" not in training_records(path, set(), {"other_sign:give_way"})[1]
+
+
+def _two_stage_crops(root: Path) -> Path:
+    Image.new("RGB", (40, 40)).save(root / "s.jpg")
+    return _crops_file(root, [
+        {"image_path": "s.jpg", "bbox_xyxy": [10, 10, 30, 30], "label": "maximum_speed:120", "mtsd_object": "m"},
+        {"image_path": "s.jpg", "bbox_xyxy": [10, 10, 30, 30], "label": "maximum_speed:50", "mtsd_object": "f"},
+        {"image_path": "s.jpg", "bbox_xyxy": [10, 10, 30, 30], "label": "other_sign:roundabout", "mtsd_object": "r"}])
+
+
+def test_the_plan_of_the_pretraining_on_mapillary_alone(tmp_path, capsys):
+    dataset = _classifier_fixture(tmp_path, capsys)
+    latest = tmp_path / "splits" / "latest.json"
+    plain = prepare_reader_training(dataset, latest, tmp_path, class_scheme="v2")
+    path = _two_stage_crops(tmp_path)
+    plan = prepare_reader_training(dataset, latest, tmp_path, class_scheme="v2", mapillary_path=path,
+                                   mapillary_only=True)
+    # Train is Mapillary alone; the classes are ours and Mapillary's (a kind not ours as other_sign), so that the
+    # second stage, on ours, has the same list.
+    assert {r["label_basis"] for r in plan["records"] if r["split"] == "train"} == {"mapillary"}
+    assert plan["classes"] == sorted(set(plain["classes"]) | {"maximum_speed:120", "other_sign"})
+    assert "not_a_sign" in plan["classes"] and plan["trainable"] and plan["mapillary_only"]
+    assert plan["mapillary"]["by_label"] == {"maximum_speed:120": 1, "maximum_speed:50": 1, "other_sign": 1}
+    # Validation: our sign crops of a class Mapillary has, without the not_a_sign crops.
+    validation = [r for r in plan["records"] if r["split"] == "validation"]
+    assert validation and {r["label"] for r in validation} <= set(plan["mapillary"]["by_label"])
+    assert plan["skipped"]["our_train_crops_left_out_of_the_pretraining"] == plain["counts_by_split"]["train"]
+    assert plan["skipped"]["validation_not_a_sign_left_out_of_the_pretraining"] > 0
+    assert any(item.startswith("mapillary_only_pretraining") for item in plan["limitations"])
+    assert plain["mapillary_only"] is False and plain["start"] is None
+    with pytest.raises(ValueError, match="add --mapillary"):
+        prepare_reader_training(dataset, latest, tmp_path, class_scheme="v2", mapillary_only=True)
+
+
+def test_the_plan_of_the_second_stage_has_the_classes_of_its_start(tmp_path, capsys):
+    dataset = _classifier_fixture(tmp_path, capsys)
+    latest = tmp_path / "splits" / "latest.json"
+    path = _two_stage_crops(tmp_path)
+    first = prepare_reader_training(dataset, latest, tmp_path, class_scheme="v2", mapillary_path=path,
+                                    mapillary_only=True)
+    start = {"path": "/runs/r/pretrain/reader-best.pt", "sha256": "ab", "classes": first["classes"],
+             "class_scheme": "v2", "split_sha256": first["split_sha256"], "mapillary_only": True}
+    plan = prepare_reader_training(dataset, latest, tmp_path, class_scheme="v2", start=start)
+    assert plan["classes"] == first["classes"] and plan["start"] == start
+    ours = {r["label"] for r in plan["records"] if r["split"] == "train"}
+    assert plan["classes_from_start"] == sorted(set(first["classes"]) - ours) and "maximum_speed:120" not in ours
+    assert "maximum_speed:120" in plan["classes_from_start"]
+    assert {r["label_basis"] for r in plan["records"] if r["split"] == "train"} != {"mapillary"}
+    assert plan["trainable"] and not any(item.startswith("start_of_another_split") for item in plan["limitations"])
+    other = prepare_reader_training(dataset, latest, tmp_path, class_scheme="v2", start=dict(start, split_sha256="x"))
+    assert any(item.startswith("start_of_another_split") for item in other["limitations"])
+    with pytest.raises(ValueError, match="--classes v2"):
+        prepare_reader_training(dataset, latest, tmp_path, start=start)
+    with pytest.raises(ValueError, match="not a v2 classifier"):
+        prepare_reader_training(dataset, latest, tmp_path, class_scheme="v2", start=dict(start, class_scheme="v1"))
+
+
+def test_the_two_stages_resume_with_their_start(tmp_path):
+    from test_detector_sizes import _config_of
+    first = TrainConfig(class_scheme="v2", augment=True, pretrained=True, mapillary="/m/crops.jsonl",
+                        mapillary_only=True).__dict__
+    flags = resume_arguments({"task": "reader", "config": first})
+    assert "--mapillary-only" in flags and "--init-from" not in flags and _config_of(flags, "reader").__dict__ == first
+    start = str(tmp_path / "pretrain" / "reader-best.pt")
+    second = TrainConfig(class_scheme="v2", augment=True, init_from=start).__dict__
+    flags = resume_arguments({"task": "reader", "config": second})
+    assert flags[flags.index("--init-from") + 1] == start and "--pretrained" not in flags
+    assert _config_of(flags, "reader").__dict__ == second
+    # A run saved before the two stages resumes without them.
+    from nnslr_tools.training import READER_CONFIG_BEFORE_SETTINGS
+    assert (READER_CONFIG_BEFORE_SETTINGS["mapillary_only"], READER_CONFIG_BEFORE_SETTINGS["init_from"]) == (False, None)
+
+
+def test_the_train_command_checks_the_two_stages(tmp_path, capsys):
+    from nnslr_tools.cli import main
+    base = ["train", "--dry-run", "--data-root", str(tmp_path)]
+    cases = [
+        (["--task", "reader", "--classes", "v2", "--mapillary-only"], "add --mapillary"),
+        (["--task", "reader", "--classes", "v2", "--init-from", "x.pt", "--pretrained"], "two different starts"),
+        (["--task", "reader", "--init-from", "x.pt"], "--classes v2"),
+        (["--task", "detector", "--init-from", "x.pt"], "only with --mode continue"),
+        (["--task", "detector", "--mapillary-only"], "classifier option"),
+    ]
+    for arguments, message in cases:
+        assert main(base + arguments) != 0, arguments
+        assert message in capsys.readouterr().err, arguments
+
+
+START_CHECK = r"""
+import sys
+import torch
+from torchvision.models import mobilenet_v3_small
+from nnslr_tools.checkpoints import safe_torch_load
+from nnslr_tools.training import _load_start
+saved = safe_torch_load(sys.argv[1])
+assert saved["mapillary_only"] is True and saved["start"] is None and saved["initialization"] == "random"
+# Another order of the classes and one the start lacks: every layer copied, the head row by row by class name.
+classes = list(reversed(saved["classes"])) + ["maximum_speed:999"]
+model = mobilenet_v3_small()
+model.classifier[-1] = torch.nn.Linear(model.classifier[-1].in_features, len(classes))
+fresh = model.state_dict()["classifier.3.weight"][-1].clone()
+_load_start(torch, model, saved, classes, saved["input_size"], "classifier", sys.argv[1])
+state, weights = model.state_dict(), saved["state_dict"]
+assert all(torch.equal(state[key], weights[key]) for key in weights if not key.startswith("classifier.3."))
+for row, label in enumerate(classes[:-1]):
+    assert torch.equal(state["classifier.3.weight"][row], weights["classifier.3.weight"][saved["classes"].index(label)])
+assert torch.equal(state["classifier.3.weight"][-1], fresh)
+second = safe_torch_load(sys.argv[2])
+assert second["initialization"] == "mapillary_pretraining" and second["classes"] == saved["classes"]
+assert second["start"]["path"] == sys.argv[1] and second["start"]["mapillary_only"] is True
+print("start ok")
+"""
+
+
+def test_tiny_cpu_two_stages(tmp_path, capsys, torch_python):
+    """Stage 1 on the Mapillary crops alone, stage 2 on ours from it: the same classes, the start recorded."""
+    from test_detector_sizes import _run
+    dataset = _classifier_fixture(tmp_path, capsys)
+    crops = _two_stage_crops(tmp_path)
+    base = ["-m", "nnslr_tools.cli", "train", str(dataset), "--task", "reader", "--classes", "v2", "--data-root",
+            str(tmp_path), "--device", "cpu", "--num-workers", "0", "--epochs", "1", "--batch-size", "4",
+            "--input-size", "32", "--no-amp"]
+    first, second = tmp_path / "run" / "pretrain", tmp_path / "run" / "classifier"
+    process = _run(torch_python, *base, "--mapillary", str(crops), "--mapillary-only", "--output", str(first))
+    assert process.returncode == 0, process.stderr[-3000:]
+    assert re.search(r"^pretrain epoch 1/1 train_loss \S+ val_loss \S+ train_accuracy \S+ val_accuracy \S+ "
+                     r"val_sign_accuracy [0-9.]+ \d+s$", process.stdout, re.MULTILINE), process.stdout
+    pretrained = json.loads((first / "result.json").read_text())
+    assert pretrained["mapillary_only"] is True and pretrained["start"] is None
+    process = _run(torch_python, *base, "--init-from", str(first / "reader-best.pt"), "--output", str(second))
+    assert process.returncode == 0, process.stderr[-3000:]
+    assert f"classifier starts from {first / 'reader-best.pt'}: every layer, and the head of " in process.stdout
+    assert re.search(r"^classifier epoch 1/1 ", process.stdout, re.MULTILINE), process.stdout
+    result = json.loads((second / "result.json").read_text())
+    assert result["classes"] == pretrained["classes"] and result["initialization"] == "mapillary_pretraining"
+    assert result["start"]["sha256"] and result["config"]["init_from"] == str(first / "reader-best.pt")
+    plan = json.loads((second / "training-plan.json").read_text())
+    assert plan["start"]["mapillary_only"] is True and "maximum_speed:120" in plan["classes_from_start"]
+    process = _run(torch_python, "-c", START_CHECK, str(first / "reader-best.pt"), str(second / "reader-best.pt"))
+    assert process.returncode == 0 and "start ok" in process.stdout, process.stderr[-3000:]

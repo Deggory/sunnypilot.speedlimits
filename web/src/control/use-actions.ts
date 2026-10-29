@@ -48,7 +48,9 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
     const where = options?.region && options.region !== 'all' ? ' taken in ' + regionWords(options.region) : '';
     const share = options?.share && options.share !== '100' ? options.share + ' % of the' : 'The';
     const mapillary = options?.mapillary === 'on' ? ' ' + share + ' signs of Mapillary' + where
-      + ' join its training crops, not its measures.' : '';
+      + ' join its training crops, not its measures.'
+      : options?.mapillary === 'pretrain' ? ' It first learns on ' + share.toLowerCase() + ' signs of Mapillary' + where
+        + ' alone, then on yours from there: two trainings, not its measures.' : '';
     return {title: 'Train the classifier?', action: 'Start training',
       text: 'Mines the false boxes of the cutter in use, trains the classifier with “not a sign” on the GPU, then measures it '
         + 'alone and in the chain: it takes hours. Its run is a new one, named by the time it starts.' + mapillary};

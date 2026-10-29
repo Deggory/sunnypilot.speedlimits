@@ -695,6 +695,20 @@ def test_the_detail_of_a_classifier_run(root, index):
     assert index.detail('r1')['classifier_run'] is None and 'classifier' not in index.detail('r1')['curves']
 
 
+
+def test_a_classifier_in_two_stages_has_the_curves_of_its_pretraining(root, index):
+    # NNSLR_CLASSIFIER_MAPILLARY=pretrain: the Mapillary signs alone ("pretrain epoch ..."), then ours from there.
+    log = CLASSIFIER_LOG.format(name='c3').replace('== 4/7 Train the classifier ==\n', (
+        '== 4/7 Train the classifier ==\n'
+        'pretrain epoch 1/2 train_loss 0.4500 val_loss 0.9200 train_accuracy 0.8700 val_accuracy 0.7900 val_sign_accuracy 0.7900 31s\n'
+        'pretrain stops early after epoch 1: x\n'))
+    run = make_classifier_run(root, 'c3', log=log)
+    curves = index.detail(run.name)['curves']
+    assert set(curves) == {'pretrain', 'classifier'} and curves['pretrain']['stopped_early'] == 1
+    assert curves['pretrain']['points'] == [{'epoch': 1, 'train_loss': 0.45, 'val_loss': 0.92, 'train_accuracy': 0.87,
+                                             'val_accuracy': 0.79, 'val_sign_accuracy': 0.79, 'seconds': 31}]
+    assert len(curves['classifier']['points']) == 2
+
 def test_without_its_log_the_classifier_curves_come_from_result_json(root, index):
     run = make_classifier_run(root)
     (run / 'classifier.log').unlink()

@@ -400,6 +400,8 @@ def prepare_reader_training(
     mapillary_path: Path | None = None,
     mapillary_region: str = "all",
     mapillary_share: float = 100.0,
+    mapillary_only: bool = False,
+    start: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Validate inputs and build the immutable reader-training plan.
 
@@ -410,6 +412,10 @@ def prepare_reader_training(
     the cutter's false boxes (without it, only the removed proposals and the boxes marked "not a sign");
     mapillary_path is the crops file of nnslr mapillary-crops, extra train crops of v2 (nnslr_tools.mapillary);
     mapillary_region and mapillary_share choose which of them (the photos of some continents or countries, a share).
+
+    The two stages of a classifier pretrained on Mapillary (v2): mapillary_only is the first, every Mapillary crop of
+    a v2 class in train and none of ours; start (reader_start of a reader-best.pt, nnslr train --init-from) is the
+    second, whose classes are its own and those of the start, so both stages have the same list (_prepare_classifier).
     """
     if class_scheme not in CLASS_SCHEMES:
         raise ValueError(f"unknown class scheme {class_scheme!r}: one of {', '.join(CLASS_SCHEMES)}")
@@ -420,6 +426,12 @@ def prepare_reader_training(
     from nnslr_tools.mapillary import FULL_SHARE, check_share, region_text
     if mapillary_path is None and (region_text(mapillary_region) != "all" or check_share(mapillary_share) != FULL_SHARE):
         raise ValueError("--mapillary-region and --mapillary-share choose Mapillary crops: add --mapillary")
+    if mapillary_only and mapillary_path is None:
+        raise ValueError("--mapillary-only trains on the Mapillary crops alone: add --mapillary")
+    if start is not None and class_scheme != "v2":
+        raise ValueError("a start of a fresh run (--init-from) is for the v2 classifier: use --classes v2")
+    if start is not None and checkpoint_class_scheme(start) != "v2":
+        raise ValueError("the start (--init-from) is not a v2 classifier")
     dataset_path = Path(dataset_path)
     split_path = Path(split_path)
     data_root = Path(data_root)
@@ -432,7 +444,8 @@ def prepare_reader_training(
     if class_scheme == "v2":
         return _prepare_classifier(loaded, dataset_path, split_path, data_root, dataset_kind=dataset_kind,
                                    negatives_path=negatives_path, mapillary_path=mapillary_path,
-                                   mapillary_region=mapillary_region, mapillary_share=mapillary_share)
+                                   mapillary_region=mapillary_region, mapillary_share=mapillary_share,
+                                   mapillary_only=mapillary_only, start=start)
 
     records: list[dict[str, Any]] = []
     skipped = Counter()
@@ -601,11 +614,19 @@ def _mined_negatives(negatives_path: Path, loaded: dict[str, Any], frames: list[
 def _prepare_classifier(loaded: dict[str, Any], dataset_path: Path, split_path: Path, data_root: Path, *,
                         dataset_kind: str, negatives_path: Path | None,
                         mapillary_path: Path | None = None, mapillary_region: str = "all",
-                        mapillary_share: float = 100.0) -> dict[str, Any]:
+                        mapillary_share: float = 100.0, mapillary_only: bool = False,
+                        start: dict[str, Any] | None = None) -> dict[str, Any]:
     """The v2 plan (see prepare_reader_training): the sign crops with their v2 labels, the kinds too rare to
     learn folded into other_sign, the not_a_sign crops of each partition from its own frames only, and the
     Mapillary crops in train when asked (after the folding, which counts our crops only), of the region and share
-    asked (nnslr_tools.mapillary.training_records)."""
+    asked (nnslr_tools.mapillary.training_records).
+
+    mapillary_only, the first stage of a two-stage run: every Mapillary crop of a v2 class (no cap per label; a kind
+    that is no class of ours comes in as other_sign) and none of ours in train. Its classes are those our train
+    would have, and Mapillary's: the second stage, trained on ours from it, has the same list. Validation keeps our
+    sign crops, to choose the epoch that reads our camera best, without the not_a_sign crops: Mapillary has none, the
+    second stage learns them. start, the second stage: the classes are ours and the start's (a class of the start
+    that our train lacks keeps what the start learnt, and validation keeps it)."""
     rows = loaded["rows"]
     assignments = loaded["assignments"]
     frames = reviewed_frames(rows, assignments)
@@ -646,20 +667,34 @@ def _prepare_classifier(loaded: dict[str, Any], dataset_path: Path, split_path: 
         if record["label"] in folded:
             record["label"] = OTHER_SIGN
     mapillary = None
+    ours = {r["label"] for r in records if r["split"] == TRAIN_SPLIT}
+    extra: list[dict[str, Any]] = []
     if mapillary_path is not None:
         from nnslr_tools.mapillary import training_records
-        ours = {r["label"] for r in records if r["split"] == TRAIN_SPLIT}
         extra, mapillary = training_records(Path(mapillary_path), ours,
                                             {label for label in ours if label.startswith(OTHER_SIGN + ":")},
-                                            region=mapillary_region, share=mapillary_share)
+                                            region=mapillary_region, share=mapillary_share,
+                                            capped=not mapillary_only, fold_other_kinds=mapillary_only)
         for path in sorted({record["image_path"] for record in extra}):
             if not _safe_image_path(data_root, path).is_file():
                 raise ValueError(f"missing_image: {path} (prepare Mapillary again: helpers/mapillary.sh)")
-        records += extra
+    if mapillary_only:
+        skipped.update("our_train_crops_left_out_of_the_pretraining" if r["split"] == TRAIN_SPLIT else
+                       "validation_not_a_sign_left_out_of_the_pretraining" for r in records
+                       if r["split"] == TRAIN_SPLIT or (r["split"] == VALIDATION_SPLIT and r["label"] == NOT_A_SIGN))
+        records = [r for r in records
+                   if r["split"] != TRAIN_SPLIT and not (r["split"] == VALIDATION_SPLIT and r["label"] == NOT_A_SIGN)]
+    records += extra
 
     train_labels = sorted({r["label"] for r in records if r["split"] == TRAIN_SPLIT})
+    classes = sorted(set(train_labels) | ours) if mapillary_only else list(train_labels)
+    classes_from_start: list[str] = []
+    if start is not None:
+        classes_from_start = sorted(set(start.get("classes") or []) - set(classes))
+        classes = sorted(set(classes) | set(classes_from_start))
     val_labels = sorted({r["label"] for r in records if r["split"] == VALIDATION_SPLIT})
-    unseen_validation = sorted(set(val_labels) - set(train_labels))
+    # A validation label that nothing in this run or its start learnt cannot be read: it leaves validation.
+    unseen_validation = sorted(set(val_labels) - set(train_labels) - set(classes_from_start))
     records, skipped = _without_unseen_validation(records, unseen_validation, skipped)
     counts_by_split = Counter(r["split"] for r in records)
     counts_by_class = Counter(r["label"] for r in records if r["split"] == TRAIN_SPLIT)
@@ -684,7 +719,8 @@ def _prepare_classifier(loaded: dict[str, Any], dataset_path: Path, split_path: 
         counts_by_split[TRAIN_SPLIT] > 0
         and counts_by_split[VALIDATION_SPLIT] > 0
         and len(train_labels) >= 2
-        and NOT_A_SIGN in train_labels
+        # The pretraining has no not_a_sign crop: the class is there for the second stage.
+        and NOT_A_SIGN in (classes if mapillary_only else train_labels)
     )
     limitations = [
         "classifier_on_reviewed_boxes_and_negatives",
@@ -695,6 +731,12 @@ def _prepare_classifier(loaded: dict[str, Any], dataset_path: Path, split_path: 
         limitations.append("no_mined_negatives: only removed proposals and boxes marked not a sign")
     if mapillary is not None:
         limitations.append("mapillary_crops_in_train: street photos of other cameras, measured on our drives only")
+    if mapillary_only:
+        limitations.append("mapillary_only_pretraining: no crop of ours and no not_a_sign in train; "
+                           "a start for nnslr train --init-from, not a classifier to use")
+    if start is not None and start.get("split_sha256") != loaded["split_sha256"]:
+        limitations.append("start_of_another_split: the start chose or learnt its weights on another split, "
+                           "whose crops may be in this run's validation or test")
     if any(record.get("tier") == "ai_before_rule" for record in records if record["label"] == NOT_A_SIGN):
         limitations.append("negatives_of_ai_reviews_before_the_other_sign_rule_may_be_unboxed_signs")
     if dataset_kind == "training-candidate":
@@ -710,7 +752,7 @@ def _prepare_classifier(loaded: dict[str, Any], dataset_path: Path, split_path: 
         "split_path": str(loaded["split_path"]),
         "requested_split_path": str(split_path),
         "split_sha256": loaded["split_sha256"],
-        "classes": train_labels,
+        "classes": classes,
         "records": records,
         "counts_by_split": dict(sorted(counts_by_split.items())),
         "positives_by_split": dict(sorted(positives.items())),
@@ -724,6 +766,10 @@ def _prepare_classifier(loaded: dict[str, Any], dataset_path: Path, split_path: 
         "mapillary_sha256": None if mapillary is None else mapillary["sha256"],
         # Which Mapillary crops were chosen (region, share, cap): a resumed run must choose the same ones.
         "mapillary_selection_sha256": None if mapillary is None else mapillary["selection_sha256"],
+        # The first stage of a two-stage run (Mapillary alone), or the start of the second (reader_start).
+        "mapillary_only": mapillary_only,
+        "start": start,
+        "classes_from_start": classes_from_start,
         "folded_labels": folded,
         "min_kind_train_crops": MIN_KIND_TRAIN_CROPS,
         "negative_max_iou": NEGATIVE_MAX_IOU,
@@ -979,11 +1025,18 @@ class TrainConfig:
     # this share of them in percent (a fixed choice: the same share takes the same crops).
     mapillary_region: str = "all"
     mapillary_share: float = 100.0
+    # v2 with mapillary only: the Mapillary crops alone in train, none of ours (the first stage of a two-stage run,
+    # a start for init_from; prepare_reader_training).
+    mapillary_only: bool = False
+    # v2, a fresh run only: the reader-best.pt it starts from (nnslr train --init-from, the second stage of a
+    # two-stage run) in place of ImageNet; its weights are copied, its head row by row by class name.
+    init_from: str | None = None
 
 
 # The settings a reader run saved before they existed was trained with: resuming such a run compares against these.
 READER_CONFIG_BEFORE_SETTINGS = {"class_scheme": "v1", "augment": False, "mapillary": None,
-                                 "mapillary_region": "all", "mapillary_share": 100.0}
+                                 "mapillary_region": "all", "mapillary_share": 100.0, "mapillary_only": False,
+                                 "init_from": None}
 
 # The box of a training crop moved and resized before the crop, as the cutter's boxes are never exact: each side
 # scaled by a factor in "scale", the centre moved by up to "shift" of the box's size, with this probability.
@@ -1035,6 +1088,36 @@ def _check_reader_config(config: "TrainConfig") -> None:
         raise ValueError(f"invalid reader class_scheme {config.class_scheme!r}: one of {', '.join(CLASS_SCHEMES)}")
     if config.augment and config.class_scheme != "v2":
         raise ValueError("the photometric augmentation and box jitter are settings of the v2 classifier")
+
+
+def _load_start(torch, model, saved: dict[str, Any], classes: list[str], input_size: int, name: str,
+                origin: str) -> None:
+    """The weights of a start (nnslr train --init-from) in a fresh classifier: every layer copied, the rows of the
+    head (classifier.3) by class name; a class the start lacks keeps the fresh row of the new head."""
+    if saved.get("task") != "reader" or saved.get("architecture") != "mobilenet_v3_small":
+        raise ValueError("the start is not a reader/classifier checkpoint")
+    if checkpoint_class_scheme(saved) != "v2":
+        raise ValueError("the start is not a v2 classifier")
+    if saved.get("input_size") != input_size:
+        raise ValueError(f"the start has input size {saved.get('input_size')}, this run {input_size}")
+    weights = model_weights(saved)
+    state = {key: value.detach().clone() for key, value in model.state_dict().items()}
+    head = f"classifier.{len(model.classifier) - 1}."
+    body = {key for key in state if not key.startswith(head)}
+    if body != {key for key in weights if not key.startswith(head)}:
+        raise ValueError("the start's layers are not those of this network")
+    for key in body:
+        state[key] = weights[key]
+    rows = {label: row for row, label in enumerate(saved.get("classes") or [])}
+    carried = [label for label in classes if label in rows]
+    for row, label in enumerate(classes):
+        if label in rows:
+            state[head + "weight"][row] = weights[head + "weight"][rows[label]]
+            state[head + "bias"][row] = weights[head + "bias"][rows[label]]
+    model.load_state_dict(state, strict=True)
+    new = [label for label in classes if label not in rows]
+    print(f"{name} starts from {origin}: every layer, and the head of {len(carried)} of its {len(classes)} classes"
+          + (f" (new: {', '.join(new)})" if new else ""), flush=True)
 
 
 def _sample_seed(*parts: Any) -> int:
@@ -1330,6 +1413,10 @@ def resume_arguments(state: dict[str, Any]) -> list[str]:
                 flags += ["--mapillary-region", str(config["mapillary_region"])]
             if float(config.get("mapillary_share", 100.0)) != 100.0:
                 flags += ["--mapillary-share", f"{float(config['mapillary_share']):g}"]
+            if config.get("mapillary_only"):
+                flags.append("--mapillary-only")
+        if config.get("init_from"):
+            flags += ["--init-from", str(config["init_from"])]
     return flags
 
 
@@ -1911,6 +1998,23 @@ def train_detector(
     return result
 
 
+def reader_start(path: Path) -> dict[str, Any]:
+    """What the plan of a fresh classifier run records of the reader-best.pt it starts from (nnslr train
+    --init-from): its file and sha256, classes, class scheme, input size, split, how it started itself, and whether
+    it was the pretraining on Mapillary alone. Reads the checkpoint (torch)."""
+    path = Path(path)
+    saved = torch_load(path)
+    if saved.get("task") != "reader" or saved.get("architecture") != "mobilenet_v3_small":
+        raise ValueError(f"the start is not a reader/classifier checkpoint: {path}")
+    if not isinstance(saved.get("classes"), list) or not saved["classes"]:
+        raise ValueError(f"the start has no classes: {path}")
+    return {"path": str(path), "sha256": _sha256(path), "classes": list(saved["classes"]),
+            "class_scheme": checkpoint_class_scheme(saved), "input_size": saved.get("input_size"),
+            "split_sha256": saved.get("split_sha256"), "dataset_sha256": saved.get("dataset_sha256"),
+            "epoch": saved.get("epoch"), "initialization": saved.get("initialization"),
+            "mapillary_only": bool(saved.get("mapillary_only", False))}
+
+
 def train_reader(
     plan: dict[str, Any],
     data_root: Path,
@@ -1930,6 +2034,12 @@ def train_reader(
     crops weighing in the loss as much as all the sign crops together when they are more, and its best epoch
     the highest validation balanced accuracy: the mean of the right answers on the sign crops and the share of
     the not_a_sign crops it rejects, so that neither the signs nor the junk boxes of the cutter decide alone.
+
+    The two stages of a classifier pretrained on Mapillary: a plan of Mapillary alone (mapillary_only) trains the
+    "pretrain" network (its log lines "pretrain epoch ..."); a fresh run with config.init_from starts from that
+    reader-best.pt instead of ImageNet: every weight copied, the head's rows by class name (a class the start
+    lacks starts from zero), and its checkpoint and result say initialization "mapillary_pretraining" (or
+    "checkpoint", from any other classifier) and the start.
     """
     _check_reader_config(config)
     scheme = checkpoint_class_scheme(plan)
@@ -1956,7 +2066,13 @@ def train_reader(
 
     classifier = scheme == "v2"
     # The name of the network in the log lines, the progress of the panel and wandb.
-    name = "classifier" if classifier else "reader"
+    pretraining = classifier and bool(plan.get("mapillary_only"))
+    name = "pretrain" if pretraining else "classifier" if classifier else "reader"
+    start = plan.get("start") if classifier else None
+    if bool(config.init_from) != bool(start) or (start and mode == "continue"):
+        raise ValueError("a start (--init-from) is in both the plan and the configuration of a fresh run, or in neither")
+    if start and _sha256(Path(config.init_from)) != start.get("sha256"):
+        raise ValueError(f"the start changed since the plan was made: {config.init_from}")
     augment = classifier and config.augment
     classes = list(plan["classes"])
     class_to_index = {label: idx for idx, label in enumerate(classes)}
@@ -2073,10 +2189,22 @@ def train_reader(
         **loader_options,
     )
 
-    weights = Weights.IMAGENET1K_V1 if config.pretrained and mode == "fresh" else None
+    weights = Weights.IMAGENET1K_V1 if config.pretrained and mode == "fresh" and not start else None
     model = mobilenet_v3_small(weights=weights)
     model.classifier[-1] = torch.nn.Linear(model.classifier[-1].in_features, len(classes))
+    if start and mode == "fresh":
+        _load_start(torch, model, torch_load(Path(config.init_from)), classes, config.input_size, name,
+                    config.init_from)
     model.to(device)
+    if start:
+        initialization = "mapillary_pretraining" if start.get("mapillary_only") else "checkpoint"
+        initialization_source = str(start.get("path"))
+    elif config.pretrained:
+        initialization = "imagenet1k_v1"
+        initialization_source = "torchvision.models.MobileNet_V3_Small_Weights.IMAGENET1K_V1"
+    else:
+        initialization = initialization_source = "random"
+    start_summary = None if not start else {key: value for key, value in start.items() if key != "classes"}
 
     optimizer = torch.optim.AdamW(
         model.parameters(),
@@ -2166,6 +2294,8 @@ def train_reader(
             raise ValueError("resume reader classes mismatch")
         if classifier and saved.get("negatives_sha256") != plan.get("negatives_sha256"):
             raise ValueError("resume negatives mismatch: the run started with another negatives file")
+        if classifier and saved.get("start_sha256") != (start or {}).get("sha256"):
+            raise ValueError("resume start mismatch: the run started from other weights (--init-from)")
         if classifier and saved.get("mapillary_sha256") != plan.get("mapillary_sha256"):
             raise ValueError("resume Mapillary mismatch: the run started with other Mapillary crops")
         if (classifier and "mapillary_selection_sha256" in saved
@@ -2199,6 +2329,7 @@ def train_reader(
             "negatives_sha256": plan.get("negatives_sha256"),
             "mapillary_sha256": plan.get("mapillary_sha256"),
             "mapillary_selection_sha256": plan.get("mapillary_selection_sha256"),
+            "start_sha256": (start or {}).get("sha256"),
             "classes": classes,
             "input_size": config.input_size,
             "best_accuracy": best_accuracy,
@@ -2346,11 +2477,8 @@ def train_reader(
                     "split_sha256": plan["split_sha256"],
                     "epoch": epoch_number,
                     "validation_accuracy": epoch_result["validation_accuracy"],
-                    "initialization": "imagenet1k_v1" if config.pretrained else "random",
-                    "initialization_source": (
-                        "torchvision.models.MobileNet_V3_Small_Weights.IMAGENET1K_V1"
-                        if config.pretrained else "random"
-                    ),
+                    "initialization": initialization,
+                    "initialization_source": initialization_source,
                     "torch_version": str(torch.__version__),
                     "torchvision_version": torchvision.__version__,
                 }
@@ -2362,6 +2490,8 @@ def train_reader(
                         "validation_balanced_accuracy": epoch_result["validation_balanced_accuracy"],
                         "folded_labels": dict(plan.get("folded_labels") or {}),
                         "negatives_sha256": plan.get("negatives_sha256"),
+                        "mapillary_only": pretraining,
+                        "start": start_summary,
                     })
                 torch.save(saved_best, best_path)
 
@@ -2429,11 +2559,8 @@ def train_reader(
             "gpu": gpu,
             "torch_version": str(torch.__version__),
             "torchvision_version": torchvision.__version__,
-            "initialization": "imagenet1k_v1" if config.pretrained else "random",
-            "initialization_source": (
-                "torchvision.models.MobileNet_V3_Small_Weights.IMAGENET1K_V1"
-                if config.pretrained else "random"
-            ),
+            "initialization": initialization,
+            "initialization_source": initialization_source,
             "config": config.__dict__,
             "crop_cache": {key: cache_summary.get(key) for key in ("folder", "key", "crops", "frames", "megabytes")},
             "history": history,
@@ -2446,6 +2573,8 @@ def train_reader(
                 "best_validation_balanced_accuracy": best.get("validation_balanced_accuracy"),
                 "loss_weights": loss_weights,
                 "augmentation": augmentation,
+                "mapillary_only": pretraining,
+                "start": start_summary,
                 "folded_labels": dict(plan.get("folded_labels") or {}),
                 "negatives": {"file": (plan.get("negatives_file") or {}).get("file"),
                               "sha256": plan.get("negatives_sha256"), "by_split": plan.get("negatives")},
