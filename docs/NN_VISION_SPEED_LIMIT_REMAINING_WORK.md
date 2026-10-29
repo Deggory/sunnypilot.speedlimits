@@ -926,8 +926,8 @@ The runner does only: camera → ONNX → `speedVisionSP`; `state_out` → `stat
 The order, strongest first:
 
 1. a speed sign read now → that limit (inside a car park see 2);
-2. a car park recognised (the road-type head says parking for a few seconds) → **15 km/h**, a sign read there
-   only when lower (10 stays 10, 20 becomes 15); the limit remembered from the road before is dropped, not
+2. a car park recognised (the road-type head says parking for a few seconds) → **10 km/h**, a sign read there
+   only when lower (5 stays 5, 20 becomes 10); the limit remembered from the road before is dropped, not
    suspended: leaving the car park the model gives 0 until it reads a sign, because the road and the direction it
    re-enters are not known;
 3. the limit remembered from the last sign → that limit;
@@ -935,7 +935,7 @@ The order, strongest first:
 5. anything else → 0, the map decides.
 
 Road types of the head: town, rural, expressway, motorway, parking. A car park has no legal general limit, but the
-model returns 15 km/h there (decided by Cristian on 27 Oct 2026, replacing 0): with 0 sunnypilot takes the map, which
+model returns 10 km/h there (decided by Cristian on 27 Oct 2026, replacing 0; 10 instead of 15 since 29 Oct 2026): with 0 sunnypilot takes the map, which
 often has no limit in a car park or the limit of the road next to it, and the car could speed up where one must drive
 at walking pace.
 

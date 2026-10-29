@@ -116,7 +116,7 @@ export function sendQuestion(signnet: ModelVersion, classifier: ModelVersion | n
     : 'the classifier in use';
   const scene = roadType
     ? ' and the road type ' + roadType.label + ' of ' + roadType.run + ' to read the scene where no sign gives the limit '
-      + '(a car park 15, a town 50)'
+      + '(a car park 10, a town 50)'
     : '; no road type is in use, so it reads the signs alone';
   return {
     title: 'Send this SignNet to the car?', action: 'Send to the car',

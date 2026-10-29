@@ -10,7 +10,7 @@ names its type:
   sure), or the position is inside a car park outline (``amenity=parking``: "car park on the map") and our road is a
   service road, or no road is found, or the car is slower than PARKING_SPEED (the GPS finds the street next to the car
   park). Faster than PARKING_MAX_SPEED an aisle or a service road found is the GPS slipping, not a car park. Sure only when the outline and a service road agree. An underground car park lies under the streets: slow
-  on a street over it is not parking. Its limit to sunnypilot is always 15 km/h (a sign read there counts only when lower), and seeing it drops
+  on a street over it is not parking. Its limit to sunnypilot is always 10 km/h (a sign read there counts only when lower), and seeing it drops
   the limit remembered from the road before;
 - motorway: ``highway=motorway``;
 - expressway: ``highway=trunk`` (the Swiss Autostrasse), unless the map puts it in a town;
