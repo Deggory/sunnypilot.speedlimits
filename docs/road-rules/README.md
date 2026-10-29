@@ -49,9 +49,10 @@ PT; in LU it probably ends a limit set by the panel). Nowhere does a dark panel 
   km/h. `None` means no general limit (the German motorway): never use it for a country that has one.
 - `ROAD_SIGN_KEEPS_LIMIT`: SE, NO and FI, where a motorway, expressway or town sign only says which road the car is on.
 - The country is the one chosen for the maps on the comma (Settings › OSM, `OsmLocationName`), else CH.
-- Junctions: the comma follows the map's limit when it changes (`MAP_SECONDS`, another road). The rule of the countries
-  where a sign ends at the next junction (CH, LI, IT, BE, PL, CZ, HU, SI and partly SK, HR, PT, ES) waits for the
-  junction head of the road-type network; it ends a number read from a sign, never a zone or a town-wide limit.
+- Junctions: the vision side never reads the map; map and vision meet only in sunnypilot's resolver ("Map Data +
+  Vision"). The rule of the countries where a sign ends at the next junction (CH, LI, IT, BE, PL, CZ, HU, SI and partly
+  SK, HR, PT, ES) waits for the road-type network to see the turn from the camera and the car's own signals (yaw,
+  steering, blinkers); it ends a number read from a sign, never a zone or a town-wide limit.
 
 ## Not handled yet
 
