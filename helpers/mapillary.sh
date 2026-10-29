@@ -25,8 +25,9 @@ if [ "$#" -ne 0 ] && [ "$#" -ne 2 ]; then
 fi
 SOURCE="${NNSLR_MAPILLARY_DIR:-/data/mapillary}"
 if [ "$#" -eq 0 ] && [ -d "$SOURCE" ]; then
-    # On the server /data/mapillary is a share mounted into the container: an empty local folder means it is not.
-    if [ "$SOURCE" = /data/mapillary ] && ! mountpoint -q "$SOURCE"; then
+    # On the server /data/mapillary is the NFS share bound into the container: the bind is always a mountpoint, so
+    # a share that is down shows as the local filesystem (zfs) under it.
+    if [ "$SOURCE" = /data/mapillary ] && [ "$(findmnt -no FSTYPE "$SOURCE")" != nfs4 ]; then
         echo "mapillary: /data/mapillary is not mounted (the TrueNAS share): ask cluster-admin, do not copy around it" >&2
         exit 1
     fi
