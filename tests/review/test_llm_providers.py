@@ -284,6 +284,10 @@ def test_http_errors_mask_the_key():
         with pytest.raises(LlmError) as error:
             llm_providers.chat(record(fake.base_url), [], timeout=5)
     assert error.value.message == 'HTTP 500: broken *** here'
+    with FakeLlm(status=502, error_message='') as fake:
+        with pytest.raises(LlmError) as error:
+            llm_providers.chat(record(fake.base_url), [], timeout=5)
+    assert error.value.message == 'HTTP 502: the AI server 127.0.0.1 is down or restarting, try later'
 
 
 def test_timeouts_and_unreachable_servers():

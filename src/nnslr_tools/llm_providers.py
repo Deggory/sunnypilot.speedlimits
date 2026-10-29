@@ -444,6 +444,9 @@ def _call(url: str, key: str | None, *, body: dict | None = None, timeout: float
     except urllib.error.HTTPError as exc:
         detail = _clean(_masked(_provider_message(exc), key), 160)
         exc.close()
+        if not detail and exc.code in (502, 503, 504):
+            # The proxy in front of the AI server answers, the server behind it does not.
+            detail = 'the AI server ' + (urllib.parse.urlsplit(url).hostname or '') + ' is down or restarting, try later'
         raise LlmError(502, 'ai_http_error', _masked(f'HTTP {exc.code}' + (': ' + detail if detail else ''), key),
                        http_code=exc.code) from None
     except (socket.timeout, TimeoutError):

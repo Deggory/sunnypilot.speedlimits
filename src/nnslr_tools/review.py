@@ -1412,7 +1412,8 @@ def make_handler(app: ReviewApp):
             try:
                 fitted = ai_review.fit_box(app, route, frame_key, body.get('box'), provider, run_id=run_id)
             except ReviewRejected as exc:
-                print(f'AI fit: {terminal_text(route)} {frame_key} failed: {terminal_text(exc.reason)}', flush=True)
+                print(f'AI fit: {terminal_text(route)} {frame_key} failed: {terminal_text(exc.reason)}: '
+                      f'{terminal_text(llm_providers._masked(exc.message, provider.get("key")))}', flush=True)
                 raise self._masked(exc, provider.get('key')) from None
             finally:
                 app.ai_slots.release()
