@@ -290,8 +290,10 @@ This replaces the older `nn-speed-limit-vision` scaffolding below for the comma 
 - The preprocessing (`vision.py`) is the training's bit for bit: swscale's BT.601 YUV to RGB (x86 fixed point) and
   Pillow's bilinear resize, in numpy. On the comma's little cores: 100 ms a frame (offroad the big cores are off).
 - The networks are compiled on the device with tinygrad (`runner.py`, the QCOM flags of SConscript) into
-  `/data/media/0/models/speed_limits/`, by the offroad `speed_limits_warmup` (SignNet 50 s, classifier 96 s) or by
-  speedvisiond itself. Checked on the comma: the same boxes and classes as onnxruntime on the server.
+  `/data/media/0/models/speed_limits/`, by the build at boot after an update (`speed_limits/SConscript`, since 29 Oct
+  2026: driving off right after an install left speedvisiond compiling for minutes of the drive), else by the offroad
+  `speed_limits_warmup` (SignNet 50 s, classifier 96 s) or by speedvisiond itself. Checked on the comma: the same boxes
+  and classes as onnxruntime on the server.
 - SignNet runs right after a `modelV2` (the GPU is shared with the driving model at the same KGSL level);
   the process runs at niceness 10.
 - Shown by the sunnylink toggle Cruise › Speed Limits › Show Vision Speed Limit (`SpeedLimitVisionDisplay`), the
