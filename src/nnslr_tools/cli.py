@@ -25,6 +25,7 @@ import json
 import os
 import platform
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -55,6 +56,9 @@ from nnslr_tools.manifest import sha256_of
 # [route-extract] - START
 from nnslr_tools.manifest import NnslerManifestError, RouteManifest, normalize_relpath, parse_route_id
 from nnslr_tools.route_io import build_route_manifest, discover_segment_dirs
+
+# Segments of a route extracted at once: Prepare runs two routes, so 20 on the server's 32 cores.
+EXTRACT_WORKERS = 10
 # [route-extract] - END
 # [nnslr-sync] - START
 # [route-extract] - START
@@ -466,9 +470,8 @@ def _cmd_extract_route(args: argparse.Namespace) -> int:
                       alignment_path if alignment_path.is_file() else None))
         # [dataset-review] - END
 
-    all_rows = []
-    summaries = []
-    for index, video, segment_output, alignment_path in plans:
+    def extract_segment(plan):
+        index, video, segment_output, alignment_path = plan
         print(f"Extracting segment {index}: {video}", file=sys.stderr, flush=True)
         frames = extract_frames(
             video, segment_output, fps=None if args.all_frames else args.fps,
@@ -479,9 +482,17 @@ def _cmd_extract_route(args: argparse.Namespace) -> int:
                                     alignment=alignment_path)
         manifest = segment_output / "frames.jsonl"
         _write_jsonl(manifest, rows)
-        all_rows.extend(rows)
-        summaries.append({"segment_index": index, "frame_count": len(rows),
-                          "output": str(segment_output), "manifest": str(manifest)})
+        return rows, {"segment_index": index, "frame_count": len(rows),
+                      "output": str(segment_output), "manifest": str(manifest)}
+
+    # Several segments at once: ffprobe reads a whole video on one core, so one segment at a time left most of the
+    # server idle. The work is in ffmpeg/ffprobe processes, so threads are enough; the results keep the segments' order.
+    all_rows = []
+    summaries = []
+    with ThreadPoolExecutor(max_workers=max(1, args.workers)) as pool:
+        for rows, summary in pool.map(extract_segment, plans):
+            all_rows.extend(rows)
+            summaries.append(summary)
     if args.manifest:
         _write_jsonl(Path(args.manifest), all_rows)
     print(json.dumps({
@@ -1405,6 +1416,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_extract.add_argument("--manifest", help="optional combined frame JSONL; --route also writes frames.jsonl in each segment directory")
     # [route-extract] - END
     p_extract.add_argument("--overwrite", action="store_true")
+    p_extract.add_argument("--workers", type=int, default=int(os.environ.get("NNSLR_EXTRACT_WORKERS", EXTRACT_WORKERS)),
+                           help=f"with --route: segments extracted at once (NNSLR_EXTRACT_WORKERS, default {EXTRACT_WORKERS})")
     p_extract.set_defaults(func=_cmd_extract_frames)
 
     p_log = sub.add_parser("log-metadata", help="read LOCAL qlog/rlog camera/map metadata")

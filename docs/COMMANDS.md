@@ -121,7 +121,7 @@ These helpers are the daily flow, and the portal's buttons run them. Each one sk
 |---|---|---|
 | `sync-routes --route R [--dry-run]` | copies one route over SSH/rsync, without the download helper's filters | network, writes data |
 | `link-videos [--route R] [--dry-run]` | links segments already in `COMMA_VIDEOS_DIR` into `raw/routes` | writes data |
-| `extract-frames --route R` | extracts frames with ffmpeg, one per second by default | CPU-heavy, writes data |
+| `extract-frames --route R [--workers N]` | extracts frames with ffmpeg, one per second by default; N segments at once (`NNSLR_EXTRACT_WORKERS`, default 10: Prepare runs two routes, so 20 segments on the 32 cores) | CPU-heavy, writes data |
 | `route-manifest`, `inspect-manifest`, `video-probe`, `log-metadata`, `align-route`, `alignment-report` | inventory of local segments, video probing, and the alignment of video frames to the logs | read-only or writes reports |
 | `find-candidates`, `make-clips` | map transitions as search hints, and short review clips around them (older tools) | writes data |
 
