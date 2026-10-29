@@ -1,4 +1,4 @@
-// The Models tab: the three networks of the pipeline (cutter, classifier, decider; docs/NEURAL_NETWORK.md), every
+// The Models tab: the three networks of the pipeline (cutter, classifier, decider) and the road type (docs/NEURAL_NETWORK.md), every
 // version trained on this server (GET /api/panel/models every 10 s while the tab is open), the one in use for each
 // role (POST /api/panel/models/active, asked first in the confirm dialog), and the words the tab shows.
 import {onBeforeUnmount, onMounted, ref, shallowRef} from 'vue';
@@ -39,6 +39,14 @@ export const ROLE_TEXT: Record<ModelRole, {what: string; today: string; empty: s
     empty: 'No decider trained yet: experiment B is the first prototype.',
     emptyMore: 'Its variants appear here once scripts/run_experiment_b.sh has trained them.',
     uses: 'Nothing uses the decider yet: the choice is only noted for later.',
+  },
+  road_type: {
+    what: 'Says from the camera what road the car is on, once a second: town, rural, expressway, motorway, ramp or parking. '
+      + 'With memory it remembers the seconds before, so the motorway after a ramp is seen without a sign.',
+    today: 'Today: prototypes, with memory and without, judged on the test drives.',
+    empty: 'No road type trained yet.',
+    emptyMore: '“Train the road type” on the Train tab; its two networks appear here.',
+    uses: 'Nothing uses the road type yet: the choice is only noted for the car.',
   },
 };
 
@@ -197,7 +205,8 @@ export interface Metric {
  * every sign found on the test at its score, and the speed signs among its 5 best boxes a frame (what the car reads:
  * a detector passes on a couple of hundred boxes a frame at that score, SignNet a few); the classifier with “not a sign”: the speed-sign crops and every sign
  * crop read right (the kind of an other sign aside), and the chain with the cutter; an old reader: its crops read
- * right; the decider: the “Another” signs found on validation and on the test. */
+ * right; the decider: the “Another” signs found on validation and on the test; the road type: the motorway said right
+ * in the first minute after each ramp, the mean F1 of the road types and the town's F1, on the test. */
 export function metricsOf(version: ModelVersion): Metric[] {
   const of = (part: number | null | undefined, whole: number | null | undefined): string =>
     whole ? thousands(part ?? 0) + ' of ' + thousands(whole) : '';
@@ -244,6 +253,22 @@ export function metricsOf(version: ModelVersion): Metric[] {
         count: of(chain.correct, chain.truth), detail: chain.truth ? of(chain.correct, chain.truth) + ' speed signs, end to end' : 'speed signs, end to end'});
     }
     return metrics;
+  }
+  if (version.role === 'road_type') {
+    const test = version.test;
+    if (test === null) return [];
+    const merge = test.after_merge;
+    const town = test.classes['town'] ?? null;
+    return [
+      {key: 'merge', label: 'Motorway after a ramp', short: 'After a ramp', value: merge.merges ? merge.accuracy : null,
+        count: merge.merges ? merge.seconds + ' s, ' + merge.merges + (merge.merges === 1 ? ' ramp' : ' ramps') : 'no ramp',
+        detail: merge.merges ? 'The first minute on the motorway after each of the ' + merge.merges + ' ramps of the test'
+          : 'The test has no ramp onto the motorway'},
+      {key: 'macro', label: 'Road types', value: test.macro_f1, count: test.frames === null ? '' : thousands(test.frames) + ' s',
+        detail: 'Mean F1 of the road types the test has'},
+      {key: 'town', label: 'Town', value: town?.f1 ?? null, count: town ? thousands(town.support) + ' s' : '',
+        detail: 'F1 of the town on the test'},
+    ];
   }
   const another = (numbers: typeof version.validation): Metric['count'] =>
     numbers?.other_road_support ? of(numbers.other_road_found, numbers.other_road_support) : '';

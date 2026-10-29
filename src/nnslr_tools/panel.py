@@ -66,6 +66,9 @@ CUTTER_SCRIPT = 'scripts/run_detector_sizes.sh'
 # The decider: experiment B, its three variants (the crop alone; with position and speed; with the scene), on a run of
 # its own (start() adds <time>-decider).
 DECIDER_SCRIPT = 'scripts/run_experiment_b.sh'
+# The road type with memory (town, rural, expressway, motorway, ramp, parking from the camera, a GRU over the seconds),
+# trained with and without memory and exported as one ONNX step, on a run of its own (start() adds <time>-road-type).
+ROAD_TYPE_SCRIPT = 'scripts/run_road_type.sh'
 # The road type of every frame from the map (Data › Roads): the GPS of the drives, the map roads near them, the types.
 ROAD_TYPES_SCRIPT = 'helpers/road_types.sh'
 # Where the photos of the Mapillary Traffic Sign Dataset were taken (Train › Classifier, its region): asked of
@@ -80,6 +83,7 @@ RUN_LINES = {
     'train_classifier': (re.compile(r'^== scripts/run_classifier\.sh (\S+)\s*$', re.M), RUN_ARGUMENT_LINE),
     'train_cutter': (re.compile(r'^== scripts/run_detector_sizes\.sh (\S+)(?: \S+)*\s*$', re.M), RUN_ARGUMENT_LINE),
     'train_decider': (re.compile(r'^== scripts/run_experiment_b\.sh (\S+)\s*$', re.M), RUN_ARGUMENT_LINE),
+    'train_road_type': (re.compile(r'^== scripts/run_road_type\.sh (\S+)\s*$', re.M), RUN_ARGUMENT_LINE),
     # The SignNet being sent ("== Send to the car: SignNet <run>, classifier <id>"), for the Models tab.
     'send_to_car': (re.compile(r'^== Send to the car: SignNet ([^\s,]+)', re.MULTILINE),),
     'try_on_comma': (re.compile(r'^== Try on the comma: SignNet ([^\s,]+)', re.MULTILINE),),
@@ -150,7 +154,7 @@ FAMILY_TEXT = {'all': 'every sign', 'speed': 'speed signs only'}
 def _settings_of(log: Path, action: str) -> list[str]:
     """How a training of the cutter, the classifier or the decider was launched, as short chips from the head of
     its log: ["1344 × 760", "speed signs only", "20 epochs", "batch 8", "pretrained"]; [] for other jobs."""
-    if action not in ('train_cutter', 'train_classifier', 'train_decider'):
+    if action not in ('train_cutter', 'train_classifier', 'train_decider', 'train_road_type'):
         return []
     try:
         with log.open('rb') as handle:
@@ -237,6 +241,7 @@ ACTIONS = {
     # (start() adds <time>-cutter and the size; {'size', 'families'}).
     'train_cutter': {'label': 'Train the cutter', 'group': 'train', 'command': [CUTTER_SCRIPT]},
     'train_decider': {'label': 'Train the decider', 'group': 'train', 'command': [DECIDER_SCRIPT]},
+    'train_road_type': {'label': 'Train the road type', 'group': 'train', 'command': [ROAD_TYPE_SCRIPT]},
     # The cutter, classifier and decider in use exported as one package (start() names it); nothing is uploaded.
     'networks_prepare': {'label': 'Prepare the package', 'group': 'publish', 'command': [NETWORKS_SCRIPT]},
     # A package prepared here ({'package': name}) uploaded to Hugging Face, public: other people download it.
@@ -280,6 +285,7 @@ ACTIVITIES = (
     ('train', 'GPU training', 'run_v100_baseline.sh'),
     ('train', 'classifier training', 'run_classifier.sh'),
     ('train', 'cutter training', 'run_detector_sizes.sh'),
+    ('train', 'road type training', 'run_road_type.sh'),
     ('update', 'code update', 'helpers/update.sh'),
     ('publish', 'package of the networks', 'publish_networks.sh'),
     ('publish', 'send to the car', 'send_to_car.sh'),
@@ -302,7 +308,8 @@ RUNNING_NAMES = {'fetch': 'a download from the comma', 'prepare': 'a preparation
                  'measure_proposer': 'a proposer measurement', 'setup_vlm': 'the install of Qwen3-VL',
                  'dataset': 'an import of the reviews', 'train': 'a training', 'train_continue': 'a training',
                  'train_resume': 'a training', 'train_classifier': 'a classifier training',
-                 'train_cutter': 'a cutter training', 'train_decider': 'a decider training', 'update': 'a code update',
+                 'train_cutter': 'a cutter training', 'train_decider': 'a decider training',
+                 'train_road_type': 'a road type training', 'update': 'a code update',
                  'networks_prepare': 'the preparation of a package', 'networks_publish': 'a publication',
                  'send_to_car': 'a send to the car', 'try_on_comma': 'a trial on the comma',
                  'comma_restore': "a return to the build's networks",
@@ -313,6 +320,7 @@ ACTIVITY_NAMES = {'download from the comma': 'a download from the comma', 'prepa
                   'frame extraction': 'a preparation', 'pre-annotation': 'a preparation',
                   'dataset and training': 'an import or a training', 'GPU training': 'a training',
                   'classifier training': 'a classifier training', 'cutter training': 'a cutter training',
+                  'road type training': 'a road type training',
                   'code update': 'a code update', 'AI review': 'an AI review',
                   'package of the networks': 'a package of the networks', 'send to the car': 'a send to the car',
                   'networks on the comma': 'a copy onto the comma',
@@ -659,9 +667,10 @@ class Panel:
         trainings = [item for item in payload['activities'] if item['group'] == 'train']
         if from_panel or not trainings:
             return
-        terminal = {'classifier training': 'train_classifier', 'cutter training': 'train_cutter'}
+        terminal = {'classifier training': 'train_classifier', 'cutter training': 'train_cutter',
+                    'road type training': 'train_road_type'}
         patterns = (('train', 'logs/train-*.log'), ('train_classifier', 'runs/*/classifier.log'),
-                    ('train_cutter', 'runs/*/detector-sizes/*.log'))
+                    ('train_cutter', 'runs/*/detector-sizes/*.log'), ('train_road_type', 'runs/*/road-type.log'))
         for action, pattern in patterns:
             items = [item for item in trainings if terminal.get(item['label'], 'train') == action]
             logs = sorted(self.root.glob(pattern), key=lambda path: path.stat().st_mtime) if items else []
@@ -792,6 +801,15 @@ class Panel:
                 reason = CUTTER_SCRIPT + ' is missing in this installation'
             elif name == 'train_decider' and not (self.repo / DECIDER_SCRIPT).is_file():
                 reason = DECIDER_SCRIPT + ' is missing in this installation'
+            elif name == 'train_road_type' and not (self.repo / ROAD_TYPE_SCRIPT).is_file():
+                reason = ROAD_TYPE_SCRIPT + ' is missing in this installation'
+            elif name == 'train_road_type' and not self._road_types_found():
+                reason = 'no road types yet: Data › Roads, Find the road types'
+            elif name == 'train_road_type' and gpu is not None and gpu['processes']:
+                reason = 'the GPU is busy with another process'
+            elif name == 'train_road_type':
+                # Its labels are the road types of the map (Data › Roads): it needs no confirmed sign.
+                pass
             elif name in ('networks_prepare', 'networks_publish') and not (self.repo / NETWORKS_SCRIPT).is_file():
                 reason = NETWORKS_SCRIPT + ' is missing in this installation'
             elif name == 'networks_prepare':
@@ -851,6 +869,13 @@ class Panel:
         if not token_ready(self.repo):
             return "no Mapillary token: add MAPILLARY_TOKEN to the server's .env"
         return ''
+
+    def _road_types_found(self) -> bool:
+        """Whether a drive has its road types (derived/road_types/<route>.jsonl, helpers/road_types.sh)."""
+        try:
+            return any((self.root / 'derived' / 'road_types').glob('*.jsonl'))
+        except OSError:
+            return False
 
     # -- the dataset and the starting points of a training ----------------------------------------
     def dataset_summary(self) -> dict | None:
@@ -1402,6 +1427,8 @@ class Panel:
             raise PanelError(403, 'actions_disabled', CUTTER_SCRIPT + ' is missing in this installation.')
         if action == 'train_decider' and not (self.repo / DECIDER_SCRIPT).is_file():
             raise PanelError(403, 'actions_disabled', DECIDER_SCRIPT + ' is missing in this installation.')
+        if action == 'train_road_type' and not (self.repo / ROAD_TYPE_SCRIPT).is_file():
+            raise PanelError(403, 'actions_disabled', ROAD_TYPE_SCRIPT + ' is missing in this installation.')
         if action in ('networks_prepare', 'networks_publish') and not (self.repo / NETWORKS_SCRIPT).is_file():
             raise PanelError(403, 'actions_disabled', NETWORKS_SCRIPT + ' is missing in this installation.')
         if action == 'road_types' and not (self.repo / ROAD_TYPES_SCRIPT).is_file():
@@ -1439,6 +1466,8 @@ class Panel:
                 command.append(self.new_run_name('classifier'))
             if action == 'train_decider':
                 command.append(self.new_run_name('decider'))
+            if action == 'train_road_type':
+                command.append(self.new_run_name('road-type'))
             if action == 'train_cutter':
                 # NAME SIZE: one size, so the run holds one cutter.
                 command += [self.new_run_name('cutter'), size]

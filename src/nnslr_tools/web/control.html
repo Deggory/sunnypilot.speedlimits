@@ -591,8 +591,9 @@ background:var(--ok-soft);color:var(--ok)}
 .rt-strip span{flex-basis:0;min-width:2px}
 .rt-shares{margin:0;display:flex;flex-wrap:wrap;gap:2px 14px;font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
 .rt-frames{margin-left:auto}
-.train-sections{width:100%;max-width:560px;margin:0 auto;display:grid;grid-template-columns:repeat(4,minmax(0,1fr))}
+.train-sections{width:100%;max-width:640px;margin:0 auto;display:grid;grid-template-columns:repeat(5,minmax(0,1fr))}
 .train-sections button{position:relative;padding:7px 4px;white-space:nowrap}
+@media (max-width:430px){.train-sections button{font-size:12.5px;padding:7px 1px}}
 .train-sections .seg-dot{position:absolute;top:5px;right:5px;margin:0}
 .seg-dot{display:inline-block;width:7px;height:7px;margin-left:6px;border-radius:50%;background:var(--rev);vertical-align:2px;
 animation:seg-pulse 1.6s ease-in-out infinite}
@@ -786,7 +787,8 @@ background:rgba(5,7,11,.55);color:#fff;pointer-events:none}
    outlined green. */
 .roles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;align-items:start}
 /* Models (ModelsTab.vue): the three in use, one card each; tap one to list its versions in the table below. */
-.inuse-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.inuse-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+@media (max-width:1100px){.inuse-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .inuse-card{display:flex;flex-direction:column;align-items:flex-start;gap:4px;min-width:0;padding:16px 18px;border-radius:18px;
 border:0;background:var(--surface);box-shadow:var(--shadow);color:inherit;font:inherit;text-align:left;cursor:pointer;
 transition:box-shadow .15s,transform .1s}
@@ -805,7 +807,9 @@ transition:box-shadow .15s,transform .1s}
 .inuse-fig small{font-size:12px;color:var(--muted)}
 .inuse-more{margin-top:auto;padding-top:8px;font-size:13px;font-weight:500;color:var(--accent)}
 .versions-card{display:flex;flex-direction:column;gap:12px}
-.versions-seg{align-self:center;width:100%;max-width:480px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
+.versions-seg{align-self:center;width:100%;max-width:560px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr))}
+.versions-seg button{white-space:nowrap;padding-left:4px;padding-right:4px}
+@media (max-width:430px){.versions-seg button{font-size:12.5px;padding-left:1px;padding-right:1px}}
 /* The table of the versions: a row per version, its numbers in columns with a thin bar; a row opens its card. */
 .vt{display:flex;flex-direction:column;--vt-num:118px}
 .vt-head,.vt-row>summary{display:grid;grid-template-columns:minmax(0,1fr) repeat(var(--vt-cols),var(--vt-num)) 14px;column-gap:16px;align-items:center}
@@ -837,7 +841,7 @@ transition:box-shadow .15s,transform .1s}
 align-items:center;gap:2px 12px;padding:12px 14px}.inuse-role{grid-area:role}.inuse-name{grid-area:name;font-size:15px}
 .inuse-figs{grid-area:figs;margin:0;gap:12px}.inuse-fig b{font-size:19px}.inuse-fig small{font-size:11px}.inuse-when,.inuse-more{display:none}
 .versions-card{scroll-margin-top:72px}}
-@media (max-width:560px){.vt{--vt-num:64px}.vt-head,.vt-row>summary{column-gap:10px}.vt-c-chain,.vt-num small{display:none}
+@media (max-width:560px){.vt{--vt-num:64px}.vt-head,.vt-row>summary{column-gap:10px}.vt-c-chain,.vt-c-town,.vt-num small{display:none}
 .vt-head{grid-template-columns:minmax(0,1fr) repeat(min(var(--vt-cols),2),var(--vt-num)) 14px}
 .vt-row>summary{grid-template-columns:minmax(0,1fr) repeat(min(var(--vt-cols),2),var(--vt-num)) 14px;padding:10px 6px}
 .vt-head{padding:0 6px 6px}.vt-num b{font-size:15px}.vt-name b{white-space:normal;overflow-wrap:anywhere;font-size:14px}}

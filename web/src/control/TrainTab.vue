@@ -3,7 +3,8 @@
 // frames, drives; the reviews not imported yet), a link to Data › Training dataset, where they are imported. Then one network at a time, chosen
 // in a switcher with a dot on the one training: the cutter (scripts/run_detector_sizes.sh, its input size and the
 // signs it finds), the classifier with "not a sign" (scripts/run_classifier.sh), the decider (in preparation:
-// experiment B), the whole pipeline (helpers/3_train.sh, with where it starts). Each has the same place for its work:
+// experiment B), the road type with memory (scripts/run_road_type.sh), the whole pipeline (helpers/3_train.sh, with
+// where it starts). Each has the same place for its work:
 // the Train button, or its training running (or failed) with its steps, then its curves and its latest version
 // (GET /api/panel/models, a link to its versions in Models). The page does not move while work runs.
 import {computed, ref} from 'vue';
@@ -27,15 +28,16 @@ const props = defineProps<{status: PanelStatus | null}>();
 const emit = defineEmits<{run: [name: ActionName, state: ActionState, start?: TrainingStart, options?: ActionOptions]; stop: [job: Job];
   details: [job: Job]}>();
 
-/** The page as an app: one line of data, then one network at a time (Cutter, Classifier, Decider, the whole Pipeline),
- * whose Train button becomes its progress, in the same place, while it trains. */
-type Section = 'cutter' | 'classifier' | 'decider' | 'pipeline';
+/** The page as an app: one line of data, then one network at a time (Cutter, Classifier, Decider, Road type, the whole
+ * Pipeline), whose Train button becomes its progress, in the same place, while it trains. */
+type Section = 'cutter' | 'classifier' | 'decider' | 'road' | 'pipeline';
 const SECTIONS: {key: Section; label: string}[] = [{key: 'cutter', label: 'Cutter'}, {key: 'classifier', label: 'Classifier'},
-  {key: 'decider', label: 'Decider'}, {key: 'pipeline', label: 'Pipeline'}];
+  {key: 'decider', label: 'Decider'}, {key: 'road', label: 'Road type'}, {key: 'pipeline', label: 'Pipeline'}];
 function sectionOf(action: ActionName): Section | null {
   if (action === 'train_cutter') return 'cutter';
   if (action === 'train_classifier') return 'classifier';
   if (action === 'train_decider') return 'decider';
+  if (action === 'train_road_type') return 'road';
   return PIPELINE_ACTIONS.includes(action) ? 'pipeline' : null;
 }
 /** The newest job of a section (running or the last one). */
@@ -45,7 +47,8 @@ function jobFor(section: Section): Job | null {
 /** The work started from a terminal, by section (its label names the network; else the pipeline). */
 function activitiesFor(section: Section): Activity[] {
   return activities.value.filter((activity) => {
-    const named: Section = activity.label.includes('cutter') ? 'cutter' : activity.label.includes('classifier') ? 'classifier' : 'pipeline';
+    const named: Section = activity.label.includes('cutter') ? 'cutter' : activity.label.includes('classifier') ? 'classifier'
+      : activity.label.includes('road type') ? 'road' : 'pipeline';
     return named === section;
   });
 }
@@ -71,9 +74,12 @@ const latest = (role: ModelRole): ModelVersion | null => roleOf(role)?.versions[
 const latestCutter = computed(() => latest('cutter'));
 const latestClassifier = computed(() => latest('classifier'));
 const latestDecider = computed(() => latest('decider'));
+/** The road type: the newest network with memory (the one for the car), else the newest. */
+const latestRoad = computed(() => roleOf('road_type')?.versions.find((version) => version.role === 'road_type'
+  && version.memory === 'gru') ?? latest('road_type'));
 const roleLabel = (role: ModelRole): string => roleOf(role)?.label ?? role;
 const sectionLatest = computed(() => section.value === 'cutter' ? latestCutter.value : section.value === 'classifier'
-  ? latestClassifier.value : section.value === 'decider' ? latestDecider.value : null);
+  ? latestClassifier.value : section.value === 'decider' ? latestDecider.value : section.value === 'road' ? latestRoad.value : null);
 /** The headline of a version in one line: its main number and what it counts (the numbers of ModelItem). */
 function headlineOf(version: ModelVersion): {value: string; text: string} | null {
   if (version.role === 'cutter') {
@@ -89,12 +95,17 @@ function headlineOf(version: ModelVersion): {value: string; text: string} | null
     if (version.test) return {value: pct(version.test.accuracy), text: 'test signs read right'};
     return null;
   }
+  if (version.role === 'road_type') {
+    const merge = version.test?.after_merge;
+    if (merge?.merges) return {value: pct(merge.accuracy), text: 'motorway said right in the minute after a ramp'};
+    return version.test ? {value: pct(version.test.macro_f1), text: 'road types, mean F1 on the test'} : null;
+  }
   return version.validation ? {value: pct(version.validation.other_road_recall), text: '“Another” found on validation'} : null;
 }
 const latestHeadline = computed(() => sectionLatest.value ? headlineOf(sectionLatest.value) : null);
 /** How many versions the section's network has: Models lists them, to compare and to choose. */
 const sectionVersions = computed(() => section.value === 'cutter' || section.value === 'classifier' || section.value === 'decider'
-  ? roleOf(section.value)?.versions.length ?? 0 : 0);
+  ? roleOf(section.value)?.versions.length ?? 0 : section.value === 'road' ? roleOf('road_type')?.versions.length ?? 0 : 0);
 
 /** The cutter: its input size and the signs it learns to find (status.cutter_options; these when the server is older). */
 const sizeOptions = computed(() => (props.status?.cutter_options?.sizes ?? ['640x360', '960x544', '1344x760'])
@@ -118,6 +129,11 @@ const CUTTER_ACTIONS = computed((): [ActionName, string][] => [
 /** The decider's training, in its card: experiment B, its three variants. */
 const DECIDER_ACTIONS: [ActionName, string][] = [
   ['train_decider', 'Three deciders: the crop alone, with position and speed, with the scene. About 15 minutes on the GPU.'],
+];
+/** The road type's training, in its card: with memory and without, compared, the one with memory exported. */
+const ROAD_ACTIONS: [ActionName, string][] = [
+  ['train_road_type', 'With memory and without, compared on the test drives; the one with memory is exported for the car. '
+    + 'About 15 minutes on the GPU.'],
 ];
 /** The classifier: our signs only, or with the signs of the Mapillary dataset in train (status.classifier_options). */
 const mapillaryState = computed(() => props.status?.classifier_options?.mapillary ?? null);
@@ -158,6 +174,8 @@ const sectionActivities = computed(() => activitiesFor(section.value));
 /** The curves of a training: while it runs (a placeholder before the first epoch), or of the last one if it has any. */
 const charted = computed((): {progress: Progress; running: boolean} | null => {
   // A training started from a terminal: the server reads its progress from data/logs/train-<run>.log.
+  // The road type has no curves: its epochs are in its steps.
+  if (section.value === 'road') return null;
   const terminal = sectionActivities.value.find((activity) => activity.progress);
   if (terminal?.progress && !(job.value?.state === 'running')) return {progress: terminal.progress, running: true};
   const value = job.value;
@@ -208,6 +226,8 @@ const numbers = computed(() => {
     <p v-if="section === 'cutter'" class="role-what">Finds every box that could be a sign. It must miss nothing: the classifier drops its false boxes.</p>
     <p v-else-if="section === 'classifier'" class="role-what">Says what each box of the cutter is: a speed value, end of limit, another sign and its kind, or not a sign.</p>
     <p v-else-if="section === 'decider'" class="role-what">Says whom each sign applies to: our road, another road, or abstain.</p>
+    <p v-else-if="section === 'road'" class="role-what">Says from the camera what road the car is on, once a second: town, rural,
+      expressway, motorway, ramp or parking. It remembers the seconds before, so the motorway after a ramp is seen without a sign.</p>
     <p v-else class="role-what">The detector and the reader together, from the reviews to a package: the way every model was trained so far.</p>
 
     <!-- The slot of the work: the training running (or failed) in place of its button, first: what runs and what to start come before the versions. -->
@@ -253,6 +273,10 @@ const numbers = computed(() => {
         <ActionList :items="DECIDER_ACTIONS" :actions="status?.actions ?? null" @run="(name, state) => emit('run', name, state)"/>
         <p class="latest-none" id="train-decider-note">The one in use (Models) sets OURS or another on the speed signs Our networks propose.</p>
       </template>
+      <template v-else-if="section === 'road'">
+        <ActionList :items="ROAD_ACTIONS" :actions="status?.actions ?? null" @run="(name, state) => emit('run', name, state)"/>
+        <p class="latest-none" id="train-road-note">It learns from the road types of Data › Roads. Nothing on the car uses it yet.</p>
+      </template>
       <TrainStart v-else :starts="status ? status.training_starts ?? [] : null" :state="status?.actions.train ?? null"
                   @start="(start) => status && emit('run', 'train', status.actions.train, start)"/>
       <p v-if="job && !bigJob && !sectionActivities.length" class="last-line">Last: {{ job.label }}, {{ startedWhen(job) }} ·
@@ -263,7 +287,7 @@ const numbers = computed(() => {
     <!-- The latest version in one row, a link to Models: its versions there, to compare and to choose (the choice
          is made only there). -->
     <a v-if="sectionLatest" class="latest-row latest-link" :href="'/models#role-' + sectionLatest.role" id="latest-version">
-      <span class="latest-what"><span class="latest-kicker">{{ section === 'decider' ? 'Latest prototype' : 'Latest' }} ·
+      <span class="latest-what"><span class="latest-kicker">{{ section === 'decider' || section === 'road' ? 'Latest prototype' : 'Latest' }} ·
         {{ sectionLatest.trained_at ? isoWhen(sectionLatest.trained_at) : sectionLatest.run }}<span
         v-if="sectionLatest.in_use" class="latest-use">in use</span><span v-else-if="!sectionLatest.finished" class="latest-wait">not finished</span></span>
         <span class="latest-name">{{ sectionLatest.label }}</span>
@@ -273,6 +297,7 @@ const numbers = computed(() => {
     </a>
     <p v-else-if="section === 'cutter' || section === 'classifier'" class="latest-none">{{ models === null ? 'Loading…'
       : 'None trained yet: the ' + (section === 'cutter' ? 'detector' : 'reader') + ' of a whole pipeline plays this role.' }}</p>
+    <p v-else-if="section === 'road'" class="latest-none">{{ models === null ? 'Loading…' : 'None trained yet.' }}</p>
 
     <TrainingCharts v-if="charted?.running" :progress="charted.progress" :running="true"/>
     <details v-else-if="charted" class="latest-row curves-row">

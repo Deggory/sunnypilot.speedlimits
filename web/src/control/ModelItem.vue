@@ -4,14 +4,16 @@
 // then by width, boxes per frame, time per frame; the
 // classifier: the speed signs and every sign read right on the test, and for the classifier with “not a sign” the “not a sign” crops it rejects and
 // the chain end to end at the cutter's score, the speed signs found and read right and the false boxes per frame that
-// survive it; the decider: the "Another" road found, on validation and test), the button that puts it in use and the
-// link to its run on Evaluate. A SignNet (the cutter made for the car) has its own details and, instead of “Use this
+// survive it; the decider: the "Another" road found, on validation and test; the road type: the motorway after a ramp,
+// the road types and the town, then its F1 by road type, its changes of road type and their delay, its false switches
+// and its size), the button that puts it in use and the link to its run on Evaluate (not for the road type, which
+// Evaluate does not show). A SignNet (the cutter made for the car) has its own details and, instead of “Use this
 // one” (it is never the cutter in use here), “Send to the car” (scripts/send_to_car.sh, asked first by the Models tab)
 // and “Try on the comma now” (scripts/try_on_comma.sh: copied straight onto the comma until its next software update).
 // “On the car”: one of the networks the comma downloads; “Trying on the comma”: the one copied there now.
 import {computed} from 'vue';
 import {isoWhen, thousands} from '../common/format';
-import type {DeciderNumbers, ModelVersion} from '../common/panel-types';
+import type {DeciderNumbers, ModelVersion, RoadTypeNumbers} from '../common/panel-types';
 import {PARTITION_LABEL, pct} from './evaluate';
 import {ROLE_TEXT, epochText, evaluateHref, metricsOf, openRun, perFrame, sizeText, type CarState, type Metric} from './models';
 import MetricTiles from './MetricTiles.vue';
@@ -24,6 +26,8 @@ const cutter = computed(() => props.version.role === 'cutter' ? props.version : 
 const signnet = computed(() => cutter.value?.kind === 'signnet');
 const classifier = computed(() => props.version.role === 'classifier' ? props.version : null);
 const decider = computed(() => props.version.role === 'decider' ? props.version : null);
+const roadType = computed(() => props.version.role === 'road_type' ? props.version : null);
+const roadMetrics = computed((): Metric[] => roadType.value ? metricsOf(roadType.value) : []);
 /** The cutter's numbers: on the test, else on validation (a size compared before its test was measured). */
 const cut = computed(() => cutter.value?.test ?? cutter.value?.validation ?? null);
 const cutterMetrics = computed((): Metric[] => cutter.value ? metricsOf(cutter.value) : []);
@@ -31,7 +35,7 @@ const cutterCaption = computed(() => cut.value === null ? ''
   : 'Found on the ' + (PARTITION_LABEL[cut.value.partition] ?? cut.value.partition).toLowerCase() + ' at score ' + (cut.value.score_threshold ?? '–')
     + ', and in the ' + (cut.value.budget?.boxes ?? 5) + ' best boxes of each frame (what the car reads)');
 const evaluated = computed(() => cut.value !== null || (classifier.value?.test ?? null) !== null || (classifier.value?.chain ?? null) !== null
-  || decider.value?.validation != null || decider.value?.test != null);
+  || decider.value?.validation != null || decider.value?.test != null || roadType.value?.test != null);
 const epoch = computed(() => epochText(props.version.best_epoch, props.version.epochs_run ?? props.version.epochs));
 /** The classifier with “not a sign” (classifier:<run>/classifier); an old reader has none of its numbers. */
 const rejects = computed(() => classifier.value?.class_scheme !== undefined);
@@ -90,6 +94,28 @@ function deciderCell(numbers: DeciderNumbers | null, key: keyof DeciderNumbers):
   return pct(numbers[key]);
 }
 const noOtherOnTest = computed(() => decider.value?.test?.other_road_support === 0);
+
+/** The road types and the changes between them, in plain words (nnslr_tools.road_type_metrics). */
+const ROAD_NAMES: Record<string, string> = {town: 'Town', rural: 'Rural', expressway: 'Expressway', motorway: 'Motorway',
+  ramp: 'Ramp', parking: 'Parking'};
+const CHANGE_ROWS: {key: string; label: string}[] = [
+  {key: 'ramp_to_motorway', label: 'Ramp → motorway'}, {key: 'motorway_to_ramp', label: 'Motorway → ramp'},
+  {key: 'town_entry', label: 'Into a town'}, {key: 'town_exit', label: 'Out of a town'}, {key: 'other', label: 'Other changes'}];
+const roadClasses = computed(() => (roadType.value?.classes ?? Object.keys(roadType.value?.test?.classes ?? {}))
+  .map((key) => ({key, label: ROAD_NAMES[key] ?? key})));
+function f1Cell(numbers: RoadTypeNumbers | null, key: string): string {
+  const row = numbers?.classes[key];
+  return row === undefined ? '–' : row.support === 0 ? 'none' : pct(row.f1);
+}
+/** "4 of 4 · +3 s": the changes found within a minute and their median delay (negative: before the label changes). */
+function changeCell(numbers: RoadTypeNumbers | null, key: string): string {
+  const row = numbers?.transitions[key];
+  if (!row || row.count === 0) return '–';
+  const delay = row.median_delay === null ? '' : ' · ' + (row.median_delay > 0 ? '+' : row.median_delay < 0 ? '−' : '')
+    + Math.abs(row.median_delay) + ' s';
+  return row.found + ' of ' + row.count + delay;
+}
+const perHour = (value: number | null | undefined): string => value === null || value === undefined ? '–' : String(Math.round(value));
 </script>
 
 <template>
@@ -213,13 +239,52 @@ const noOtherOnTest = computed(() => decider.value?.test?.other_road_support ===
       </template>
     </template>
 
+    <template v-else-if="roadType">
+      <template v-if="roadType.test">
+        <MetricTiles :metrics="roadMetrics" caption="On the test drives, one frame a second: F1 of each road type, and the motorway
+          said right in the first minute after each ramp"/>
+        <details class="model-more"><summary>Details</summary>
+        <div class="table-wrap"><table class="model-table" aria-label="F1 by road type">
+          <thead><tr><th>F1</th><th class="num">Validation</th><th class="num">Test</th></tr></thead>
+          <tbody>
+            <tr v-for="row in roadClasses" :key="row.key" :data-class="row.key">
+              <th scope="row">{{ row.label }}</th>
+              <td class="num" :title="(roadType.validation?.classes[row.key]?.support ?? 0) + ' s'">{{ f1Cell(roadType.validation, row.key) }}</td>
+              <td class="num" :title="(roadType.test.classes[row.key]?.support ?? 0) + ' s'">{{ f1Cell(roadType.test, row.key) }}</td>
+            </tr>
+          </tbody>
+        </table></div>
+        <div class="table-wrap"><table class="model-table" aria-label="Changes of road type found within a minute">
+          <thead><tr><th>Changes</th><th class="num" title="Found within a minute · median delay">Test</th></tr></thead>
+          <tbody>
+            <tr v-for="row in CHANGE_ROWS" :key="row.key" :data-change="row.key">
+              <th scope="row">{{ row.label }}</th><td class="num">{{ changeCell(roadType.test, row.key) }}</td>
+            </tr>
+          </tbody>
+        </table></div>
+        <dl class="model-facts">
+          <div><dt title="Changes of road type it says where the road type stays, per hour of driving; then with 3 steps alike in a row, as the car would">False switches per hour</dt><dd>{{
+            perHour(roadType.test.false_switches_per_hour) }}<span class="muted"> · {{ perHour(roadType.test.false_switches_per_hour_debounced) }} after 3 alike</span></dd></div>
+          <div v-if="roadType.test_smoothed"><dt title="This network with a majority over the last 5 seconds">With a 5 s majority</dt><dd>{{
+            pct(roadType.test_smoothed.after_merge.accuracy) }} after a ramp<span class="muted"> · {{ pct(roadType.test_smoothed.macro_f1) }} road types</span></dd></div>
+          <div><dt>Weights</dt><dd>{{ roadType.parameters ? thousands(roadType.parameters) : '–' }}</dd></div>
+          <div><dt title="Multiply-adds of one step, one frame">Work per step</dt><dd>{{ roadType.flops_per_step ? Math.round(roadType.flops_per_step / 1e6) + ' M' : '–' }}</dd></div>
+          <div><dt :title="'One step at batch 1 on ' + (roadType.step_device ?? 'this server')">Time per step</dt><dd>{{ roadType.step_ms === null ? '–' : roadType.step_ms + ' ms' }}</dd></div>
+          <div><dt>Best epoch</dt><dd>{{ epoch }}</dd></div>
+          <div v-if="roadType.memory === 'gru'"><dt>For the car</dt><dd>{{ roadType.onnx ? 'ONNX step exported' : 'not exported yet' }}</dd></div>
+        </dl>
+        <p class="note">Delay: the median seconds from the change in the labels to the network’s; negative: it changes first.</p>
+        </details>
+      </template>
+    </template>
+
     <p v-if="!evaluated" class="model-wait">{{ version.finished ? 'Not evaluated: no numbers on the test yet.' : 'Still training, or stopped before its end.' }}</p>
     <p v-for="problem in version.problems" :key="problem" class="note ds-note">{{ problem }}.</p>
     <p v-if="signnet" class="note model-car-why">Made for the car: never the cutter in use here, where Prepare and the
       classifier’s training use a detector.</p>
 
     <div class="model-actions">
-      <a class="flow-link" :href="evaluateHref(version)" @click="openRun($event, version)">Open the run ›</a>
+      <a v-if="!roadType" class="flow-link" :href="evaluateHref(version)" @click="openRun($event, version)">Open the run ›</a>
       <span v-if="signnet" class="model-buttons">
         <button v-if="triable" class="btn small" type="button" :disabled="tryBlocked !== ''"
                 :title="tryBlocked || 'Copies it with the classifier in use straight onto the comma, until its next software update.'"

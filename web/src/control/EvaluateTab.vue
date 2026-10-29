@@ -275,8 +275,8 @@ const MEASURE: [ActionName, string][] = [['measure_proposer', 'Proposes the sign
 let pendingPick: string | null = null;
 watch(view, () => { picked.value = pendingPick; pendingPick = null; });
 
-/** The view of each role, for a version asked for by the address. */
-const ROLE_VIEW: Record<ModelRole, View> = {cutter: 'cutter', classifier: 'classifier', decider: 'decider'};
+/** The view of each role, for a version asked for by the address (the road type has none here). */
+const ROLE_VIEW: Partial<Record<ModelRole, View>> = {cutter: 'cutter', classifier: 'classifier', decider: 'decider'};
 /** The version “Open the run ›” of Models and Train asks for (?model=, else the newest version of ?run=): chosen in the
  * view of its role once the versions have come, then forgotten. */
 function openWanted(): void {
@@ -286,13 +286,14 @@ function openWanted(): void {
   const version = versions.find((item) => item.id === selectedModel.value) ?? versions.find((item) => item.run === selectedRun.value) ?? null;
   selectedModel.value = null;
   selectedRun.value = null;
-  if (version === null) return;
+  const target = version === null ? undefined : ROLE_VIEW[version.role];
+  if (version === null || target === undefined) return;
   mode.value = 'scores';
-  if (view.value === ROLE_VIEW[version.role]) {
+  if (view.value === target) {
     picked.value = version.id;
   } else {
     pendingPick = version.id;
-    view.value = ROLE_VIEW[version.role];
+    view.value = target;
   }
 }
 watch(models, openWanted, {immediate: true});

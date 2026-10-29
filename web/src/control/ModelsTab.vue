@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Models: first the three networks of the pipeline in use (cutter, classifier, decider; docs/NEURAL_NETWORK.md), one
+// Models: first the networks in use (the cutter, classifier and decider of the pipeline, the road type; docs/NEURAL_NETWORK.md), one
 // card each with its numbers; then the versions of one of them (the switch, or a tap on its card) as a table to
 // compare: the numbers that judge that role in columns, the one in use marked; a row opens its whole card (ModelItem:
 // details, Use this one, the run). A role has no model in use until someone picks one: there is no default. The
@@ -33,7 +33,7 @@ const readOnly = computed(() => (props.status !== null && !props.status.actions_
 /** The version being put in use, so its button waits for the answer. */
 const busy = ref<string | null>(null);
 
-const ROLES: readonly ModelRole[] = ['cutter', 'classifier', 'decider'];
+const ROLES: readonly ModelRole[] = ['cutter', 'classifier', 'decider', 'road_type'];
 /** The role whose versions are listed: the address's (/models#role-classifier, Train's link), else the cutter. */
 const fromHash = ROLES.find((role) => location.hash === '#role-' + role) ?? null;
 const picked = ref<ModelRole>(fromHash ?? 'cutter');
@@ -168,7 +168,7 @@ async function choose(version: ModelVersion): Promise<void> {
   <template v-else>
     <p v-if="payload.active_problem" class="banner" id="active-problem">{{ payload.active_problem }}: the choices cannot be shown or changed until it is fixed or removed.</p>
 
-    <!-- The three in use: tap one to list its versions below. -->
+    <!-- The ones in use: tap one to list its versions below. -->
     <div class="inuse-grid" id="roles">
       <button v-for="role in roles" :key="role.role" type="button" class="inuse-card" :class="{picked: role.role === picked}"
               :id="'role-' + role.role" :data-role="role.role" :aria-pressed="role.role === picked" @click="pick(role.role)">

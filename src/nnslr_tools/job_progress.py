@@ -47,6 +47,15 @@ DECIDER_STEPS = (
     ('experiment_b_crop_geom', 'Crop, position and speed', 32),
     ('experiment_b_full', 'Crop, position and the scene', 32),
 )
+# scripts/run_road_type.sh: the road-type network with memory, then the same network without it, then the comparison
+# and the ONNX step (their epoch lines name them: road_type_gru, road_type_frame).
+ROAD_TYPE_STEPS = (
+    ('checks', 'Checks and GPU smoke test', 5),
+    ('frames', 'Resize the frames', 5),
+    ('road_type_gru', 'Train with memory', 45),
+    ('road_type_frame', 'Train without memory', 40),
+    ('export', 'Compare and export the ONNX step', 5),
+)
 PREPARE_STEPS = (('link', 'Link the videos', 5), ('frames', 'Extract the frames and propose the signs', 95))
 # scripts/publish_networks.sh: "== 1/4 Export the cutter" ... (prepare), "== 1/3 Check the package" ... (upload).
 NETWORKS_PREPARE_STEPS = (('cutter', 'Export the cutter', 40), ('classifier', 'Export the classifier', 20),
@@ -76,12 +85,14 @@ AI_MEASURE_STEPS = (('measure', 'Measure the AI reviewer', 100),)
 # [ai-reviewer] - END
 STEPS = {'fetch': FETCH_STEPS, 'prepare': PREPARE_STEPS, 'dataset': DATASET_STEPS, 'train': TRAIN_STEPS,
          'train_continue': TRAIN_STEPS, 'train_resume': TRAIN_STEPS, 'train_classifier': CLASSIFIER_STEPS,
-         'train_cutter': CUTTER_STEPS, 'train_decider': DECIDER_STEPS, 'update': UPDATE_STEPS, 'ai_review': AI_REVIEW_STEPS,
+         'train_cutter': CUTTER_STEPS, 'train_decider': DECIDER_STEPS, 'train_road_type': ROAD_TYPE_STEPS,
+         'update': UPDATE_STEPS, 'ai_review': AI_REVIEW_STEPS,
          'measure_ai_reviewer': AI_MEASURE_STEPS, 'networks_prepare': NETWORKS_PREPARE_STEPS,
          'networks_publish': NETWORKS_PUBLISH_STEPS, 'road_types': ROAD_TYPES_STEPS, 'send_to_car': CAR_STEPS,
          'try_on_comma': TRY_STEPS, 'comma_restore': RESTORE_STEPS}
 # The actions whose percent is the weighted sum of their steps (the AI's: its frames done, from its reports).
-WEIGHTED = ('train', 'train_continue', 'train_resume', 'train_classifier', 'train_cutter', 'train_decider', 'dataset', 'ai_review',
+WEIGHTED = ('train', 'train_continue', 'train_resume', 'train_classifier', 'train_cutter', 'train_decider',
+            'train_road_type', 'dataset', 'ai_review',
             'measure_ai_reviewer', 'networks_prepare', 'networks_publish', 'road_types', 'send_to_car',
             'try_on_comma', 'comma_restore')
 
@@ -101,6 +112,8 @@ CUTTER_TITLES = ((re.compile(r'Validate the training'), 'checks'), (re.compile(r
 DECIDER_PIPELINE = {1: 'checks', 2: 'checks', 3: 'experiment_b_crop', 4: 'experiment_b_crop_geom', 5: 'experiment_b_full'}
 SUBSTEPS = {'train_classifier': (7, CLASSIFIER_PIPELINE), 'train_cutter': (None, CUTTER_PIPELINE),
             'train_decider': (5, DECIDER_PIPELINE),
+            'train_road_type': (6, {1: 'checks', 2: 'checks', 3: 'frames', 4: 'road_type_gru', 5: 'road_type_frame',
+                                    6: 'export'}),
             'networks_prepare': (4, {1: 'cutter', 2: 'classifier', 3: 'decider', 4: 'package'}),
             'networks_publish': (3, {1: 'check', 2: 'catalog', 3: 'upload'}),
             'send_to_car': (5, {1: 'export', 2: 'publish', 3: 'record', 4: 'move', 5: 'build'}),
@@ -121,15 +134,16 @@ MARKERS = (
     (re.compile(r'^== c\. Road type'), 'road_types', ()),
 )
 SUBSTEP = re.compile(r'^== (\d+)/(\d+) ')
-EPOCH = re.compile(r'^(detector|reader|classifier|experiment_b_crop_geom|experiment_b_crop|experiment_b_full) epoch (\d+)/(\d+)\b')
+EPOCH = re.compile(r'^(detector|reader|classifier|experiment_b_crop_geom|experiment_b_crop|experiment_b_full|'
+                   r'road_type_gru|road_type_frame) epoch (\d+)/(\d+)\b')
 # "classifier stops early after epoch 12: ...": the training ends before its planned epochs.
-EARLY = re.compile(r'^(detector|reader|classifier) stops early after epoch (\d+)\b')
+EARLY = re.compile(r'^(detector|reader|classifier|road_type_gru|road_type_frame) stops early after epoch (\d+)\b')
 # The values of an epoch line: "train_loss 0.5000 val_loss 0.6000 ... 40s" (the detector also writes
 # val_recall, its validation recall at score 0.1, which chooses its best epoch; the classifier with "not a sign"
 # val_sign_accuracy, the sign crops read right, and val_rejection, the "not a sign" crops it rejects: their mean,
-# the balanced accuracy, chooses its best epoch).
+# the balanced accuracy, chooses its best epoch; the road-type network val_macro_f1, its F1 over the road types).
 METRIC = re.compile(r'\b(train_loss|val_loss|train_accuracy|val_accuracy|val_recall|val_sign_accuracy|val_rejection|'
-                    r'val_balanced_accuracy) (-?[0-9.]+(?:e-?[0-9]+)?)\b')
+                    r'val_balanced_accuracy|val_macro_f1) (-?[0-9.]+(?:e-?[0-9]+)?)\b')
 SECONDS = re.compile(r'\b([0-9]+)s$')
 FETCHED = re.compile(r'^== (\S+)--(\d+) -> ')
 # helpers/fetch_comma_segments.sh, a route and its segments (in Italian in the older logs).
@@ -307,8 +321,8 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
         detail = epoch[0] + ' · stopped early after epoch ' + str(stopped[epoch[0]])
     elif epoch is not None and epoch[0] == current and state == 'running':
         # A variant of the decider by its step's label ("Crop, position and speed"), a network by its name.
-        name = dict((key, label) for key, label, _ in steps).get(epoch[0], epoch[0]) if epoch[0].startswith('experiment_b') \
-            else epoch[0]
+        name = dict((key, label) for key, label, _ in steps).get(epoch[0], epoch[0]) \
+            if epoch[0].startswith(('experiment_b', 'road_type')) else epoch[0]
         detail = name + ' · epoch ' + str(epoch[1]) + ' of ' + str(epoch[2])
     elif action == 'prepare_again' and preparation is not None and preparation.get('again'):
         detail = again_detail(preparation)

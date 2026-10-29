@@ -1508,6 +1508,34 @@ def build_parser() -> argparse.ArgumentParser:
     p_signnet.add_argument("--workers", type=int, default=8)
     p_signnet.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_signnet.set_defaults(func=_cmd_train_signnet)
+    p_road_net = sub.add_parser("train-road-type", help="train the road-type network with memory (town, rural, "
+                                                        "expressway, motorway, ramp, parking from the camera, a GRU "
+                                                        "over the seconds) on the road types of the drives; writes "
+                                                        "road-type-best.pt and result.json (GPU, .venv-gpu)")
+    p_road_net.add_argument("--run-dir", required=True, help="output folder, e.g. data/runs/<name>/road-type/gru")
+    p_road_net.add_argument("--memory", default="gru", choices=("gru", "none"),
+                            help="gru: with memory; none: the same encoder per frame, to compare")
+    p_road_net.add_argument("--epochs", type=int, default=60)
+    p_road_net.add_argument("--patience", type=int, default=15)
+    p_road_net.add_argument("--batch-size", "--batch", dest="batch", type=int, default=12, help="sequences per step")
+    p_road_net.add_argument("--num-workers", "--workers", dest="workers", type=int, default=8,
+                            help="processes resizing the frames for the cache")
+    p_road_net.add_argument("--seed", type=int, default=0)
+    p_road_net.add_argument("--dry-run", action="store_true",
+                            help="on the CPU, a few short sequences, one epoch of two steps: checks the pipeline")
+    p_road_net.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+    p_road_net.set_defaults(func=_cmd_train_road_type)
+    p_road_cmp = sub.add_parser("compare-road-type", help="the road-type network with and without memory on test: "
+                                                          "<run>/road-type/comparison.txt")
+    p_road_cmp.add_argument("--run-root", required=True, help="the run folder, e.g. data/runs/<name>")
+    p_road_cmp.set_defaults(func=_cmd_compare_road_type)
+    p_road_onnx = sub.add_parser("export-road-type", help="the road-type network as one ONNX step (image, speed, "
+                                                          "hidden -> probabilities, hidden_out) and its contract")
+    p_road_onnx.add_argument("--checkpoint", required=True, help="road-type-best.pt")
+    p_road_onnx.add_argument("--output", required=True, help="the .onnx file; the contract is <output>.contract.json")
+    p_road_onnx.add_argument("--no-verify", action="store_true", help="skip the onnxruntime parity check")
+    p_road_onnx.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data (for the rollout check)")
+    p_road_onnx.set_defaults(func=_cmd_export_road_type)
     p_mapillary = sub.add_parser("mapillary-crops", help="cut the signs of the Mapillary Traffic Sign Dataset that are "
                                                          "ours into <data root>/external/mapillary/crops and "
                                                          "crops.jsonl: extra train crops of the classifier "
@@ -2206,6 +2234,36 @@ def _cmd_train_signnet(args: argparse.Namespace) -> int:
                for split in ("validation", "test")}
     print(json.dumps({"run_dir": args.run_dir, "best_epoch": result["best_epoch"], "parameters": result["parameters"],
                       "by_box_budget": summary}, sort_keys=True), flush=True)
+    return 0
+
+
+def _cmd_train_road_type(args: argparse.Namespace) -> int:
+    from nnslr_tools.preannotate import resolve_data_root
+    from nnslr_tools.road_type_net import train_road_type
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    result = train_road_type(root, Path(args.run_dir), memory=args.memory, epochs=args.epochs, patience=args.patience,
+                             batch=args.batch, dry_run=args.dry_run, workers=args.workers, seed=args.seed)
+    test = result["test"]
+    print(json.dumps({"run_dir": args.run_dir, "memory": args.memory, "best_epoch": result["best_epoch"],
+                      "parameters": result["parameters"], "flops_per_step": result["flops_per_step"],
+                      "test_macro_f1": test["weight_1"]["macro_f1"],
+                      "test_after_merge_accuracy": test["after_merge"]["accuracy"],
+                      "test_false_switches_per_hour": test["false_switches_per_hour"]}, sort_keys=True), flush=True)
+    return 0
+
+
+def _cmd_compare_road_type(args: argparse.Namespace) -> int:
+    from nnslr_tools.road_type_net import compare_road_type
+    print(compare_road_type(Path(args.run_root)), end="", flush=True)
+    return 0
+
+
+def _cmd_export_road_type(args: argparse.Namespace) -> int:
+    from nnslr_tools.preannotate import resolve_data_root
+    from nnslr_tools.road_type_net import export_road_type_onnx
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    result = export_road_type_onnx(Path(args.checkpoint), Path(args.output), verify=not args.no_verify, data_root=root)
+    print(json.dumps(result, sort_keys=True), flush=True)
     return 0
 
 

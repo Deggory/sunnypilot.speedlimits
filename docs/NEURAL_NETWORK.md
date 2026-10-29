@@ -185,3 +185,74 @@ It added two points, both taken: "Unclear" is taught as abstain rather than drop
 - **Road markings are speed limits** (26 October 2026): a number painted on the road ("30", "30 ZONE") counts as a speed sign. It is often the only one a driver gets, for example when leaving a parking space inside a 30 zone, past its entry sign. The cutter learns to box it (both "Every sign" and "Speed signs only"), the classifier reads it (`road_marking:30`) and the decider says whose road it is on. Older reviews left many painted numbers without a box, so until they are boxed, those frames teach the cutter that the paint is background.
 - **Published together, on Hugging Face** (25 October 2026): the three networks in use go out as one package (ONNX, contracts, model card, `networks.json`) in the catalog `speed_networks.json` of `cristianku/sunnypilot-speedlimits-models`, so that other people can use them; a car will download from that catalog, as sunnypilot's model picker does from its own. Prepared and published from the Models tab (`scripts/publish_networks.sh`).
 - **Our networks propose only whole** (25 October 2026): Prepare offers "Our networks" only when the cutter, the classifier and the decider are all in use (`preannotate.ours_missing`). The decider sets the road (ours, another, or unresolved when it abstains) of every speed sign proposed, with the car's speed from `nnslr gps` when the drive has it (`_chain_proposer`); the other signs stay unresolved, since it learnt ownership only on the speed signs.
+
+## The road type with memory (29 October 2026)
+
+**Why.** Mobileye, and today's sunnypilot, keep a sign's limit until another sign ends it. On a Swiss motorway on-ramp a 60 sign is never ended by a sign: the motorway's 120 starts where the ramp merges. The same holds for the end of a town (80 or 100 after the town's 50), for an expressway (100) and for a car park. The car needs the kind of road it is on, and the moment it changes, from the camera. One frame is often not enough (the first metres of a motorway look like a rural road), so the network has a memory of the seconds before.
+
+**The network** (`src/nnslr_tools/road_type_net.py`, `nnslr train-road-type`):
+- one step a second: the whole road frame, resized to 256 × 144, and the car's speed;
+- encoder: torchvision's MobileNetV3-small with ImageNet weights, pooled, then 128 numbers (Linear, Hardswish, Dropout);
+- the speed as two numbers, `min(max(v, 0), 60) / 30` and 1 when known (GPS speed in training, `carState.vEgo` on the car);
+- memory: a GRU of 128; output: the probability of each of `road_types.ROAD_TYPES` (town, rural, expressway, motorway, ramp, parking), in that order and with those names;
+- the version without memory, to compare: the same encoder and speed with a small head per frame (`--memory none`), also measured with a causal 5-second majority vote over its answers, the cheapest memory;
+- size: 1,101,478 parameters (1,018,406 without memory), about 84 MFLOPs a step, 3.9 ms a step on the V100 at batch 1. At 1 Hz that is a small fraction of Chestnut, next to the driving model; it is still to be measured there.
+
+**Labels and weights** (`src/nnslr_tools/road_type_data.py`). The road type of each frame comes from the map (`nnslr road-types`) with the corrections of Data › Roads over it (`road_types.load_road_types`). The weight of a frame in the loss:
+- no road type (no GPS, no road on the map, "Can't tell"): 0. It is out of the loss but still goes through the memory;
+- sure: 1;
+- a ramp from its OSM link (`highway motorway_link` or `trunk_link`): 1. Every ramp is marked "check it" because its limit is unclear, not because the road is: an OSM link is the ramp. All 832 ramp frames are unsure and none was corrected yet, so masking them would erase the class;
+- every other unsure frame (a 60 or 70 road taken as rural, a gap of the map or the GPS filled, a frame smoothed into its neighbours): 0.3. These are mostly at the changes, where the memory matters; they count less because the map may be wrong there.
+- On top, the loss weighs each class by 1 / √(its frequency). Every measure reads the weight-1 frames only.
+
+**Split** (`road-type-place-v1`, split sha256 `a1681d1cef42…`). The drives pass the same roads again and again, so it is by place, like the signs' split: areas of about 300 m. Test is every area of the held-out test drive of `data/splits/latest.json` (`0000012d--6552a45378`, the same drive as the signs' test), so that drive is measured as it was driven; the areas next to it are a buffer. Validation is two compact clusters of other areas (about 15 % of the frames) with their own buffer. A sequence is a run of frames of one drive, without a gap, in one partition, of at least 30 seconds: the network is trained and measured on whole stretches, never on lone frames.
+
+| Partition | Sequences | Labelled frames | Town | Rural | Motorway | Ramp | Parking |
+|---|---|---|---|---|---|---|---|
+| Train | 18 | 10,031 | 2,595 | 2,171 | 3,902 | 365 | 178 |
+| Validation | 11 | 1,814 | 328 | 509 | 783 | 82 | 0 |
+| Test | 17 | 6,646 | 1,757 | 937 | 2,840 | 327 | 0 |
+
+There is no expressway frame anywhere (the drives have none on the map), and no parking in validation or test. The changes of road type (10 s of each side): ramp → motorway 2 in train, 1 in validation, 4 in test; motorway → ramp 2, 1, 2; town entry 13, 3, 11; town exit 11, 3, 10. Merges (a ramp of 3 s or more, then the motorway): 5 in train, 1 in validation, 7 in test.
+
+Unsure frames, by class (to confirm first in Data › Roads): town 343, rural 1,352, motorway 397, ramp 832, parking 13.
+
+**Training.** Windows of 48 seconds, 35 % of them around a change of road type; half of the batches start from the memory of the 32 seconds before the window, as on the car, the others from zeros. Per sequence the same random colour and framing (no mirror: traffic keeps right), a second dropped now and then, the speed ±5 % and unknown in one sequence in ten. AdamW, the best epoch by the validation macro F1, run over whole sequences with their memory. `scripts/run_road_type.sh` does both networks, the comparison and the export in about 15 minutes on the V100.
+
+**First results** (run `2026-10-29_0937-road-type`, test, weight-1 frames, 5,029 seconds):
+
+| | Macro F1 | Accuracy | Town | Rural | Motorway | Ramp |
+|---|---|---|---|---|---|---|
+| With memory (GRU, epoch 37) | **0.584** | **0.790** | **0.932** | 0.576 | **0.827** | 0.000 |
+| Without memory (epoch 30) | 0.548 | 0.749 | 0.831 | 0.553 | 0.801 | 0.006 |
+| Without memory, 5 s majority | 0.571 | | 0.846 | 0.612 | 0.824 | 0.000 |
+
+| Change (test) | With memory: found, median delay | Without memory |
+|---|---|---|
+| Ramp → motorway (4) | 4, −7.5 s | 3, −10 s |
+| Motorway → ramp (2) | 0 | 0 |
+| Town entry (11) | 11, +3 s | 11, 0 s |
+| Town exit (10) | 10, +1.5 s | 9, −2 s |
+| Other (8) | 3, +7 s | 4, +1.5 s |
+
+- **False switches** inside one road type, per hour: with memory 58 raw, 33 after the car's 3-step debounce; without memory 483 and 75; with the 5 s majority 136 and 80. The memory is what makes the answer steady.
+- **After a merge**, the first 60 s on the motorway after a ramp, the share said motorway: with memory **91.5 %** (90.9 % debounced), without memory 79.9 % (81.0 %), with the majority 81.6 % (83.0 %), over 7 merges and 364 s of test. Without memory most of the misses are "town" (57 s); with memory 22 s rural and 9 s town. Validation has a single merge (60 s, all right for every version). **These are few merges**: the trend is clear, the number is not yet a measure.
+- **Ramp is never recognised** (F1 0): of the 327 ramp seconds of test it says motorway for 180, rural for 82, town for 62. There are about 12 ramps in train, all with unsure labels. So the "ramp → motorway" change is found early (−7.5 s): the network says motorway while still on the ramp.
+- **Motorway taken as rural**: 652 of the 2,840 motorway seconds of test, mostly in two stretches (0000012e segments 33–45, 350 s; 0000012d, 231 s).
+
+**On the car** (the ONNX step, `nnslr export-road-type`; `road-type/export/road-type.onnx` and `road-type.onnx.contract.json` in the run). One step: `image` (1, 3, 144, 256), `speed` (1, 2), `hidden` (1, 128) in; `probabilities` (1, 6) and `hidden_out` (1, 128) out. The GRU is written as matrix products, sigmoid and tanh, with no ONNX GRU node; the ImageNet normalisation is inside. Checked against PyTorch with onnxruntime: largest error 6e-7 on random inputs, and the same answer on all 120 seconds of a real drive run step by step. The input, from sunnypilot's `speed_limits/vision.py`:
+1. `y, uv = vision.nv12_planes(buf.data, buf.width, buf.height, buf.stride, buf.uv_offset)` from `VISION_STREAM_ROAD`, the whole 1344 × 760 frame;
+2. `planes = vision.yuv_to_rgb(y, uv, 0, buf.height, 0, buf.width)` (BT.601, as the dataset PNGs);
+3. `planes = vision.resize(planes, 256, 144)` (PIL bilinear: bit-exact with the training cache);
+4. `image = planes[None].astype(np.float32) / 255.0`, RGB, NCHW, no mean or std;
+5. `speed = [[min(max(vEgo, 0), 60) / 30, 1.0]]`, or `[[0, 0]]` when unknown;
+6. `hidden`: zeros at the start of the drive and after more than 5 s without a step, then the previous `hidden_out`;
+7. one step a second (the frames of the training are 1 s apart; a faster rate would make the memory faster too);
+8. `road_type = classes[argmax(probabilities)]`, taken only after the same class 3 steps in a row.
+
+**What is missing.**
+- Ramps: confirmed ramp frames in Data › Roads, and more drives with on- and off-ramps. Until the network says "ramp", the car must not lift a ramp's limit on "motorway" alone: it says motorway on the ramp itself.
+- Expressways: no frame yet. Parking: no held-out frame.
+- More merges in validation and test, to make the after-merge number a measure.
+- The stretches of motorway taken as rural, to look at (the frames, or the map's labels there).
+- The car: nothing uses it. It needs `SpeedLimitMemory` to take the road type, the timing on Chestnut, and a decision on how the network and the map combine.

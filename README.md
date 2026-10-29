@@ -69,6 +69,7 @@ All training happens on a server with one GPU (a Tesla V100). The networks train
 | Cutter | Trained and measured. One version is chosen in the portal. |
 | Classifier | A first version with "not a sign" is trained and measured. None is chosen yet. |
 | Decider | Prototypes (experiment B). The one chosen sets the road of Our networks' proposals. |
+| Road type | A prototype with memory (29 October 2026): the kind of road from the camera, one frame a second, and the merge after a ramp. Measured on a held-out drive; nothing uses it yet. |
 | Following over time | Computed on the reviewed frames, not yet on the networks' output. |
 | Limit state and country rules | Planned. A small core with no dependencies ([`src/speed_vision_core`](src/speed_vision_core)) already has the types, the validation and the temporal checks. |
 | sunnypilot | No working integration. [`integrations/sunnypilot`](integrations/sunnypilot/README.md) keeps an old, frozen advisory snapshot that only ever reports "unavailable". |
@@ -122,6 +123,7 @@ The Train tab has one card per network:
 - **Cutter.** Pick the input size (640 × 360, 960 × 544 or the full 1344 × 760, the default) and whether it boxes every sign or only speed signs, then press **Train the cutter**.
 - **Classifier.** **Train the classifier** collects the cutter's false boxes, trains the classifier with "not a sign", and measures it on its own and together with the cutter. Once `helpers/mapillary.sh` has cut the signs of the Mapillary Traffic Sign Dataset, a switch adds them to its training crops (**With Mapillary**); the measures stay on our drives. **Where** keeps the signs of some continents or countries (Europe, or only Switzerland, Germany and Italy), once **Locate the photos** has found where each photo was taken; **Share** takes a fixed random part of them (5 %, say).
 - **Decider.** **Train the decider** trains experiment B's three variants (the crop alone, with position and speed, with the scene) in about 15 minutes, and compares them. It is a prototype; the one in use (Models) sets OURS or another on the speed signs Our networks propose.
+- **Road type.** **Train the road type** trains the network that tells town, rural, expressway, motorway, ramp and parking from the camera, once with memory and once without, in about 15 minutes, compares them and exports the one with memory as an ONNX step for the car. It learns from the road types of Data › Roads, and needs no reviewed sign. It is a prototype: nothing uses it yet ([docs/NEURAL_NETWORK.md](docs/NEURAL_NETWORK.md#the-road-type-with-memory-29-october-2026)).
 
 Two more buttons cover the dataset and the older pipeline. **Import reviews** turns the confirmed frames into the dataset. **Whole pipeline** runs the older detector-and-reader baseline, from the import to a packaged model.
 
@@ -278,6 +280,8 @@ Day-to-day work happens in the portal, whose buttons run a few helper scripts an
 Two helpers belong to the AI reviewer. `helpers/ai_review.sh` (**Review with AI**) reviews a route with the provider chosen in Settings. `helpers/measure_ai_reviewer.sh` (**Measure** in Evaluate → AI reviewers) measures a provider on the same frames people reviewed. Neither takes a key as an argument: the providers and their keys stay on the server, in `data/web/private/llm-providers.json`. An AI review saved by **Review and save** waits for a person: the import leaves it out until you confirm the frame. Providers can also be added from a terminal with `nnslr llm-provider add` ([docs/INSTALL.md](docs/INSTALL.md)).
 
 Two helpers prepare the Mapillary signs of the classifier. `helpers/mapillary.sh` cuts the signs of ours out of the Mapillary Traffic Sign Dataset. `helpers/mapillary_locations.sh` (**Locate the photos** in Train › Classifier) asks Mapillary where each photo was taken, so that **Where** can choose a continent or a country; it needs a Mapillary client token in `.env` (`MAPILLARY_TOKEN`) and resumes where it stopped.
+
+One script trains the road type. `scripts/run_road_type.sh NAME` (**Train the road type** in Train › Road type) checks the pipeline on the CPU, trains the network with memory and the one without on the GPU, compares them in `comparison.txt` and exports the one with memory as an ONNX step with its contract (`nnslr train-road-type`, `compare-road-type`, `export-road-type`). It writes only under `data/runs/NAME/` and the frame cache, and publishes nothing.
 
 Two scripts take a SignNet to the comma, from its card on Models › Versions. `scripts/send_to_car.sh` (**Send to the car**) publishes it with the classifier in use in `speed-limits-models`, moves the sunnypilot `speed-limits` branch and builds `psa-torque-sunny-testing`; the comma then installs the update. `scripts/try_on_comma.sh` (**Try on the comma now**) copies them straight onto the comma over ssh after checking them with the comma's own code, until its next software update; `--restore` (**Back to the build's networks**) undoes it.
 

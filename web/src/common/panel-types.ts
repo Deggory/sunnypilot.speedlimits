@@ -2,7 +2,7 @@
 import type {AiState} from './ai-types';
 
 export type ActionName = 'fetch' | 'prepare' | 'prepare_again' | 'measure_proposer' | 'setup_vlm' | 'dataset' | 'train' | 'train_continue' | 'train_resume' | 'train_classifier'
-  | 'train_cutter' | 'train_decider' | 'update' | 'ai_review' | 'measure_ai_reviewer' | 'networks_prepare' | 'networks_publish'
+  | 'train_cutter' | 'train_decider' | 'train_road_type' | 'update' | 'ai_review' | 'measure_ai_reviewer' | 'networks_prepare' | 'networks_publish'
   | 'road_types' | 'send_to_car' | 'try_on_comma' | 'comma_restore' | 'mapillary_locations';
 /** What a cutter learns to find: every sign (the speed signs and the other signs) or the speed signs only. */
 export type CutterFamilies = 'all' | 'speed';
@@ -978,8 +978,8 @@ export interface CutterSize {
 
 // GET /api/panel/models and POST /api/panel/models/active (nnslr_tools.model_roles.ModelIndex): the Models tab.
 
-/** The three networks of the pipeline (docs/NEURAL_NETWORK.md). */
-export type ModelRole = 'cutter' | 'classifier' | 'decider';
+/** The three networks of the sign pipeline (docs/NEURAL_NETWORK.md), and the road type from the camera. */
+export type ModelRole = 'cutter' | 'classifier' | 'decider' | 'road_type';
 
 /** Signs of one width found by the cutter. */
 export interface WidthRecall {
@@ -1113,7 +1113,40 @@ export interface DeciderModel extends ModelBase {
   test: DeciderNumbers | null;
 }
 
-export type ModelVersion = CutterModel | ClassifierModel | DeciderModel;
+/** A road-type network on one partition (nnslr_tools.model_roles.road_type_digest), over its frames of weight 1. */
+export interface RoadTypeNumbers {
+  macro_f1: number | null;
+  accuracy: number | null;
+  /** Its seconds (one frame a second). */
+  frames: number | null;
+  classes: Record<string, {f1: number | null; support: number}>;
+  /** The first 60 s on the motorway after each merge (a ramp, then motorway or expressway): the seconds said right. */
+  after_merge: {merges: number; seconds: number; accuracy: number | null; accuracy_debounced: number | null};
+  /** The changes of road type by kind: how many, how many it found within a minute, the median delay in seconds. */
+  transitions: Record<string, {count: number; found: number; median_delay: number | null}>;
+  false_switches_per_hour: number | null;
+  false_switches_per_hour_debounced: number | null;
+}
+
+export interface RoadTypeModel extends ModelBase {
+  role: 'road_type';
+  /** gru: with memory; none: the same encoder one frame at a time, to compare. */
+  memory: 'gru' | 'none' | null;
+  classes: string[] | null;
+  parameters: number | null;
+  flops_per_step: number | null;
+  /** One step at batch 1 on this server (a hint: the car's GPU is another). */
+  step_ms: number | null;
+  step_device: string | null;
+  /** Its ONNX step and contract are exported (the one with memory). */
+  onnx: boolean;
+  validation: RoadTypeNumbers | null;
+  test: RoadTypeNumbers | null;
+  /** The network without memory with a 5-second majority vote. */
+  test_smoothed: RoadTypeNumbers | null;
+}
+
+export type ModelVersion = CutterModel | ClassifierModel | DeciderModel | RoadTypeModel;
 
 /** The model in use for a role (models/active.json of the data root). */
 export interface ActiveModel {
