@@ -540,14 +540,21 @@ class Panel:
     # -- the machine ---------------------------------------------------------------------------
     def comma(self) -> dict:
         """The comma pill of the top bar: reachable or not (nnslr_tools.comma_link), and whether a download from it
-        runs now (a job of the panel or helpers/fetch_comma_segments.sh from a terminal)."""
+        runs now (a job of the panel or helpers/fetch_comma_segments.sh from a terminal), and what a download must
+        wait for (a preparation running: Download new drives is off until it ends)."""
         from nnslr_tools import comma_link
-        return {**comma_link.state(self.root), 'downloading': 'fetch' in self._running_groups(self.activities())}
+        return {**comma_link.state(self.root), **self._download_state()}
 
     def test_comma(self) -> dict:
         """The comma checked now (its Test button)."""
         from nnslr_tools import comma_link
-        return {**comma_link.check_now(self.root), 'downloading': 'fetch' in self._running_groups(self.activities())}
+        return {**comma_link.check_now(self.root), **self._download_state()}
+
+    def _download_state(self) -> dict:
+        """'downloading', and 'waits_for': what keeps a download from starting ("a preparation"), None when nothing."""
+        running = self._running_groups(self.activities())
+        other = _conflicting_group('fetch', running) if 'fetch' not in running else None
+        return {'downloading': 'fetch' in running, 'waits_for': GROUP_NAMES.get(other, other) if other else None}
 
     def set_comma_address(self, body) -> dict:
         """The address of the comma from its panel ({'address': '192.168.1.20'}; '' for the ssh host "comma")."""

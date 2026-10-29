@@ -13,6 +13,8 @@ interface CommaState {
   online: boolean | null;
   checked: string | null;
   downloading: boolean;
+  /** What a download waits for ("a preparation"): Download new drives is off until it ends; null: nothing. */
+  waits_for?: string | null;
   /** What is tried: the address set here, or "comma (192.168.200.208)", the ssh host of the server. */
   address: string;
   configured: boolean;
@@ -168,9 +170,12 @@ onBeforeUnmount(() => {
         <li><button type="button" class="btn small" :disabled="testing" @click="testNow">{{ testing ? 'Testing…' : 'Test now' }}</button></li>
       </ol>
       <div class="tm-update">
-        <button type="button" class="btn small primary" :disabled="!comma.online || comma.login === false || comma.downloading" @click="download">
+        <button type="button" class="btn small primary"
+                :disabled="!comma.online || comma.login === false || comma.downloading || !!comma.waits_for" @click="download">
           Download new drives</button>
-        <span v-if="message" class="tm-sub" role="status">{{ message }}</span>
+        <span v-if="comma.waits_for && !comma.downloading" class="tm-sub" role="status">Waits for {{ comma.waits_for }} to
+          finish (Data › Drives): the two never run together.</span>
+        <span v-else-if="message" class="tm-sub" role="status">{{ message }}</span>
       </div>
     </div>
   </div>

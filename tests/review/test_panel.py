@@ -269,6 +269,9 @@ def test_fetch_never_runs_together_with_a_preparation_or_an_update(root, checkou
             panel.start(action)
         assert busy.value.status == 409
     assert panel.status()['actions']['prepare']['reason'] == 'A download from the comma is running'
+    from nnslr_tools import comma_link
+    monkeypatch.setattr(comma_link, 'state', lambda root: {})
+    assert panel.comma() == {'downloading': True, 'waits_for': None}
     # A training does not touch the videos.
     assert panel.status()['actions']['dataset']['reason'] != 'A download from the comma is running'
     panel.stop(fetch['id'])
@@ -277,6 +280,8 @@ def test_fetch_never_runs_together_with_a_preparation_or_an_update(root, checkou
     monkeypatch.setenv('FAKE_SLEEP', '30')
     prepare = panel.start('prepare')
     assert panel.status()['actions']['fetch']['reason'] == 'A preparation is running'
+    # The comma pill turns Download new drives off and says what it waits for.
+    assert panel.comma() == {'downloading': False, 'waits_for': 'a preparation'}
     panel.stop(prepare['id'])
     finished(panel, prepare['id'])
 
