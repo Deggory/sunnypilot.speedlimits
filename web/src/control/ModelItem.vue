@@ -77,7 +77,7 @@ const tryBlocked = computed((): string => {
 });
 const sendTitle = computed(() => sendBlocked.value || (props.version.on_car
   ? 'Its last send did not finish building psa-torque-sunny-testing: this sends it again and builds it.'
-  : 'Publishes it with the classifier in use for the comma and builds psa-torque-sunny-testing.'));
+  : 'Publishes it with the classifier and the road type in use for the comma and builds psa-torque-sunny-testing.'));
 
 const DECIDER_ROWS: {key: keyof DeciderNumbers; label: string; title: string}[] = [
   {key: 'other_road_recall', label: '“Another” found', title: 'Share of the signs for another road it calls “Another” (recall)'},

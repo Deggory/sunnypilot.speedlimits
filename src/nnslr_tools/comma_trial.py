@@ -47,6 +47,7 @@ from nnslr_tools.car_release import (
     FILES,
     GPU_VENV_ENV,
     MANIFEST,
+    ROAD_TYPE_FILE,
     choose,
     export,
     manifest_of,
@@ -437,9 +438,11 @@ def compiled_name(stem: str, digest: str) -> str:
 
 def copy_files(comma: Comma, folder: Path, version: str) -> list[str]:
     """Each file to <name>.tmp in the comma's models folder, its sha256 checked there, then all moved into place,
-    speed_limits.json last. Returns the files copied."""
+    speed_limits.json last; the build's road type, when it has one, stays in use. Returns the files copied."""
     names = [name for network_file in FILES.values() for name in (network_file, network_file + '.contract.json')]
-    (folder / MANIFEST).write_text(json.dumps(manifest_of(version), indent=2) + '\n', encoding='utf-8')
+    road_type = 'yes' in comma.run('cd ' + _q(comma.models) + f' && test -f {ROAD_TYPE_FILE} && '
+                                   f'test -f {ROAD_TYPE_FILE}.contract.json && echo yes || true')
+    (folder / MANIFEST).write_text(json.dumps(manifest_of(version, road_type), indent=2) + '\n', encoding='utf-8')
     names.append(MANIFEST)
     try:
         for name in names:

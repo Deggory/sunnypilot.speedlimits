@@ -1966,7 +1966,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_send = sub.add_parser(
         "send-to-car",
-        help="export a SignNet and the classifier in use to ONNX, publish them in the clone of the models the comma "
+        help="export a SignNet and the classifier in use to ONNX (with the road type in use, when one is chosen), "
+             "publish them in the clone of the models the comma "
              "downloads (one commit pushed; nothing when they are the published ones already) and record them in "
              "models/on-car.json: steps 1-3 of scripts/send_to_car.sh",
     )

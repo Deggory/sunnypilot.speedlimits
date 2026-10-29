@@ -108,17 +108,22 @@ export interface CarState {
   onTrial?: string | null;
 }
 
-/** The question before "Send to the car" (scripts/send_to_car.sh): which SignNet and which classifier (the one in
- * use) the comma gets, what the job publishes and builds, and what is left to do on the comma. */
-export function sendQuestion(signnet: ModelVersion, classifier: ModelVersion | null): ConfirmOptions {
+/** The question before "Send to the car" (scripts/send_to_car.sh): which SignNet, which classifier and which road
+ * type (the ones in use) the comma gets, what the job publishes and builds, and what is left to do on the comma. */
+export function sendQuestion(signnet: ModelVersion, classifier: ModelVersion | null,
+                             roadType: ModelVersion | null = null): ConfirmOptions {
   const reader = classifier ? classifier.label + ' ' + (classifier.trained_at ? isoWhen(classifier.trained_at) : classifier.run)
     : 'the classifier in use';
+  const scene = roadType
+    ? ' and the road type ' + roadType.label + ' of ' + roadType.run + ' to read the scene where no sign gives the limit '
+      + '(a car park 15, a town 50)'
+    : '; no road type is in use, so it reads the signs alone';
   return {
     title: 'Send this SignNet to the car?', action: 'Send to the car',
-    text: 'The comma gets ' + signnet.label + ' of ' + signnet.run + ' to find the signs and ' + reader
-      + ' (the classifier in use) to read them. They are published in speed-limits-models, the sunnypilot speed-limits '
-      + 'branch moves to them and psa-torque-sunny-testing is built again: a few minutes. Then, on the comma: '
-      + 'Settings, Software, Check for updates, and install.',
+    text: 'The comma gets ' + signnet.label + ' of ' + signnet.run + ' to find the signs, ' + reader
+      + ' (the classifier in use) to read them' + scene + '. They are published in speed-limits-models, the sunnypilot '
+      + 'speed-limits branch moves to them and psa-torque-sunny-testing is built again: a few minutes. Then, on the '
+      + 'comma: Settings, Software, Check for updates, and install.',
   };
 }
 

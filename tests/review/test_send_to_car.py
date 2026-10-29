@@ -163,6 +163,99 @@ def test_published_once_then_nothing_then_a_new_version_the_same_day(tmp_path):
     assert json.loads((data / 'models/on-car.json').read_text())['version'] == '2026-10-28.3'
 
 
+def road_type_run(data: Path, name: str, onnx: bytes, *, export: bool = True) -> str:
+    """A finished road type with memory (road-type/gru) and, unless not, the ONNX step its training exported."""
+    run = data / 'runs' / name / 'road-type'
+    weights = b'road type weights ' + name.encode()
+    (run / 'gru').mkdir(parents=True)
+    (run / 'gru' / 'road-type-best.pt').write_bytes(weights)
+    write(run / 'gru' / 'result.json', {'task': 'road_type', 'memory': 'gru', 'motion': True})
+    if export:
+        (run / 'export').mkdir()
+        (run / 'export' / 'road-type.onnx').write_bytes(onnx)
+        write(run / 'export' / 'road-type.onnx.contract.json', {
+            'task': 'road_type', 'checkpoint': str(run / 'gru' / 'road-type-best.pt'), 'onnx_sha256': sha256(onnx),
+            'checkpoint_sha256': sha256(weights)})
+    return f'road_type:{name}/road-type/gru'
+
+
+def use_road_type(data: Path, model_id: str) -> None:
+    runs = RunsIndex(data)
+    runs.running_runs = dict
+    ModelIndex(runs).set_active('road_type', model_id, who=None, via='local')
+
+
+def fake_export_with_road_type(content: bytes):
+    """fake_export, and the road type's step copied as the real export does."""
+    signs = fake_export(content)
+
+    def exporter(chosen: dict, folder: Path) -> dict:
+        car_release.copy_road_type(chosen, folder)
+        return signs(chosen, folder)
+    return exporter
+
+
+def test_the_road_type_in_use_goes_on_the_car_and_goes_away_with_it(tmp_path):
+    data = tmp_path / 'data'
+    servers_runs(data)
+    origin, clone = models_clone(tmp_path)
+    use_road_type(data, road_type_run(data, 't1', b'road v1'))
+    lines = []
+    result = car_release.send_to_car(data, 's1', models=clone, today=TODAY, exporter=fake_export_with_road_type(b'v1'),
+                                     say=lines.append)
+    assert result['changed'] and git(origin, 'rev-parse', 'main') == result['commit']
+    manifest = json.loads((clone / 'speed_limits.json').read_text())
+    assert manifest == car_release.manifest_of('2026-10-28', road_type=True)
+    assert manifest['road_type'] == {'file': 'road-type.onnx', 'contract': 'road-type.onnx.contract.json'}
+    assert (clone / 'road-type.onnx').read_bytes() == b'road v1'
+    contract = json.loads((clone / 'road-type.onnx.contract.json').read_text())
+    assert contract['checkpoint'] == 'road_type:t1/road-type/gru' and contract['onnx_sha256'] == sha256(b'road v1')
+    assert 'road-type.onnx' in git(clone, 'show', '--name-only', '--format=', 'HEAD').split()
+    assert 'road type t1' in git(clone, 'log', '-1', '--format=%s')
+    record = json.loads((data / 'models/on-car.json').read_text())
+    assert record['road_type']['id'] == 'road_type:t1/road-type/gru'
+    assert lines[0] == ('== 1/3 Export the SignNet of s1 and the classifier classifier:r1/reader, the road type '
+                        'road_type:t1/road-type/gru')
+    roles = {role['role']: role for role in ModelIndex(RunsIndex(data)).index()['roles']}
+    assert [entry['id'] for entry in roles['road_type']['versions'] if entry['on_car']] == ['road_type:t1/road-type/gru']
+
+    # The same again: nothing; another road type: a new version.
+    again = car_release.send_to_car(data, 's1', models=clone, today=TODAY, exporter=fake_export_with_road_type(b'v1'),
+                                    say=lambda line: None)
+    assert not again['changed']
+    use_road_type(data, road_type_run(data, 't2', b'road v2'))
+    second = car_release.send_to_car(data, 's1', models=clone, today=TODAY, exporter=fake_export_with_road_type(b'v1'),
+                                     say=lambda line: None)
+    assert second['changed'] and (clone / 'road-type.onnx').read_bytes() == b'road v2'
+
+    # No road type in use: the published one is removed, the signs alone.
+    active = data / 'models' / 'active.json'
+    value = json.loads(active.read_text())
+    value.pop('road_type')
+    active.write_text(json.dumps(value))
+    third = car_release.send_to_car(data, 's1', models=clone, today=TODAY, exporter=fake_export_with_road_type(b'v1'),
+                                    say=lambda line: None)
+    assert third['changed'] and not (clone / 'road-type.onnx').exists()
+    assert 'road_type' not in json.loads((clone / 'speed_limits.json').read_text())
+    assert git(clone, 'ls-files', 'road-type.onnx', 'road-type.onnx.contract.json') == ''
+    assert 'road_type' not in json.loads((data / 'models/on-car.json').read_text())
+
+
+def test_only_a_road_type_with_memory_and_its_exported_step_goes_on_the_car(tmp_path):
+    data = tmp_path / 'data'
+    servers_runs(data)
+    use_road_type(data, road_type_run(data, 't1', b'road', export=False))
+    with pytest.raises(ValueError, match='has no exported ONNX step'):
+        car_release.choose(data, 's1')
+    frame = data / 'runs' / 't3' / 'road-type' / 'frame'
+    frame.mkdir(parents=True)
+    (frame / 'road-type-best.pt').write_bytes(b'w')
+    write(frame / 'result.json', {'task': 'road_type', 'memory': 'none'})
+    use_road_type(data, 'road_type:t3/road-type/frame')
+    with pytest.raises(ValueError, match='has no memory'):
+        car_release.choose(data, 's1')
+
+
 def test_a_dry_run_exports_and_compares_only(tmp_path):
     data = tmp_path / 'data'
     servers_runs(data)

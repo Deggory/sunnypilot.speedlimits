@@ -127,12 +127,14 @@ const restoreBlocked = computed((): string => {
   if (state === null) return 'Not available on this server.';
   return state.allowed ? '' : state.reason.charAt(0).toUpperCase() + state.reason.slice(1) + '.';
 });
-/** Asks, naming the SignNet and the classifier in use, then starts the job. */
+/** Asks, naming the SignNet, the classifier and the road type in use, then starts the job. */
 async function send(version: ModelVersion): Promise<void> {
   const state = car.value.state;
   if (state === null || !state.allowed) return;
   const classifiers = roles.value.find((role) => role.role === 'classifier');
-  if (!await askConfirm(sendQuestion(version, classifiers ? inUseOf(classifiers) : null))) return;
+  const roadTypes = roles.value.find((role) => role.role === 'road_type');
+  if (!await askConfirm(sendQuestion(version, classifiers ? inUseOf(classifiers) : null,
+                                     roadTypes ? inUseOf(roadTypes) : null))) return;
   emit('run', 'send_to_car', state, undefined, {signnet: version.run});
 }
 /** Asks in plain words what a trial on the comma does, then starts the job. */

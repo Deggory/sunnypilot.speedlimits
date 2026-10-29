@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
 # Send a SignNet to the car: the button "Send to the car" of a SignNet version on the Models tab runs it. The SignNet
-# of <run> and the classifier in use replace the networks the comma downloads, and the testing branch is built again.
+# of <run>, the classifier in use and the road type in use replace the networks the comma downloads, and the testing
+# branch is built again.
 #
 # Usage:
 #   scripts/send_to_car.sh --signnet=<run> [--classifier=<id>] [--rebuild] [--dry-run]
 #
 #   1/5 Export   the SignNet of <run> and the classifier in use (models/active.json; --classifier: another id of the
-#                Models tab) to ONNX on the CPU with the GPU venv, each checked against PyTorch with onnxruntime.
-#   2/5 Publish  both in the clone of cristianku/speed-limits-models: the ONNX, their contracts and speed_limits.json
+#                Models tab) to ONNX on the CPU with the GPU venv, each checked against PyTorch with onnxruntime;
+#                the road type in use (with memory), when one is chosen, is the ONNX step its training exported.
+#   2/5 Publish  them in the clone of cristianku/speed-limits-models: the ONNX, their contracts and speed_limits.json
 #                (format 2, version = the day, .2 .3 ... for another one the same day), one commit pushed to main.
-#                Nothing when both ONNX are the published ones already (the export is the same byte for byte).
+#                Nothing when every ONNX is the published one already (the export is the same byte for byte).
+#                Without a road type in use the published one is removed (the comma reads the signs alone).
 #   3/5 Record   models/on-car.json of the data root (what `nnslr on-car` writes): Models, "On the car".
 #   4/5 Move     the submodule openpilot/sunnypilot/speed_limits/models of the sunnypilot clone (branch speed-limits)
 #                to that commit, one commit of that path alone pushed to speed-limits; nothing when it is there.

@@ -104,10 +104,12 @@ MAX_ID = 320
 ACTIVE_FILE = 'models/active.json'
 ON_CAR_FILE = 'models/on-car.json'
 # The networks of the published models repository (speed_limits.json, format 2) by the role they play here.
-CAR_NETWORKS = {'finder': 'cutter', 'classifier': 'classifier'}
+CAR_NETWORKS = {'finder': 'cutter', 'classifier': 'classifier', 'road_type': 'road_type'}
+# A release may have no road type: speedvisiond then reads the signs alone.
+OPTIONAL_CAR_NETWORKS = ('road_type',)
 SIGNNET_WEIGHTS = re.compile(rf'/runs/({_RUN})/{SIGNNET_PART}-best\.pt$')
 # The weights file of a version, inside its part (SignNet's is at the root of its run).
-WEIGHTS = {'cutter': 'detector-best.pt', 'classifier': 'reader-best.pt'}
+WEIGHTS = {'cutter': 'detector-best.pt', 'classifier': 'reader-best.pt', 'road_type': 'road-type-best.pt'}
 SHA256 = re.compile(r'[0-9a-f]{64}')
 COMMIT = re.compile(r'[0-9a-f]{40}')
 # How the person who chose was recognised: signed in on the site, the access token of an agent, 127.0.0.1 without
@@ -613,7 +615,7 @@ def _car_model_id(role: str, checkpoint: Any) -> str:
         found = SIGNNET_WEIGHTS.search('/' + checkpoint) if role == 'cutter' else None
         if found is not None:
             return f'cutter:{found.group(1)}/{SIGNNET_PART}'
-        found = CHAIN_WEIGHTS[role].search('/' + checkpoint)
+        found = CHAIN_WEIGHTS[role].search('/' + checkpoint) if role in CHAIN_WEIGHTS else None
         if found is not None:
             return f'{role}:{found.group(1)}/{found.group(2)}'
     raise ValueError(f'the {role} contract names {checkpoint!r}, not weights of a run')
@@ -628,10 +630,10 @@ def _git(folder: Path, *args: str) -> str:
 
 def record_on_car(root: Path, models: Path, *, dry_run: bool = False) -> dict:
     """``nnslr on-car``: <root>/models/on-car.json from a clone of the published models repository, the networks
-    the comma downloads. Each network of its speed_limits.json (format 2: finder and classifier) must match its
-    contract (the ONNX sha256), name weights of a run on this server, and those weights must be the ones the contract
-    was made from (checkpoint sha256); the clone must be clean and its commit on a remote branch. Reads only the
-    clone (no network) and the runs; writes the one file, unless dry_run."""
+    the comma downloads. Each network of its speed_limits.json (format 2: finder, classifier, road_type when there
+    is one) must match its contract (the ONNX sha256), name weights of a run on this server, and those weights must be
+    the ones the contract was made from (checkpoint sha256); the clone must be clean and its commit on a remote
+    branch. Reads only the clone (no network) and the runs; writes the one file, unless dry_run."""
     root, models = Path(root), Path(models)
     if not models.is_dir():
         raise ValueError(f'{models} is not a folder')
@@ -643,6 +645,8 @@ def record_on_car(root: Path, models: Path, *, dry_run: bool = False) -> dict:
     record: dict[str, Any] = {'schema_version': 1}
     for network, role in CAR_NETWORKS.items():
         item = manifest.get(network)
+        if item is None and network in OPTIONAL_CAR_NETWORKS:
+            continue
         if not isinstance(item, dict):
             raise ValueError(f'speed_limits.json has no {network}')
         onnx, _ = _models_json(models, item.get('file'))
