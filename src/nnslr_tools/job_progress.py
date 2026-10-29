@@ -156,6 +156,11 @@ SECONDS = re.compile(r'\b([0-9]+)s$')
 FETCHED = re.compile(r'^== (\S+)--(\d+) -> ')
 # helpers/fetch_comma_segments.sh, a route and its segments (in Italian in the older logs).
 ON_COMMA = re.compile(r'^(\S+) (?:on the comma|sul comma): ')
+# Its first line, every drive it goes through; then a line per drive that starts with its name, and the segments it
+# downloads ("Download: 35 36").
+COMMA_ROUTES = re.compile(r'^Routes found on the comma:(.*)$')
+ROUTE_LINE = re.compile(r'^(\S+?)(?:--\d+)?(?::| on the comma)')
+TO_DOWNLOAD = re.compile(r'Download:((?: \d+)*)$')
 # A proposer measured (helpers/measure_proposer.sh): its worker writes a line per frame, "Preannotating 280/604: ...".
 PREANNOTATING = re.compile(r'^Preannotating (\d+)/(\d+)\b')
 # The last line the panel's wrapper writes (nnslr_tools.panel.WRAPPER; in Italian in the older logs).
@@ -244,6 +249,10 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
     stopped: dict[str, int] = {}
     fetched = 0
     route = ''
+    # The fetch: the drives on the comma, the one it is at, its segments to download and those reached.
+    comma_routes: list[str] = []
+    at_route = -1
+    segments: tuple[int, int] = (0, 0)
     # A proposer measured: the frames proposed so far and all of them.
     proposed: tuple[int, int] | None = None
     # The curves of the training: per network, one point per epoch.
@@ -286,11 +295,22 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
             stopped[match.group(1)] = int(match.group(2))
             if match.group(1) in curves:
                 curves[match.group(1)]['stopped_early'] = int(match.group(2))
+        match = COMMA_ROUTES.match(line)
+        if match:
+            comma_routes = match.group(1).split()
+        match = ROUTE_LINE.match(line) if comma_routes else None
+        if match and match.group(1) in comma_routes:
+            index = comma_routes.index(match.group(1))
+            if index != at_route:
+                at_route, segments = index, (0, 0)
         if FETCHED.match(line):
             fetched += 1
+            segments = (segments[0] + 1, segments[1])
         match = ON_COMMA.match(line)
         if match:
             route = match.group(1)
+            wanted = TO_DOWNLOAD.search(line)
+            segments = (0, len(wanted.group(1).split()) if wanted else 0)
         match = PREANNOTATING.match(line)
         if match and int(match.group(2)):
             proposed = (int(match.group(1)), int(match.group(2)))
@@ -327,6 +347,9 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
         percent = float(preparation['percent'])
     elif action == 'measure_proposer' and proposed is not None:
         percent = round(min(proposed) * 100 / proposed[1], 1)
+    elif action == 'fetch' and comma_routes:
+        inside = min(segments[0] / segments[1], 1.0) if segments[1] else 0.0
+        percent = round((max(at_route, 0) + inside) * 100 / len(comma_routes), 1)
 
     if epoch is not None and epoch[0] == current and state == 'running' and epoch[0] in stopped:
         detail = epoch[0] + ' · stopped early after epoch ' + str(stopped[epoch[0]])
@@ -343,6 +366,8 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
         detail = str(preparation['routes_done']) + ' of ' + str(preparation['routes_total']) + ' drives ready'
     elif action == 'fetch' and (fetched or route):
         detail = (str(fetched) + (' segment downloaded' if fetched == 1 else ' segments downloaded')
+                  + (' · drive ' + str(at_route + 1) + ' of ' + str(len(comma_routes))
+                     if comma_routes and at_route >= 0 and state == 'running' else '')
                   + (' · ' + route if route and state == 'running' else ''))
     elif action == 'measure_proposer' and proposed is not None and state == 'running':
         detail = f'{proposed[0]:,} of {proposed[1]:,} frames'

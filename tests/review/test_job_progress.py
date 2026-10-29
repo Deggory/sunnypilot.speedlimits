@@ -71,7 +71,14 @@ def test_preparation_uses_its_own_count_and_fetch_counts_segments():
     assert fetched['percent'] is None and fetched['detail'] == '1 segment downloaded · r1'
     fetched = progress('fetch', 'running', 'Routes found on the comma: r1 r2\n'
                        'r1 on the comma: 0 1. Skip:. Download: 0 1\n== r1--0 -> /x\n')
-    assert fetched['detail'] == '1 segment downloaded · r1'
+    # Its percent: the drives behind it, and the segments reached in the one it is at.
+    assert fetched['percent'] == 25.0 and fetched['detail'] == '1 segment downloaded · drive 1 of 2 · r1'
+    fetched = progress('fetch', 'running', 'Routes found on the comma: r1 r2 r3 r4\n'
+                       'r1: skipping 0 1 leaves no segment\nr1: no segment fit to download\n'
+                       'r2 on the comma: 0 1 2. Skip:. Download: 0 1 2\n== r2--0 -> /x\n== r2--1 -> /x\n'
+                       'r2--1: reverse gear found, segment left out\n')
+    assert fetched['percent'] == round((1 + 2 / 3) * 100 / 4, 1)
+    assert fetched['detail'] == '2 segments downloaded · drive 2 of 4 · r2'
 
 
 def test_the_progress_inside_the_current_step_comes_from_the_last_report():

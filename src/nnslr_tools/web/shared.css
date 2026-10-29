@@ -168,6 +168,13 @@ max-height:calc(100dvh - 72px - env(safe-area-inset-bottom,0px));overflow-y:auto
 .tm-edit input{font:inherit;font-size:16px;padding:8px 12px;border-radius:10px;border:0;background:var(--surface-2);color:var(--fg);width:100%}
 .tm-edit-actions{display:flex;justify-content:flex-end;gap:8px}
 .tm-update .tm-sub{margin:0}
+/* The download from the comma: its bar and what it is at. */
+.tm-progress{display:grid;gap:6px;padding:10px 0 2px;border-top:.5px solid var(--line)}
+.tm-progress .tm-sub{margin:0;overflow-wrap:anywhere}
+.tm-bar{position:relative;height:6px;border-radius:3px;background:var(--surface-3);overflow:hidden}
+.tm-bar span{display:block;height:100%;width:0;border-radius:3px;background:var(--accent);transition:width .8s ease}
+.tm-bar.indeterminate span{position:absolute;width:35%;animation:tm-slide 1.4s ease-in-out infinite}
+@keyframes tm-slide{0%{left:-35%}100%{left:100%}}
 @media (max-width:560px){
   .brand-name{display:none}
   .tabs a{flex:1 1 auto;padding:5px 5px;font-size:12.5px;letter-spacing:-.02em}

@@ -552,10 +552,20 @@ class Panel:
         return {**comma_link.check_now(self.root), **self._download_state()}
 
     def _download_state(self) -> dict:
-        """'downloading', and 'waits_for': what keeps a download from starting ("a preparation"), None when nothing."""
-        running = self._running_groups(self.activities())
+        """'downloading', 'waits_for': what keeps a download from starting ("a preparation"), None when nothing,
+        and 'download_progress': {percent, detail} of the download of the panel running now, else None."""
+        activities = self.activities()
+        running = self._running_groups(activities)
         other = _conflicting_group('fetch', running) if 'fetch' not in running else None
-        return {'downloading': 'fetch' in running, 'waits_for': GROUP_NAMES.get(other, other) if other else None}
+        found = None
+        if 'fetch' in running:
+            job = next((job for job in self.jobs(activities) if job['action'] == 'fetch' and job['state'] == 'running'),
+                       None)
+            if job is not None:
+                result = self.job_progress(job, None)
+                found = {'percent': result['percent'], 'detail': result['detail']}
+        return {'downloading': 'fetch' in running, 'waits_for': GROUP_NAMES.get(other, other) if other else None,
+                'download_progress': found}
 
     def set_comma_address(self, body) -> dict:
         """The address of the comma from its panel ({'address': '192.168.1.20'}; '' for the ssh host "comma")."""

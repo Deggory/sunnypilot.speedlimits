@@ -15,6 +15,8 @@ interface CommaState {
   downloading: boolean;
   /** What a download waits for ("a preparation"): Download new drives is off until it ends; null: nothing. */
   waits_for?: string | null;
+  /** The download of the panel running now: its percent (null while unknown) and what it is at. */
+  download_progress?: {percent: number | null; detail: string} | null;
   /** What is tried: the address set here, or "comma (192.168.200.208)", the ssh host of the server. */
   address: string;
   configured: boolean;
@@ -82,7 +84,12 @@ async function copyKey(): Promise<void> {
     copied.value = false;
   }
 }
-const word = computed(() => comma.value?.downloading ? 'Downloading' : comma.value?.online && comma.value.login === false ? 'Refuses this server'
+const downloadPercent = computed(() => {
+  const value = comma.value?.download_progress?.percent;
+  return value === null || value === undefined ? null : Math.max(0, Math.min(100, value));
+});
+const word = computed(() => comma.value?.downloading
+  ? 'Downloading' + (downloadPercent.value === null ? '' : ' · ' + Math.floor(downloadPercent.value) + '%') : comma.value?.online && comma.value.login === false ? 'Refuses this server'
   : comma.value?.online ? 'Connected'
   : comma.value?.online === false ? 'Not reachable' : 'Checking…');
 
@@ -169,6 +176,12 @@ onBeforeUnmount(() => {
         <li><strong>Here</strong>: its address, the IP under Settings → Network → Advanced on the comma (above).</li>
         <li><button type="button" class="btn small" :disabled="testing" @click="testNow">{{ testing ? 'Testing…' : 'Test now' }}</button></li>
       </ol>
+      <div v-if="comma.downloading" class="tm-progress" role="status">
+        <div class="tm-bar" :class="{indeterminate: downloadPercent === null}" role="progressbar" aria-label="Download"
+             aria-valuemin="0" aria-valuemax="100" :aria-valuenow="downloadPercent === null ? undefined : Math.floor(downloadPercent)"><span
+             :style="downloadPercent === null ? undefined : {width: downloadPercent + '%'}"></span></div>
+        <p v-if="comma.download_progress?.detail" class="tm-sub">{{ comma.download_progress.detail }}</p>
+      </div>
       <div class="tm-update">
         <button type="button" class="btn small primary"
                 :disabled="!comma.online || comma.login === false || comma.downloading || !!comma.waits_for" @click="download">
