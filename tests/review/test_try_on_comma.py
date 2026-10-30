@@ -394,7 +394,7 @@ def test_refused_when_the_compiled_folder_is_unknown(comma):
      'no class of the classifier gives a speed'),
 ])
 def test_refused_when_the_contracts_do_not_fit_the_comma(comma, changes, message):
-    refused(comma, 'these networks do not fit the build on the comma: .*' + message + '.*a build is needed: use Send to the car',
+    refused(comma, 'these networks do not fit the build on the comma: .*' + message + '.*a build is needed: use Publish',
             exporter=exporter_of(**changes))
 
 

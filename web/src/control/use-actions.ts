@@ -103,8 +103,8 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
     return {title: 'Update the site?', action: 'Update',
       text: 'git pull, the libraries, then the site restarts: it is away for a few seconds.'};
   }
-  // send_to_car, try_on_comma, comma_restore: the Models tab asks itself (models.ts sendQuestion, tryQuestion,
-  // restoreQuestion), naming the SignNet and the classifier in use.
+  // send_to_car, try_on_comma, comma_restore: the Publish and Models tabs ask themselves (models.ts publishQuestion,
+  // tryQuestion, restoreQuestion), naming the SignNet and the classifier in use.
   return null;
 }
 
@@ -130,7 +130,7 @@ const STOP_TEXT: Partial<Record<ActionName, string>> = {
   networks_publish: 'What Hugging Face already received may stay there.',
   road_types: 'The drives done stay; the next run does them all again in a minute.',
   mapillary_locations: 'The photos already located stay: locating again carries on from there.',
-  send_to_car: 'What was already published or pushed stays. Sending again carries on: what is in place is skipped, '
+  send_to_car: 'What was already published or pushed stays. Publishing again carries on: what is in place is skipped, '
     + 'and a build not finished runs then.',
   try_on_comma: 'Stopped before the copy, nothing on the comma changed. Stopped during the copy or the wait, the networks '
     + 'already on the comma stay until “Back to the build\'s networks”.',

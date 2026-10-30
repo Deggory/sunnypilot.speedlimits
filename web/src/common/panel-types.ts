@@ -1394,11 +1394,11 @@ export interface ModelsPayload {
   /** What runs on the comma: the published models commit (models/on-car.json); null when nothing was recorded. */
   on_car?: {repository: string | null; commit: string | null; version: string | null; recorded_at: string | null} | null;
   on_car_problem?: string | null;
-  /** A Send to the car moved the sunnypilot branch but its build of the testing branch did not finish: sending the
-   * SignNet on the car again builds it. */
+  /** A Publish to the car moved the sunnypilot branch but its build of the testing branch did not finish: publishing
+   * again builds it. */
   car_build_pending?: boolean;
   /** The networks copied onto the comma by “Try on the comma now” (models/on-comma-trial.json), until its next software
-   * update, “Back to the build's networks” or the next Send to the car; null when none. */
+   * update, “Back to the build's networks” or the next Publish to the car; null when none. */
   comma_trial?: CommaTrial | null;
 }
 

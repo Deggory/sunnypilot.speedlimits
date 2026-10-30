@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // On the car (Models tab): the settings of the comma's vision limit (sunnypilot speed_limits/vision.py), how sure a
 // sign or a road type must be and how long it must be seen; GET/POST /api/panel/car-settings (nnslr_tools.car_settings).
-// Saved here, they reach the comma only with the next Send to the car or Try on the comma, in speed_limits.json.
+// Saved here, they reach the comma only with the next Publish or Try on the comma, in speed_limits.json.
 import {computed, onMounted, reactive, ref, shallowRef} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import {isoWhen} from '../common/format';
@@ -62,7 +62,7 @@ async function save(values: Record<string, number | null>): Promise<void> {
   saving.value = true;
   try {
     fill(await post<CarSettingsPayload>('/api/panel/car-settings', {values}));
-    toast('Saved: they reach the comma with the next Send to the car');
+    toast('Saved: they reach the comma with the next Publish');
   } catch (problem) {
     toast(messageOf(problem), true);
   } finally {
@@ -82,7 +82,7 @@ const allDefault = computed(() => (payload.value?.settings ?? []).every((setting
   <section class="card car-settings" id="car-settings" aria-labelledby="car-settings-title">
     <h2 id="car-settings-title">On the car</h2>
     <p class="note">How the comma turns what its camera sees into a limit. Saved here, they reach the comma with the next
-      <strong>Send to the car</strong> (or Try on the comma), never on their own.</p>
+      <strong>Publish</strong> (Publish tab, or Try on the comma), never on their own.</p>
     <template v-if="payload">
       <div v-for="[group, title] in GROUPS" :key="group" class="cs-group">
         <h3 class="ds-title">{{ title }}</h3>
@@ -100,7 +100,7 @@ const allDefault = computed(() => (payload.value?.settings ?? []).every((setting
         </label>
       </div>
       <div class="cs-foot">
-        <span class="cs-state">{{ payload.sent ? 'The comma has these.' : 'Not on the comma yet: Send to the car.' }}<template
+        <span class="cs-state">{{ payload.sent ? 'The comma has these.' : 'Not on the comma yet: Publish puts them there.' }}<template
           v-if="payload.at"> Changed {{ isoWhen(payload.at) }}{{ payload.by ? ' by ' + payload.by : '' }}.</template></span>
         <button type="button" class="link-button" :disabled="props.readOnly || saving || allDefault" @click="resetAll">All to default</button>
         <button type="button" class="btn primary small" id="car-settings-save"

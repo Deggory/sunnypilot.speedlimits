@@ -28,7 +28,7 @@ flowchart TD
   B --> C["Review on the site<br/>a person confirms the boxes"]
   C --> D["Import reviews<br/>→ training dataset"]
   D --> E["Train<br/>sign finder, sign reader, road type"]
-  E --> F["Send to the car<br/>speed-limits-models"]
+  E --> F["Publish<br/>speed-limits-models"]
   F -.->|new drives| A
 ```
 
@@ -36,7 +36,7 @@ flowchart TD
 - **Review** is the only step done by hand. Every label the networks learn from is confirmed here.
 - **Import reviews** copies the confirmed labels (the boxes and what each sign says) into the training dataset ([what it does](#4-import-the-reviews)).
 - **Train** teaches the networks on a GPU on the server. The car never trains anything.
-- **Send to the car** puts the networks into sunnypilot. The comma gets them with its next software update.
+- **Publish** puts the networks in use into sunnypilot. The comma gets them with its next software update.
 
 ### What runs on the car
 
@@ -143,10 +143,10 @@ On the site: **Models › Versions**. Every version has its test numbers. **Use 
 
 <sub>The networks in use, each with its main test numbers.</sub>
 
-On the card of a SignNet:
+To the car:
 
-- **Send to the car** publishes that SignNet, the classifier and the road type in use into the [`speed-limits-models`](https://github.com/cristianku/speed-limits-models) repository. That is a submodule of sunnypilot's `speed-limits` branch. It then rebuilds Cristian's sunnypilot test branch (`psa-torque-sunny-testing`), in a few minutes. On the comma: **Settings › Software › Check for updates**, then install.
-- **Try on the comma now** copies that SignNet and the classifier in use straight onto a parked comma over SSH, after checking them with the comma's own code. The road type stays the build's. They last until the comma's next update. **Back to the build's networks** undoes it.
+- **Publish** (**Models › Publish**, one button) publishes the SignNet, the classifier and the road type in use into the [`speed-limits-models`](https://github.com/cristianku/speed-limits-models) repository. That is a submodule of sunnypilot's `speed-limits` branch. It then rebuilds Cristian's sunnypilot test branch (`psa-torque-sunny-testing`), in a few minutes. On the comma: **Settings › Software › Check for updates**, then install. The Hugging Face package below it is optional, for other people.
+- **Try on the comma now**, on the card of a SignNet, copies that SignNet and the classifier in use straight onto a parked comma over SSH, after checking them with the comma's own code. The road type stays the build's. They last until the comma's next update. **Back to the build's networks** undoes it.
 
 The **On the car** card holds the comma's settings: how sure a sign must be, in how many pictures, how long a road type must be seen. They travel with the next send.
 
@@ -178,7 +178,7 @@ Day-to-day work happens on the site, whose buttons run a few helper scripts and 
 
 - `helpers/1_prepare.sh`, `helpers/2_review.sh`, `helpers/3_train.sh`, `helpers/update.sh`: the daily steps above. `helpers/status.sh` only reads.
 - `scripts/run_signnet.sh`, `scripts/run_classifier.sh`, `scripts/run_road_type.sh`, `scripts/run_experiment_b.sh`: the trainings of the Training page (GPU).
-- `scripts/send_to_car.sh` and `scripts/try_on_comma.sh`: Send to the car and Try on the comma now.
+- `scripts/send_to_car.sh` and `scripts/try_on_comma.sh`: Publish (to the car) and Try on the comma now.
 - `helpers/ai_review.sh` and `helpers/measure_ai_reviewer.sh`: the AI reviewer. Its providers and keys stay on the server.
 - `scripts/train_box_fit.sh`: trains the review page's **Fit box** on the boxes people drew, on the CPU in about 15 minutes.
 

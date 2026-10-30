@@ -93,7 +93,7 @@ RUN_LINES = {
                      re.compile(r'^== scripts/run_detector_sizes\.sh (\S+)(?: \S+)*\s*$', re.M), RUN_ARGUMENT_LINE),
     'train_decider': (re.compile(r'^== scripts/run_experiment_b\.sh (\S+)\s*$', re.M), RUN_ARGUMENT_LINE),
     'train_road_type': (re.compile(r'^== scripts/run_road_type\.sh (\S+)\s*$', re.M), RUN_ARGUMENT_LINE),
-    # The SignNet being sent ("== Send to the car: SignNet <run>, classifier <id>"), for the Models tab.
+    # The SignNet being published ("== Send to the car: SignNet <run>, classifier <id>", scripts/send_to_car.sh).
     'send_to_car': (re.compile(r'^== Send to the car: SignNet ([^\s,]+)', re.MULTILINE),),
     'try_on_comma': (re.compile(r'^== Try on the comma: SignNet ([^\s,]+)', re.MULTILINE),),
 }
@@ -309,10 +309,11 @@ ACTIONS = {
     'networks_prepare': {'label': 'Prepare the package', 'group': 'publish', 'command': [NETWORKS_SCRIPT]},
     # A package prepared here ({'package': name}) uploaded to Hugging Face, public: other people download it.
     'networks_publish': {'label': 'Publish on Hugging Face', 'group': 'publish', 'command': [NETWORKS_SCRIPT, '--upload']},
-    # A SignNet of the Models tab ({'signnet': run}) and the classifier in use sent to the comma: exported, published
-    # in cristianku/speed-limits-models, recorded on the car, the sunnypilot speed-limits branch moved to them and
-    # psa-torque-sunny-testing built again (nnslr_tools.car_release). Then the comma updates from its settings.
-    'send_to_car': {'label': 'Send to the car', 'group': 'publish', 'command': [CAR_SCRIPT]},
+    # Publish (Publish tab): the SignNet in use ({'signnet': run}), the classifier and the road type in use put into the
+    # comma's software: exported, published in cristianku/speed-limits-models, recorded on the car, the sunnypilot
+    # speed-limits branch moved to them and psa-torque-sunny-testing built again (nnslr_tools.car_release). Then the
+    # comma updates from its settings.
+    'send_to_car': {'label': 'Publish to the car', 'group': 'publish', 'command': [CAR_SCRIPT]},
     # The same two networks copied straight onto the comma over ssh, checked first with the comma's own code, until
     # its next software update (nnslr_tools.comma_trial): no publication, no build. And the build's networks back.
     'try_on_comma': {'label': 'Try on the comma now', 'group': 'publish', 'command': [TRY_SCRIPT]},
@@ -353,7 +354,7 @@ ACTIVITIES = (
     ('train', 'road type training', 'run_road_type.sh'),
     ('update', 'code update', 'helpers/update.sh'),
     ('publish', 'package of the networks', 'publish_networks.sh'),
-    ('publish', 'send to the car', 'send_to_car.sh'),
+    ('publish', 'publish to the car', 'send_to_car.sh'),
     ('publish', 'networks on the comma', 'try_on_comma.sh'),
     # [ai-reviewer] - START
     ('ai', 'AI review', 'nnslr ai-review'),
@@ -376,7 +377,7 @@ RUNNING_NAMES = {'fetch': 'a download from the comma', 'prepare': 'a preparation
                  'train_cutter': 'a cutter training', 'train_decider': 'a decider training',
                  'train_road_type': 'a road type training', 'update': 'a code update',
                  'networks_prepare': 'the preparation of a package', 'networks_publish': 'a publication',
-                 'send_to_car': 'a send to the car', 'try_on_comma': 'a trial on the comma',
+                 'send_to_car': 'a publication to the car', 'try_on_comma': 'a trial on the comma',
                  'comma_restore': "a return to the build's networks",
                  'ai_review': 'an AI review',
                  'measure_ai_reviewer': 'an AI reviewer measurement', 'road_types': 'a search for the road types',
@@ -387,7 +388,7 @@ ACTIVITY_NAMES = {'download from the comma': 'a download from the comma', 'prepa
                   'classifier training': 'a classifier training', 'cutter training': 'a cutter training',
                   'road type training': 'a road type training',
                   'code update': 'a code update', 'AI review': 'an AI review',
-                  'package of the networks': 'a package of the networks', 'send to the car': 'a send to the car',
+                  'package of the networks': 'a package of the networks', 'publish to the car': 'a publication to the car',
                   'networks on the comma': 'a copy onto the comma',
                   'AI reviewer measure': 'an AI reviewer measurement', 'road types': 'a search for the road types',
                   'Mapillary positions': 'a search for the Mapillary positions'}
@@ -1166,7 +1167,7 @@ class Panel:
 
     def models(self) -> dict:
         """Every trained cutter, classifier and decider with its numbers, newest first, and the one in use; and
-        whether a build of the testing branch is still owed after a Send to the car (it is sent again then)."""
+        whether a build of the testing branch is still owed after a Publish to the car (publishing again builds it)."""
         return {**self.models_index.index(), 'car_build_pending': build_pending(self.root),
                 'comma_trial': read_trial(self.root)}
 
@@ -1519,7 +1520,7 @@ class Panel:
                 start_env['HF_TOKEN'] = kept
         signnet = (options or {}).get('signnet')
         if signnet is not None and action not in SIGNNET_ACTIONS:
-            raise PanelError(400, 'bad_option', 'Only "Send to the car" and "Try on the comma now" take a SignNet.')
+            raise PanelError(400, 'bad_option', 'Only "Publish to the car" and "Try on the comma now" take a SignNet.')
         if action in SIGNNET_ACTIONS:
             # A finished SignNet of the Models tab, by its run name: nothing else reaches the command line.
             wanted = f'cutter:{signnet}/{SIGNNET_PART}' if isinstance(signnet, str) and RUN_NAME.fullmatch(signnet) else None

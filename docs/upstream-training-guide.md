@@ -685,7 +685,7 @@ car keeps those scoring 0.3 or more (`CAR_MIN_SCORE`), so only `evaluate-chain`
 judged at 0.3 is exactly the car. A reader of what the car finds takes `car`
 from the result; for an older `result.json` without it,
 `by_score_threshold['0.3']` stands in (about 0.35 boxes a frame there, so the
-cap of 5 almost never bites). **Send to the car** and **Try on the comma now**
+cap of 5 almost never bites). **Publish** (to the car) and **Try on the comma now**
 refuse a SignNet that does not fit the car or has not finished. A sign below the
 band (a road marking, a low sign close by) is never found. `nnslr export-onnx
 --task signnet` writes the ONNX for the car, with one output `out`.

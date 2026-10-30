@@ -9,7 +9,7 @@ trial lasts until the comma's next software update, which puts back the build's 
 1. Check the comma: it answers over ssh, it is parked (IsOnroad), its build runs the speed-limits networks
    (runner.py with MANIFEST_FORMAT = 2, warmup.py, vision.py) and prepares them (the toggle or the source), and where
    it keeps the compiled networks (Paths.model_root in hw.py). Its vision.py is copied here, read-only.
-2. Export the SignNet and the classifier as "Send to the car" does (nnslr_tools.car_release).
+2. Export the SignNet and the classifier as Publish does (nnslr_tools.car_release).
 3. Check them with the comma's code, before anything is copied: the contracts against the comma's vision.py (SignNet's
    input band and grid step, its one output of 5 channels, heat first; the classifier's input size, normalisation and
    classes as the comma reads them into speeds), then the comma's own read_signs, with both ONNX under onnxruntime on
@@ -79,7 +79,7 @@ SPEED_FAMILIES = ('maximum_speed', 'variable_display', 'zone', 'road_marking')
 CANCELLATION = 'cancellation'
 VISION_NAMES = ('SIGNNET_WIDTH', 'SIGNNET_HEIGHT', 'SIGNNET_STRIDE', 'CLASSIFIER_SIZE', 'CLASSIFIER_MEAN',
                 'CLASSIFIER_STD', 'SignNetInput', 'read_signs', 'class_speed')
-BUILD_NEEDED = 'a build is needed: use Send to the car'
+BUILD_NEEDED = 'a build is needed: use Publish'
 NOT_PREPARED = ("turn on Show Vision Speed Limit, or choose Speed Limit Source Map Data + Vision, on the comma: it "
                 "prepares the networks only then")
 
@@ -191,10 +191,10 @@ def check_comma(comma: Comma, *, restore: bool = False) -> dict:
     if not restore and not (state['runner'] and state['warmup'] and state['vision']):
         raise CommaError(f'the comma{build} cannot run these networks (no speedvisiond: {PACKAGE}/runner.py with '
                          'MANIFEST_FORMAT = 2, warmup.py and vision.py): install the testing build first '
-                         '(Send to the car), then try again')
+                         '(Publish), then try again')
     if not state['models']:
         raise CommaError(f'the comma{build} has no speed-limits models folder ({comma.models}): '
-                         'install the testing build first (Send to the car)')
+                         'install the testing build first (Publish)')
     if restore:
         return state
     if not (state['display'] or state['policy'] == MAP_DATA_VISION):

@@ -1103,7 +1103,7 @@ def _cmd_on_car(args: argparse.Namespace) -> int:
 
 
 def _cmd_send_to_car(args: argparse.Namespace) -> int:
-    """Steps 1-3 of Send to the car (nnslr_tools.car_release): export, publish in the models clone, on-car.json."""
+    """Steps 1-3 of Publish to the car (nnslr_tools.car_release): export, publish in the models clone, on-car.json."""
     from nnslr_tools.car_release import send_to_car
     from nnslr_tools.preannotate import resolve_data_root
     root = resolve_data_root(Path(args.data_root) if args.data_root else None)

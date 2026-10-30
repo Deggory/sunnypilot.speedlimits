@@ -1,4 +1,4 @@
-"""Send to the car (Models › a SignNet version): nnslr_tools.car_release (export, publish in the models clone, on-car.json),
+"""Publish to the car (the Publish tab; send_to_car): nnslr_tools.car_release (export, publish in the models clone, on-car.json),
 scripts/send_to_car.sh (the sunnypilot submodule and the build) and the panel action send_to_car.
 
 Every repository is a temporary git clone with a bare remote; the export and the build are fakes: nothing is exported
@@ -551,7 +551,7 @@ def test_send_to_car_says_why_it_cannot_run(root, checkout, tmp_path, monkeypatc
         'no classifier in use: choose one on the Models tab'
     servers_runs(root)
     # No confirmed frame is needed: it sends networks already trained.
-    assert panel._action_states(ready_payload(), [])['send_to_car'] == {'label': 'Send to the car', 'allowed': True, 'reason': ''}
+    assert panel._action_states(ready_payload(), [])['send_to_car'] == {'label': 'Publish to the car', 'allowed': True, 'reason': ''}
     assert panel.models()['car_build_pending'] is False
 
 

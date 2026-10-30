@@ -4,7 +4,7 @@ speed_limits.json, car_release.manifest_of). The comma takes each one it knows w
 default for the others (vision.apply_settings): a setting of this list is a constant of vision.py, same default.
 
 Kept in ``models/car-settings.json`` of the data root: {"values": {key: number}, "by", "at"}, only the values changed
-from the default. They reach the car with the next Send to the car (or Try on the comma), never on their own.
+from the default. They reach the car with the next Publish (or Try on the comma), never on their own.
 """
 from __future__ import annotations
 

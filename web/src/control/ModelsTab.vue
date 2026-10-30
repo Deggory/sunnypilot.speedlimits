@@ -5,13 +5,12 @@
 // details, Use this one, the run). A role has no model in use until someone picks one: there is no default. The
 // networks the comma downloads (models/on-car.json, written by nnslr on-car) are marked “on the car”. The cutter is
 // SignNet, the same network the comma runs: one at the car's band can be put in use; the old Detectors are listed to
-// compare only (an old one still in use says so on its card). A SignNet's card also has “Send to the car”
-// (scripts/send_to_car.sh: it and the classifier in use published for the comma, the sunnypilot speed-limits
-// branch moved, psa-torque-sunny-testing built), whose job shows here while it runs, and “Try on the comma now”
-// (scripts/try_on_comma.sh: the same two networks copied straight onto the comma, checked first with its own code, until
-// its next software update; models/on-comma-trial.json), with “Back to the build's networks”. The runs themselves are on
-// Results (/evaluate); the package of the three in use is on Publish (/publish). Last, On the car: the settings of the
-// comma's vision limit, sent with the networks (CarSettingsSection).
+// compare only (an old one still in use says so on its card). A SignNet's card also has “Try on the comma now”
+// (scripts/try_on_comma.sh: it and the classifier in use copied straight onto the comma, checked first with its own
+// code, until its next software update; models/on-comma-trial.json), whose job shows here while it runs, with “Back to
+// the build's networks”. The networks in use reach the car with Publish (/publish: scripts/send_to_car.sh). The runs
+// themselves are on Results (/evaluate). Last, On the car: the settings of the comma's vision limit, published with
+// the networks (CarSettingsSection).
 import {computed, nextTick, ref, watch} from 'vue';
 import {isoWhen} from '../common/format';
 import type {ActionName, ActionOptions, ActionState, Job, ModelRole, ModelVersion, PanelStatus, RoleModels} from '../common/panel-types';
@@ -22,7 +21,7 @@ import JobProgress from './JobProgress.vue';
 import {JOB_STATE, jobOf, startedWhen} from './jobs';
 import ModelItem from './ModelItem.vue';
 import Segmented from './Segmented.vue';
-import {ROLE_TEXT, chosenText, metricsOf, putInUse, restoreQuestion, sendQuestion, tryQuestion, useModels,
+import {ROLE_TEXT, chosenText, metricsOf, putInUse, restoreQuestion, tryQuestion, useModels,
   type CarState} from './models';
 import SectionHead from './SectionHead.vue';
 
@@ -86,8 +85,8 @@ function signnetText(version: ModelVersion): string {
     version.train_share ? Math.round(version.train_share * 100) + ' % of the drives' : ''].filter(Boolean).join(' · ');
 }
 /** Whether the comma runs the version in use of a role, in words. Two versions often have the same name: the time
- * of the one on the car tells them apart. The comma runs the cutter, the classifier and the road type (Send to the
- * car sends the SignNet chosen with the classifier and the road type in use); a trial replaces the first two until
+ * of the one on the car tells them apart. The comma runs the cutter, the classifier and the road type (Publish puts
+ * the ones in use there); a trial replaces the first two until
  * its next software update; the decider runs only on this server. */
 interface CarLine {tone: 'same' | 'other' | 'none'; text: string; more?: string}
 function carLine(role: RoleModels): CarLine | null {
@@ -98,8 +97,7 @@ function carLine(role: RoleModels): CarLine | null {
   const tried = role.role === 'cutter' ? trial.value?.signnet.run : role.role === 'classifier' ? trial.value?.classifier.run : null;
   if (tried) return used?.run === tried ? {tone: 'same', text: 'On the comma: this one, as a trial'}
     : {tone: 'other', text: 'On the comma: a trial of ' + tried};
-  const more = role.role === 'cutter' ? 'Send to the car, on its version below, puts this one there.'
-    : 'It goes with the next Send to the car.';
+  const more = 'Publish, on the Publish tab, puts it there.';
   if (car === null) return used ? {tone: 'other', text: 'On the car: none yet', more} : {tone: 'none', text: 'On the car: none'};
   const when = car.trained_at ? isoWhen(car.trained_at) : car.run;
   if (used === null) return {tone: 'none', text: 'On the car: ' + car.label + ', ' + when};
@@ -138,22 +136,23 @@ function cell(version: ModelVersion, key: string) {
   return metricsOf(version).find((metric) => metric.key === key) ?? null;
 }
 
-/** The last Send to the car, trial on the comma or return to the build's networks; running or failed, it is shown in
- * full above the versions. */
-const carJob = computed(() => jobOf(props.status, ['send_to_car', 'try_on_comma', 'comma_restore']));
+/** The last trial on the comma or return to the build's networks; running or failed, it is shown in full above the
+ * versions (a publication to the car shows on the Publish tab). */
+const carJob = computed(() => jobOf(props.status, ['try_on_comma', 'comma_restore']));
 const bigCarJob = computed(() => carJob.value && (carJob.value.state === 'running' || carJob.value.state === 'failed') ? carJob.value : null);
-const CAR_JOB_TEXT: Partial<Record<ActionName, string>> = {send_to_car: 'Last send to the car',
-  try_on_comma: 'Last trial on the comma', comma_restore: 'Last return to the build’s networks'};
+const CAR_JOB_TEXT: Partial<Record<ActionName, string>> = {try_on_comma: 'Last trial on the comma',
+  comma_restore: 'Last return to the build’s networks'};
+const publishJob = computed(() => jobOf(props.status, ['send_to_car']));
 const carHeading = (job: Job): string | undefined => !job.run ? undefined
   : 'SignNet ' + job.run + (job.action === 'try_on_comma' ? ' on the comma' : '');
-const runningOf = (action: ActionName): string | null =>
-  carJob.value?.state === 'running' && carJob.value.action === action ? carJob.value.run ?? '' : null;
+const runningOf = (action: ActionName): string | null => {
+  const job = action === 'send_to_car' ? publishJob.value : carJob.value;
+  return job?.state === 'running' && job.action === action ? job.run ?? '' : null;
+};
 /** The networks being tried on the comma now (models/on-comma-trial.json), null when none. */
 const trial = computed(() => payload.value?.comma_trial ?? null);
 const car = computed((): CarState => ({
-  state: props.status?.actions.send_to_car ?? null,
   sending: runningOf('send_to_car'),
-  pending: Boolean(payload.value?.car_build_pending),
   tryState: props.status?.actions.try_on_comma ?? null,
   trying: runningOf('try_on_comma') ?? runningOf('comma_restore'),
   onTrial: trial.value?.signnet.run ?? null,
@@ -170,21 +169,11 @@ const trialText = computed((): string => {
 const restoreState = computed(() => props.status?.actions.comma_restore ?? null);
 const restoreBlocked = computed((): string => {
   if (readOnly.value) return 'Read-only: the buttons are turned off on this server.';
-  if (carJob.value?.state === 'running') return 'Wait for the job running now.';
+  if (carJob.value?.state === 'running' || publishJob.value?.state === 'running') return 'Wait for the job running now.';
   const state = restoreState.value;
   if (state === null) return 'Not available on this server.';
   return state.allowed ? '' : state.reason.charAt(0).toUpperCase() + state.reason.slice(1) + '.';
 });
-/** Asks, naming the SignNet, the classifier and the road type in use, then starts the job. */
-async function send(version: ModelVersion): Promise<void> {
-  const state = car.value.state;
-  if (state === null || !state.allowed) return;
-  const classifiers = roles.value.find((role) => role.role === 'classifier');
-  const roadTypes = roles.value.find((role) => role.role === 'road_type');
-  if (!await askConfirm(sendQuestion(version, classifiers ? inUseOf(classifiers) : null,
-                                     roadTypes ? inUseOf(roadTypes) : null))) return;
-  emit('run', 'send_to_car', state, undefined, {signnet: version.run});
-}
 /** Asks in plain words what a trial on the comma does, then starts the job. */
 async function tryOnComma(version: ModelVersion): Promise<void> {
   const state = car.value.tryState ?? null;
@@ -289,7 +278,7 @@ async function choose(version: ModelVersion): Promise<void> {
           </summary>
           <ul class="model-list">
             <ModelItem :version="version" :role-label="pickedRole.label" :score="payload.cutter_score_threshold"
-                       :read-only="readOnly" :busy="busy" :car="car" @use="choose" @send="send" @try="tryOnComma"/>
+                       :read-only="readOnly" :busy="busy" :car="car" @use="choose" @try="tryOnComma"/>
           </ul>
         </details>
       </div>
@@ -304,7 +293,7 @@ async function choose(version: ModelVersion): Promise<void> {
         of each frame, whatever their score.</p>
       <p class="note models-foot">The numbers compare only on the same test: the older versions were measured on fewer signs (the count
         under each number). The choice is kept in <code>{{ payload.active_file }}</code> of the data root; it copies, exports and
-        deploys nothing: nothing on the comma changes. Only Send to the car, on a SignNet, changes what the comma
+        deploys nothing: nothing on the comma changes. Only Publish, on the Publish tab, changes what the comma
         downloads; Try on the comma now copies a SignNet onto it until its next software update.<template v-if="carText"> On the car: the networks published in {{ carText }}.</template></p>
       <p v-if="payload.on_car_problem" class="note">What is on the car cannot be shown: {{ payload.on_car_problem }}.</p>
     </section>

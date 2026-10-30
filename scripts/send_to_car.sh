@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Send a SignNet to the car: the button "Send to the car" of a SignNet version on the Models tab runs it. The SignNet
-# of <run>, the classifier in use and the road type in use replace the networks the comma downloads, and the testing
-# branch is built again.
+# Publish to the car: the button Publish of the Publish tab runs it, for the SignNet in use. The SignNet of <run>, the
+# classifier in use and the road type in use replace the networks the comma downloads, and the testing branch is
+# built again.
 #
 # Usage:
 #   scripts/send_to_car.sh --signnet=<run> [--classifier=<id>] [--rebuild] [--dry-run]

@@ -731,6 +731,22 @@ a.latest-link:hover{background:var(--surface-3)}
 .package-row .btn{flex:none}
 .warn-text{color:var(--warn);white-space:normal}
 @media (max-width:600px){.package-row{flex-wrap:wrap}.package-row .btn{width:100%}}
+.publish h2 .h2-aside{font-size:13px;font-weight:500;color:var(--muted);margin-left:6px}
+/* Publish › Publish (CarPublishSection): each network in use next to the one the comma's software has. */
+.car-state{margin:0;font-size:15px;font-weight:600;color:var(--muted)}
+.car-state.ok{color:var(--ok)}.car-state.warn{color:var(--warn)}
+.car-rows{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.car-row{display:grid;grid-template-columns:7.5em minmax(0,1fr);gap:4px 12px;align-items:baseline;padding:10px 14px;
+border-radius:12px;background:var(--surface-2);min-width:0}
+.car-role{font-size:13px;color:var(--muted)}
+.car-what{display:flex;flex-direction:column;gap:2px;min-width:0;overflow-wrap:break-word}
+.car-what b{font-weight:600}
+.car-what small{font-size:12.5px;font-weight:600;color:var(--muted)}
+.car-row.same small{color:var(--ok)}.car-row.same small::before{content:"✓ "}
+.car-row.other small{color:var(--warn)}
+.car-go{display:flex;flex-direction:column;align-items:flex-start;gap:6px}
+.car-go .act-reason{margin:0}
+@media (max-width:600px){.car-row{grid-template-columns:minmax(0,1fr)}.car-go .btn{width:100%}}
 .curves-row>:not(summary){margin:0 8px 8px}
 .eval-table{font-size:13.5px}
 .eval-table th,.eval-table td{padding:8px 10px}

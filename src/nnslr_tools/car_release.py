@@ -1,4 +1,4 @@
-"""``nnslr send-to-car``: the first three steps of "Send to the car" (Models › a SignNet version), the networks the
+"""``nnslr send-to-car``: the first three steps of Publish to the car (the Publish tab), the networks the
 comma downloads replaced by a SignNet of this server, the classifier in use and the road type in use.
 
 1. Export: the SignNet of a run (or the cutter in use) and the classifier in use (models/active.json, or one given)
@@ -73,7 +73,7 @@ def car_paths(repo: Path) -> dict[str, Path]:
 
 
 def car_missing(repo: Path) -> str:
-    """Why "Send to the car" cannot run on this server ('' when it can)."""
+    """Why Publish to the car cannot run on this server ('' when it can)."""
     repo = Path(repo)
     if not (repo / CAR_SCRIPT).is_file():
         return CAR_SCRIPT + ' is missing in this installation'
@@ -348,7 +348,7 @@ def send_to_car(root: Path, signnet: Any = None, *, classifier: Any = None, mode
                 dry_run: bool = False, today: date | None = None, steps_of: int = 3,
                 exporter: Callable[[dict, Path], dict] | None = None,
                 say: Callable[[str], None] = lambda line: print(line, flush=True)) -> dict:
-    """Steps 1 to 3 of "Send to the car" (see the module): the export, its publication when it differs from the
+    """Steps 1 to 3 of Publish to the car (see the module): the export, its publication when it differs from the
     published networks, and on-car.json; signnet None: the cutter in use. Returns {'changed', 'commit', 'version', 'record'}."""
     root = Path(root)
     models = Path(models or os.environ.get(MODELS_CLONE_ENV) or MODELS_CLONE)

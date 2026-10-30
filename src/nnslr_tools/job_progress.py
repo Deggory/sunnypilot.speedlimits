@@ -85,7 +85,7 @@ NETWORKS_PREPARE_STEPS = (('cutter', 'Export the cutter', 40), ('classifier', 'E
 NETWORKS_PUBLISH_STEPS = (('check', 'Check the package', 10), ('catalog', 'Read the catalog', 10),
                           ('upload', 'Upload to Hugging Face', 80))
 # scripts/send_to_car.sh: "== 1/5 Export ..." to "== 5/5 Build ..."; the build of the testing branch takes the minutes.
-CAR_STEPS = (('export', 'Export the SignNet and the classifier', 10), ('publish', 'Publish them for the comma', 5),
+CAR_STEPS = (('export', 'Prepare the package: the networks in use to ONNX, checked', 10), ('publish', 'Publish it in speed-limits-models', 5),
              ('record', 'Record them as on the car', 2), ('move', 'Move the sunnypilot speed-limits branch', 3),
              ('build', 'Build psa-torque-sunny-testing', 80))
 # scripts/try_on_comma.sh: "== 1/5 Check the comma" to "== 5/5 Wait ..."; the comma compiles them in a few minutes.

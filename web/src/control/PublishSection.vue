@@ -1,7 +1,8 @@
 <script setup lang="ts">
-// Publish (Models tab): our three networks in use as one package, for other people (scripts/publish_networks.sh).
-// Prepare exports the cutter, classifier and decider to ONNX, checks each against PyTorch and writes the model card:
-// nothing leaves the server. Publish uploads a prepared package to Hugging Face, public, after a question.
+// Publish › Hugging Face, optional and apart from the car: our three networks in use as one package, for other people
+// (scripts/publish_networks.sh). Prepare exports the cutter, classifier and decider to ONNX, checks each against PyTorch
+// and writes the model card: nothing leaves the server. Publish on Hugging Face uploads a prepared package, public,
+// after a question. The comma never reads it: its networks come with Publish, above (CarPublishSection.vue).
 import {computed} from 'vue';
 import {isoWhen} from '../common/format';
 import type {ActionName, ActionOptions, ActionState, Job, NetworkPackage, PanelStatus} from '../common/panel-types';
@@ -43,10 +44,10 @@ function publish(): void {
 
 <template>
   <section class="card publish" id="publish" aria-labelledby="publish-title">
-    <h2 id="publish-title">Publish</h2>
-    <p class="note">The three networks in use, as one package, on Hugging Face for other people
+    <h2 id="publish-title">Hugging Face <small class="h2-aside">optional</small></h2>
+    <p class="note">Not needed for the car: the three networks in use as one package for other people
       (<a :href="'https://huggingface.co/' + repo" target="_blank" rel="noopener">{{ repo }}</a>). Every package is checked here
-      before it can be published.</p>
+      before it can be uploaded.</p>
     <p class="hf-line" id="hf-line">
       <template v-if="account?.source === 'portal'">Hugging Face: connected as <strong>{{ account.user }}</strong> ·
         <a href="/account#huggingface">Settings ›</a></template>
@@ -61,7 +62,7 @@ function publish(): void {
         <ActionList :items="PREPARE" :actions="status?.actions ?? null" @run="(name, state) => emit('run', name, state)"/>
         <!-- How the last one ended, under its button: a preparation takes less than a minute. -->
         <p v-if="job" class="last-line" :class="{'pub-done': job.state === 'ok'}" id="publish-last"><template
-          v-if="job.state === 'ok'">✓ {{ DONE[job.action] ?? job.label }}, {{ startedWhen(job) }}</template><template
+          v-if="job.state === 'ok'">✓ {{ DONE[job.action] ?? job.label }}, {{ job.ended_at ? isoWhen(job.ended_at) : startedWhen(job) }}</template><template
           v-else>Last: {{ job.label }}, {{ startedWhen(job) }} · {{ job.state === 'interrupted' ? 'stopped' : JOB_STATE[job.state][0] }}</template> ·
           <button type="button" class="link-button" @click="emit('details', job)">Details</button></p>
         <div v-if="latest" class="package-row" id="latest-package">

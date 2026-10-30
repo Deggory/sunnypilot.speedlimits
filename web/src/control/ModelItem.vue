@@ -9,9 +9,9 @@
 // and its size), the button that puts it in use and the link to its run on Evaluate (not for the road type, which
 // Evaluate does not show). “Use this one” only on a version the server lets be chosen (version.selectable: finished,
 // and for the cutter a SignNet at the car's band; an old Detector is kept to compare), else why not in a small note.
-// A SignNet (the cutter the comma runs) has its own details and, next to “Use this one”, “Send to the car”
-// (scripts/send_to_car.sh, asked first by the Models tab) and “Try on the comma now” (scripts/try_on_comma.sh: copied
-// straight onto the comma until its next software update).
+// A SignNet (the cutter the comma runs) has its own details and, next to “Use this one”, “Try on the comma now”
+// (scripts/try_on_comma.sh: copied straight onto the comma until its next software update). The car gets the networks
+// in use with Publish, on the Publish tab (CarPublishSection.vue).
 // “On the car”: one of the networks the comma downloads; “Trying on the comma”: the one copied there now.
 import {computed} from 'vue';
 import {isoWhen, thousands} from '../common/format';
@@ -22,11 +22,11 @@ import MetricTiles from './MetricTiles.vue';
 
 const props = defineProps<{version: ModelVersion; roleLabel: string; score: number; readOnly: boolean; busy: string | null;
   car?: CarState | null}>();
-const emit = defineEmits<{use: [version: ModelVersion]; send: [version: ModelVersion]; try: [version: ModelVersion]}>();
+const emit = defineEmits<{use: [version: ModelVersion]; try: [version: ModelVersion]}>();
 
 const cutter = computed(() => props.version.role === 'cutter' ? props.version : null);
 const signnet = computed(() => cutter.value?.kind === 'signnet');
-/** A SignNet the comma can run (its band and grid): only it can be tried on or sent to the car. */
+/** A SignNet the comma can run (its band and grid): only it can be tried on or published to the car. */
 const forCar = computed(() => signnet.value && cutter.value?.fits_the_car !== false);
 const classifier = computed(() => props.version.role === 'classifier' ? props.version : null);
 const decider = computed(() => props.version.role === 'decider' ? props.version : null);
@@ -62,18 +62,6 @@ const blocked = computed((): string => {
   return '';
 });
 
-/** Send to the car: on a SignNet not on the car yet, or on the one on the car while its build is still owed. */
-const sendable = computed(() => forCar.value && (!props.version.on_car || Boolean(props.car?.pending)));
-const sending = computed(() => props.car?.sending === props.version.run);
-/** Why “Send to the car” is off, as its title. */
-const sendBlocked = computed((): string => {
-  if (props.readOnly) return 'Read-only: the buttons are turned off on this server.';
-  if (!props.version.finished) return 'Its training has not finished: its weights may still change.';
-  if (props.car?.sending != null) return 'A SignNet is being sent to the car now.';
-  const state = props.car?.state ?? null;
-  if (state === null) return 'Sending to the car is not available on this server.';
-  return state.allowed ? '' : state.reason.charAt(0).toUpperCase() + state.reason.slice(1) + '.';
-});
 /** Try on the comma now: on a SignNet neither on the car nor on trial there already. */
 const onTrial = computed(() => signnet.value && props.car?.onTrial === props.version.run);
 const triable = computed(() => forCar.value && !props.version.on_car && !onTrial.value);
@@ -83,15 +71,11 @@ const tryBlocked = computed((): string => {
   if (props.readOnly) return 'Read-only: the buttons are turned off on this server.';
   if (!props.version.finished) return 'Its training has not finished: its weights may still change.';
   if (props.car?.trying != null) return 'Networks are being copied onto the comma now.';
-  if (props.car?.sending != null) return 'A SignNet is being sent to the car now.';
+  if (props.car?.sending != null) return 'The networks are being published to the car now.';
   const state = props.car?.tryState ?? null;
   if (state === null || state === undefined) return 'Trying on the comma is not available on this server.';
   return state.allowed ? '' : state.reason.charAt(0).toUpperCase() + state.reason.slice(1) + '.';
 });
-const sendTitle = computed(() => sendBlocked.value || (props.version.on_car
-  ? 'Its last send did not finish building psa-torque-sunny-testing: this sends it again and builds it.'
-  : 'Publishes it with the classifier and the road type in use for the comma and builds psa-torque-sunny-testing.'));
-
 const DECIDER_ROWS: {key: keyof DeciderNumbers; label: string; title: string}[] = [
   {key: 'other_road_recall', label: '“Another” found', title: 'Share of the signs for another road it calls “Another” (recall)'},
   {key: 'other_road_precision', label: '“Another” right', title: 'Share of its “Another” answers that are right (precision)'},
@@ -376,10 +360,7 @@ const hourly = (value: number | null): string => value === null ? '–' : value 
                   :title="tryBlocked || 'Copies it with the classifier in use straight onto the comma, until its next software update.'"
                   :aria-label="'Try ' + version.run + ' · ' + version.label + ' on the comma now'" :data-try="version.run"
                   @click="emit('try', version)">{{ trying ? 'Copying…' : 'Try on the comma now' }}</button>
-          <button v-if="sendable" class="btn primary small" type="button" :disabled="sendBlocked !== ''" :title="sendTitle"
-                  :aria-label="'Send ' + version.run + ' · ' + version.label + ' to the car'" :data-send="version.run"
-                  @click="emit('send', version)">{{ sending ? 'Sending…' : version.on_car ? 'Finish sending' : 'Send to the car' }}</button>
-          <span v-else class="model-car-note">The comma runs this one.</span>
+          <span v-if="version.on_car" class="model-car-note">The comma runs this one.</span>
         </template>
       </span>
     </div>

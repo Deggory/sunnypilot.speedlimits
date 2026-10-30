@@ -96,22 +96,20 @@ export async function putInUse(version: ModelVersion, roleLabel: string): Promis
   }
 }
 
-/** “Send to the car” for the SignNet versions: the action's state, the run of the SignNet being sent ('' when the
- * run is not known yet; null when none is sent), and whether a build of the testing branch is still owed. */
+/** The SignNet versions and the comma: the run of the SignNet being published to the car ('' when the run is not known
+ * yet; null when none is), and “Try on the comma now”. */
 export interface CarState {
-  state: ActionState | null;
   sending: string | null;
-  pending: boolean;
   /** “Try on the comma now”: its state, the run being copied ('' while not known; null: none), the run on trial. */
   tryState?: ActionState | null;
   trying?: string | null;
   onTrial?: string | null;
 }
 
-/** The question before "Send to the car" (scripts/send_to_car.sh): which SignNet, which classifier and which road
- * type (the ones in use) the comma gets, what the job publishes and builds, and what is left to do on the comma. */
-export function sendQuestion(signnet: ModelVersion, classifier: ModelVersion | null,
-                             roadType: ModelVersion | null = null): ConfirmOptions {
+/** The question before Publish (Publish tab, scripts/send_to_car.sh): which SignNet, which classifier and which road
+ * type (the ones in use) the comma gets, what the job prepares, publishes and builds, and what is left to do on the comma. */
+export function publishQuestion(signnet: ModelVersion, classifier: ModelVersion | null,
+                                roadType: ModelVersion | null = null): ConfirmOptions {
   const reader = classifier ? classifier.label + ' ' + (classifier.trained_at ? isoWhen(classifier.trained_at) : classifier.run)
     : 'the classifier in use';
   const scene = roadType
@@ -119,11 +117,11 @@ export function sendQuestion(signnet: ModelVersion, classifier: ModelVersion | n
       + '(a car park 10, a town 50)'
     : '; no road type is in use, so it reads the signs alone';
   return {
-    title: 'Send this SignNet to the car?', action: 'Send to the car',
+    title: 'Publish the networks in use to the car?', action: 'Publish',
     text: 'The comma gets ' + signnet.label + ' of ' + signnet.run + ' to find the signs, ' + reader
-      + ' (the classifier in use) to read them' + scene + '. They are published in speed-limits-models, the sunnypilot '
-      + 'speed-limits branch moves to them and psa-torque-sunny-testing is built again: a few minutes. Then, on the '
-      + 'comma: Settings, Software, Check for updates, and install.',
+      + ' to read them' + scene + '. The package is prepared and checked, published in speed-limits-models, the '
+      + 'sunnypilot speed-limits branch moves to it and psa-torque-sunny-testing is built again: a few minutes. Then, on '
+      + 'the comma: Settings, Software, Check for updates, and install.',
   };
 }
 

@@ -38,7 +38,7 @@ export const ACTION_TAB: Record<ActionName, string | null> = {
   train_cutter: '/train', train_decider: '/train', ai_review: '/train', mapillary_locations: '/train',
   measure_proposer: '/evaluate', measure_ai_reviewer: '/evaluate',
   networks_prepare: '/publish', networks_publish: '/publish',
-  send_to_car: '/models', try_on_comma: '/models', comma_restore: '/models',
+  send_to_car: '/publish', try_on_comma: '/models', comma_restore: '/models',
   update: null,
 };
 const actionsOf = (tab: string): ActionName[] => (Object.keys(ACTION_TAB) as ActionName[]).filter((name) => ACTION_TAB[name] === tab);
@@ -52,7 +52,7 @@ export const EVALUATE_ACTIONS: ActionName[] = actionsOf('/evaluate');
 export function activityTab(activity: Pick<Activity, 'group' | 'label'>): string | null {
   if (activity.label === 'road types') return '/roads';
   if (activity.group === 'mapillary') return '/train';
-  if (activity.label === 'send to the car' || activity.label === 'networks on the comma') return '/models';
+  if (activity.label === 'networks on the comma') return '/models';
   if (activity.group === 'ai') return activity.label.includes('measure') ? '/evaluate' : '/train';
   if (activity.group === 'publish') return '/publish';
   return activity.group === 'fetch' || activity.group === 'prepare' ? '/prepare' : activity.group === 'train' ? '/train' : null;

@@ -974,7 +974,7 @@ def make_handler(app: ReviewApp):
             return car_settings.view(app.root, car_release.published_settings())
 
         def _car_settings_post(self, body):
-            """Models › On the car: {"values": {setting: number or null}} saved for the next Send to the car; a
+            """Models › On the car: {"values": {setting: number or null}} saved for the next Publish to the car; a
             read-only panel refuses it, as it refuses the actions."""
             from nnslr_tools import car_settings
             if not app.panel.actions_enabled:
