@@ -17,6 +17,10 @@ The AI reviewer of Settings (:mod:`nnslr_tools.llm_providers`, :mod:`nnslr_tools
 belongs to the site, not to /api/v1: only a signed-in browser, or the site on 127.0.0.1,
 changes its providers, tests them, asks for a frame's suggestion or starts an AI job; the
 token only reads. No answer or log line ever holds a provider's key.
+
+"Fit box" of the page (``/frame/<key>/fit``) fits the reviewer's boxes to the signs under them on
+this server's CPU (:mod:`nnslr_tools.box_fit`), with no AI provider; like the AI it needs a
+signed-in browser or the site on 127.0.0.1, and nothing is saved.
 """
 from __future__ import annotations
 
@@ -69,6 +73,14 @@ DEFAULT_CSP = "default-src 'none'; base-uri 'none'; form-action 'none'; frame-an
 SESSION_REQUIRED_MESSAGE = 'Sign in on the site to use the AI reviewer.'
 # At most this many suggestions (and Tests) wait for the model at once: each holds a request thread for minutes.
 MAX_AI_SUGGESTIONS = 2
+# [box-fit] - START
+# Fit box (nnslr_tools.box_fit): at most this many fits run at once (each one CPU core for a few tenths of a second),
+# a request waits FIT_WAIT_SECONDS for its turn, and fits at most MAX_FIT_BOXES boxes of one frame.
+MAX_LOCAL_FITS = 2
+FIT_WAIT_SECONDS = 5.0
+MAX_FIT_BOXES = 64
+FIT_SESSION_MESSAGE = 'Sign in on the site to fit boxes.'
+# [box-fit] - END
 AI_SETTINGS_POSTS = ('/api/settings/ai/providers', '/api/settings/ai/reviewer', '/api/settings/ai/models',
                      '/api/settings/ai/test')
 AI_DELETE_RE = re.compile(r'/api/settings/ai/providers/([a-z][a-z0-9-]{0,31})/delete')
@@ -234,6 +246,9 @@ class ReviewApp(ReviewService):
         # [ai-reviewer] - START
         self.ai_slots = threading.BoundedSemaphore(MAX_AI_SUGGESTIONS)
         # [ai-reviewer] - END
+        # [box-fit] - START
+        self.fit_slots = threading.BoundedSemaphore(MAX_LOCAL_FITS)
+        # [box-fit] - END
 
     def token_matches(self, supplied) -> bool:
         if self.token is None or not isinstance(supplied, str):
@@ -1221,7 +1236,7 @@ def make_handler(app: ReviewApp):
                 return
             # [control-panel] - END
             match = re.fullmatch(
-                r'/api/route/([^/]+)/frame/([0-9]{1,9})/([0-9]{1,9})(/apply-previous|/ai-suggest|/ai-fit)?', path)
+                r'/api/route/([^/]+)/frame/([0-9]{1,9})/([0-9]{1,9})(/apply-previous|/ai-suggest|/ai-fit|/fit)?', path)
             if match is None:
                 self._problem(404, 'not_found', 'Invalid save address.', True)
                 return
@@ -1236,6 +1251,10 @@ def make_handler(app: ReviewApp):
             if match.group(4) in ('/ai-suggest', '/ai-fit'):
                 self._require_ai_session()
             # [ai-reviewer] - END
+            # [box-fit] - START
+            if match.group(4) == '/fit' and not self._can_use_ai():
+                raise ReviewRejected(403, 'session_required', FIT_SESSION_MESSAGE)
+            # [box-fit] - END
             body = self._read_json()
             route = match.group(1)
             frame_key = str(int(match.group(2))) + '/' + str(int(match.group(3)))
@@ -1249,6 +1268,12 @@ def make_handler(app: ReviewApp):
                 self._ai_fit(route, frame_key, body)
                 return
             # [ai-reviewer] - END
+            # [box-fit] - START
+            if match.group(4) == '/fit':
+                # The reviewer's boxes fitted on this server (Fit box): nothing is saved, the page moves the boxes.
+                self._json(200, self._local_fit(route, frame_key, body))
+                return
+            # [box-fit] - END
             if match.group(4):
                 # "Apply previous" of the page: nothing is saved, the page shows the boxes to check.
                 self._json(200, app.apply_previous(route, frame_key, body))
@@ -1456,6 +1481,66 @@ def make_handler(app: ReviewApp):
             print(f'AI fit: {terminal_text(route)} {frame_key} {terminal_text(fitted["message"])}', flush=True)
             self._json(200, fitted)
         # [ai-reviewer] - END
+
+        # [box-fit] - START
+        def _local_fit(self, route, frame_key, body):
+            """{boxes: [box or None for each box sent], ms}: the reviewer's boxes fitted to the signs under them by
+            :mod:`nnslr_tools.box_fit`, on the original frame decoded once. None: no better box, keep it."""
+            import math
+            import time
+            if not isinstance(body, dict):
+                raise ReviewRejected(400, 'invalid_json', 'A JSON object is required.')
+            run_id = body.get('run_id')
+            if run_id is not None and not isinstance(run_id, str):
+                raise ReviewRejected(400, 'invalid_json', 'run_id is the run of the report, a string.')
+            sent = body.get('boxes')
+            if not isinstance(sent, list) or not 1 <= len(sent) <= MAX_FIT_BOXES:
+                raise ReviewRejected(400, 'invalid_boxes',
+                                     f'boxes is a list of 1 to {MAX_FIT_BOXES} boxes [x1, y1, x2, y2] in pixels.')
+            frame = app.get_frame(route, frame_key)
+            if run_id is not None and run_id != frame['run_id']:
+                raise ReviewRejected(409, 'stale_report', 'The report of this route was rebuilt: reload the page.')
+            width, height = frame.get('width'), frame.get('height')
+            if type(width) is not int or type(height) is not int or width < 1 or height < 1:
+                raise ReviewRejected(409, 'invalid_frame', 'The frame has no size in the report: rebuild the report.')
+            boxes = []
+            for box in sent:
+                if not isinstance(box, list) or len(box) != 4 \
+                        or not all(type(v) in (int, float) and math.isfinite(v) for v in box):
+                    raise ReviewRejected(400, 'invalid_boxes', 'Each box is [x1, y1, x2, y2]: four finite numbers.')
+                x1, y1, x2, y2 = (float(v) for v in box)
+                # The page's boxes stay inside the frame; half a pixel of rounding is let through.
+                if not (-0.5 <= x1 < x2 <= width + 0.5 and -0.5 <= y1 < y2 <= height + 0.5):
+                    raise ReviewRejected(400, 'invalid_boxes', 'A box is outside the frame or not x1 < x2, y1 < y2.')
+                boxes.append([x1, y1, x2, y2])
+            if not app.fit_slots.acquire(timeout=FIT_WAIT_SECONDS):
+                raise ReviewRejected(429, 'fit_busy', 'The server is fitting other boxes: try again in a moment.')
+            try:
+                started = time.perf_counter()
+                from nnslr_tools import box_fit
+                try:
+                    path = app.image_file(route, frame_key, 'original')[0]
+                except (ReviewRejected, OSError):
+                    path = app.image_file(route, frame_key, 'preview')[0]
+                try:
+                    img = box_fit.read_image(path)
+                except OSError:
+                    raise ReviewRejected(409, 'invalid_image', 'The frame image cannot be read.') from None
+                # A preview smaller than the frame: the boxes go to its pixels and back.
+                sx, sy = img.shape[1] / width, img.shape[0] / height
+                fitted = []
+                for x1, y1, x2, y2 in boxes:
+                    box = box_fit.fit_image(img, [x1 * sx, y1 * sy, x2 * sx, y2 * sy])
+                    fitted.append(None if box is None else
+                                  [round(box[0] / sx, 1), round(box[1] / sy, 1), round(box[2] / sx, 1),
+                                   round(box[3] / sy, 1)])
+                ms = round((time.perf_counter() - started) * 1000)
+            finally:
+                app.fit_slots.release()
+            print(f'Fit box: {terminal_text(route)} {frame_key} {sum(b is not None for b in fitted)}/{len(fitted)} '
+                  f'fitted in {ms} ms', flush=True)
+            return {'ok': True, 'boxes': fitted, 'ms': ms}
+        # [box-fit] - END
 
         def _same_origin(self):
             fetch_site = self.headers.get('Sec-Fetch-Site')

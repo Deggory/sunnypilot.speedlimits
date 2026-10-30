@@ -4,7 +4,7 @@
 import {computed, ref, useTemplateRef, watchEffect} from 'vue';
 import {BOOLEAN_FIELDS, FAMILIES, QUICK_VALUES, ROADS, SELECT_FIELDS, SIGN_KIND_GROUPS, familyHasValue,
   type BooleanField, type SelectField} from './catalog';
-import {aiBlocker, fitBox, fitting} from './ai';
+import {aiBlocker, canFitLocally, fitBox, fitLocal, fitting, localFitting} from './ai';
 import {addedBy, originalOf} from './boxes';
 import {coarsePointer, releaseFocus} from './dom';
 import {setFamily, setField, setKind, setOnVehicle, setOtherOurs, setValue, togglePainted} from './edits';
@@ -58,6 +58,8 @@ const KIND_KEYS: Record<string, string> = {give_way: 'G', stop: 'P', roundabout:
   direction_right: '→', direction_straight: '↑', direction_several: '↓'};
 const canFit = computed(() => props.detection !== null && aiBlocker() === '');
 const fittingThis = computed(() => fitting.key === props.row.frame_key && fitting.index === state.selected);
+const canFitHere = computed(() => props.detection !== null && canFitLocally());
+const fittingHere = computed(() => localFitting.key === props.row.frame_key && localFitting.index === state.selected);
 // Where the box comes from: the model's proposal, else who added it (the reviewer by hand, or an AI reviewer).
 const evidence = computed(() => {
   const d = props.detection;
@@ -133,9 +135,14 @@ function booleanChanged(key: BooleanField, event: Event): void {
     </div>
     <div class="zoom-foot">
       <p class="evidence" id="evidence">{{ evidence }}</p>
-      <!-- A rough box made tight by the AI, shown only the picture around it (C). -->
-      <button v-if="canFit" type="button" class="chip fit" id="fitBox" :disabled="fitting.key !== null"
-              @click="fitBox(true); releaseFocus($event)">{{ fittingThis ? 'Fitting…' : 'Fit with AI' }}<kbd>C</kbd></button>
+      <div v-if="canFitHere || canFit" class="fit-chips">
+        <!-- A rough box made tight on the server, in a fraction of a second (C). -->
+        <button v-if="canFitHere" type="button" class="chip fit" id="fitLocal" :disabled="localFitting.key !== null"
+                @click="fitLocal(true); releaseFocus($event)">{{ fittingHere ? 'Fitting…' : 'Fit box' }}<kbd>C</kbd></button>
+        <!-- The same by the AI, shown only the picture around it (Shift+C): slower, for the boxes Fit box misses. -->
+        <button v-if="canFit" type="button" class="chip fit ai" id="fitBox" :disabled="fitting.key !== null"
+                @click="fitBox(true); releaseFocus($event)">{{ fittingThis ? 'Fitting…' : 'Fit with AI' }}<kbd>⇧C</kbd></button>
+      </div>
     </div>
     <!-- Asked for nearly every box: right under the zoom. -->
     <p class="field-label">Road</p>

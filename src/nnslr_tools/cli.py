@@ -1566,6 +1566,24 @@ def build_parser() -> argparse.ArgumentParser:
     p_signnet.add_argument("--dry-run", action="store_true",
                            help="build the plan only (no torch): one JSON line with its frames and boxes by split")
     p_signnet.set_defaults(func=_cmd_train_signnet)
+    p_box_fit = sub.add_parser("train-box-fit", help="train the review page's local box fit (Fit box, key C) on the "
+                                                     "boxes people drew: the colour trees and the edge MLPs (CPU). "
+                                                     "Measures it first on routes left out (--folds), then writes "
+                                                     "colour.npz and edges.npz trained on every box")
+    p_box_fit.add_argument("--out", default=None,
+                           help="folder for colour.npz and edges.npz (default: the package's own, "
+                                "src/nnslr_tools/box_fit, which the review site loads)")
+    p_box_fit.add_argument("--dataset", default=None, help="default: <data root>/annotations/objects.jsonl")
+    p_box_fit.add_argument("--folds", type=int, default=4,
+                           help="route groups of the honest measure before the final training (default 4; 0 or 1: "
+                                "no measure)")
+    p_box_fit.add_argument("--seed", type=int, default=0, help="seed of the trees and the MLPs (default 0)")
+    p_box_fit.add_argument("--workers", type=int, default=None,
+                           help="processes extracting the candidates (default: half the cores, at most 8)")
+    p_box_fit.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+    p_box_fit.add_argument("--dry-run", action="store_true",
+                           help="only count the boxes, cases and route groups: one JSON line, nothing written")
+    p_box_fit.set_defaults(func=_cmd_train_box_fit)
     p_road_net = sub.add_parser("train-road-type", help="train the road-type network with memory (town, rural, "
                                                         "expressway, motorway, ramp, parking from the camera, a GRU "
                                                         "over the seconds) on the road types of the drives, with the "
@@ -2416,6 +2434,21 @@ def _cmd_train_signnet(args: argparse.Namespace) -> int:
            for split in ("validation", "test")}
     print(json.dumps({"run_dir": args.run_dir, "best_epoch": result["best_epoch"], "parameters": result["parameters"],
                       "by_box_budget": summary, "car": car}, sort_keys=True), flush=True)
+    return 0
+
+
+def _cmd_train_box_fit(args: argparse.Namespace) -> int:
+    from nnslr_tools.preannotate import resolve_data_root
+    from nnslr_tools.box_fit import HERE as box_fit_dir
+    from nnslr_tools.box_fit.train import DEFAULT_WORKERS, run
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    workers = args.workers if args.workers is not None else DEFAULT_WORKERS
+    if workers < 1 or args.folds < 0 or args.folds > 20:
+        raise ValueError("--workers must be at least 1 and --folds between 0 and 20")
+    summary = run(root, Path(args.out) if args.out else box_fit_dir,
+                  objects=Path(args.dataset) if args.dataset else None, seed=args.seed, workers=workers,
+                  folds=args.folds, dry_run=args.dry_run, log=lambda line: print(line, file=sys.stderr, flush=True))
+    print(json.dumps(summary, sort_keys=True), flush=True)
     return 0
 
 

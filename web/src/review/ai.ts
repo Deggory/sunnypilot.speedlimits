@@ -9,7 +9,7 @@ import {refuseChange} from './busy';
 import {reactive} from 'vue';
 import {messageOf} from '../common/api';
 import type {AiAction, AiState, AiSuggestion, AiTrial} from '../common/ai-types';
-import type {Box} from './types';
+import type {Box, Detection, FrameRow} from './types';
 import {askConfirm} from '../composables/confirm';
 import {clone} from './dom';
 import {changed} from './edits';
@@ -141,13 +141,44 @@ export async function askAi(): Promise<void> {
   }
 }
 
+/** What became of a box sent to a fit: its answer applied ('fitted'); left as it was, with no answer or one within
+ * ``within`` of it on every side ('same'); or left alone, since it was moved ('changed') or removed ('removed') while
+ * the fit ran. */
+type FitOutcome = 'fitted' | 'same' | 'changed' | 'removed';
+
+function settleFit(row: FrameRow, detection: Detection, sent: string, box: Box | null, within = 0): FitOutcome {
+  if (!workOf(row).detections.includes(detection)) return 'removed';
+  if (JSON.stringify(detection.bbox_xyxy) !== sent) return 'changed';
+  const was = detection.bbox_xyxy;
+  if (!box || box.every((value, side) => Math.abs(value - (was[side] ?? Infinity)) < within)) return 'same';
+  detection.bbox_xyxy = box;
+  // A box carried from the previous frame is now on its sign: as "Here" does, its check goes.
+  delete detection.check_position;
+  changed(row);
+  return 'fitted';
+}
+
+/** How many boxes of a fit had each outcome. */
+function countFits(outcomes: FitOutcome[]): Record<FitOutcome, number> {
+  const count = {fitted: 0, same: 0, changed: 0, removed: 0};
+  for (const outcome of outcomes) count[outcome] += 1;
+  return count;
+}
+
+/** ", 2 changed meanwhile and left as they are, 1 removed meanwhile": the boxes a fit left alone. */
+function meanwhile(count: Record<FitOutcome, number>): string {
+  const moved = count.changed ? ', ' + count.changed + ' changed meanwhile and left as '
+    + (count.changed === 1 ? 'it is' : 'they are') : '';
+  return moved + (count.removed ? ', ' + count.removed + ' removed meanwhile' : '');
+}
+
 /** The box being fitted (Fit with AI), by frame key and index; null when none. */
 export const fitting = reactive<{key: string | null; index: number}>({key: null, index: -1});
 
-/** Fit with AI (C): the box the reviewer picked (``selected``: the one selected, as the button of its editor), else
- * every box of the frame (the page selects the first one by itself), sent with only the picture around it
- * (…/ai-fit, ai_review.fit_box), one after the other; each comes back tight, as an unsaved change to confirm. A box
- * moved or removed meanwhile is left as it is. */
+/** Fit with AI (Shift+C): the box the reviewer picked (``selected``: the one selected, as the button of its
+ * editor), else every box of the frame (the page selects the first one by itself), sent with only the picture
+ * around it (…/ai-fit, ai_review.fit_box), one after the other; each comes back tight, as an unsaved change to
+ * confirm. A box moved or removed meanwhile is left as it is. */
 export async function fitBox(selected = false): Promise<void> {
   const row = currentRow();
   const apiBase = report.apiBase;
@@ -159,9 +190,7 @@ export async function fitBox(selected = false): Promise<void> {
   const key = row.frame_key;
   fitting.key = key;
   fitting.index = chosen ? state.selected : -1;
-  let fitted = 0;
-  let empty = 0;
-  let kept = 0;
+  const outcomes: FitOutcome[] = [];
   let message = '';
   try {
     for (const [number, detection] of targets.entries()) {
@@ -170,27 +199,70 @@ export async function fitBox(selected = false): Promise<void> {
       const answer = await call<{box: Box | null; message: string}>('POST', apiBase + '/frame/' + key + '/ai-fit',
         {run_id: report.runId, box: detection.bbox_xyxy});
       message = answer.message;
-      const unchanged = workOf(row).detections.includes(detection) && JSON.stringify(detection.bbox_xyxy) === sent;
-      if (!answer.box) empty += 1;
-      else if (!unchanged) kept += 1;
-      else {
-        detection.bbox_xyxy = answer.box;
-        // A box carried from the previous frame is now on its sign: as "Here" does, its check goes.
-        delete detection.check_position;
-        changed(row);
-        fitted += 1;
-      }
+      outcomes.push(settleFit(row, detection, sent, answer.box));
     }
-    const text = targets.length === 1 ? message + (kept ? ': the box changed meanwhile, kept.' : '.')
-      : fitted + ' of ' + targets.length + ' boxes fitted by AI' + (empty ? ', ' + empty + ' with no sign seen' : '')
-        + (kept ? ', ' + kept + ' changed meanwhile and kept' : '') + '.';
-    state.notice = {key, text, error: false, warn: fitted < targets.length};
+    const count = countFits(outcomes);
+    const one = count.changed ? ': the box changed meanwhile, left as it is.'
+      : count.removed ? ': the box was removed meanwhile.' : '.';
+    const text = targets.length === 1 ? message + one
+      : count.fitted + ' of ' + targets.length + ' boxes fitted by AI'
+        + (count.same ? ', ' + count.same + ' with no sign seen' : '') + meanwhile(count) + '.';
+    state.notice = {key, text, error: false, warn: count.fitted < targets.length};
   } catch (error) {
     state.notice = {key, text: 'Fit with AI: ' + messageOf(error), error: true};
     void loadAiState();
   } finally {
     fitting.key = null;
     fitting.index = -1;
+  }
+}
+
+/** The frame whose boxes the server is fitting (Fit box), and the box's index (-1: all of them); null when none. */
+export const localFitting = reactive<{key: string | null; index: number}>({key: null, index: -1});
+
+/** Whether Fit box can be used: only with the review server, and a report that is still the one on the server. */
+export function canFitLocally(): boolean {
+  return Boolean(report.apiBase) && state.server !== 'stale';
+}
+
+/** Fit box (C): the box the reviewer picked (``selected``: the one selected, as the button of its editor), else every
+ * box of the frame, fitted to the sign under it on the server's CPU (…/fit, nnslr_tools.box_fit), all in one request
+ * and in a fraction of a second, with no AI. Each fitted box is an unsaved change to confirm, as with Fit with AI; a
+ * box with no better box found (no sign there, or already right), moved less than a pixel, or moved or removed
+ * meanwhile, is left as it is. */
+export async function fitLocal(selected = false): Promise<void> {
+  const row = currentRow();
+  const apiBase = report.apiBase;
+  if (!row || !apiBase || !canFitLocally() || localFitting.key !== null || refuseChange()) return;
+  const boxes = workOf(row).detections;
+  const chosen = selected || state.selectedByUser ? boxes[state.selected] : undefined;
+  const targets = chosen ? [chosen] : [...boxes];
+  if (targets.length === 0) return;
+  const key = row.frame_key;
+  localFitting.key = key;
+  localFitting.index = chosen ? state.selected : -1;
+  const sent = targets.map((detection) => ({detection, box: JSON.stringify(detection.bbox_xyxy)}));
+  try {
+    const answer = await call<{boxes: (Box | null)[]; ms: number}>('POST', apiBase + '/frame/' + key + '/fit',
+      {run_id: report.runId, boxes: targets.map((detection) => detection.bbox_xyxy)});
+    // An answer that moves no side by a pixel or more is no change: a box already right (or a confirmed frame)
+    // stays as it is, not an edit to confirm again.
+    const count = countFits(sent.map(({detection, box}, number) =>
+      settleFit(row, detection, box, answer.boxes[number] ?? null, 1)));
+    const ms = ' · ' + answer.ms + ' ms.';
+    const text = targets.length > 1
+      ? count.fitted + ' of ' + targets.length + ' boxes fitted'
+        + (count.same ? ', ' + count.same + ' kept as ' + (count.same === 1 ? 'it was' : 'they were') : '')
+        + meanwhile(count) + ms
+      : count.fitted ? 'Box fitted' + ms : count.same ? 'No better box found: kept as it was' + ms
+        : count.changed ? 'The box changed meanwhile: left as it is.' : 'The box was removed meanwhile.';
+    // Only a box the fit could not reach is worth a warning; one already right is not.
+    state.notice = {key, text, error: false, warn: count.changed + count.removed > 0};
+  } catch (error) {
+    state.notice = {key, text: 'Fit box: ' + messageOf(error), error: true};
+  } finally {
+    localFitting.key = null;
+    localFitting.index = -1;
   }
 }
 

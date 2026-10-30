@@ -1,12 +1,12 @@
 // Keyboard shortcuts: Shift ← → frame, Shift ↑ ↓ box (the arrows alone too on a box with a number or none selected), the speed typed
 // with one key (2 = 20 … 9 = 90, 1 = 100, "1 2" = 120, 0 = not readable; typed whole, "5 0", it works too), O X U the road (ours, another, unclear), S other
 // sign for our road, V on a vehicle (not a sign), G give way, P stop, R roundabout, E something else, M main road, ← → ↑ ↓ the
-// direction (left, right, straight, several), Enter confirm, B or N new box, C fit (centre) the box picked with the AI
-// (every box of the frame when none was picked), A apply previous, I ask the AI, H second reading, D removes every
+// direction (left, right, straight, several), Enter confirm, B or N new box, C fit the box picked to its sign on the server
+// (every box of the frame when none was picked; Shift+C the same with the AI), A apply previous, I ask the AI, H second reading, D removes every
 // box of the frame, Del removes a box the reviewer selected (on the one the page opened on it says to click it
 // first), Esc cancel, ? shows or hides the list of the keys. While a menu or panel of the site's top bar is open, the keys are its own.
 import {onBeforeUnmount, onMounted} from 'vue';
-import {askAi, fitBox} from './ai';
+import {askAi, fitBox, fitLocal} from './ai';
 import {applyPrevious} from './carry';
 import {confirmFrame} from './confirm';
 import {cancelAll, removeAllBoxes, removeSelected, selectBox, setField, setKind, setOnVehicle, setOtherOurs, setValue, toggleDrawing,
@@ -226,10 +226,10 @@ export function useKeyboard(): void {
         break;
       case 'c':
       case 'C':
-        // The box picked (a click, ↑ ↓), else every box of the frame.
+        // The box picked (a click, ↑ ↓), else every box of the frame: C on this server, Shift+C with the AI.
         if (report.apiBase) {
           event.preventDefault();
-          void fitBox();
+          void (event.shiftKey ? fitBox() : fitLocal());
         }
         break;
       case 'a':
