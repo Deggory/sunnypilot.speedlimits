@@ -657,6 +657,11 @@ def make_handler(app: ReviewApp):
             if path == '/api/panel/models/active':
                 self._problem(405, 'method_not_allowed', 'Use POST, with {"role", "id"}.', True)
                 return
+            # The settings of the comma's vision limit for Models › On the car (nnslr_tools.car_settings): the ones
+            # set here and the ones the published speed_limits.json carries to the car.
+            if path == '/api/panel/car-settings':
+                self._json(200, self._car_settings_view())
+                return
             match = re.fullmatch(r'/api/panel/job/([0-9a-z_-]+)/log', path)
             if match:
                 offset = parse_qs(urlsplit(self.path).query).get('offset', ['0'])[0]
@@ -945,6 +950,24 @@ def make_handler(app: ReviewApp):
                       f'({terminal_text(who or via)})', flush=True)
             self._json(200, {'ok': True, **road_types.drive_view(app.root, route, by_key)})
 
+        def _car_settings_view(self):
+            from nnslr_tools import car_release, car_settings
+            return car_settings.view(app.root, car_release.published_settings())
+
+        def _car_settings_post(self, body):
+            """Models › On the car: {"values": {setting: number or null}} saved for the next Send to the car; a
+            read-only panel refuses it, as it refuses the actions."""
+            from nnslr_tools import car_settings
+            if not app.panel.actions_enabled:
+                raise PanelError(403, 'actions_disabled', 'The panel is read-only on this server.')
+            who, via = self._who()
+            try:
+                record = car_settings.save(app.root, body, who or via)
+            except car_settings.SettingsError as exc:
+                raise ReviewRejected(400, 'invalid_settings', str(exc)) from None
+            print(f'Panel: car settings {record["values"] or "all default"} ({terminal_text(who or via)})', flush=True)
+            self._json(200, {'ok': True, **self._car_settings_view()})
+
         def _junction_post(self, route, undo, body):
             """Data › Roads: a person's "Junction here" ({"frame_key", "junction": "here"}) or "Not a junction"
             ("none") for a frame of a drive, or Undo of the last one; the drive again. Kept apart from the map's
@@ -1134,7 +1157,9 @@ def make_handler(app: ReviewApp):
             # /junction: a person's "Junction here" or "Not a junction" for a frame ({"frame_key", "junction"}), or
             # /junction/undo.
             road = re.fullmatch(r'/api/panel/road-types/([^/]+)(/junction)?(/undo)?', path)
-            if run or stop or active or chosen or road:
+            # The settings of the comma's vision limit ({"values": {setting: number or null}}).
+            settings = path == '/api/panel/car-settings'
+            if run or stop or active or chosen or road or settings:
                 # Same protections as saving a frame: same origin, JSON only (no form can send it).
                 if not self._same_origin():
                     self._problem(403, 'cross_origin', 'Request from another origin refused.', True)
@@ -1176,6 +1201,8 @@ def make_handler(app: ReviewApp):
                     self._json(200, {'ok': True, 'role': role, 'active': entry})
                 elif chosen:
                     self._json(200, {'ok': True, **app.panel.set_proposer(body)})
+                elif settings:
+                    self._car_settings_post(body)
                 elif road and road.group(2):
                     self._junction_post(road.group(1), road.group(3) is not None, body)
                 elif road:

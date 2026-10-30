@@ -19,7 +19,7 @@ from test_panel import finished, full_log
 from test_panel_runs import write
 from test_send_to_car import IDENTITY, git, ready_payload, servers_runs, sha256
 
-from nnslr_tools import car_release, comma_trial
+from nnslr_tools import car_release, car_settings, comma_trial
 from nnslr_tools.comma_trial import CommaError
 from nnslr_tools.job_progress import progress
 from nnslr_tools.panel import Panel, PanelError
@@ -245,7 +245,8 @@ def test_copied_checked_moved_manifest_last_then_ready(comma):
     assert result['outcome'] == 'ready'
     models = models_state(comma)
     assert models['signnet.onnx'] == b'v1 signnet.onnx' and models['classifier.onnx'] == b'v1 classifier.onnx'
-    assert json.loads(models['speed_limits.json']) == car_release.manifest_of('2026-10-28-try')
+    assert json.loads(models['speed_limits.json']) == car_release.manifest_of('2026-10-28-try',
+                                                                             settings=car_settings.DEFAULTS)
     assert not [name for name in models if name.endswith('.tmp')]
     contract = json.loads(models['signnet.onnx.contract.json'])
     assert contract['checkpoint'] == 'cutter:s1/signnet'
@@ -268,7 +269,8 @@ def test_the_builds_road_type_stays_in_use_during_a_trial(comma):
     (comma['models'] / (car_release.ROAD_TYPE_FILE + '.contract.json')).write_text('{}\n')
     assert run_trial(comma, sleep=compile_all(comma))['outcome'] == 'ready'
     models = models_state(comma)
-    assert json.loads(models['speed_limits.json']) == car_release.manifest_of('2026-10-28-try', road_type=True)
+    assert json.loads(models['speed_limits.json']) == car_release.manifest_of('2026-10-28-try', road_type=True,
+                                                                                 settings=car_settings.DEFAULTS)
     assert models[car_release.ROAD_TYPE_FILE] == b'build road type'
 
 

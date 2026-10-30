@@ -52,6 +52,7 @@ Inside the data root:
 | `runs/<run>/` | trainings, evaluations, exports and bundles |
 | `models/active.json` | the version in use for each network (Models tab) |
 | `models/on-car.json` | the networks the comma downloads, marked "On the car" on the Models tab (`nnslr on-car`) |
+| `models/car-settings.json` | the settings of the comma's vision limit saved on Models › On the car (`{"values", "by", "at"}`, only those changed from the default; `nnslr_tools.car_settings`). Every Send to the car and Try on the comma now writes them all in the `settings` of `speed_limits.json`; the comma's `vision.apply_settings` takes each one within its bounds |
 | `models/send-to-car.pending` | a Send to the car moved the sunnypilot branch but its build is still owed: the next send builds it |
 | `models/on-comma-trial.json` | the networks copied onto the comma by **Try on the comma now**, marked "Trying on the comma" on the Models tab; cleared by **Back to the build's networks**, by an automatic restore, and by the next Send to the car once its build is pushed |
 | `models/preannotation/<sha256>/` | the downloaded pre-annotation models |

@@ -28,6 +28,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from nnslr_tools import car_settings
 from nnslr_tools.model_roles import (
     MAX_ID,
     MODEL_ID,
@@ -205,10 +206,22 @@ def _git(folder: Path, *args: str) -> str:
     return done.stdout.strip()
 
 
-def manifest_of(version: str, road_type: bool = False) -> dict:
+def manifest_of(version: str, road_type: bool = False, settings: dict | None = None) -> dict:
+    """speed_limits.json; settings: the car's (car_settings.values), each a constant of vision.py on the comma."""
     files = {**FILES, **({'road_type': ROAD_TYPE_FILE} if road_type else {})}
     return {'format': 2, 'version': version,
-            **{network: {'file': name, 'contract': name + '.contract.json'} for network, name in files.items()}}
+            **{network: {'file': name, 'contract': name + '.contract.json'} for network, name in files.items()},
+            **({'settings': dict(settings)} if settings else {})}
+
+
+def published_settings(models: Path | None = None) -> dict | None:
+    """The car's settings in the published speed_limits.json ({} when it has none: the comma's defaults), None
+    without a manifest."""
+    manifest = _read_manifest(Path(models or os.environ.get(MODELS_CLONE_ENV) or MODELS_CLONE))
+    if manifest is None:
+        return None
+    settings = manifest.get('settings')
+    return settings if isinstance(settings, dict) else {}
 
 
 def next_version(current: Any, today: date) -> str:
@@ -249,8 +262,9 @@ def _sync(models: Path, *, dry_run: bool) -> str:
 
 
 def publish(models: Path, chosen: dict, folder: Path, exported: dict, *, today: date | None = None,
-            dry_run: bool = False) -> dict:
-    """The export in the clone of the models repository and pushed (step 2): {'changed', 'commit', 'version'}."""
+            dry_run: bool = False, settings: dict | None = None) -> dict:
+    """The export in the clone of the models repository and pushed (step 2): {'changed', 'commit', 'version'}. A
+    change of the settings alone is a new version too."""
     models = Path(models)
     if not (models / '.git').exists():
         raise ValueError(f'{models} is not a git clone')
@@ -260,7 +274,7 @@ def publish(models: Path, chosen: dict, folder: Path, exported: dict, *, today: 
     files = car_files(chosen)
     road_type = 'road_type' in files
     same_manifest = manifest is not None and {key: value for key, value in manifest.items() if key != 'version'} == {
-        key: value for key, value in manifest_of('', road_type).items() if key != 'version'}
+        key: value for key, value in manifest_of('', road_type, settings).items() if key != 'version'}
     same = same_manifest and all(
         (models / name).is_file() and not (models / name).is_symlink()
         and _sha256(models / name) == exported[network]['onnx_sha256'] for network, name in files.items())
@@ -280,7 +294,8 @@ def publish(models: Path, chosen: dict, folder: Path, exported: dict, *, today: 
                 raise ValueError(f'{target} is a link: the clone must hold the files themselves')
             shutil.copyfile(folder / file, target)
             paths.append(file)
-    (models / MANIFEST).write_text(json.dumps(manifest_of(version, road_type), indent=2) + '\n', encoding='utf-8')
+    (models / MANIFEST).write_text(json.dumps(manifest_of(version, road_type, settings), indent=2) + '\n',
+                                   encoding='utf-8')
     paths.append(MANIFEST)
     message = (f'speed limits {version}: SignNet {chosen["finder"]["run"]}, classifier {chosen["classifier"]["run"]}'
                + (f', road type {chosen["road_type"]["run"]}' if road_type else '') + '\n\n'
@@ -334,7 +349,8 @@ def send_to_car(root: Path, signnet: Any, *, classifier: Any = None, models: Pat
         for network in car_files(chosen):
             say(f'{network}: {exported[network]["id"]} onnx sha256 {exported[network]["onnx_sha256"]}')
         say(f'== 2/{steps_of} Publish them in {models}')
-        published = publish(models, chosen, folder, exported, today=today, dry_run=dry_run)
+        published = publish(models, chosen, folder, exported, today=today, dry_run=dry_run,
+                            settings=car_settings.values(root))
     if not published['changed']:
         say(f'unchanged: the published networks are these ones already (version {published["version"]}, '
             f'commit {published["commit"][:7]}); no commit, no push')

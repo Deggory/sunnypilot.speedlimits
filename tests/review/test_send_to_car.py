@@ -19,7 +19,7 @@ from test_panel import finished, full_log
 from test_panel_models import make_signnet, pipeline
 from test_panel_runs import write
 
-from nnslr_tools import car_release
+from nnslr_tools import car_release, car_settings
 from nnslr_tools.job_progress import progress
 from nnslr_tools.model_roles import ModelIndex
 from nnslr_tools.panel import Panel, PanelError
@@ -131,7 +131,8 @@ def test_published_once_then_nothing_then_a_new_version_the_same_day(tmp_path):
     head = git(clone, 'rev-parse', 'HEAD')
     assert result['changed'] and (result['version'], result['commit']) == ('2026-10-28', head)
     assert git(origin, 'rev-parse', 'main') == head
-    assert json.loads((clone / 'speed_limits.json').read_text()) == car_release.manifest_of('2026-10-28')
+    assert json.loads((clone / 'speed_limits.json').read_text()) == car_release.manifest_of(
+        '2026-10-28', settings=car_settings.DEFAULTS)
     assert (clone / 'speed_limits.json').read_text().startswith('{\n  "format": 2,\n  "version": "2026-10-28",')
     contract = json.loads((clone / 'signnet.onnx.contract.json').read_text())
     assert contract['checkpoint'] == 'cutter:s1/signnet' and contract['onnx_sha256'] == sha256(b'v1 signnet.onnx')
@@ -205,7 +206,7 @@ def test_the_road_type_in_use_goes_on_the_car_and_goes_away_with_it(tmp_path):
                                      say=lines.append)
     assert result['changed'] and git(origin, 'rev-parse', 'main') == result['commit']
     manifest = json.loads((clone / 'speed_limits.json').read_text())
-    assert manifest == car_release.manifest_of('2026-10-28', road_type=True)
+    assert manifest == car_release.manifest_of('2026-10-28', road_type=True, settings=car_settings.DEFAULTS)
     assert manifest['road_type'] == {'file': 'road-type.onnx', 'contract': 'road-type.onnx.contract.json'}
     assert (clone / 'road-type.onnx').read_bytes() == b'road v1'
     contract = json.loads((clone / 'road-type.onnx.contract.json').read_text())

@@ -672,6 +672,22 @@ a.latest-link{display:flex;align-items:center;gap:12px;padding:10px 14px;min-wid
 a.latest-link:hover{background:var(--surface-3)}
 .latest-none{margin:0;font-size:13px;color:var(--muted)}
 /* Publish (Models tab): the latest package of the networks, one row with its button. */
+.car-settings{margin-top:18px;display:flex;flex-direction:column;gap:10px}
+.car-settings h2{margin:0}
+.car-settings .note{margin:0}
+.cs-group{display:flex;flex-direction:column;gap:2px}
+.cs-group .ds-title{margin:6px 0 2px}
+.cs-row{display:flex;align-items:center;gap:12px;padding:8px 0;border-top:1px solid var(--line)}
+.cs-text{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:2px;font-size:14px;overflow-wrap:anywhere}
+.cs-text small{color:var(--muted);font-size:12.5px;line-height:1.35}
+.cs-input{flex:none;display:flex;align-items:center;gap:6px}
+.cs-input input{width:84px;font:inherit;font-size:15px;text-align:right;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--surface-2);color:var(--fg)}
+.cs-input input[aria-invalid="true"]{border-color:var(--bad)}
+.cs-input small{width:52px;color:var(--muted);font-size:12.5px;line-height:1.2}
+.cs-foot{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;padding-top:8px;border-top:1px solid var(--line)}
+.cs-state{flex:1 1 220px;min-width:0;color:var(--muted);font-size:13px}
+.cs-foot .link-button:disabled{color:var(--muted);cursor:default}
+@media (max-width:480px){.cs-input input{width:68px}}
 .publish{margin-top:18px;display:flex;flex-direction:column;gap:10px}
 .publish h2{margin:0}
 .publish .note{margin:0}

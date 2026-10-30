@@ -9,12 +9,14 @@
 // branch moved, psa-torque-sunny-testing built), whose job shows here while it runs, and “Try on the comma now”
 // (scripts/try_on_comma.sh: the same two networks copied straight onto the comma, checked first with its own code, until
 // its next software update; models/on-comma-trial.json), with “Back to the build's networks”. The runs themselves are on
-// Results (/evaluate); the package of the three in use is on Publish (/publish).
+// Results (/evaluate); the package of the three in use is on Publish (/publish). Last, On the car: the settings of the
+// comma's vision limit, sent with the networks (CarSettingsSection).
 import {computed, nextTick, ref, watch} from 'vue';
 import {isoWhen} from '../common/format';
 import type {ActionName, ActionOptions, ActionState, Job, ModelRole, ModelVersion, PanelStatus, RoleModels} from '../common/panel-types';
 import {askConfirm} from '../composables/confirm';
 import {pct} from './evaluate';
+import CarSettingsSection from './CarSettingsSection.vue';
 import JobProgress from './JobProgress.vue';
 import {JOB_STATE, jobOf, startedWhen} from './jobs';
 import ModelItem from './ModelItem.vue';
@@ -255,6 +257,9 @@ async function choose(version: ModelVersion): Promise<void> {
         downloads; Try on the comma now copies a SignNet onto it until its next software update.<template v-if="carText"> On the car: the networks published in {{ carText }}.</template></p>
       <p v-if="payload.on_car_problem" class="note">What is on the car cannot be shown: {{ payload.on_car_problem }}.</p>
     </section>
+
+    <!-- The settings of the comma's vision limit, sent with the networks. -->
+    <CarSettingsSection :read-only="readOnly"/>
     <p v-if="error" class="note">Not updated: {{ error }}</p>
   </template>
 </template>

@@ -52,6 +52,7 @@ from nnslr_tools.car_release import (
     export,
     manifest_of,
 )
+from nnslr_tools import car_settings
 from nnslr_tools.model_roles import _sha256
 
 TRY_SCRIPT = 'scripts/try_on_comma.sh'
@@ -436,13 +437,15 @@ def compiled_name(stem: str, digest: str) -> str:
     return f'{stem}_{digest[:16]}_tinygrad.pkl'
 
 
-def copy_files(comma: Comma, folder: Path, version: str) -> list[str]:
+def copy_files(comma: Comma, folder: Path, version: str, settings: dict | None = None) -> list[str]:
     """Each file to <name>.tmp in the comma's models folder, its sha256 checked there, then all moved into place,
-    speed_limits.json last; the build's road type, when it has one, stays in use. Returns the files copied."""
+    speed_limits.json last (with the car's settings); the build's road type, when it has one, stays in use. Returns
+    the files copied."""
     names = [name for network_file in FILES.values() for name in (network_file, network_file + '.contract.json')]
     road_type = 'yes' in comma.run('cd ' + _q(comma.models) + f' && test -f {ROAD_TYPE_FILE} && '
                                    f'test -f {ROAD_TYPE_FILE}.contract.json && echo yes || true')
-    (folder / MANIFEST).write_text(json.dumps(manifest_of(version, road_type), indent=2) + '\n', encoding='utf-8')
+    (folder / MANIFEST).write_text(json.dumps(manifest_of(version, road_type, settings), indent=2) + '\n',
+                                   encoding='utf-8')
     names.append(MANIFEST)
     try:
         for name in names:
@@ -603,7 +606,7 @@ def try_on_comma(root: Path, signnet: Any, *, classifier: Any = None, comma: Com
             return {'outcome': 'dry_run', 'record': None}
         say('== 4/5 Copy them onto the comma')
         version = f'{(today or date.today()).isoformat()}-try'
-        copy_files(comma, folder, version)
+        copy_files(comma, folder, version, car_settings.values(root))
     record = {'signnet': {**{key: chosen['finder'][key] for key in ('id', 'run')},
                           'onnx_sha256': exported['finder']['onnx_sha256']},
               'classifier': {**{key: chosen['classifier'][key] for key in ('id', 'run')},
