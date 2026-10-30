@@ -2,7 +2,10 @@
 // Data › Roads, a drive opened ("/roads?drive=<route>"): its pictures one at a time with the type of road there, the
 // map's or a person's (GET /api/panel/road-types/<route>), and the strip of the whole drive under it, coloured as the
 // list, a dark line under the stretches a person set, an orange one under those to check, a blue one over the stretch a
-// tap sets; a tap or a drag on it goes there. Play, the arrows and space step as in Results › Drive (DriveView.vue). A
+// tap sets; a tap on it goes there, its knob is dragged from where it is. A long drive has a second strip under it, the
+// minute or two around the picture, its pictures five pixels apart: a drag moves the drive under the line in its middle
+// picture by picture, a tap goes to the picture tapped, a wheel or a trackpad scrolls it; its stretch is framed on the
+// strip of the drive. Play, the arrows and space step as in Results › Drive (DriveView.vue). A
 // person corrects the map: the type of the stretch shown (or from a marked start to here), saved at once (POST, the drive
 // comes back), after a question when it is longer than a minute; Next to check goes to the next stretch the map is
 // unsure about. On a phone the loop (Next to check, look, tap a type) fits one screen; the rest is under it.
@@ -56,8 +59,8 @@ const frames = computed(() => payload.value?.frames ?? []);
 const runs = computed(() => roadRuns(frames.value));
 /** The stretches to check: a line under each on the strip, Next to check goes from one to the next. */
 const checks = computed(() => checkStretches(frames.value));
-/** The narrowest mark of the strip, in frames: the position, a stretch of one picture (the stretch a tap sets three
- * times that, to show beside the position). */
+/** The narrowest mark of the strip, in frames: a stretch of one picture (the stretch a tap sets three times that, to show
+ * beside the position). */
 const thin = computed(() => Math.max(1, frames.value.length / 250));
 const facts = computed(() => {
   const drive = payload.value;
@@ -167,6 +170,7 @@ onMounted(() => document.addEventListener('keydown', onKey));
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKey);
   window.clearTimeout(timer);
+  sizes?.disconnect();
 });
 
 // -- the junctions: dots under the strip, the one at the picture shown, and a person's correction --------------------------
@@ -174,13 +178,15 @@ const junctions = computed(() => payload.value?.junctions?.marks ?? []);
 /** The junctions to check (a GPS that stops in one, a track far from it, a long wait in it, the map's on another road):
  * Next to check stops on them too. */
 const junctionChecks = computed(() => junctions.value.filter((mark) => mark.doubt !== null));
-/** The dots of the strip: those that are not junctions under, the junctions over them, those to check on top. */
-const dots = computed(() => {
+/** The dots of a strip, each at `place` of its middle (in %): those that are not junctions under, the junctions over
+ * them, those to check on top. */
+function dotsOf(marks: readonly RoadJunction[], place: (middle: number) => number) {
   const order = (mark: RoadJunction): number => mark.doubt !== null ? 2 : mark.label === 'junction' ? 1 : 0;
-  return [...junctions.value].sort((a, b) => order(a) - order(b))
-    .map((mark) => ({key: mark.id + '/' + mark.first, left: 100 * (mark.first + mark.last + 1) / 2 / frames.value.length,
+  return [...marks].sort((a, b) => order(a) - order(b))
+    .map((mark) => ({key: mark.id + '/' + mark.first, left: place((mark.first + mark.last + 1) / 2),
       kind: mark.doubt !== null ? 'check' : mark.label === 'junction' ? 'on' : 'not'}));
-});
+}
+const dots = computed(() => dotsOf(junctions.value, (middle) => 100 * middle / frames.value.length));
 /** Where Next to check stops: the first frame of each stretch to check and of each junction to check, in drive order. */
 const stops = computed(() => [...new Set([...checks.value.map((item) => item.first),
   ...junctionChecks.value.map((mark) => mark.first)])].sort((a, b) => a - b).map((first) => ({first})));
@@ -253,22 +259,121 @@ function nextCheck(): void {
   if (box && (box.top < bar || box.bottom > window.innerHeight)) window.scrollTo({top: window.scrollY + box.top - bar - 8});
 }
 
-// -- the strip: a tap or a drag goes to that point of the drive ----------------------------------------------------------
+// -- the strip of the drive: a tap goes to that point, the knob is dragged from where it is -------------------------------
 const strip = useTemplateRef<HTMLElement>('strip');
-let dragging = false;
-function stripAt(event: PointerEvent): void {
+/** The width of the strip in pixels: how many pictures the close strip shows. */
+const width = ref(0);
+let sizes: ResizeObserver | undefined;
+watch(strip, (element) => {
+  sizes?.disconnect();
+  if (!element) return;
+  sizes = new ResizeObserver(([entry]) => { width.value = entry?.contentRect.width ?? 0; });
+  sizes.observe(element);
+});
+/** A finger or the mouse on a strip, for the time over the knob. */
+const dragging = ref(false);
+/** A drag on the strip: how far right of the knob it was taken (0: a tap away from it, the knob came to the finger). */
+let grab: number | null = null;
+/** Where the knob is, in % of the strip. */
+const headAt = computed(() => 100 * (cursor.value + 0.5) / Math.max(1, frames.value.length) + '%');
+/** The time of the picture wanted, over the knob while it is dragged. */
+const headTime = computed(() => {
+  const at = frames.value[cursor.value];
+  return at && payload.value ? frameTime(at.key, payload.value.start) : '';
+});
+function stripAt(x: number): void {
+  const box = strip.value?.getBoundingClientRect();
+  if (!box || box.width <= 0 || frames.value.length === 0) return;
+  seek(Math.floor(((x - box.left) / box.width) * frames.value.length));
+}
+function stripDown(event: PointerEvent): void {
   const box = strip.value?.getBoundingClientRect();
   if (!box || box.width <= 0 || frames.value.length === 0) return;
   playing.value = false;
-  seek(Math.floor(((event.clientX - box.left) / box.width) * frames.value.length));
-}
-function stripDown(event: PointerEvent): void {
-  dragging = true;
+  const head = box.left + box.width * (cursor.value + 0.5) / frames.value.length;
+  // Near the knob (a finger is wide), it is taken where it is: no jump of a few pictures.
+  grab = Math.abs(event.clientX - head) <= (event.pointerType === 'mouse' ? 8 : 22) ? event.clientX - head : 0;
+  dragging.value = true;
   (event.currentTarget as Element).setPointerCapture(event.pointerId);
-  stripAt(event);
+  if (grab === 0) stripAt(event.clientX);
 }
 function stripMove(event: PointerEvent): void {
-  if (dragging) stripAt(event);
+  if (grab !== null) stripAt(event.clientX - grab);
+}
+function stripUp(): void {
+  grab = null;
+  dragging.value = false;
+}
+
+// -- the close strip: the minute or two around the picture, a drag moves the drive under its middle ----------------------
+/** Pixels between two pictures on the close strip: a finger moves them one by one. */
+const CLOSE_PX = 5;
+/** The pictures it shows: as many as fit, an even count so the picture wanted is in the middle. */
+const near = computed(() => Math.max(20, 2 * Math.round(width.value / CLOSE_PX / 2)));
+/** Only on a drive the strip shows tighter than that. */
+const zoomed = computed(() => width.value > 0 && frames.value.length > 2 * near.value);
+/** The frame at its left edge (with a fraction: the middle of the picture wanted is the middle of the strip). */
+const nearFrom = computed(() => cursor.value + 0.5 - near.value / 2);
+function inView<T extends {first: number; count: number}>(items: readonly T[]): T[] {
+  const from = nearFrom.value;
+  return zoomed.value ? items.filter((item) => item.first < from + near.value && item.first + item.count > from) : [];
+}
+const nearRuns = computed(() => inView(runs.value));
+const nearChecks = computed(() => inView(checks.value));
+/** A notch every 10 pictures, a long one every 60, inside the drive. */
+const ticks = computed((): number[] => {
+  if (!zoomed.value) return [];
+  const marks: number[] = [];
+  const last = Math.min(frames.value.length, nearFrom.value + near.value);
+  for (let tick = Math.max(10, Math.ceil(nearFrom.value / 10) * 10); tick < last; tick += 10) marks.push(tick);
+  return marks;
+});
+const nearDots = computed(() => dotsOf(inView(junctions.value.map((mark) => ({...mark, count: mark.last - mark.first + 1}))),
+  (middle) => 100 * (middle - nearFrom.value) / near.value));
+/** Its stretch framed on the strip of the drive, in %. */
+const lens = computed(() => {
+  const count = frames.value.length;
+  const from = Math.max(0, nearFrom.value);
+  const to = Math.min(count, nearFrom.value + near.value);
+  return {left: 100 * from / count + '%', width: 100 * (to - from) / count + '%'};
+});
+const close = useTemplateRef<HTMLElement>('close');
+/** A drag on it: where it went down, the picture then, whether it moved (else a tap). */
+let pull: {x: number; from: number; moved: boolean} | null = null;
+function closeDown(event: PointerEvent): void {
+  playing.value = false;
+  pull = {x: event.clientX, from: cursor.value, moved: false};
+  dragging.value = true;
+  (event.currentTarget as Element).setPointerCapture(event.pointerId);
+}
+function closeMove(event: PointerEvent): void {
+  if (pull === null) return;
+  const moved = event.clientX - pull.x;
+  if (Math.abs(moved) > 4) pull.moved = true;
+  // The drive follows the finger: to the right, back in time.
+  if (pull.moved) seek(pull.from - Math.round(moved / (width.value / near.value)));
+}
+function closeUp(event: PointerEvent): void {
+  const box = close.value?.getBoundingClientRect();
+  if (pull !== null && !pull.moved && event.type === 'pointerup' && box && box.width > 0) {
+    seek(Math.floor(nearFrom.value + ((event.clientX - box.left) / box.width) * near.value));
+  }
+  pull = null;
+  dragging.value = false;
+}
+/** A wheel or a trackpad: the pixels it scrolls, a picture every CLOSE_PX. */
+let wheeled = 0;
+function closeWheel(event: WheelEvent): void {
+  const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+  if (!delta) return;
+  event.preventDefault();
+  playing.value = false;
+  if (Math.sign(delta) !== Math.sign(wheeled)) wheeled = 0;
+  wheeled += delta * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? width.value : 1);
+  const by = Math.trunc(wheeled / (width.value / near.value));
+  if (by === 0) return;
+  wheeled -= by * (width.value / near.value);
+  seek(cursor.value + by);
 }
 
 // -- the frame shown, and its correction -----------------------------------------------------------------------------------
@@ -376,24 +481,48 @@ async function undo(what: '/undo' | '/junction/undo' = '/undo'): Promise<void> {
 
       <div class="rt-time">
         <div ref="strip" class="rt-scrub" role="slider" :aria-valuemin="1" :aria-valuemax="frames.length"
-             :aria-valuenow="cursor + 1" aria-label="Where in the drive" @pointerdown="stripDown" @pointermove="stripMove"
-             @pointerup="dragging = false" @pointercancel="dragging = false">
-          <svg class="rt-track" :viewBox="'0 0 ' + frames.length + ' 20'" preserveAspectRatio="none" aria-hidden="true">
-            <rect v-for="run in runs" :key="run.first" :x="run.first" y="3" :width="run.count" height="11" :class="'rt-' + run.kind"/>
-            <template v-for="run in runs" :key="'r' + run.first">
-              <rect v-if="run.reviewed" :x="run.first" y="16" :width="run.count" height="3" class="rt-done"/>
-            </template>
-            <rect v-for="item in checks" :key="'c' + item.first" :x="item.first" y="16" :width="Math.max(item.count, thin)" height="3"
-                  class="rt-tocheck"/>
-            <rect v-if="span" :x="span[0]" y="0" :width="Math.max(span[1] - span[0] + 1, 3 * thin)" height="2.2" class="rt-marked"/>
-            <rect :x="cursor" y="0" :width="thin" height="20" class="rt-head"/>
-            <rect v-if="splittable && part !== 'all'" :x="cursor" y="-2" :width="Math.max(thin, 1)" height="24" class="rt-cut"/>
-          </svg>
+             :aria-valuenow="cursor + 1" :aria-valuetext="headTime" aria-label="Where in the drive" @pointerdown="stripDown"
+             @pointermove="stripMove" @pointerup="stripUp" @pointercancel="stripUp">
+          <div class="rt-bar">
+            <svg class="rt-track" :viewBox="'0 0 ' + frames.length + ' 20'" preserveAspectRatio="none" aria-hidden="true">
+              <rect v-for="run in runs" :key="run.first" :x="run.first" y="3" :width="run.count" height="11" :class="'rt-' + run.kind"/>
+              <template v-for="run in runs" :key="'r' + run.first">
+                <rect v-if="run.reviewed" :x="run.first" y="16" :width="run.count" height="3" class="rt-done"/>
+              </template>
+              <rect v-for="item in checks" :key="'c' + item.first" :x="item.first" y="16" :width="Math.max(item.count, thin)" height="3"
+                    class="rt-tocheck"/>
+              <rect v-if="span" :x="span[0]" y="0" :width="Math.max(span[1] - span[0] + 1, 3 * thin)" height="2.2" class="rt-marked"/>
+              <rect v-if="splittable && part !== 'all'" :x="cursor" y="-2" :width="Math.max(thin, 1)" height="24" class="rt-cut"/>
+            </svg>
+            <!-- The knob and the frame of the close strip in HTML: round, as the SVG is stretched. -->
+            <i v-if="zoomed" class="rt-lens" :style="lens" aria-hidden="true"></i>
+            <i class="rt-knob" :style="{left: headAt}" aria-hidden="true"></i>
+            <span v-if="dragging && headTime" class="rt-bubble" :style="{left: 'clamp(34px, ' + headAt + ', calc(100% - 34px))'}"
+                  aria-hidden="true">{{ headTime }}</span>
+          </div>
           <!-- The junctions: round dots in HTML, as the strip's SVG is stretched. -->
           <div v-if="dots.length" class="rt-jrow" aria-hidden="true">
             <i v-for="dot in dots" :key="dot.key" class="rt-jdot" :class="dot.kind" :style="{left: dot.left + '%'}"></i>
-            <i class="rt-jhead" :style="{left: 100 * (cursor + 0.5) / frames.length + '%'}"></i>
+            <i class="rt-jhead" :style="{left: headAt}"></i>
           </div>
+        </div>
+        <!-- The minute or two around the picture: the drive moves under the line in the middle. -->
+        <div v-if="zoomed" ref="close" class="rt-close" aria-hidden="true" @pointerdown="closeDown" @pointermove="closeMove"
+             @pointerup="closeUp" @pointercancel="closeUp" @wheel="closeWheel">
+          <svg class="rt-track" :viewBox="nearFrom + ' 0 ' + near + ' 20'" preserveAspectRatio="none">
+            <rect v-for="run in nearRuns" :key="run.first" :x="run.first" y="3" :width="run.count" height="11" :class="'rt-' + run.kind"/>
+            <template v-for="run in nearRuns" :key="'r' + run.first">
+              <rect v-if="run.reviewed" :x="run.first" y="16" :width="run.count" height="3" class="rt-done"/>
+            </template>
+            <rect v-for="item in nearChecks" :key="'c' + item.first" :x="item.first" y="16" :width="item.count" height="3" class="rt-tocheck"/>
+            <rect v-if="span" :x="span[0]" y="0" :width="span[1] - span[0] + 1" height="2.2" class="rt-marked"/>
+            <rect v-for="tick in ticks" :key="'t' + tick" :x="tick - 0.15" y="3" width="0.3" :height="tick % 60 === 0 ? 11 : 3.5"
+                  class="rt-tick"/>
+          </svg>
+          <div v-if="dots.length" class="rt-jrow">
+            <i v-for="dot in nearDots" :key="dot.key" class="rt-jdot" :class="dot.kind" :style="{left: dot.left + '%'}"></i>
+          </div>
+          <i class="rt-close-head"></i>
         </div>
         <div class="rt-controls">
           <button type="button" class="btn small primary rt-play" :aria-pressed="playing" @click="toggle"><svg class="icon"

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // Models: first the networks in use (the cutter, classifier and decider of the pipeline, the road type; docs/NEURAL_NETWORK.md), one
 // card each with its numbers; then the versions of one of them (the switch, or a tap on its card) as a table to
-// compare: the numbers that judge that role in columns, the one in use marked; a row opens its whole card (ModelItem:
+// compare: the numbers that judge that role in columns, the one in use marked; only the recent versions, the older ones
+// behind “Show older versions” (nothing is deleted); a row opens its whole card (ModelItem:
 // details, Use this one, the run). A role has no model in use until someone picks one: there is no default. The
 // networks the comma downloads (models/on-car.json, written by nnslr on-car) are marked “on the car”. The cutter is
 // SignNet, the same network the comma runs: one at the car's band can be put in use; the old Detectors are listed to
@@ -63,6 +64,8 @@ watch(payload, (value) => {
   arrived = true;
   if (fromHashVersion) {
     picked.value = fromHash;
+    const role = value.roles.find((item) => item.role === fromHash);
+    if (role && !recentOf(role).some((version) => version.id === fromHashVersion)) olderOf.value = fromHash;
     void nextTick(() => openVersion(fromHashVersion));
   } else pick(fromHash);
 }, {immediate: true});
@@ -76,6 +79,31 @@ function oldInUse(role: RoleModels): boolean {
   const used = inUseOf(role);
   return role.old_kind_in_use ?? (used?.role === 'cutter' && used.kind !== 'signnet');
 }
+/** The versions of a role worth a look, newest first: the one in use and the others of its run, the newer ones that can
+ * be put in use, the one on the car or tried on the comma, a training running now; with none in use, every one that can
+ * be. The others (the old Detectors, the SignNets that do not fit the car, stopped trainings, the older versions) wait
+ * behind “Show older versions”: nothing is deleted. */
+function recentOf(role: RoleModels): ModelVersion[] {
+  const used = inUseOf(role);
+  const since = used?.trained_at ? Date.parse(used.trained_at) : null;
+  const running = new Set((props.status?.jobs ?? []).filter((job) => job.state === 'running').map((job) => job.run));
+  const tried = role.role === 'cutter' ? trial.value?.signnet.run : role.role === 'classifier' ? trial.value?.classifier.run : null;
+  const recent = role.versions.filter((version) => version.in_use || version.on_car || version.run === used?.run
+    || version.run === tried || running.has(version.run)
+    || (version.finished && version.selectable !== false && (used === null
+      || (since !== null && version.trained_at !== null && Date.parse(version.trained_at) > since))));
+  return recent.length ? recent : role.versions;
+}
+const recent = computed(() => Object.fromEntries(roles.value.map((role) => [role.role, recentOf(role)])) as Record<ModelRole, ModelVersion[]>);
+/** The role whose older versions are shown too, or null. */
+const olderOf = ref<ModelRole | null>(null);
+/** The rows of the table: the recent versions, or all of them. */
+const listed = computed((): ModelVersion[] => {
+  const role = pickedRole.value;
+  if (role === null) return [];
+  return olderOf.value === role.role ? role.versions : recent.value[role.role] ?? role.versions;
+});
+const olderCount = computed(() => (pickedRole.value?.versions.length ?? 0) - (recent.value[picked.value]?.length ?? 0));
 /** The version of a role that runs on the comma, or null. */
 const carOf = (role: RoleModels): ModelVersion | null => role.versions.find((version) => version.on_car) ?? null;
 /** A SignNet in a few words, to tell its versions apart in the table: "grid 8 px", "grid 4 px · 25 % of the drives". */
@@ -124,7 +152,7 @@ function fallbackOf(role: RoleModels): ModelVersion | null {
 /** The columns of the table: the numbers of the role's newest measured version (they are the same for every version
  * of a role, a cutter of the speed signs only has “–” under every sign). */
 const columns = computed(() => {
-  const versions = pickedRole.value?.versions ?? [];
+  const versions = listed.value;
   let widest: ReturnType<typeof metricsOf> = [];
   for (const version of versions) {
     const metrics = metricsOf(version);
@@ -234,7 +262,7 @@ async function choose(version: ModelVersion): Promise<void> {
         <span v-if="oldInUse(role)" class="inuse-old">{{ role.notice ?? 'The cutter in use is an old Detector: choose a SignNet.' }}</span>
         <span v-if="carLines[role.role]" class="inuse-car" :class="carLines[role.role]!.tone">{{ carLines[role.role]!.text }}<span
           v-if="carLines[role.role]!.more" class="inuse-car-more">{{ carLines[role.role]!.more }}</span></span>
-        <span class="inuse-more">{{ role.versions.length }} {{ role.versions.length === 1 ? 'version' : 'versions' }} ›</span>
+        <span class="inuse-more">{{ (recent[role.role] ?? []).length }} {{ (recent[role.role] ?? []).length === 1 ? 'version' : 'versions' }} ›</span>
       </button>
     </div>
 
@@ -260,7 +288,7 @@ async function choose(version: ModelVersion): Promise<void> {
       <div v-else class="vt" :style="{'--vt-cols': columns.length}">
         <div class="vt-head" aria-hidden="true"><span>Version</span><span v-for="column in columns" :key="column.key"
           :class="'vt-c-' + column.key">{{ column.label }}</span><span></span></div>
-        <details v-for="version in pickedRole.versions" :key="version.id" class="vt-row" :class="{'in-use': version.in_use}"
+        <details v-for="version in listed" :key="version.id" class="vt-row" :class="{'in-use': version.in_use}"
                  :data-model="version.id">
           <summary>
             <span class="vt-name"><b>{{ version.label }}</b><small>{{ version.trained_at ? isoWhen(version.trained_at) : version.run }}<template
@@ -281,6 +309,9 @@ async function choose(version: ModelVersion): Promise<void> {
                        :read-only="readOnly" :busy="busy" :car="car" @use="choose" @try="tryOnComma"/>
           </ul>
         </details>
+        <button v-if="olderCount > 0" type="button" class="link-button vt-older" :aria-expanded="olderOf === pickedRole.role"
+                @click="olderOf = olderOf === pickedRole.role ? null : pickedRole.role">{{ olderOf === pickedRole.role
+                  ? 'Hide the older versions' : 'Show ' + olderCount + ' older ' + (olderCount === 1 ? 'version' : 'versions') }}</button>
       </div>
       <p v-if="pickedRole.role === 'cutter' && carJob && !bigCarJob" class="last-line" id="car-last">{{ CAR_JOB_TEXT[carJob.action] }}:
         {{ carJob.run ? 'SignNet ' + carJob.run + ', ' : '' }}{{ startedWhen(carJob) }} ·
