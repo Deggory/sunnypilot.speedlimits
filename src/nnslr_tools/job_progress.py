@@ -35,6 +35,14 @@ CLASSIFIER_STEPS = (
     ('evaluate', 'Evaluate the classifier alone', 7),
     ('chain', 'Evaluate the chain end to end', 15),
 )
+# The same in two stages (NNSLR_CLASSIFIER_MAPILLARY=pretrain, PRETRAINING): the Mapillary crops alone, then ours from
+# them, a step each with half the training's weight.
+CLASSIFIER_TWO_STAGE_STEPS = (
+    *CLASSIFIER_STEPS[:2],
+    ('pretrain', 'Learn the Mapillary signs', 30),
+    ('classifier', 'Train on our signs', 30),
+    *CLASSIFIER_STEPS[3:],
+)
 # scripts/run_detector_sizes.sh with one size: a detector trained as the cutter, then measured on test and validation.
 CUTTER_STEPS = (
     ('checks', 'Checks and GPU smoke test', 5),
@@ -237,7 +245,8 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
     ('val_sign_accuracy', 'val_rejection', 'val_balanced_accuracy',) 'seconds'}]}}} for an action in state running,
     ok, failed or interrupted; with 'seconds_left' (the server's time left, None while unknown) for Propose again
     running and 'failure' (failure_text, '' when unknown) for a failed job."""
-    steps = STEPS.get(action, ())
+    two_stages = action == 'train_classifier' and PRETRAINING.search(text) is not None
+    steps = steps_of(action, two_stages)
     keys = [key for key, _, _ in steps]
     current = keys[0] if keys else ''
     done: set[str] = set()
@@ -314,13 +323,13 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
         match = PREANNOTATING.match(line)
         if match and int(match.group(2)):
             proposed = (int(match.group(1)), int(match.group(2)))
+    # Step 4 of two stages is the pretraining until the script starts the second ("-- the second stage").
+    if two_stages and current == 'classifier' and not SECOND_STAGE.search(text):
+        current = 'pretrain'
     if current in keys:
         done.update(keys[:keys.index(current)])
 
     inside = _inside_step(current, epoch, substep, pipeline, stopped) if current in keys else None
-    two_stages = action == 'train_classifier' and PRETRAINING.search(text) is not None
-    if two_stages and current == 'classifier':
-        inside = _two_stage_step(epoch, stopped)
     finished_ok = state == 'ok'
     rows = []
     for key, label, _ in steps:
@@ -352,13 +361,11 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
         percent = round((max(at_route, 0) + inside) * 100 / len(comma_routes), 1)
 
     if epoch is not None and epoch[0] == current and state == 'running' and epoch[0] in stopped:
-        detail = epoch[0] + ' · stopped early after epoch ' + str(stopped[epoch[0]])
-    elif two_stages and current == 'classifier' and epoch is not None and state == 'running' and inside is not None:
-        detail = 'classifier · ' + inside['text']
+        detail = NET_NAMES.get(epoch[0], epoch[0]) + ' · stopped early after epoch ' + str(stopped[epoch[0]])
     elif epoch is not None and epoch[0] == current and state == 'running':
         # A variant of the decider by its step's label ("Crop, position and speed"), a network by its name.
         name = dict((key, label) for key, label, _ in steps).get(epoch[0], epoch[0]) \
-            if epoch[0].startswith(('experiment_b', 'road_type')) else epoch[0]
+            if epoch[0].startswith(('experiment_b', 'road_type')) else NET_NAMES.get(epoch[0], epoch[0])
         detail = name + ' · epoch ' + str(epoch[1]) + ' of ' + str(epoch[2])
     elif action == 'prepare_again' and preparation is not None and preparation.get('again'):
         detail = again_detail(preparation)
@@ -412,30 +419,22 @@ def _inside_step(current: str, epoch: tuple[str, int, int] | None, substep: tupl
             'text': substep[1] + ' · ' + str(done + 1) + ' of ' + str(len(parts))}
 
 
-def _two_stage_step(epoch: tuple[str, int, int] | None, stopped: dict[str, int]) -> dict | None:
-    """The classifier step of a two-stage run from its epoch lines: the pretraining on Mapillary its first half,
-    the training on our crops its second (an early stop ends a stage). None before the first epoch."""
-    if epoch is None or epoch[0] not in ('pretrain', 'classifier') or not epoch[2]:
-        return None
-    network, number, total = epoch
-    done = total if network in stopped else min(number, total)
-    words = ('stopped early after epoch ' + str(stopped[network]) if network in stopped
-             else 'epoch ' + str(number) + ' of ' + str(total))
-    if network == 'pretrain':
-        return {'done': done, 'total': 2 * total, 'percent': round(done * 50 / total, 1),
-                'text': 'pretraining on Mapillary, ' + words}
-    return {'done': total + done, 'total': 2 * total, 'percent': round(50 + done * 50 / total, 1),
-            'text': 'on our signs after the pretraining, ' + words}
-
-
 # scripts/run_classifier.sh: the runs of nnslr evaluate-chain in its chain step (test and validation, then test with
 # the old reader), and the line each writes when it is done or skipped.
 CHAIN_RUNS = 3
 CHAIN_RUN_DONE = re.compile(r'^(?:evaluated the chain on |skip evaluated chain )', re.M)
 # A classifier run in two stages (scripts/run_classifier.sh with NNSLR_CLASSIFIER_MAPILLARY=pretrain) says so in its
-# head ("pretraining:  --classes v2 ... --mapillary-only"): its classifier step is the pretraining on the Mapillary
-# crops alone ("pretrain epoch 3/30 ..."), then the training on ours from it ("classifier epoch ..."), half each.
+# head ("pretraining:  --classes v2 ... --mapillary-only"): the pretraining on the Mapillary crops alone ("pretrain epoch
+# 3/30 ..."), then the training on ours from it ("classifier epoch ..."), a step each (CLASSIFIER_TWO_STAGE_STEPS).
 PRETRAINING = re.compile(r'^pretraining:\s', re.MULTILINE)
+SECOND_STAGE = re.compile(r'^-- the second stage', re.MULTILINE)
+# A network by its name in the line under the progress bar ("Mapillary · epoch 3 of 30").
+NET_NAMES = {'pretrain': 'Mapillary'}
+
+
+def steps_of(action: str, two_stages: bool = False) -> tuple:
+    """The steps of an action: a classifier in two stages has its pretraining as a step of its own."""
+    return CLASSIFIER_TWO_STAGE_STEPS if action == 'train_classifier' and two_stages else STEPS.get(action, ())
 
 # The tasks that report their own progress (nnslr_tools.progress) and the step they belong to.
 TASK_STEPS = {'import': 'import', 'validate': 'split', 'split': 'split', 'detector': 'detector',
@@ -443,7 +442,7 @@ TASK_STEPS = {'import': 'import', 'validate': 'split', 'split': 'split', 'detect
               # scripts/run_classifier.sh: the mining of the cutter's false boxes, the classifier, the chain.
               'mine': 'mine', 'classifier': 'classifier', 'chain': 'chain',
               # Its first stage on the Mapillary crops alone (NNSLR_CLASSIFIER_MAPILLARY=pretrain).
-              'pretrain': 'classifier',
+              'pretrain': 'pretrain',
               # [ai-reviewer] - START
               # nnslr ai-review and nnslr measure-ai-reviewer: a frame at a time.
               'ai_review': 'review', 'ai_measure': 'measure'}
@@ -464,18 +463,13 @@ def with_step_progress(result: dict, action: str, record: dict | None, setup_lin
         done, total = int(record['done']), int(record['total'])
         share = min(done, total) / total
         text = str(record.get('text') or '')
-        if current == 'classifier' and result.get('two_stages'):
-            # The pretraining on Mapillary is the first half of the step, the training on our crops the second.
-            first = record.get('task') == 'pretrain'
-            share = (share + (0 if first else 1)) / 2
-            text = ('pretraining on Mapillary, ' if first else 'on our signs after the pretraining, ') + text
         runs = result.get('chain_runs') if current == 'chain' else None
         if runs and runs['total'] > 1:
             # One run of several: the runs done count, then this one's frames.
             share = min(runs['done'] + share, runs['total']) / runs['total']
             text = text + ' · run ' + str(min(runs['done'] + 1, runs['total'])) + ' of ' + str(runs['total'])
         step_progress = {'done': done, 'total': total, 'percent': round(share * 100, 1), 'text': text}
-        steps = STEPS.get(action, ())
+        steps = steps_of(action, bool(result.get('two_stages')))
         if action in WEIGHTED and steps:
             weights = {key: weight for key, _, weight in steps}
             reached = sum(weights[step['key']] for step in result['steps'] if step['state'] == 'done')

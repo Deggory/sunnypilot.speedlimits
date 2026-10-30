@@ -36,7 +36,7 @@ const hasPoints = (curve: TrainingCurve | null | undefined): curve is TrainingCu
 const nets = computed((): Net[] => {
   if (props.nets?.length) return props.nets;
   const stepKeys = props.progress.steps.map((step) => step.key);
-  // The pretraining is inside the classifier's step: shown once it has a curve.
+  // The pretraining is a step of its own; in the logs before 30 Oct 2026 it was inside the classifier's: shown once it has a curve.
   const fromSteps = ALL_NETS.filter((net) => stepKeys.includes(net)
     || (net === 'pretrain' && stepKeys.includes('classifier') && hasPoints(curves.value.pretrain)));
   if (fromSteps.length) return fromSteps;
