@@ -2,7 +2,7 @@
 
 Queste istruzioni servono a un agente che apre il sito di revisione, guarda i fotogrammi delle route e conferma i cartelli di velocità. Valgono sia per un agente che lavora dentro Chrome con l'estensione di Claude o di ChatGPT, sia per un agente che pilota il browser con Playwright. Descrivono il sito nella versione del **23 ottobre 2026**.
 
-L'indirizzo del sito lo indica Cristian, oppure il sito è già aperto in Chrome. Non cercarlo da solo e non scriverlo nei resoconti.
+L'indirizzo del sito lo indica Cristian, oppure il sito è già aperto in Chrome. Non cercarlo da solo e non scriverlo nei resoconti. Eccezione: un agente che gira sul server stesso usa `http://127.0.0.1:8765` (sezione 10).
 
 Un agente che ha a disposizione il **server MCP** della revisione (strumenti `list_routes`, `next_frame`, `get_frame_image`, `save_frame_review`, ...) o la **REST API** `/api/v1` non ha bisogno del browser: segue la sezione 10, oltre alle regole delle sezioni 1, 4, 5 e 8. Le regole per riconoscere i cartelli (sezioni 4–5) sono le stesse.
 
@@ -284,8 +284,9 @@ Il server MCP (`/mcp` del sito, oppure `helpers/mcp.sh` via ssh) e la REST API `
 
 **Prima di iniziare**
 1. Capire, come nella sezione 1, se è una **prova senza salvataggio** o una **revisione con salvataggio** autorizzata da Cristian per quella route. In una prova non chiamare mai `save_frame_review` (REST: `POST .../review`); se disponibile, usare il server in sola lettura (`--read-only`), che non offre lo strumento.
-2. Il token, se serve (HTTP), lo configura Cristian nel client: non chiederlo nella conversazione e non scriverlo in file, resoconti, log o indirizzi.
-3. Le azioni del pannello non sono raggiungibili da MCP e API: non cercarle.
+2. Il token, se serve (HTTP), lo configura Cristian nel client: non chiederlo nella conversazione e non scriverlo in file, resoconti, log o indirizzi. Un agente che gira sul server stesso non chiede né indirizzo né token: usa `http://127.0.0.1:8765/api/v1` e carica il token dal `.env` del repository con `set -a; . ./.env; set +a`, senza stamparlo.
+3. Se Cristian non ha indicato la route, elencare quelle con fotogrammi da rivedere (`GET /api/v1/routes`, MCP `list_routes`) e chiedergli quale, insieme a prova o salvataggio.
+4. Le azioni del pannello non sono raggiungibili da MCP e API: non cercarle.
 
 **Per ogni fotogramma**
 1. `next_frame(route_id)` (REST: `GET /api/v1/routes/<route>/next`) dà il prossimo fotogramma non confermato, con le proposte del modello (`proposals`), la seconda lettura (`second_reading`), i motivi di sospetto (`suspicious_reasons`), l'eventuale revisione salvata, `run_id` e `revision`. Dopo un'interruzione basta richiamarlo: riparte da dove il lavoro si era fermato. Per andare avanti senza salvare (prova): `next_frame(route_id, after=<frame_key>)`.
