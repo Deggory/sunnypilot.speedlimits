@@ -1,6 +1,6 @@
 // Keyboard shortcuts: Shift ← → frame, Shift ↑ ↓ box (the arrows alone too on a box with a number or none selected), the speed typed
 // with one key (2 = 20 … 9 = 90, 1 = 100, "1 2" = 120, 0 = not readable; typed whole, "5 0", it works too), O X U the road (ours, another, unclear), S other
-// sign for our road, V on a vehicle (not a sign), G give way, P stop, R roundabout, E something else, M main road, ← → ↑ ↓ the
+// sign for our road, V on a vehicle (not a sign), L variable speed limit (a lit display) or back, G give way, P stop, R roundabout, E something else, M main road, ← → ↑ ↓ the
 // direction (left, right, straight, several), Enter confirm, B or N new box, C fit the box picked to its sign on the server
 // (every box of the frame when none was picked; Shift+C the same with the AI), A apply previous, I ask the AI, H second reading, D removes every
 // box of the frame, Del removes a box the reviewer selected (on the one the page opened on it says to click it
@@ -10,7 +10,7 @@ import {askAi, fitBox, fitLocal} from './ai';
 import {applyPrevious} from './carry';
 import {confirmFrame} from './confirm';
 import {cancelAll, removeAllBoxes, removeSelected, selectBox, setField, setKind, setOnVehicle, setOtherOurs, setValue, toggleDrawing,
-  toggleHints} from './edits';
+  toggleHints, toggleVariable} from './edits';
 import {currentRow, workOf} from './frames';
 import {step} from './navigation';
 import {report, state, toggleKeys} from './store';
@@ -184,6 +184,11 @@ export function useKeyboard(): void {
       if (event.key === 'v' || event.key === 'V') {
         event.preventDefault();
         setOnVehicle();
+        return;
+      }
+      if (event.key === 'l' || event.key === 'L') {
+        event.preventDefault();
+        toggleVariable();
         return;
       }
       // G give way, P stop, R roundabout, E something else, M main road, an arrow a direction: pressed again the kind

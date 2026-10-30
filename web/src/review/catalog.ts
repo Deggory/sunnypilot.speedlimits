@@ -6,6 +6,8 @@ export interface Family {
   id: string;
   label: string;
   hasValue: boolean;
+  /** A shorter name in the list of boxes, where the number and the road tag must fit beside it. */
+  brief?: string;
   /** Shown smaller, under the usual choices. */
   minor: boolean;
 }
@@ -16,7 +18,7 @@ export const FAMILIES: readonly Family[] = [
   // The crossed number of an end of limit goes in the notes: the box has no value (review rules).
   {id: 'cancellation', label: 'End of limit', hasValue: false, minor: false},
   {id: 'unreadable', label: 'Unreadable', hasValue: false, minor: false},
-  {id: 'variable_display', label: 'Variable speed limit', hasValue: true, minor: false},
+  {id: 'variable_display', label: 'Variable speed limit', brief: 'Variable limit', hasValue: true, minor: false},
   {id: 'zone', label: 'Zone', hasValue: true, minor: false},
   {id: 'road_marking_candidate', label: 'Road marking', hasValue: true, minor: true},
   {id: 'other_sign', label: 'Other sign', hasValue: false, minor: true},
@@ -152,7 +154,7 @@ export function hasValue(d: {value_kph?: number | null | undefined}): boolean {
   return d.value_kph !== null && d.value_kph !== undefined;
 }
 
-/** The full description in the panel: "Speed limit · 60 km/h", "Town entry". */
+/** The full description in the panel: "Speed limit · 60 km/h", "Variable limit · 80 km/h", "Town entry". */
 export function describe(d: Detection): string {
   const kind = d.family === 'other_sign' ? signKindOf(d.sign_type) : null;
   const painted = d.family === 'other_sign' && d.painted === true ? ', painted on the road' : '';
@@ -160,7 +162,7 @@ export function describe(d: Detection): string {
   if (painted) return 'Other sign' + painted;
   if (d.family === 'not_a_sign' && d.sign_type === ON_VEHICLE) return 'Not a sign: on a vehicle';
   const family = familyOf(d.family);
-  let text = family ? family.label : String(d.family || 'No type');
+  let text = family ? family.brief ?? family.label : String(d.family || 'No type');
   if (hasValue(d)) text += ' · ' + d.value_kph + ' km/h';
   return text;
 }

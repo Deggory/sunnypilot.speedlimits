@@ -7,7 +7,7 @@ import {BOOLEAN_FIELDS, FAMILIES, QUICK_VALUES, ROADS, SELECT_FIELDS, SIGN_KIND_
 import {aiBlocker, canFitLocally, fitBox, fitLocal, fitting, localFitting} from './ai';
 import {addedBy, originalOf} from './boxes';
 import {coarsePointer, releaseFocus} from './dom';
-import {setFamily, setField, setKind, setOnVehicle, setOtherOurs, setValue, togglePainted} from './edits';
+import {setFamily, setField, setKind, setOnVehicle, setOtherOurs, setValue, togglePainted, toggleVariable} from './edits';
 import {workOf} from './frames';
 import {vFill} from './fill';
 import {handlesOf, sceneScale, zoomView, type Rect} from './overlay';
@@ -52,6 +52,7 @@ const hasValueField = computed(() => props.detection !== null && familyHasValue(
 const noValue = computed(() => hasValueField.value
   && (props.detection?.value_kph === null || props.detection?.value_kph === undefined));
 const road = computed(() => props.detection?.applicability || 'unresolved');
+const variable = computed(() => props.detection?.family === 'variable_display');
 // O X U, G P R on a keyboard (use-keyboard.ts).
 const ROAD_KEYS: Record<string, string> = {own_road: 'O', other_road: 'X', unresolved: 'U'};
 const KIND_KEYS: Record<string, string> = {give_way: 'G', stop: 'P', roundabout: 'R', other: 'E', main_road: 'M', direction_left: '←',
@@ -158,12 +159,17 @@ function booleanChanged(key: BooleanField, event: Event): void {
               @click="setOnVehicle(); releaseFocus($event)">On a vehicle<kbd>V</kbd></button>
     </div>
     <!-- The signs are always there: a number makes the box a speed limit, "?" means the number cannot be read. -->
-    <div class="signs" id="quickValues" role="group" aria-label="Speed">
+    <div :class="['signs', {led: variable}]" id="quickValues" role="group" aria-label="Speed">
       <button v-for="value in QUICK_VALUES" :key="value" type="button" :class="value >= 100 ? 'sign wide' : 'sign'"
               :aria-pressed="detection?.value_kph === value" :data-value="value" :aria-label="value + ' km/h'"
               @click="setValue(value); releaseFocus($event)">{{ value }}</button>
       <button type="button" class="sign unknown" :aria-pressed="noValue" data-value="unknown" title="Number not readable"
               aria-label="Number not readable" @click="setValue(null); releaseFocus($event)">?</button>
+    </div>
+    <!-- The lit display over the road (L): lit, the numbers above look like it; the number stays either way. -->
+    <div class="quick-row">
+      <button type="button" class="chip quick variable" id="variable" :aria-pressed="variable"
+              @click="toggleVariable(); releaseFocus($event)">Variable speed limit<kbd>L</kbd></button>
     </div>
     <div id="valueBlock" class="value-line" :hidden="!hasValueField">
       <label for="value">Other value</label>

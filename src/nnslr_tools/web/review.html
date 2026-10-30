@@ -333,9 +333,11 @@ details[open] summary::after, .tl-toggle[aria-expanded="true"]::after { transfor
   display: grid; place-items: center; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums;
 }
 .box-row.selected .n { background: var(--accent); color: #fff; }
-.box-main .what { font-weight: 650; font-size: 14px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.box-main .what { display: flex; flex-wrap: wrap; align-items: center; column-gap: 8px; row-gap: 2px; font-weight: 650; font-size: 14px; min-width: 0; white-space: nowrap; }
+/* Short of room the road tag goes under the words: neither OURS nor the number is ever cut. */
+.box-main .what-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* The road of the box: OURS in green with a road, another in grey, road ? while not said. */
-.road-tag { display: inline-flex; align-items: center; gap: 3px; margin-left: 8px; padding: 1px 6px; border-radius: 6px; font-size: 11.5px; font-weight: 700; letter-spacing: 0.02em; vertical-align: 1px; }
+.road-tag { flex: none; display: inline-flex; align-items: center; gap: 3px; padding: 1px 6px; border-radius: 6px; font-size: 11.5px; font-weight: 700; letter-spacing: 0.02em; vertical-align: 1px; }
 .road-tag svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; }
 .road-tag.ours { color: var(--ok); background: var(--ok-soft); }
 .road-tag.another { color: var(--muted); background: var(--surface-3); font-weight: 600; }
@@ -409,6 +411,8 @@ details[open] summary::after, .tl-toggle[aria-expanded="true"]::after { transfor
 .sign:hover { transform: scale(1.06); }
 .sign.unknown { border: 2px dashed var(--muted); background: var(--surface-2); color: var(--muted); font-size: 18px; box-shadow: none; }
 .sign[aria-pressed="true"] { box-shadow: 0 0 0 3px var(--surface), 0 0 0 6px var(--accent); transform: scale(1.04); }
+/* A variable speed limit: the numbers as its lit display, white on black inside the red ring. */
+.signs.led .sign:not(.unknown) { background: #111; color: #f5f5f5; }
 .country-line { display: flex; align-items: center; gap: 8px; margin: -4px 0 0; font-size: 13px; color: var(--muted); }
 .country-line .flag { font-size: 18px; line-height: 1; }
 .kinds { display: flex; flex-direction: column; gap: 6px; margin-top: -4px; }

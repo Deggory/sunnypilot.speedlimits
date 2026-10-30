@@ -32,18 +32,25 @@ function editSelected(change: (d: Detection) => void): void {
   changed(row);
 }
 
+function applyFamily(d: Detection, id: string): void {
+  d.family = id;
+  if (!familyHasValue(id)) d.value_kph = null;
+  // The kind and "painted" belong to "Other sign" only.
+  if (id !== 'other_sign') {
+    delete d.sign_type;
+    delete d.painted;
+  }
+  d.value_state = d.value_kph === null || d.value_kph === undefined ? 'unknown' : 'reviewed';
+  state.valueError = false;
+}
+
 export function setFamily(id: string): void {
-  editSelected((d) => {
-    d.family = id;
-    if (!familyHasValue(id)) d.value_kph = null;
-    // The kind and "painted" belong to "Other sign" only.
-    if (id !== 'other_sign') {
-      delete d.sign_type;
-      delete d.painted;
-    }
-    d.value_state = d.value_kph === null || d.value_kph === undefined ? 'unknown' : 'reviewed';
-    state.valueError = false;
-  });
+  editSelected((d) => applyFamily(d, id));
+}
+
+/** L: the lit display over the road, a variable speed limit, and back to a speed limit; its number stays. */
+export function toggleVariable(): void {
+  editSelected((d) => applyFamily(d, d.family === 'variable_display' ? 'maximum_speed' : 'variable_display'));
 }
 
 /** The most common box: an "Other sign" (its kind kept when it has one) for the road the car drives on (S). */
