@@ -1270,6 +1270,7 @@ font-variant-numeric:tabular-nums}
 .pill.car{background:var(--accent-soft);color:var(--accent)}
 .model-pills{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px;flex:none}
 .inuse-car{font-size:12.5px;font-weight:600;color:var(--accent);overflow-wrap:anywhere}
+.inuse-old{font-size:12.5px;font-weight:600;color:var(--warn);overflow-wrap:anywhere}
 .model-car-note{font-size:12.5px;color:var(--muted)}
 /* A SignNet tried on the comma (Models): its pill, the buttons of its card, the line with the way back. */
 .pill.trial{background:var(--warn-soft);color:var(--fg)}
@@ -1281,7 +1282,8 @@ font-variant-numeric:tabular-nums}
 .trial-card .trial-text span{color:var(--muted)}
 .trial-card .link-button{font-size:13.5px;white-space:nowrap}
 .trial-card .link-button:disabled{color:var(--muted);cursor:default}
-@media (max-width:560px){.inuse-car{grid-column:1/-1}.versions-card[data-role="cutter"] .vt-c-every{display:none}}
+@media (max-width:560px){.inuse-car,.inuse-old{grid-column:1/-1}.versions-card[data-role="cutter"] .vt-c-every,
+.versions-card[data-role="cutter"] .vt-c-budget{display:none}}
 </style>
 </head>
 <body>

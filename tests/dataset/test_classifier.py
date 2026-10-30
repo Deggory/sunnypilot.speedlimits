@@ -369,15 +369,36 @@ def test_the_model_in_use_resolves_to_its_weights(tmp_path):
     active.write_text(json.dumps({"cutter": {"id": "cutter:r2/detector"}}))
     with pytest.raises(ValueError, match="cutter_in_use_missing"):
         resolve_model("active", "cutter", root)
-    assert resolve_model(str(weights), "cutter", root)["id"] is None
+    # A path inside runs/ gets its model's id (scripts/run_classifier.sh passes paths); any other path none.
+    assert resolve_model(str(weights), "cutter", root)["id"] == "cutter:r1/detector-sizes/96x64"
+    elsewhere = tmp_path / "detector-best.pt"
+    elsewhere.write_bytes(b"x")
+    assert resolve_model(str(elsewhere), "cutter", root)["id"] is None
+    assert resolve_model(str(weights), "classifier", root)["id"] is None
     with pytest.raises(ValueError, match="checkpoint_missing"):
         resolve_model(str(root / "nothing.pt"), "classifier", root)
+    # SignNet, the cutter: its weights at the root of its run.
+    signnet = root / "runs" / "s1" / "signnet-best.pt"
+    signnet.parent.mkdir(parents=True)
+    signnet.write_bytes(b"x")
+    active.write_text(json.dumps({"cutter": {"id": "cutter:s1/signnet"}}))
+    assert resolve_model("active", "cutter", root) == {"path": signnet.resolve(), "id": "cutter:s1/signnet"}
+    assert resolve_model(str(signnet), "cutter", root)["id"] == "cutter:s1/signnet"
+    active.write_text(json.dumps({"cutter": {"id": "cutter:s2/signnet"}}))
+    with pytest.raises(ValueError, match=r"cutter_in_use_missing: cutter:s2/signnet has no runs/s2/signnet-best\.pt"):
+        resolve_model("active", "cutter", root)
+    # A SignNet is a cutter only.
+    active.write_text(json.dumps({"classifier": {"id": "classifier:s1/signnet"}}))
+    with pytest.raises(ValueError, match="no_classifier_in_use"):
+        resolve_model("active", "classifier", root)
+    assert resolve_model(str(signnet), "classifier", root)["id"] is None
     # The decider's weights are named after its variant.
     decider = root / "runs" / "r3" / "experiment-b" / "crop_geom" / "crop_geom-best.pt"
     decider.parent.mkdir(parents=True)
     decider.write_bytes(b"x")
     active.write_text(json.dumps({"decider": {"id": "decider:r3/experiment-b/crop_geom"}}))
     assert resolve_model("active", "decider", root) == {"path": decider.resolve(), "id": "decider:r3/experiment-b/crop_geom"}
+    assert resolve_model(str(decider), "decider", root)["id"] == "decider:r3/experiment-b/crop_geom"
     active.write_text(json.dumps({"decider": {"id": "decider:r3/experiment-b/other"}}))
     with pytest.raises(ValueError, match="no_decider_in_use"):
         resolve_model("active", "decider", root)
@@ -498,6 +519,24 @@ def test_the_script_checks_its_arguments_first():
                                  text=True, timeout=60,
                                  env={"PATH": "/usr/bin:/bin", "NNSLR_DATA_ROOT": "/nonexistent", **settings})
         assert process.returncode == 2 and message in process.stderr, process.stderr
+
+
+def test_the_script_never_writes_into_a_signnet_run(tmp_path):
+    # A stand-in GPU environment and an idle GPU: the run folder's guard is what stops it.
+    tools, venv = tmp_path / "bin", tmp_path / "venv" / "bin"
+    for folder in (tools, venv):
+        folder.mkdir(parents=True)
+    for tool in (tools / "nvidia-smi", venv / "nnslr", venv / "python"):
+        tool.write_text("#!/bin/sh\nexit 0\n")
+        tool.chmod(0o755)
+    run = tmp_path / "data" / "runs" / "r1"
+    run.mkdir(parents=True)
+    (run / "signnet-best.pt").write_bytes(b"x")
+    process = subprocess.run(["bash", str(REPO / "scripts" / "run_classifier.sh"), "r1"], capture_output=True, check=False,
+                             text=True, timeout=60, env={"PATH": f"{tools}:/usr/bin:/bin",
+                                                         "NNSLR_DATA_ROOT": str(tmp_path / "data"),
+                                                         "NNSLR_GPU_VENV": str(venv.parent)})
+    assert process.returncode == 3 and "it has signnet-best.pt" in process.stderr, process.stderr
 
 
 # ---------------------------------------------------------------- with torch, in a subprocess, CPU only
@@ -712,6 +751,122 @@ def test_tiny_cpu_classifier_chain(tmp_path, capsys, torch_python):
     assert "== the chain on test" in text and "old reader" in text and "new" in text
 
 
+
+MAKE_SIGNNET = r"""
+import math
+import sys
+from pathlib import Path
+import torch
+from nnslr_tools.signnet import build_signnet, checkpoint_of
+
+dataset_sha, split_sha, path = sys.argv[1], sys.argv[2], Path(sys.argv[3])
+torch.manual_seed(0)
+# A random SignNet at a tiny band: its heat around 0.5 (bias 0), boxes about 12 band pixels a side.
+model = build_signnet((4, 4, 4, 4), 8, 1)
+with torch.no_grad():
+    model.out.bias[0] = 0.0
+    model.out.bias[1:3] = math.log(12)
+path.parent.mkdir(parents=True, exist_ok=True)
+plan = {"dataset_sha256": dataset_sha, "split_sha256": split_sha, "families": "all"}
+torch.save(checkpoint_of(model, plan, widths=(4, 4, 4, 4), stride=8, fuse_kernel=1, band_width=96, epoch=1), path)
+print("signnet ok")
+"""
+
+SIGNNET_BOXES_CHECK = r"""
+import json
+import sys
+from pathlib import Path
+import torch
+from PIL import Image
+from nnslr_tools import chain
+from nnslr_tools.signnet import _band_of, frame_boxes_of
+
+data_root, frames = Path(sys.argv[1]), json.loads(sys.argv[2])
+resolved = chain.resolve_model(sys.argv[3], "cutter", data_root)
+cutter, checkpoint, band = chain._load_cutter(resolved, torch.device("cpu"))
+assert chain.cutter_kind(cutter) == "signnet" and band == [96, 32] and checkpoint["families"] == "all"
+seen = 0
+for frame, pixels, found in chain.cutter_boxes(cutter, torch.device("cpu"), frames, data_root, min_score=0.1,
+                                               num_workers=0, batch_size=2):
+    with Image.open(data_root / frame["image_path"]) as image:
+        image = image.convert("RGB")
+        width, height = image.size
+        with torch.no_grad():
+            heat, shape = cutter.model(_band_of(image, 96)[None].float() / 255.0)
+    alone = frame_boxes_of(heat, shape, 8, 96, width, min_score=0.1)
+    # The same boxes as the frame alone (a batch of two may round the last bits apart), clamped to the frame.
+    assert len(found) == len(alone) and 0 < len(found) <= 5, found
+    for mine, theirs in zip(found, alone):
+        clamped = [min(max(v, 0.0), limit) for v, limit in zip(theirs["box"], (width, height, width, height))]
+        assert abs(mine["score"] - theirs["score"]) < 1e-5, (mine, theirs)
+        assert all(abs(a - b) < 1e-3 for a, b in zip(mine["box"], clamped)), (mine, clamped)
+    seen += 1
+assert seen == len(frames)
+print("boxes ok")
+"""
+
+
+def test_tiny_cpu_signnet_chain(tmp_path, capsys, torch_python):
+    """The chain with a SignNet as the cutter in use: the car's boxes (its band, at most 5 a frame, in frame pixels)
+    for mining the negatives and for evaluate-chain, at the SignNet's scores."""
+    dataset = _classifier_fixture(tmp_path, capsys)
+    plan = prepare_reader_training(dataset, tmp_path / "splits" / "latest.json", tmp_path, class_scheme="v2")
+    signnet = tmp_path / "runs" / "signnet-run" / "signnet-best.pt"
+    old_reader = tmp_path / "runs" / "old-run" / "reader" / "reader-best.pt"
+    process = _run(torch_python, "-c", MAKE_SIGNNET, plan["dataset_sha256"], plan["split_sha256"], str(signnet))
+    assert process.returncode == 0 and "signnet ok" in process.stdout, process.stderr[-3000:]
+    process = _run(torch_python, "-c", MAKE_MODELS, plan["dataset_sha256"], plan["split_sha256"],
+                   str(tmp_path / "runs" / "unused" / "detector-best.pt"), str(old_reader))
+    assert process.returncode == 0, process.stderr[-3000:]
+    (tmp_path / "models").mkdir()
+    (tmp_path / "models" / "active.json").write_text(json.dumps({"cutter": {"id": "cutter:signnet-run/signnet"}}))
+    base = ["--data-root", str(tmp_path), "--device", "cpu", "--num-workers", "0"]
+
+    frames = [{"image_path": row["image_path"]} for row in load_jsonl(dataset)][:4]
+    process = _run(torch_python, "-c", SIGNNET_BOXES_CHECK, str(tmp_path), json.dumps(frames), "active")
+    assert process.returncode == 0 and "boxes ok" in process.stdout, process.stderr[-3000:]
+
+    negatives = tmp_path / "runs" / "tiny" / "negatives.jsonl"
+    process = _run(torch_python, "-m", "nnslr_tools.cli", "mine-negatives", str(dataset), *base, "--cutter", "active",
+                   "--output", str(negatives), "--batch-size", "3", "--total-factor", "1")
+    assert process.returncode == 0, process.stderr[-3000:]
+    header, rows = read_negatives(negatives)
+    cutter = header["cutter"]
+    assert cutter["id"] == "cutter:signnet-run/signnet" and cutter["kind"] == "signnet" and cutter["same_split"]
+    assert cutter["band"] == cutter["input_size"] == [96, 32] and cutter["stride"] == 8 and cutter["max_boxes"] == 5
+    assert cutter["families"] == "all" and cutter["dataset_sha256"] == plan["dataset_sha256"]
+    per_frame = {}
+    for row in rows:
+        x1, y1, x2, y2 = row["bbox_xyxy"]
+        assert 0 <= x1 <= x2 <= WIDTH and 0 <= y1 <= y2 <= HEIGHT and row["score"] >= 0.1
+        per_frame[row["image_sha256"]] = per_frame.get(row["image_sha256"], 0) + 1
+    assert per_frame and max(per_frame.values()) <= 3
+
+    chain_path = tmp_path / "runs" / "tiny" / "chain-test.json"
+    process = _run(torch_python, "-m", "nnslr_tools.cli", "evaluate-chain", str(dataset), *base, "--cutter", "active",
+                   "--classifier", str(old_reader), "--partition", "test", "--output", str(chain_path))
+    assert process.returncode == 0, process.stderr[-3000:]
+    chain = json.loads(chain_path.read_text())
+    assert chain["cutter"]["kind"] == "signnet" and chain["cutter"]["id"] == "cutter:signnet-run/signnet"
+    assert chain["score_thresholds"] == [0.1, 0.2, 0.3] and chain["main_score_threshold"] == 0.3
+    assert set(chain["by_score_threshold"]) == {"0.1", "0.2", "0.3"}
+    assert any(item.startswith("signnet_top_band_and_5_boxes_a_frame_as_the_car") for item in chain["limitations"])
+    assert chain["per_frame_boxes"]["min_score"] == 0.1 and len(chain["images"]) == 2
+    for image in chain["images"]:
+        parts = [line.split(" ") for line in image["cutter_boxes"]]
+        assert 0 < len(parts) <= 5 and all(float(part[4]) >= 0.1 for part in parts)
+        assert all(0 <= float(part[0]) <= float(part[2]) <= WIDTH and 0 <= float(part[1]) <= float(part[3]) <= HEIGHT
+                   for part in parts)
+    # Scores given on the command line are the caller's, a path to the weights inside runs gets its id.
+    process = _run(torch_python, "-m", "nnslr_tools.cli", "evaluate-chain", str(dataset), *base, "--cutter", str(signnet),
+                   "--classifier", str(old_reader), "--partition", "test", "--score-thresholds", "0.2,0.4",
+                   "--main-score-threshold", "0.4", "--output", str(chain_path.with_name("chain-given.json")))
+    assert process.returncode == 0, process.stderr[-3000:]
+    given = json.loads(chain_path.with_name("chain-given.json").read_text())
+    assert given["score_thresholds"] == [0.2, 0.4] and given["main_score_threshold"] == 0.4
+    assert given["cutter"]["id"] == "cutter:signnet-run/signnet"
+
+
 def _iou(a, b):
     ix, iy = max(0.0, min(a[2], b[2]) - max(a[0], b[0])), max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
     union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - ix * iy
@@ -751,6 +906,68 @@ def test_cutter_families_choose_the_positive_boxes(tmp_path, capsys):
                        "--cutter-families", "speed", "--dry-run")
     assert code == 0 and json.loads(out.out)["sample_count"] == 2, out.err
 
+
+
+def test_train_signnet_dry_run_says_the_data_and_whether_it_fits_the_car(tmp_path, capsys):
+    from nnslr_tools.training import prepare_detector_training
+
+    dataset = _classifier_fixture(tmp_path, capsys)
+    plan = prepare_detector_training(dataset, tmp_path / "splits" / "latest.json", tmp_path)
+    run = tmp_path / "runs" / "dry"
+    base = ["train-signnet", "--data-root", str(tmp_path), "--run-dir", str(run), "--dry-run"]
+    code, out = invoke(capsys, *base)
+    assert code == 0, out.err
+    said = json.loads(out.out)
+    assert said["dry_run"] and said["task"] == "signnet" and said["families"] == "all"
+    assert (said["dataset_sha256"], said["split_sha256"]) == (plan["dataset_sha256"], plan["split_sha256"])
+    assert said["band"] == [896, 288] and said["stride"] == 8 and said["fits_the_car"] is True
+    assert said["boxes_by_split"] == plan["boxes_by_split"] and not run.exists()
+    code, out = invoke(capsys, *base, "--band-width", "448", "--families", "speed")
+    said = json.loads(out.out)
+    assert code == 0 and said["band"] == [448, 144] and said["fits_the_car"] is False and said["families"] == "speed"
+    code, out = invoke(capsys, *base, "--widths", "16,24,32")
+    assert code == 2 and "invalid --widths" in out.err
+    assert said["trainable"] is True
+
+
+def test_train_signnet_refuses_a_plan_that_cannot_train_and_flushes_its_lines(tmp_path, capsys, monkeypatch):
+    import builtins
+
+    from nnslr_tools import signnet, training
+
+    dataset = _classifier_fixture(tmp_path, capsys)
+    real = training.prepare_detector_training
+    plan = real(dataset, tmp_path / "splits" / "latest.json", tmp_path)
+    monkeypatch.setattr(training, "prepare_detector_training",
+                        lambda *a, **kw: {**real(*a, **kw), "trainable": False})
+    run = tmp_path / "runs" / "never"
+    base = ["train-signnet", "--data-root", str(tmp_path), "--run-dir", str(run)]
+    code, out = invoke(capsys, *base, "--dry-run")
+    assert code == 1 and json.loads(out.out)["trainable"] is False
+    code, out = invoke(capsys, *base)
+    assert code == 2 and "training_plan_not_trainable" in out.err and not run.exists()
+
+    # A plan that trains: the lines are printed with flush (signnet.log is a file behind tee), and the car's
+    # numbers (best 5 boxes of 0.3 or more) come with the 5-box ones.
+    monkeypatch.setattr(training, "prepare_detector_training", lambda *a, **kw: plan)
+    given = {}
+    measured = {"recall_iou": .4, "false_positives_per_image": .2}
+
+    def fake(plan, root, run_dir, **kw):
+        given.update(kw)
+        kw["log"]("signnet epoch 1/1 train_loss 1.0000 val_recall 0.400 val_false_per_frame 0.20 3s")
+        return {"best_epoch": 1, "parameters": 9, **{split: {"by_box_budget": {"5": measured}, "car": measured}
+                                                     for split in ("validation", "test")}}
+
+    monkeypatch.setattr(signnet, "train_signnet", fake)
+    flushed = []
+    printing = builtins.print
+    monkeypatch.setattr(builtins, "print", lambda *a, **kw: (flushed.append(kw.get("flush")), printing(*a, **kw)))
+    code, out = invoke(capsys, *base)
+    monkeypatch.setattr(builtins, "print", printing)
+    assert code == 0, out.err
+    assert out.out.startswith("signnet epoch 1/1 ") and flushed[0] is True
+    assert json.loads(out.out.splitlines()[-1])["car"]["test"] == measured
 
 def test_cutter_families_resume_as_they_were_trained():
     from nnslr_tools.training import DetectorTrainConfig, _detector_config_differences

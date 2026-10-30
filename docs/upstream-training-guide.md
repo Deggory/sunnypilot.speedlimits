@@ -581,15 +581,15 @@ frame without signs gives no loss. Each detector epoch therefore uses every fram
 with signs and a share of the frames without (`--negative-frame-fraction`,
 default `0.1`, drawn again each epoch; `1.0` uses every frame as before); the
 validation uses the same share as one fixed draw, so its epochs compare.
-`result.json` records the counts under `frames`. The detector is the cutter of
-the pipeline, so its best epoch (`detector-best.pt`) and early stopping follow
+`result.json` records the counts under `frames`. The detector was the cutter of
+the pipeline until 30 October 2026 (SignNet is now, see below), so its best epoch (`detector-best.pt`) and early stopping follow
 the validation recall at score 0.1, ties to fewer false boxes per frame
 (`--select-by recall`, the default; `--select-by loss` keeps the lowest
 validation loss). Every epoch line also prints `val_recall`, and `result.json`
 holds `best_epoch`, `best_validation_recall`, the validation loss of that epoch
 as `best_validation_loss`, and `selection`.
 
-What the cutter learns to cut is `--cutter-families`: `all` (the default for a
+What the detector learns to cut is `--cutter-families`: `all` (the default for a
 new detector) is the speed-sign families and the other traffic signs
 (`other_sign`), so that the classifier gets them and says what they are;
 `speed` is the speed signs only, as every detector before the option (a
@@ -611,7 +611,8 @@ background for the cutter.
 from the run's `training-state.pt` (`nnslr_tools.training.resume_arguments_file`),
 `--pretrained` of a start from ImageNet included.
 
-To compare input sizes, `scripts/run_detector_sizes.sh NAME [SIZES...]`
+To compare input sizes of the old Detector (kept to compare: since 30 October
+2026 a Detector cannot be put in use), `scripts/run_detector_sizes.sh NAME [SIZES...]`
 (default `320x320 640x360 960x544`) trains one detector per size with the same
 settings into `$NNSLR_DATA_ROOT/runs/NAME/detector-sizes/<size>/`, evaluates
 each on test and validation and prints the comparison, saved as
@@ -622,6 +623,72 @@ recall; its boxes are the families `NNSLR_CUTTER_FAMILIES` (`all` by default, or
 `speed`). It refuses a busy GPU unless `NNSLR_ALLOW_BUSY_GPU=1`, like the
 baseline pipeline, and finishes an interrupted comparison when run again with
 the same name.
+
+### The cutter: SignNet (since 30 October 2026)
+
+SignNet (`nnslr_tools.signnet`, `nnslr train-signnet`) is the one cutter, the
+same network the comma runs (`sunnypilot/speed_limits/vision.py`). It reads the
+band at the top of the frame: the frame scaled to the band width and its top
+rows kept (1344 x 416 and 672 x 208 keep the top 416 of 760 rows, which hold 97%
+of the reviewed signs; the car's 896 x 288 keeps the top 432), RGB 0..1. Plain 3
+x 3 convolutions (`--widths`, the channels at strides 2, 4, 8 and 16) give a
+heat map of sign centres at `--stride` 8 or 4 with each sign's size and offset,
+no NMS: the decode keeps the 3 x 3 local maxima, best first. `--fuse-kernel 1`
+joins the strides with 1 x 1 convolutions. It takes the detector's plan
+(`prepare_detector_training`: the same frames, boxes, families, split and
+`--dataset-kind`); a switched-off variable display is an ignore box, neither
+learnt nor counted.
+
+The defaults are the car's setup, the one **Train the cutter**
+(`scripts/run_signnet.sh NAME`, about 80 minutes on the server's GPU) runs:
+`--band-width 896 --stride 8 --fuse-kernel 1 --widths 16,24,32,48`, 40 epochs,
+batch 16, learning rate 0.003, `--families all` (`NNSLR_CUTTER_FAMILIES=speed`
+in the script for the speed signs only).
+
+```sh
+CUDA_VISIBLE_DEVICES= .venv-gpu/bin/nnslr train-signnet --run-dir /tmp/signnet-dry --dry-run  # the plan only
+bash scripts/run_signnet.sh <YYYY-MM-DD_HHMM-cutter>
+```
+
+The dry run prints one JSON line: `counts_by_split`, `boxes_by_split`,
+`families`, `split_sha256`, `trainable`; it exits 1 when the plan has nothing to
+train or validate on (a training refuses such a plan too), so the script stops
+at its step 1/3, before the GPU. Each epoch is measured on validation, and the
+epoch with the best validation recall among the best 5 boxes a frame, at any
+score, is kept as `<run>/signnet-best.pt` (the weights with `widths`, `stride`,
+`fuse_kernel`, `band`, `epoch`, `dataset_sha256`, `split_sha256` and `families`;
+a checkpoint saved before 30 October 2026 has the last three only in the
+`result.json` beside it). Its epoch line reads `signnet epoch N/M train_loss L
+val_recall R val_false_per_frame F Ns`, the validation among the best 5 boxes at
+any score. At the end the best epoch is measured on validation and test, and
+`<run>/result.json` (`task` `signnet`) holds `band`, `stride`, `fuse_kernel`,
+`widths`, `parameters`, `best_epoch`, `history`, `families`, `dataset_sha256`,
+`split_sha256`, `counts_by_split`, `boxes_by_split` and, for `validation` and
+`test`, `car` (what the car reads: the best 5 boxes of score 0.3 or more),
+`by_score_threshold` (0.05, 0.1, 0.2, 0.3 and 0.5) and `by_box_budget` (the best
+3, 5 and 10 boxes of a frame at any score), each with recall, false boxes per
+frame, `recall_by_width` and `recall_by_family`. They are scored on the boxes of
+the whole frame, so a sign below the band counts as missed. There is no resume:
+a run without `result.json` is unfinished, and `scripts/run_signnet.sh` trains
+such a NAME again from scratch, after moving its old `signnet.log` aside so the
+old epochs do not mix with the new ones (it refuses a finished one).
+
+The Models tab puts in use (**Use this one**) only a finished SignNet with band
+896 x 288 and stride 8 (`signnet.fits_the_car`; `CAR_BAND`, `CAR_STRIDE` mirror
+the car's `vision.py`); its id is `cutter:<run>/signnet`. The SignNet in use
+gives the car's best 5 boxes a frame, from score 0.1 (the car keeps those of 0.3
+or more), to Prepare's Our networks, `mine-negatives` and `evaluate-chain`: the
+heat map decoded best first, at most 5 a frame (`CAR_MAX_BOXES`), scaled to
+frame pixels by frame width / band width, with no size filter (the car has
+none), above the score floor of each caller (0.1 for Prepare and mining); the
+car keeps those scoring 0.3 or more (`CAR_MIN_SCORE`), so only `evaluate-chain`
+judged at 0.3 is exactly the car. A reader of what the car finds takes `car`
+from the result; for an older `result.json` without it,
+`by_score_threshold['0.3']` stands in (about 0.35 boxes a frame there, so the
+cap of 5 almost never bites). **Send to the car** and **Try on the comma now**
+refuse a SignNet that does not fit the car or has not finished. A sign below the
+band (a road marking, a low sign close by) is never found. `nnslr export-onnx
+--task signnet` writes the ONNX for the car, with one output `out`.
 
 ### The classifier: "not a sign" and the chain end to end
 
@@ -645,8 +712,9 @@ everywhere, `folded_labels`) and `not_a_sign`, learnt from:
 ```
 
 `mine-negatives` runs the cutter (`active`: the cutter in use of the Models
-tab, `models/active.json`; or a `detector-best.pt`) on every reviewed frame of
-train, validation and test and keeps its boxes of score >= 0.1
+tab, `models/active.json`; or a `signnet-best.pt`, or an old `detector-best.pt`)
+on every reviewed frame of train, validation and test (a SignNet gives the car's
+boxes: at most 5 a frame, no size filter) and keeps its boxes of score >= 0.1
 (`--score-threshold`) that overlap no box a reviewer saw there (IoU < 0.1 with
 every kept box and every removed proposal), at most 3 per frame, the highest
 scores (`--per-frame`), and at most 3 x the sign crops of each partition
@@ -656,7 +724,10 @@ then those an AI reviewed after the other-sign rule of 24 October 2026
 without a box. Each partition takes its negatives from its own frames only, the
 buffer none. The file starts with a header (dataset and split, the cutter and
 its sha256, the settings, the counts per partition and per reviewer tier); the
-training refuses it on another dataset or split.
+training refuses it on another dataset or split. Its `cutter` block has the id
+(`cutter:<run>/signnet` for a SignNet), `kind` (`signnet` or `detector`) and
+`input_size`; for a SignNet also `band` and `stride`, and `input_size` is the
+band.
 
 ```sh
 .venv/bin/nnslr train --task reader --classes v2 --dry-run
@@ -683,8 +754,10 @@ rejected, by source and on the frames a person reviewed).
 `nnslr evaluate-chain --cutter active --classifier <reader-best.pt> --partition
 test --output <run>/evaluation/chain-test.json` measures the two networks end
 to end: the cutter on every reviewed frame of the partition, each of its boxes
-cut from the frame at full resolution and classified; at cutter scores 0.05,
-0.1 and 0.25 the speed signs found AND read right (overall, by the width of the
+cut from the frame at full resolution and classified; at cutter scores 0.1,
+0.2 and 0.3 with a SignNet (judged at 0.3, the car's floor; the report records
+it as `main_score_threshold`), or 0.05, 0.1 and 0.25 with an old Detector
+(judged at 0.1), the speed signs found AND read right (overall, by the width of the
 reviewed box, on the signs a person confirmed), the cutter's own share found,
 the boxes and false boxes per frame, the false boxes per frame that survive
 (answered anything but `not_a_sign`) and the confusion of every box passed on.
@@ -692,7 +765,7 @@ An old reader (`v1`) rejects nothing: every false box survives.
 
 `scripts/run_classifier.sh NAME` (also the **Train the classifier** button of
 the Train tab) does all of it on the GPU into `data/runs/NAME/`: checks, mining
-with the cutter in use, training from ImageNet, the classifier alone on test and
+with the cutter in use (the SignNet in use: the car's best 5 boxes a frame, from score 0.1), training from ImageNet, the classifier alone on test and
 validation, the chain on test and validation, the chain on test with the old
 reader (`NNSLR_OLD_READER_RUN`, default `2026-10-24_1452`) and a comparison
 saved as `comparison.txt`. It refuses a busy GPU unless
@@ -776,8 +849,8 @@ Most labels are AI reviews, so both also report `counts_by_label_basis` and a
 confirmed (`provenance.label_basis` `human_review`), or `null` when the
 partition has none; the top-level metrics stay those of the whole partition.
 `--dry-run` prints `counts_by_label_basis` and `human_reviewed_sample_count`.
-The detector is the cutter of the pipeline (cutter, then the reader as
-classifier, then whom the sign applies to), so its report also measures recall
+The detector was the cutter of the pipeline until 30 October 2026 (cutter, then
+the reader as classifier, then whom the sign applies to), so its report also measures recall
 first: `recall_by_width` (the reviewed boxes found by their width in frame
 pixels: `lt12`, `12-20`, `20-40`, `ge40`, the buckets of the site's Evaluate
 tab), `predictions_per_image` (the boxes passed on to the classifier) and, in

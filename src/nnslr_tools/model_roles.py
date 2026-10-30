@@ -1,20 +1,20 @@
 # [model-roles] - START
 """The networks of the pipeline by role, for the Models tab of the site (docs/NEURAL_NETWORK.md): the cutter finds
-every box that could be a sign (today the detector), the classifier says what each box is (today the reader), the
+every box that could be a sign (SignNet, the network the comma runs), the classifier says what each box is, the
 decider says whom a sign applies to (today only the prototypes of experiment B).
 
 Every trained artifact under <data root>/runs is listed by role, newest first, with the numbers that judge it, read
 from what the training and the evaluation wrote:
 
-- cutter: ``<run>/detector/detector-best.pt`` (measured in ``<run>/evaluation/detector-test.json``) and
-  ``<run>/detector-sizes/<size>/detector-best.pt`` (scripts/run_detector_sizes.sh, measured in
-  ``<size>/evaluation/detector-{test,validation}.json``): recall overall and by sign width at the cutter's score
-  (CUTTER_SCORE, else the report's own threshold), boxes and false boxes per frame, time per frame; and the speed
-  signs found among the BOX_BUDGET best boxes of each frame, what the car reads, from the boxes a newer report keeps
-  frame by frame. ``<run>/signnet-best.pt`` with its ``<run>/result.json`` (``nnslr train-signnet``, SignNet, the
-  cutter made for the comma's GPU): measured on the same frames with the same scoring (nnslr_tools.signnet.measure),
-  so its numbers sit in the same columns; it cannot be the cutter in use here (Prepare and the classifier's training
-  run a detector);
+- cutter: ``<run>/signnet-best.pt`` with its ``<run>/result.json`` (``nnslr train-signnet``, scripts/run_signnet.sh:
+  SignNet, THE cutter, the same network the comma runs): recall overall and by sign width at the cutter's score
+  (CUTTER_SCORE), boxes per frame, and the signs found among its BOX_BUDGET best boxes of each frame, what the car
+  reads. Only a finished SignNet of the car's band and grid (nnslr_tools.signnet.fits_the_car: 896 x 288, stride 8,
+  what the comma's vision.py runs) can be the cutter in use. The old Detectors, ``<run>/detector/detector-best.pt``
+  (``<run>/evaluation/detector-test.json``) and ``<run>/detector-sizes/<size>/detector-best.pt``
+  (scripts/run_detector_sizes.sh, ``<size>/evaluation/detector-{test,validation}.json``), stay listed to compare,
+  measured on the same frames with the same scoring, never chosen again: an old Detector id still in active.json is
+  read back and still resolves until a SignNet is chosen;
 - classifier: ``<run>/reader/reader-best.pt`` (``<run>/evaluation/reader-test.json``): right answers on the test,
   overall and on the crops a person confirmed; ``<run>/classifier/reader-best.pt`` of scripts/run_classifier.sh, the
   classifier with "not a sign" (``<run>/evaluation/classifier-test.json``, ``<run>/evaluation/chain-test.json``):
@@ -39,7 +39,8 @@ the id of each network there, checked against the sha256 of its weights on this 
 tab marks those versions "On the car"; nothing else reads the file.
 
 The model in use for each role is <data root>/models/active.json, ``{"cutter": {"id", "who", "via", "at"} or null,
-"classifier": ..., "decider": ...}``: null until someone picks one, never a default here. Prepare's "ours" proposer
+"classifier": ..., "decider": ...}``: null until someone picks one, never a default here. Every version says whether
+it can be chosen (``selectable``) and, when not, why in a few words (``not_selectable_reason``). Prepare's "ours" proposer
 reads the three in use, only when all three are (nnslr_tools.preannotate.our_networks); scripts/run_classifier.sh the
 cutter in use.
 Choosing copies, exports or deploys nothing. Only ModelIndex.set_active writes, only that file, atomically; the id
@@ -67,6 +68,7 @@ from nnslr_tools.runs import (CHAIN_WEIGHTS, EXPERIMENT_DIR, INPUT_NAMES, RUN_NA
                               VARIANT_LABELS, VARIANTS, RunsIndex, _dig, _int, _iso, _mtime, _num, _ratio, _size_table,
                               _words, chain_digest, chain_headline, classifier_headline, classifier_result_digest,
                               reader_digest, result_digest)
+from nnslr_tools.signnet import CAR_MAX_BOXES, CAR_MIN_SCORE, car_measure, fits_the_car
 from nnslr_tools.training import DETECTOR_FAMILIES
 
 ROLES = ('cutter', 'classifier', 'decider', 'road_type')
@@ -92,11 +94,13 @@ FAMILIES = ('all', 'speed')
 # A detector folder of scripts/run_detector_sizes.sh: WIDTHxHEIGHT.
 SIZE_NAME = re.compile(r'[1-9][0-9]{0,4}x[1-9][0-9]{0,4}')
 _RUN = RUN_NAME.pattern
-MODEL_ID = re.compile(rf'(cutter|classifier|decider|road_type):({_RUN})/(detector|detector-sizes/{SIZE_NAME.pattern}|'
-                      rf'reader|classifier|{EXPERIMENT_DIR}/{_RUN}|{ROAD_TYPE_PART}/(?:gru|gru-nomotion|gru-nosign|frame))')
-# SignNet: a cutter of the Models tab, never one of active.json (chain.py and Prepare load a detector).
+# SignNet, the cutter: its weights at the root of its run (<run>/signnet-best.pt), its id cutter:<run>/signnet.
 SIGNNET_PART = 'signnet'
 SIGNNET_ID = re.compile(rf'cutter:({_RUN})/{SIGNNET_PART}')
+# Any id of the index; the signnet part only for the cutter (role_of).
+MODEL_ID = re.compile(rf'(cutter|classifier|decider|road_type):({_RUN})/({SIGNNET_PART}|detector|'
+                      rf'detector-sizes/{SIZE_NAME.pattern}|reader|classifier|{EXPERIMENT_DIR}/{_RUN}|'
+                      rf'{ROAD_TYPE_PART}/(?:gru|gru-nomotion|gru-nosign|frame))')
 # The boxes a frame the classifier reads after the cutter in the car (SignNet keeps its epoch with the best recall
 # at this many, nnslr_tools.signnet.BOX_BUDGETS): every cutter is also judged on the speed signs among its best 5.
 BOX_BUDGET = 5
@@ -116,6 +120,16 @@ COMMIT = re.compile(r'[0-9a-f]{40}')
 # sign-in.
 VIA = ('sign-in', 'token', 'local')
 DECIDER_PARTITIONS = ('validation', 'test')
+# Why a version cannot be chosen (not_selectable_reason, short for the site; set_active says it longer).
+NOT_SELECTABLE = {
+    'not_finished': ('Not finished.', 'This model has not finished its training: its weights may still change.'),
+    'compare_only': ('An old Detector: kept to compare.',
+                     'An old Detector, kept to compare: the cutter is a SignNet, the network the car runs.'),
+    'not_for_the_car': ('Not the comma’s 896 × 288 band at stride 8: it cannot run on the car.',
+                        ('This SignNet is not of the comma’s 896 × 288 band at stride 8: the car’s vision.py cannot '
+                         'run it, so it cannot be the cutter in use.')),
+}
+OLD_KIND_NOTICE = 'The cutter in use is an old Detector: choose a SignNet.'
 
 
 class ModelChoiceError(Exception):
@@ -299,7 +313,9 @@ def cutter_digest(report: Any) -> dict:
 def signnet_digest(result: Any) -> dict:
     """result.json of ``nnslr train-signnet``: how it was trained (no history), and test and validation as a cutter
     is judged (cutter_digest of their by_score_threshold, the cutter's scoring on the cutter's frames), with the signs
-    among its BOX_BUDGET best boxes a frame (by_box_budget)."""
+    among its BOX_BUDGET best boxes a frame at any score (by_box_budget) and ``car``: what the car reads, those best
+    boxes of score 0.3 or more (signnet.car_measure: found, reviewed, recall, boxes and false boxes per frame, by
+    family, at score_threshold with max_boxes)."""
     if not isinstance(result, dict) or result.get('task') != 'signnet':
         raise ValueError('not a SignNet result')
     band = _size_label(result.get('band'))
@@ -317,10 +333,16 @@ def signnet_digest(result: Any) -> dict:
             counts = _box_counts(budget)
             digest['budget'] = _budget(counts['found'] or 0, counts['truth_boxes'] or 0,
                                        _by_family(budget.get('recall_by_family')))
+        car = car_measure(report)
+        digest['car'] = None if car is None else {
+            **_box_counts(car), 'by_family': _by_family(car.get('recall_by_family')),
+            'score_threshold': CAR_MIN_SCORE, 'max_boxes': CAR_MAX_BOXES}
         measured[partition] = digest
     history = result.get('history')
     return {
         'band': band, 'families': families,
+        # What the comma's vision.py runs (nnslr_tools.signnet.fits_the_car): only such a SignNet can be in use.
+        'fits_the_car': band is not None and fits_the_car(result.get('band'), result.get('stride')),
         'stride': _int(result.get('stride')), 'fuse_kernel': _int(result.get('fuse_kernel')),
         'parameters': _int(result.get('parameters')),
         'best_epoch': _int(result.get('best_epoch')), 'epochs': _int(result.get('epochs')),
@@ -517,12 +539,34 @@ def decider_digest(result: Any) -> dict:
     }
 
 
+def role_of(model_id: Any) -> str | None:
+    """The role of an id of the index (None when it is not one): the signnet part is the cutter's alone."""
+    if not isinstance(model_id, str) or len(model_id) > MAX_ID:
+        return None
+    match = MODEL_ID.fullmatch(model_id)
+    if match is None or (match.group(3) == SIGNNET_PART and match.group(1) != 'cutter'):
+        return None
+    return match.group(1)
+
+
+def selectable(entry: dict) -> tuple[bool, str | None]:
+    """Whether a version of the index can be the one in use, else the key of NOT_SELECTABLE: the cutter only a
+    SignNet that fits the car (the old Detectors are kept to compare), every role only a finished version."""
+    if entry.get('role') == 'cutter' and entry.get('kind') != 'signnet':
+        return False, 'compare_only'
+    if not entry.get('finished'):
+        return False, 'not_finished'
+    if entry.get('role') == 'cutter' and not entry.get('fits_the_car'):
+        return False, 'not_for_the_car'
+    return True, None
+
+
 def _active_entry(role: str, value: Any) -> dict | None:
-    """One role of active.json, checked: None when null or not a choice this module could have written."""
+    """One role of active.json, checked: None when null or not a choice this module could have written (an old
+    Detector id is still one: it is read back until a SignNet is chosen)."""
     if not isinstance(value, dict) or not isinstance(value.get('id'), str):
         return None
-    match = MODEL_ID.fullmatch(value['id'])
-    if match is None or match.group(1) != role or len(value['id']) > MAX_ID:
+    if role_of(value['id']) != role:
         return None
     who = value.get('who')
     via = value.get('via')
@@ -558,12 +602,7 @@ def _write_atomic(path: Path, value: dict) -> None:
 
 def _car_id_ok(role: str, model_id: Any) -> bool:
     """An id of a network on the car: a SignNet or a detector for the cutter, a reader or classifier."""
-    if not isinstance(model_id, str) or len(model_id) > MAX_ID:
-        return False
-    if role == 'cutter' and SIGNNET_ID.fullmatch(model_id):
-        return True
-    match = MODEL_ID.fullmatch(model_id)
-    return match is not None and match.group(1) == role
+    return role_of(model_id) == role
 
 
 def _on_car_record(data: Any) -> dict:
@@ -732,7 +771,8 @@ class ModelIndex:
         entry.update({
             'kind': 'detector',
             'label': 'Detector ' + _pretty_size(input_size or default_size),
-            'detail': 'input-size comparison' if size else 'training pipeline',
+            # The cutter before SignNet: kept to compare, never chosen again.
+            'detail': 'old, to compare · ' + ('input-size comparison' if size else 'training pipeline'),
             'architecture': trained.get('architecture'), 'initialization': trained.get('initialization'),
             'best_epoch': trained.get('best_epoch') or measured.get('checkpoint_epoch'),
             'epochs': trained.get('epochs'), 'epochs_run': trained.get('epochs_run'),
@@ -747,9 +787,10 @@ class ModelIndex:
         return entry
 
     def _signnet(self, name: str, run: Path) -> dict | None:
-        """A SignNet of ``nnslr train-signnet``: the small finder made for the comma's GPU, judged on the cutter's
-        test frames with the cutter's scoring. It cannot be the cutter in use here (Prepare and the classifier's
-        training still need a detector), so it is listed, never chosen."""
+        """A SignNet of ``nnslr train-signnet``: THE cutter, the small finder the comma runs, judged on the cutter's
+        test frames with the cutter's scoring. Finished and of the car's band and grid (fits_the_car, read from
+        result.json: the review server has no torch to open the weights), it can be the cutter in use; another band
+        or stride is research, listed to compare."""
         checkpoint = self.runs._file(run, SIGNNET_PART + '-best.pt')
         if checkpoint is None:
             return None
@@ -760,10 +801,14 @@ class ModelIndex:
         share = (subset or {}).get('share')
         entry = self._base('cutter', name, SIGNNET_PART, checkpoint, result, problems)
         band = trained.get('band')
+        fits = bool(trained.get('fits_the_car'))
         entry.update({
             'kind': 'signnet',
             'label': 'SignNet' + (' ' + _pretty_size(band) if band else ''),
-            'detail': 'for the comma’s GPU' + (f' · {round(share * 100)} % of the training drives' if share else ''),
+            'detail': ('the comma’s cutter' if fits else 'not finished' if result is None
+                       else 'not the comma’s band or grid, to compare')
+                      + (f' · {round(share * 100)} % of the training drives' if share else ''),
+            'fits_the_car': fits,
             'architecture': None, 'initialization': None,
             'best_epoch': trained.get('best_epoch'), 'epochs': trained.get('epochs'),
             'epochs_run': trained.get('epochs_run'),
@@ -928,6 +973,10 @@ class ModelIndex:
             versions.sort(key=lambda entry: (entry['_mtime'], entry['id']), reverse=True)
             for entry in versions:
                 del entry['_mtime']
+                ok, why = selectable(entry)
+                entry['selectable'] = ok
+                if not ok:
+                    entry['not_selectable_reason'] = NOT_SELECTABLE[why][0]
         return found
 
     # -- the model in use ------------------------------------------------------------------------------
@@ -1004,9 +1053,12 @@ class ModelIndex:
             for entry in versions:
                 entry['in_use'] = chosen is not None and entry['id'] == chosen['id']
                 entry['on_car'] = car_ids.get(role) is not None and entry['id'] == car_ids[role]
+            # An old Detector id still in active.json: it keeps working until a SignNet is chosen; the site says so.
+            old_kind = role == 'cutter' and chosen is not None and not SIGNNET_ID.fullmatch(chosen['id'])
             roles.append({'role': role, 'label': ROLE_LABELS[role], 'versions': versions,
                           'active': None if chosen is None else {
-                              **chosen, 'found': any(entry['in_use'] for entry in versions)}})
+                              **chosen, 'found': any(entry['in_use'] for entry in versions)},
+                          'old_kind_in_use': old_kind, 'notice': OLD_KIND_NOTICE if old_kind else None})
         self.runs._prune()
         return {'roles': roles, 'active_problem': problem, 'active_file': ACTIVE_FILE,
                 'runs_dir_exists': self.runs.runs_dir.is_dir(), 'cutter_score_threshold': CUTTER_SCORE,
@@ -1015,27 +1067,23 @@ class ModelIndex:
                     key: on_car[key] for key in ('repository', 'commit', 'version', 'recorded_at')}}
 
     def set_active(self, role: Any, model_id: Any, *, who: str | None, via: str) -> dict:
-        """POST /api/panel/models/active: the model in use for a role. The id must be a finished artifact of the
-        index; the file keeps the other roles as they are."""
+        """POST /api/panel/models/active: the model in use for a role. The id must be an artifact of the index that
+        can be chosen (selectable: finished; for the cutter a SignNet that fits the car, never an old Detector); the
+        file keeps the other roles as they are."""
         if not isinstance(role, str) or role not in ROLES:
             raise ModelChoiceError(400, 'bad_role', 'Unknown role: cutter, classifier, decider or road_type.')
-        if not isinstance(model_id, str) or len(model_id) > MAX_ID:
+        if not isinstance(model_id, str) or len(model_id) > MAX_ID or MODEL_ID.fullmatch(model_id) is None:
             raise ModelChoiceError(400, 'bad_id', 'Not a model id.')
-        if SIGNNET_ID.fullmatch(model_id):
-            raise ModelChoiceError(409, 'not_selectable', 'SignNet is made for the car: Prepare and the classifier’s '
-                                   'training here still need a detector.')
-        match = MODEL_ID.fullmatch(model_id)
-        if match is None:
-            raise ModelChoiceError(400, 'bad_id', 'Not a model id.')
-        if match.group(1) != role:
+        if role_of(model_id) != role:
             raise ModelChoiceError(400, 'wrong_role', 'That model is not a ' + role + '.')
         if via not in VIA:
             raise ValueError('via')
         version = next((entry for entry in self.artifacts()[role] if entry['id'] == model_id), None)
         if version is None:
             raise ModelChoiceError(404, 'unknown_model', 'No such model on this server.')
-        if not version['finished']:
-            raise ModelChoiceError(409, 'not_finished', 'This model has not finished its training: its weights may still change.')
+        ok, why = selectable(version)
+        if not ok:
+            raise ModelChoiceError(409, why, NOT_SELECTABLE[why][1])
         path = self._active_path()
         if path is None:
             raise ModelChoiceError(409, 'bad_models_folder', 'models/ of the data root leads outside it.')

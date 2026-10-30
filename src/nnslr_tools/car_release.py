@@ -1,7 +1,8 @@
 """``nnslr send-to-car``: the first three steps of "Send to the car" (Models › a SignNet version), the networks the
 comma downloads replaced by a SignNet of this server, the classifier in use and the road type in use.
 
-1. Export: the SignNet of a run and the classifier in use (models/active.json, or one given) to ONNX on the CPU, each
+1. Export: the SignNet of a run (or the cutter in use) and the classifier in use (models/active.json, or one given)
+   to ONNX on the CPU, each
    checked against PyTorch with onnxruntime; the road type in use (with memory: road-type/gru), when one is chosen,
    is the ONNX step its training exported and checked (<run>/road-type/export). Each contract names its network by
    its id of the Models tab.
@@ -14,7 +15,8 @@ comma downloads replaced by a SignNet of this server, the classifier in use and 
 
 scripts/send_to_car.sh runs it, then moves the models submodule of the sunnypilot speed-limits branch (step 4) and
 builds cristianku/openpilot psa-torque-sunny-testing (step 5). Nothing from a request reaches a path unchecked: the
-SignNet is a run name of the Models tab, the classifier an id of the Models tab.
+SignNet is a run name of the Models tab, the classifier an id of the Models tab. Only a SignNet of the car's band and
+grid goes (nnslr_tools.signnet.fits_the_car: the 896 x 288 band at stride 8 the comma's vision.py runs).
 """
 from __future__ import annotations
 
@@ -30,8 +32,6 @@ from typing import Any
 
 from nnslr_tools import car_settings
 from nnslr_tools.model_roles import (
-    MAX_ID,
-    MODEL_ID,
     ON_CAR_FILE,
     ROAD_TYPE_PART,
     SIGNNET_PART,
@@ -39,8 +39,10 @@ from nnslr_tools.model_roles import (
     ModelIndex,
     _sha256,
     record_on_car,
+    role_of,
 )
 from nnslr_tools.runs import RUN_NAME, RunsIndex
+from nnslr_tools.signnet import CAR_BAND, CAR_STRIDE
 
 CAR_SCRIPT = 'scripts/send_to_car.sh'
 # The clones and the build, as scripts/send_to_car.sh finds them (the same variables, the same defaults).
@@ -98,28 +100,41 @@ def build_pending(root: Path) -> bool:
 
 
 # -- 1. which networks --------------------------------------------------------------------------------------
-def choose(root: Path, signnet: Any, classifier: Any = None) -> dict:
-    """The SignNet of a run listed on the Models tab, finished, and the classifier: the one given (an id of the
-    Models tab) or the one in use; the road type in use, or None when none is chosen. Each with its id and its
-    weights on this server (the road type with its exported ONNX step and contract)."""
-    if not isinstance(signnet, str) or not RUN_NAME.fullmatch(signnet):
+def choose(root: Path, signnet: Any = None, classifier: Any = None) -> dict:
+    """The SignNet of a run listed on the Models tab (None: the cutter in use, which must be a SignNet), finished and
+    of the car's band and grid, and the classifier: the one given (an id of the Models tab) or the one in use; the
+    road type in use, or None when none is chosen. Each with its id and its weights on this server (the road type
+    with its exported ONNX step and contract)."""
+    if signnet is not None and (not isinstance(signnet, str) or not RUN_NAME.fullmatch(signnet)):
         raise ValueError(f'{signnet!r} is not a run name')
     runs = RunsIndex(Path(root))
     index = ModelIndex(runs)
     artifacts = index.artifacts(('cutter', 'classifier'))
-    finder_id = f'cutter:{signnet}/{SIGNNET_PART}'
-    finder = next((entry for entry in artifacts['cutter'] if entry['id'] == finder_id), None)
-    if finder is None:
-        raise ValueError(f'{signnet} has no SignNet on the Models tab')
+    if signnet is None:
+        finder, why = index.in_use('cutter')
+        if finder is None:
+            raise ValueError(why)
+        if finder.get('kind') != 'signnet':
+            raise ValueError(f'the cutter in use, {finder["id"]}, is an old Detector: choose a SignNet on the Models tab')
+        signnet = finder['run']
+    else:
+        finder_id = f'cutter:{signnet}/{SIGNNET_PART}'
+        finder = next((entry for entry in artifacts['cutter'] if entry['id'] == finder_id), None)
+        if finder is None:
+            raise ValueError(f'{signnet} has no SignNet on the Models tab')
     if not finder['finished']:
         raise ValueError(f'the SignNet of {signnet} has not finished its training')
+    if not finder.get('fits_the_car'):
+        size = (finder.get('input_size') or '?').replace('x', ' x ')
+        raise ValueError(f'the SignNet of {signnet} is {size} at stride {finder.get("stride")}: the comma runs '
+                         f'{CAR_BAND[0]} x {CAR_BAND[1]} at stride {CAR_STRIDE} (its vision.py), so it cannot go on '
+                         'the car')
     if classifier is None:
         chosen, why = index.in_use('classifier')
         if chosen is None:
             raise ValueError(why)
     else:
-        match = MODEL_ID.fullmatch(classifier) if isinstance(classifier, str) and len(classifier) <= MAX_ID else None
-        if match is None or match.group(1) != 'classifier':
+        if role_of(classifier) != 'classifier':
             raise ValueError(f'{classifier!r} is not the id of a classifier')
         chosen = next((entry for entry in artifacts['classifier'] if entry['id'] == classifier), None)
         if chosen is None:
@@ -329,12 +344,12 @@ def _same_record(root: Path, record: dict) -> bool:
         key: item for key, item in record.items() if key != 'recorded_at'}
 
 
-def send_to_car(root: Path, signnet: Any, *, classifier: Any = None, models: Path | None = None,
+def send_to_car(root: Path, signnet: Any = None, *, classifier: Any = None, models: Path | None = None,
                 dry_run: bool = False, today: date | None = None, steps_of: int = 3,
                 exporter: Callable[[dict, Path], dict] | None = None,
                 say: Callable[[str], None] = lambda line: print(line, flush=True)) -> dict:
     """Steps 1 to 3 of "Send to the car" (see the module): the export, its publication when it differs from the
-    published networks, and on-car.json. Returns {'changed', 'commit', 'version', 'record'}."""
+    published networks, and on-car.json; signnet None: the cutter in use. Returns {'changed', 'commit', 'version', 'record'}."""
     root = Path(root)
     models = Path(models or os.environ.get(MODELS_CLONE_ENV) or MODELS_CLONE)
     chosen = choose(root, signnet, classifier)

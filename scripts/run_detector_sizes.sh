@@ -6,12 +6,16 @@ set -euo pipefail
 # detector per input size, one after the other on one GPU, the same way and on the same frozen split; evaluates
 # each on test and on validation; then prints a comparison, also saved as comparison.txt.
 #
-# The detector is the cutter of the pipeline (cutter -> classifier -> decider): a sign it misses is lost, a false
+# The detector was the cutter of the pipeline (cutter -> classifier -> decider): a sign it misses is lost, a false
 # box the classifier can still reject. So the comparison shows recall first: at each score threshold, lowest
 # first (0.05, 0.1, the report's 0.25, 0.3, 0.5), recall overall and by the width of the reviewed box, the boxes
 # per frame passed on to the classifier and the false ones among them, then precision and F1; on all the frames
 # and on the frames a person confirmed. Then the cost of each size: milliseconds per frame of the model alone,
 # seconds per training epoch, GPU memory, and the epoch the validation chose.
+#
+# An old cutter, kept to compare: since 30 Oct 2026 the one cutter is SignNet, the network the comma runs, and the
+# portal's "Train the cutter" is scripts/run_signnet.sh. The detectors this script trains stay on the Models tab as
+# old versions to compare with; they can no longer be put in use (Models > Use this one refuses them).
 #
 # usage: scripts/run_detector_sizes.sh NAME [SIZES...]      sizes WIDTHxHEIGHT, default 320x320 640x360 960x544
 #

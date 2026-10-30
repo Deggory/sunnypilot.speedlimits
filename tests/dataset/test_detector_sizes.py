@@ -1,4 +1,5 @@
-"""The detector's input size (scripts/run_detector_sizes.sh): parsing, the checkpoint keys every rebuild reads,
+"""The detector's input size (scripts/run_detector_sizes.sh, the old cutter: since 30 Oct 2026 the one cutter is
+SignNet, scripts/run_signnet.sh; this one is kept to compare and can no longer be put in use): parsing, the checkpoint keys every rebuild reads,
 the width buckets, thresholds and comparison of the evaluation, the frames without signs per epoch, the flags
 that resume a run, all without torch; then a tiny CPU training at a non-square size with frames without signs,
 its best epoch by validation recall, evaluation, ONNX export and replay rebuild, when a Python with torch is

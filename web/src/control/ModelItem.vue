@@ -7,9 +7,11 @@
 // survive it; the decider: the "Another" road found, on validation and test; the road type: the motorway after a ramp,
 // the road types and the town, then its F1 by road type, its changes of road type and their delay, its false switches
 // and its size), the button that puts it in use and the link to its run on Evaluate (not for the road type, which
-// Evaluate does not show). A SignNet (the cutter made for the car) has its own details and, instead of “Use this
-// one” (it is never the cutter in use here), “Send to the car” (scripts/send_to_car.sh, asked first by the Models tab)
-// and “Try on the comma now” (scripts/try_on_comma.sh: copied straight onto the comma until its next software update).
+// Evaluate does not show). “Use this one” only on a version the server lets be chosen (version.selectable: finished,
+// and for the cutter a SignNet at the car's band; an old Detector is kept to compare), else why not in a small note.
+// A SignNet (the cutter the comma runs) has its own details and, next to “Use this one”, “Send to the car”
+// (scripts/send_to_car.sh, asked first by the Models tab) and “Try on the comma now” (scripts/try_on_comma.sh: copied
+// straight onto the comma until its next software update).
 // “On the car”: one of the networks the comma downloads; “Trying on the comma”: the one copied there now.
 import {computed} from 'vue';
 import {isoWhen, thousands} from '../common/format';
@@ -24,6 +26,8 @@ const emit = defineEmits<{use: [version: ModelVersion]; send: [version: ModelVer
 
 const cutter = computed(() => props.version.role === 'cutter' ? props.version : null);
 const signnet = computed(() => cutter.value?.kind === 'signnet');
+/** A SignNet the comma can run (its band and grid): only it can be tried on or sent to the car. */
+const forCar = computed(() => signnet.value && cutter.value?.fits_the_car !== false);
 const classifier = computed(() => props.version.role === 'classifier' ? props.version : null);
 const decider = computed(() => props.version.role === 'decider' ? props.version : null);
 const roadType = computed(() => props.version.role === 'road_type' ? props.version : null);
@@ -33,7 +37,9 @@ const cut = computed(() => cutter.value?.test ?? cutter.value?.validation ?? nul
 const cutterMetrics = computed((): Metric[] => cutter.value ? metricsOf(cutter.value) : []);
 const cutterCaption = computed(() => cut.value === null ? ''
   : 'Found on the ' + (PARTITION_LABEL[cut.value.partition] ?? cut.value.partition).toLowerCase() + ' at score ' + (cut.value.score_threshold ?? '–')
-    + ', and in the ' + (cut.value.budget?.boxes ?? 5) + ' best boxes of each frame (what the car reads)');
+    + (signnet.value ? ', as the car reads them (its best ' + (cut.value.car?.max_boxes ?? 5) + ' boxes of each frame of score '
+      + (cut.value.car?.score_threshold ?? 0.3) + ' or more)' : '')
+    + ', and in the ' + (cut.value.budget?.boxes ?? 5) + ' best boxes of each frame at any score');
 const evaluated = computed(() => cut.value !== null || (classifier.value?.test ?? null) !== null || (classifier.value?.chain ?? null) !== null
   || decider.value?.validation != null || decider.value?.test != null || roadType.value?.test != null);
 const epoch = computed(() => epochText(props.version.best_epoch, props.version.epochs_run ?? props.version.epochs));
@@ -42,15 +48,20 @@ const rejects = computed(() => classifier.value?.class_scheme !== undefined);
 const chain = computed(() => classifier.value?.chain ?? null);
 const oldChain = computed(() => classifier.value?.chain_old_reader ?? null);
 const classifierMetrics = computed((): Metric[] => classifier.value ? metricsOf(classifier.value) : []);
+/** It can be put in use: the server says so (an older server: finished, and not a SignNet). */
+const selectable = computed(() => props.version.selectable ?? (props.version.finished && !signnet.value));
+/** Why not, in a few words, in place of the button (nothing on the one in use, nor on one still training: its pill
+ * and its line say so). */
+const notSelectable = computed((): string => props.version.in_use || selectable.value || !props.version.finished ? ''
+  : props.version.not_selectable_reason ?? '');
 /** Why the button is off, as its title. */
 const blocked = computed((): string => {
   if (props.readOnly) return 'Read-only: the choice is turned off on this server.';
-  if (!props.version.finished) return 'Its training has not finished: its weights may still change.';
   return '';
 });
 
 /** Send to the car: on a SignNet not on the car yet, or on the one on the car while its build is still owed. */
-const sendable = computed(() => signnet.value && (!props.version.on_car || Boolean(props.car?.pending)));
+const sendable = computed(() => forCar.value && (!props.version.on_car || Boolean(props.car?.pending)));
 const sending = computed(() => props.car?.sending === props.version.run);
 /** Why “Send to the car” is off, as its title. */
 const sendBlocked = computed((): string => {
@@ -63,7 +74,7 @@ const sendBlocked = computed((): string => {
 });
 /** Try on the comma now: on a SignNet neither on the car nor on trial there already. */
 const onTrial = computed(() => signnet.value && props.car?.onTrial === props.version.run);
-const triable = computed(() => signnet.value && !props.version.on_car && !onTrial.value);
+const triable = computed(() => forCar.value && !props.version.on_car && !onTrial.value);
 const trying = computed(() => props.car?.trying === props.version.run);
 /** Why “Try on the comma now” is off, as its title. */
 const tryBlocked = computed((): string => {
@@ -343,24 +354,26 @@ const hourly = (value: number | null): string => value === null ? '–' : value 
 
     <p v-if="!evaluated" class="model-wait">{{ version.finished ? 'Not evaluated: no numbers on the test yet.' : 'Still training, or stopped before its end.' }}</p>
     <p v-for="problem in version.problems" :key="problem" class="note ds-note">{{ problem }}.</p>
-    <p v-if="signnet" class="note model-car-why">Made for the car: never the cutter in use here, where Prepare and the
-      classifier’s training use a detector.</p>
+    <p v-if="notSelectable" class="note model-why-not">{{ notSelectable }}</p>
 
     <div class="model-actions">
       <a v-if="!roadType" class="flow-link" :href="evaluateHref(version)" @click="openRun($event, version)">Open the run ›</a>
-      <span v-if="signnet" class="model-buttons">
-        <button v-if="triable" class="btn small" type="button" :disabled="tryBlocked !== ''"
-                :title="tryBlocked || 'Copies it with the classifier in use straight onto the comma, until its next software update.'"
-                :aria-label="'Try ' + version.run + ' · ' + version.label + ' on the comma now'" :data-try="version.run"
-                @click="emit('try', version)">{{ trying ? 'Copying…' : 'Try on the comma now' }}</button>
-        <button v-if="sendable" class="btn primary small" type="button" :disabled="sendBlocked !== ''" :title="sendTitle"
-                :aria-label="'Send ' + version.run + ' · ' + version.label + ' to the car'" :data-send="version.run"
-                @click="emit('send', version)">{{ sending ? 'Sending…' : version.on_car ? 'Finish sending' : 'Send to the car' }}</button>
-        <span v-else class="model-car-note">The comma runs this one.</span>
+      <span v-if="forCar || (selectable && !version.in_use)" class="model-buttons">
+        <button v-if="selectable && !version.in_use" class="btn small" type="button" :disabled="blocked !== '' || busy !== null"
+                :title="blocked || ROLE_TEXT[version.role].uses"
+                :aria-label="'Use ' + version.run + ' · ' + version.label + ' as the ' + roleLabel.toLowerCase()"
+                @click="emit('use', version)">{{ busy === version.id ? 'Saving…' : 'Use this one' }}</button>
+        <template v-if="forCar">
+          <button v-if="triable" class="btn small" type="button" :disabled="tryBlocked !== ''"
+                  :title="tryBlocked || 'Copies it with the classifier in use straight onto the comma, until its next software update.'"
+                  :aria-label="'Try ' + version.run + ' · ' + version.label + ' on the comma now'" :data-try="version.run"
+                  @click="emit('try', version)">{{ trying ? 'Copying…' : 'Try on the comma now' }}</button>
+          <button v-if="sendable" class="btn primary small" type="button" :disabled="sendBlocked !== ''" :title="sendTitle"
+                  :aria-label="'Send ' + version.run + ' · ' + version.label + ' to the car'" :data-send="version.run"
+                  @click="emit('send', version)">{{ sending ? 'Sending…' : version.on_car ? 'Finish sending' : 'Send to the car' }}</button>
+          <span v-else class="model-car-note">The comma runs this one.</span>
+        </template>
       </span>
-      <button v-else-if="!version.in_use" class="btn small" type="button" :disabled="blocked !== '' || busy !== null" :title="blocked || ROLE_TEXT[version.role].uses"
-              :aria-label="'Use ' + version.run + ' · ' + version.label + ' as the ' + roleLabel.toLowerCase()"
-              @click="emit('use', version)">{{ busy === version.id ? 'Saving…' : 'Use this one' }}</button>
     </div>
   </li>
 </template>

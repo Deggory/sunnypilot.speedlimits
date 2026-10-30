@@ -3,9 +3,10 @@
 // card each with its numbers; then the versions of one of them (the switch, or a tap on its card) as a table to
 // compare: the numbers that judge that role in columns, the one in use marked; a row opens its whole card (ModelItem:
 // details, Use this one, the run). A role has no model in use until someone picks one: there is no default. The
-// networks the comma downloads (models/on-car.json, written by nnslr on-car) are marked “on the car”: SignNet, the
-// cutter made for the car, is listed with the cutters but is never the one in use here: its card has “Send to the car”
-// instead (scripts/send_to_car.sh: it and the classifier in use published for the comma, the sunnypilot speed-limits
+// networks the comma downloads (models/on-car.json, written by nnslr on-car) are marked “on the car”. The cutter is
+// SignNet, the same network the comma runs: one at the car's band can be put in use; the old Detectors are listed to
+// compare only (an old one still in use says so on its card). A SignNet's card also has “Send to the car”
+// (scripts/send_to_car.sh: it and the classifier in use published for the comma, the sunnypilot speed-limits
 // branch moved, psa-torque-sunny-testing built), whose job shows here while it runs, and “Try on the comma now”
 // (scripts/try_on_comma.sh: the same two networks copied straight onto the comma, checked first with its own code, until
 // its next software update; models/on-comma-trial.json), with “Back to the build's networks”. The runs themselves are on
@@ -56,6 +57,12 @@ const roleOptions = computed(() => roles.value.map((role) => ({key: role.role, l
 
 /** The version in use of a role, or null (none chosen, or its files are gone). */
 const inUseOf = (role: RoleModels): ModelVersion | null => role.versions.find((version) => version.in_use) ?? null;
+/** The cutter in use is an old Detector, chosen before SignNet could be (the server says so; an older one: not a SignNet). */
+function oldInUse(role: RoleModels): boolean {
+  if (role.role !== 'cutter') return false;
+  const used = inUseOf(role);
+  return role.old_kind_in_use ?? (used?.role === 'cutter' && used.kind !== 'signnet');
+}
 /** The version of a role that runs on the comma, or null. */
 const carOf = (role: RoleModels): ModelVersion | null => role.versions.find((version) => version.on_car) ?? null;
 /** A SignNet in a few words, to tell its versions apart in the table: "grid 8 px", "grid 4 px · 25 % of the drives". */
@@ -195,6 +202,7 @@ async function choose(version: ModelVersion): Promise<void> {
           <span class="inuse-when">{{ fallbackOf(role) ? 'Prepare uses the newest, ' + fallbackOf(role)?.label + ' ' + isoWhen(fallbackOf(role)?.trained_at ?? null) + ', until you pick one.'
             : role.versions.length ? 'There is no default.' : ROLE_TEXT[role.role].emptyMore }}</span>
         </template>
+        <span v-if="oldInUse(role)" class="inuse-old">{{ role.notice ?? 'The cutter in use is an old Detector: choose a SignNet.' }}</span>
         <span v-if="carOf(role)" class="inuse-car">{{ carOf(role) === inUseOf(role) ? 'Also on the car' : 'On the car: ' + carOf(role)?.label }}</span>
         <span class="inuse-more">{{ role.versions.length }} {{ role.versions.length === 1 ? 'version' : 'versions' }} ›</span>
       </button>
@@ -248,9 +256,11 @@ async function choose(version: ModelVersion): Promise<void> {
         {{ carJob.run ? 'SignNet ' + carJob.run + ', ' : '' }}{{ startedWhen(carJob) }} ·
         {{ carJob.state === 'interrupted' ? 'stopped' : JOB_STATE[carJob.state][0] }} ·
         <button type="button" class="link-button" @click="emit('details', carJob)">Details</button></p>
-      <p v-if="pickedRole.role === 'cutter'" class="note models-foot">Speed signs and Every sign: found at score {{ payload.cutter_score_threshold }},
-        however many boxes it passes on (a detector a couple of hundred a frame, SignNet a few). In {{ payload.box_budget ?? 5 }} boxes: the
-        speed signs among its {{ payload.box_budget ?? 5 }} best boxes of each frame, as the car reads them.</p>
+      <p v-if="pickedRole.role === 'cutter'" class="note models-foot">As the car reads: a SignNet’s speed signs among its
+        {{ payload.box_budget ?? 5 }} best boxes of each frame of score 0.3 or more, those the comma keeps (best 5 at 0.3). Speed signs and
+        Every sign: found at score {{ payload.cutter_score_threshold }}, however many boxes it passes on (an old Detector a couple of hundred a
+        frame, SignNet a few). Best {{ payload.box_budget ?? 5 }}, any score: the speed signs among its {{ payload.box_budget ?? 5 }} best boxes
+        of each frame, whatever their score.</p>
       <p class="note models-foot">The numbers compare only on the same test: the older versions were measured on fewer signs (the count
         under each number). The choice is kept in <code>{{ payload.active_file }}</code> of the data root; it copies, exports and
         deploys nothing: nothing on the comma changes. Only Send to the car, on a SignNet, changes what the comma

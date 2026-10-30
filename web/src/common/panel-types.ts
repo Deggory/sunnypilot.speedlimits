@@ -6,9 +6,8 @@ export type ActionName = 'fetch' | 'prepare' | 'prepare_again' | 'measure_propos
   | 'road_types' | 'send_to_car' | 'try_on_comma' | 'comma_restore' | 'mapillary_locations';
 /** What a cutter learns to find: every sign (the speed signs and the other signs) or the speed signs only. */
 export type CutterFamilies = 'all' | 'speed';
-/** The options of “Train the cutter” (POST /api/panel/run/train_cutter {"size", "families"}). */
+/** The options of “Train the cutter” (POST /api/panel/run/train_cutter {"families"}): a SignNet at the car's band. */
 export interface CutterOptions {
-  size: string;
   families: CutterFamilies;
 }
 /** Who proposes the signs of a route (nnslr preannotate --proposer). */
@@ -44,10 +43,9 @@ export interface ProposersPayload {
   /** The proposer measured best that can run here (most speed signs read right), or null. */
   best?: Proposer | null;
 }
-/** The options of an action: the cutter's size and signs, the proposer of a preparation, or what an AI review
+/** The options of an action: the signs the cutter finds, the proposer of a preparation, or what an AI review
  * reviews (the route, the provider, save yes or no, how many frames at most, as text). */
 export interface ActionOptions {
-  size?: string;
   families?: CutterFamilies;
   proposer?: Proposer;
   route?: string;
@@ -104,8 +102,10 @@ export interface EpochPoint {
   val_loss?: number;
   train_accuracy?: number;
   val_accuracy?: number;
-  /** The detector: its validation recall at score 0.1. */
+  /** The detector: its validation recall at score 0.1; SignNet: the signs found in its 5 best boxes of each frame. */
   val_recall?: number;
+  /** SignNet: its false boxes per frame among those 5 on validation. */
+  val_false_per_frame?: number;
   /** The classifier with “not a sign”: the sign crops read right and the “not a sign” crops rejected on validation, and
    * their mean, which chooses its best epoch. */
   val_sign_accuracy?: number;
@@ -123,8 +123,8 @@ export interface TrainingCurve {
 }
 
 /** The networks with curves: the pipeline’s detector and reader, the classifier with “not a sign” and its pretraining
- * on the Mapillary signs alone (pretrain). */
-export type CurveNet = 'detector' | 'reader' | 'classifier' | 'pretrain';
+ * on the Mapillary signs alone (pretrain), SignNet (the cutter the comma runs). */
+export type CurveNet = 'detector' | 'reader' | 'classifier' | 'pretrain' | 'signnet';
 
 export interface StepProgress {
   done: number;
@@ -357,8 +357,8 @@ export interface PanelStatus {
   ai_live?: AiLive | null;
   dataset: DatasetSummary | null;
   training_starts: TrainingStart[];
-  /** The choices of “Train the cutter”: its input sizes and the default one, what it finds and the default. */
-  cutter_options?: {sizes: string[]; size: string; families: CutterFamilies[]; family: CutterFamilies};
+  /** The choices of “Train the cutter”: what it finds and the default, and the car's band it is trained at ("896x288"). */
+  cutter_options?: {families: CutterFamilies[]; family: CutterFamilies; band: string};
   /** The Mapillary switch of “Train the classifier”: whether its crops are prepared (helpers/mapillary.sh), how many
    * and of how many labels, and why not when they are not. */
   classifier_options?: {mapillary: {available: boolean; crops: number; labels: number; reason: string};
@@ -409,7 +409,7 @@ export type RunState = 'running' | 'finished' | 'incomplete';
  * scripts/run_experiment_b.sh alone, 'done' when its three variants have a result; mine, classifier, chain for a run of
  * scripts/run_classifier.sh, 'done' when its chain is measured. */
 export type RunStage = 'checks' | 'detector' | 'reader' | 'evaluate' | 'export' | 'bundle' | 'experiment' | 'mine' | 'classifier'
-  | 'chain' | 'done';
+  | 'chain' | 'signnet' | 'done';
 
 export interface RunStart {
   /** Where the weights came from; null when not recorded (a fresh run before its detector finished). */
@@ -443,10 +443,11 @@ export interface ClassifierNumbers {
   class_scheme?: string | null;
 }
 
-/** The chain end to end (cutter -> classifier) at the cutter's score 0.1: the speed signs found and read right. */
+/** The chain end to end (cutter -> classifier) at its report's main score of the cutter (a SignNet's 0.3, the car's
+ * floor; a Detector's 0.1): the speed signs found and read right. */
 export interface ChainNumbers {
   score_threshold: number;
-  /** Measured at 0.1 (else at the report's main score). */
+  /** Measured at the report's main score (else at 0.1, else at its first score). */
   at_chain_score: boolean;
   truth: number | null;
   found: number | null;
@@ -472,9 +473,13 @@ export interface ChainNumbers {
   classifier_id?: string | null;
 }
 
-/** One size of the cutter (scripts/run_detector_sizes.sh) in a line: at score 0.1 on test (else validation). */
+/** One size of an old Detector (scripts/run_detector_sizes.sh) in a line: at score 0.1 on test (else validation); or
+ * the SignNet of a run (kind 'signnet') as the car reads it: its best max_boxes boxes of score 0.3 or more. */
 export interface CutterLine {
-  size: string;
+  /** 'signnet': a SignNet run's line; missing or 'detector': a size of an old Detector. */
+  kind?: 'detector' | 'signnet';
+  /** "1344x760"; a SignNet's band ("896x288"), null when its result does not say. */
+  size: string | null;
   families: CutterFamilies;
   finished: boolean;
   evaluated: boolean;
@@ -488,12 +493,17 @@ export interface CutterLine {
   boxes_per_frame: number | null;
   false_per_frame: number | null;
   ms_per_frame: number | null;
+  /** A SignNet: the boxes a frame the car keeps (5). */
+  max_boxes?: number;
+  /** A SignNet: band 896 × 288 and grid 8, the comma's vision.py runs it as it is. */
+  fits_the_car?: boolean;
 }
 
 export interface RunSummary {
   name: string;
   /** training: the pipeline of helpers/3_train.sh; experiment: a folder with experiment B only; classifier: a run of
-   * scripts/run_classifier.sh (the classifier with “not a sign”); cutter: a run of scripts/run_detector_sizes.sh alone. */
+   * scripts/run_classifier.sh (the classifier with “not a sign”); cutter: a SignNet run (scripts/run_signnet.sh), or an
+   * old Detector run of scripts/run_detector_sizes.sh. */
   kind: 'training' | 'experiment' | 'classifier' | 'cutter';
   state: RunState;
   stage: RunStage;
@@ -529,10 +539,10 @@ export interface RunSummary {
   /** The classifier with “not a sign” on the test crops, and its best validation epoch. */
   classifier: (ClassifierNumbers & {best_validation_balanced_accuracy: number | null; best_validation_accuracy: number | null;
     best_epoch: number | null}) | null;
-  /** The chain at the cutter's score 0.1 with this classifier, and with the old reader. */
+  /** The chain at its report's main score of the cutter with this classifier, and with the old reader. */
   chain: ChainNumbers | null;
   chain_old_reader: ChainNumbers | null;
-  /** The detectors of scripts/run_detector_sizes.sh in this run, smallest first. */
+  /** The detectors of scripts/run_detector_sizes.sh in this run, smallest first; a SignNet run: its one line. */
   cutters: CutterLine[] | null;
   /** Experiment B variants with a result.json. */
   experiment_b: string[];
@@ -839,8 +849,11 @@ export interface RunDetail extends RunSummary {
   experiment: ExperimentB | null;
   /** What scripts/run_classifier.sh wrote here (a run of its own, or into a run of the pipeline). */
   classifier_run: ClassifierRun | null;
-  /** What scripts/run_detector_sizes.sh wrote here: each size as the Models tab judges a cutter, the comparison. */
+  /** What scripts/run_detector_sizes.sh wrote here (an old Detector run): each size as the Models tab judges a
+   * cutter, the comparison. */
   cutter_run: {sizes: CutterSize[]; comparison: string | null} | null;
+  /** A SignNet run (scripts/run_signnet.sh, or by hand): its result.json; null for other runs and older servers. */
+  signnet_run?: SignNetRun | null;
   /** The reports of this run the Watch panel can play (only which files exist). */
   watch: WatchModel[];
 }
@@ -966,6 +979,48 @@ export interface WatchPayloadRows extends Omit<WatchPayload, 'frames'> {
   frames: WatchFrameRows[];
 }
 
+/** What the car reads of a SignNet on one partition: its best max_boxes boxes of each frame of score score_threshold
+ * or more (5 at 0.3; signnet.car_measure, by_score_threshold['0.3'] for an older result.json). */
+export interface SignNetCar {
+  recall: number | null;
+  false_per_frame: number | null;
+  found: number | null;
+  truth_boxes: number | null;
+  /** The speed signs alone (a SignNet of every sign). */
+  speed_recall: number | null;
+  boxes_per_frame: number | null;
+  score_threshold: number;
+  max_boxes: number;
+}
+
+/** A SignNet on one partition: the signs found and the false boxes per frame among its 5 best boxes of each frame at
+ * any score (what its training keeps the best epoch by), and car: as the car reads them (null when not measured). */
+export interface SignNetNumbers {
+  recall: number | null;
+  false_per_frame: number | null;
+  /** Missing from an older server. */
+  car?: SignNetCar | null;
+}
+
+/** A SignNet run in a few numbers (nnslr_tools.runs): its shape, its training, and on validation and test the signs
+ * found and the false boxes per frame, as the car reads them and among its 5 best boxes at any score. */
+export interface SignNetRun {
+  /** [width, height] of the band at the top of the frame: [896, 288] on the car. */
+  band: [number, number] | null;
+  stride: number | null;
+  fuse_kernel: number | null;
+  widths: number[] | null;
+  parameters: number | null;
+  epochs: number | null;
+  best_epoch: number | null;
+  families: CutterFamilies | null;
+  split_sha256: string | null;
+  /** Band 896 × 288 and grid 8: the comma's vision.py runs it as it is. */
+  fits_the_car: boolean;
+  validation: SignNetNumbers | null;
+  test: SignNetNumbers | null;
+}
+
 export interface CutterSize {
   size: string;
   /** "960 × 544". */
@@ -1023,10 +1078,16 @@ export interface CutterNumbers {
   families: CutterFamilies | null;
   /** Recall by family at this score (newer reports): the speed signs, and the other signs for a cutter of every sign. */
   by_family: Record<string, {truth: number; found: number; recall: number | null}> | null;
-  /** The signs among the box_budget best boxes of each frame, what the car reads; null when the report did not keep
-   * its boxes frame by frame. */
+  /** The signs among the box_budget best boxes of each frame at any score; null when the report did not keep its
+   * boxes frame by frame. */
   budget?: {boxes: number; truth_boxes: number; found: number; recall: number | null;
             by_family: Record<string, {truth: number; found: number; recall: number | null}> | null} | null;
+  /** A SignNet: what the car reads, its best max_boxes boxes of each frame of score score_threshold or more (5 at 0.3);
+   * null when not measured, missing from an older server and for an old Detector. */
+  car?: {images: number | null; truth_boxes: number | null; found: number | null; false_boxes: number | null; recall: number | null;
+         precision: number | null; boxes_per_frame: number | null; false_per_frame: number | null;
+         by_family: Record<string, {truth: number; found: number; recall: number | null}> | null;
+         score_threshold: number; max_boxes: number} | null;
 }
 
 /** An experiment B variant on one partition: whom the sign applies to, and the reading. */
@@ -1057,6 +1118,10 @@ interface ModelBase {
   /** Its training wrote result.json: the weights no longer change. */
   finished: boolean;
   in_use: boolean;
+  /** It can be put in use (finished, and for the cutter a SignNet the car runs); absent on older servers. */
+  selectable?: boolean;
+  /** Why it cannot, in a few words ("An old Detector: kept to compare."). */
+  not_selectable_reason?: string;
   /** One of the networks the comma downloads (models/on-car.json). */
   on_car?: boolean;
   /** Files that exist but cannot be read. */
@@ -1070,13 +1135,15 @@ interface ModelBase {
 
 export interface CutterModel extends ModelBase {
   role: 'cutter';
-  /** A detector (can be in use here) or a SignNet, the small finder made for the comma's GPU (never in use here). */
+  /** SignNet, the cutter the comma runs (the one to put in use), or an old Detector, kept to compare. */
   kind?: 'detector' | 'signnet';
   /** "320x320" (a SignNet: its band); recorded false: the default, from before the size was recorded. */
   input_size: string;
   input_size_recorded: boolean;
   /** null for a SignNet: no default boxes. */
   anchor_min_ratio: number | null;
+  /** A SignNet at the comma's band (896 × 288) and grid (8 px): it can be tried on and sent to the car. */
+  fits_the_car?: boolean;
   /** A SignNet: its output grid step in pixels, its weights, the share of the training drives it saw (null: all). */
   stride?: number | null;
   parameters?: number | null;
@@ -1245,6 +1312,10 @@ export interface RoleModels {
   versions: ModelVersion[];
   /** null: nobody picked one yet (there is no default). */
   active: ActiveModel | null;
+  /** The cutter in use is an old Detector (chosen before SignNet could be): a SignNet should be chosen. */
+  old_kind_in_use?: boolean;
+  /** That in one line for the page ("The cutter in use is an old Detector: choose a SignNet."). */
+  notice?: string;
 }
 
 export interface ModelsPayload {
@@ -1254,7 +1325,7 @@ export interface ModelsPayload {
   active_file: string;
   runs_dir_exists: boolean;
   cutter_score_threshold: number;
-  /** The boxes a frame the car reads (the "In 5 boxes" measure). */
+  /** The boxes a frame the car keeps (the "Best 5, any score" measure; the car also drops those below 0.3). */
   box_budget?: number;
   /** What runs on the comma: the published models commit (models/on-car.json); null when nothing was recorded. */
   on_car?: {repository: string | null; commit: string | null; version: string | null; recorded_at: string | null} | null;

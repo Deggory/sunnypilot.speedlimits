@@ -31,8 +31,9 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
   if (name === 'train_cutter') {
     const what = options?.families === 'speed' ? 'the speed signs only' : 'the speed signs and the other signs';
     return {title: 'Train the cutter?', action: 'Start training',
-      text: 'Trains a detector at ' + (options?.size ?? 'the default size').replace('x', ' × ') + ' that finds ' + what
-        + ' on the GPU, then measures it on test and validation: it takes hours. Its run is a new one, named by the time it starts.'};
+      text: 'Trains SignNet, the cutter the comma runs, then measures it on validation and test. It finds ' + what
+        + ' in the 896 × 288 band at the top of the frame: about 80 minutes on the GPU. Its run is a new one, named by '
+        + 'the time it starts.'};
   }
   if (name === 'train_road_type') {
     return {title: 'Train the road type?', action: 'Start training',

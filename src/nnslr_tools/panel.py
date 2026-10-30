@@ -1,7 +1,7 @@
 # [control-panel] - START
 """Control panel of the review site: the state of every route, the machine, and buttons that run
 the easy helpers (helpers/fetch_comma_segments.sh, helpers/1_prepare.sh, helpers/3_train.sh,
-helpers/update.sh; scripts/run_detector_sizes.sh for the cutter and scripts/run_classifier.sh for the
+helpers/update.sh; scripts/run_signnet.sh for the cutter and scripts/run_classifier.sh for the
 classifier with "not a sign"; helpers/ai_review.sh and helpers/measure_ai_reviewer.sh for the AI reviewer of
 Settings) in the background with a live log.
 
@@ -32,7 +32,7 @@ from pathlib import Path
 from nnslr_tools.car_release import CAR_SCRIPT, build_pending, car_missing
 from nnslr_tools.comma_trial import TRY_SCRIPT, CommaProbe, read_trial, trial_missing
 from nnslr_tools.job_progress import last_line, progress, with_step_progress
-from nnslr_tools.model_roles import SIGNNET_PART, ModelChoiceError, ModelIndex
+from nnslr_tools.model_roles import NOT_SELECTABLE, SIGNNET_PART, ModelChoiceError, ModelIndex
 from nnslr_tools.runs import RunsIndex, WatchError
 
 REPO = Path(__file__).resolve().parents[2]
@@ -59,10 +59,12 @@ OLD_WRAPPERS = ('"$@"; code=$?; echo; echo "== finito con codice $code"; exit $c
 RUN_NAME = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,99}')
 RUN_LINE = re.compile(r'^== d\. training (\S+) \(', re.M)
 # The classifier's and the cutter's trainings: the panel names their run after the command ("== scripts/run_classifier.sh
-# <run>", "== scripts/run_detector_sizes.sh <run> <size>", the first line of the log), and the script says it again near
-# its top ("run:          <run>").
+# <run>", "== scripts/run_signnet.sh <run>", the first line of the log), and the script says it again near its top
+# ("run:          <run>").
 CLASSIFIER_SCRIPT = 'scripts/run_classifier.sh'
-CUTTER_SCRIPT = 'scripts/run_detector_sizes.sh'
+# The cutter is SignNet, the network the comma runs, trained with the car's setup (896 x 288, stride 8). The jobs of
+# the old cutter, a detector of scripts/run_detector_sizes.sh NAME SIZE, still name their run (RUN_LINES).
+CUTTER_SCRIPT = 'scripts/run_signnet.sh'
 # The decider: experiment B, its three variants (the crop alone; with position and speed; with the scene), on a run of
 # its own (start() adds <time>-decider).
 DECIDER_SCRIPT = 'scripts/run_experiment_b.sh'
@@ -81,7 +83,8 @@ NETWORK_PACKAGES_SHOWN = 5
 RUN_ARGUMENT_LINE = re.compile(r'^run:\s+(\S+)\s*$', re.M)
 RUN_LINES = {
     'train_classifier': (re.compile(r'^== scripts/run_classifier\.sh (\S+)\s*$', re.M), RUN_ARGUMENT_LINE),
-    'train_cutter': (re.compile(r'^== scripts/run_detector_sizes\.sh (\S+)(?: \S+)*\s*$', re.M), RUN_ARGUMENT_LINE),
+    'train_cutter': (re.compile(r'^== scripts/run_signnet\.sh (\S+)\s*$', re.M),
+                     re.compile(r'^== scripts/run_detector_sizes\.sh (\S+)(?: \S+)*\s*$', re.M), RUN_ARGUMENT_LINE),
     'train_decider': (re.compile(r'^== scripts/run_experiment_b\.sh (\S+)\s*$', re.M), RUN_ARGUMENT_LINE),
     'train_road_type': (re.compile(r'^== scripts/run_road_type\.sh (\S+)\s*$', re.M), RUN_ARGUMENT_LINE),
     # The SignNet being sent ("== Send to the car: SignNet <run>, classifier <id>"), for the Models tab.
@@ -90,16 +93,15 @@ RUN_LINES = {
 }
 # The actions that take a SignNet of the Models tab ({'signnet': run}).
 SIGNNET_ACTIONS = ('send_to_car', 'try_on_comma')
-# The cutter's training: one input size of the detector (scripts/run_detector_sizes.sh NAME SIZE), and the boxes it
-# learns to find (NNSLR_CUTTER_FAMILIES): every sign (the speed signs and the other signs) or the speed signs only.
-CUTTER_SIZES = ('640x360', '960x544', '1344x760')
-CUTTER_SIZE = '1344x760'
+# The cutter's training (scripts/run_signnet.sh NAME): the car's band, always, and the boxes it learns to find
+# (NNSLR_CUTTER_FAMILIES): every sign (the speed signs and the other signs) or the speed signs only.
+CUTTER_BAND = '896x288'
 CUTTER_FAMILIES = ('all', 'speed')
 CUTTER_FAMILY = 'all'
 # The options an action takes, besides a training's start and the run to resume (checked by Panel.start).
 # The GPU memory Qwen3-VL-8B takes in float16 (scripts/setup_vlm.sh: 17.5 GB), with a margin for one frame.
 QWEN_GPU_MB = 18 * 1024
-ACTION_OPTIONS = {'train_cutter': ('size', 'families'), 'train_classifier': ('mapillary', 'region', 'share'),
+ACTION_OPTIONS = {'train_cutter': ('families',), 'train_classifier': ('mapillary', 'region', 'share'),
                   'prepare': ('proposer',), 'prepare_again': ('proposer',),
                   'measure_proposer': ('proposer',), 'networks_publish': ('package',), 'send_to_car': ('signnet',),
                   'try_on_comma': ('signnet',),
@@ -145,15 +147,17 @@ def _run_of(log: Path, action: str = 'train') -> str | None:
             return match.group(1)
     return None
 
-# The trainings whose log starts with how they were launched (scripts/run_detector_sizes.sh, run_classifier.sh,
-# run_experiment_b.sh): "sizes:        1344x760", "settings:     --epochs 20 --batch-size 8 ... --pretrained".
+# The trainings whose log starts with how they were launched (scripts/run_signnet.sh, run_classifier.sh,
+# run_experiment_b.sh, and the old scripts/run_detector_sizes.sh): "band:         896x288", "sizes:        1344x760",
+# "settings:     --epochs 20 --batch-size 8 ... --pretrained".
 SETTING_LINE = re.compile(r'^([a-z][a-z ]{1,20}):\s+(.+)$')
 FAMILY_TEXT = {'all': 'every sign', 'speed': 'speed signs only'}
 
 
 def _settings_of(log: Path, action: str) -> list[str]:
     """How a training of the cutter, the classifier or the decider was launched, as short chips from the head of
-    its log: ["1344 × 760", "speed signs only", "20 epochs", "batch 8", "pretrained"]; [] for other jobs."""
+    its log: ["896 × 288", "every sign", "stride 8", "40 epochs", "batch 16", "learning rate 0.003"], ["1344 × 760",
+    "speed signs only", "20 epochs", "batch 8", "pretrained"]; [] for other jobs."""
     if action not in ('train_cutter', 'train_classifier', 'train_decider', 'train_road_type'):
         return []
     try:
@@ -175,10 +179,18 @@ def _settings_of(log: Path, action: str) -> list[str]:
     if pretraining:
         flags = {**{key: value for key, value in pretraining.items() if key.startswith('--mapillary')}, **flags}
     chips = []
+    if fields.get('band'):
+        chips.append(fields['band'].replace('x', ' × '))
+    elif flags.get('--band-width'):
+        chips.append('band ' + flags['--band-width'])
     if fields.get('sizes'):
         chips += [size.replace('x', ' × ') for size in fields['sizes'].split()]
-    if flags.get('--cutter-families'):
-        chips.append(FAMILY_TEXT.get(flags['--cutter-families'], flags['--cutter-families']))
+    # The detector's flag (--cutter-families) and SignNet's (--families).
+    families = flags.get('--cutter-families') or flags.get('--families')
+    if families:
+        chips.append(FAMILY_TEXT.get(families, families))
+    if flags.get('--stride'):
+        chips.append('stride ' + flags['--stride'])
     if flags.get('--classes'):
         chips.append('classes ' + flags['--classes'])
     if pretraining:
@@ -194,8 +206,10 @@ def _settings_of(log: Path, action: str) -> list[str]:
         chips.append(epochs + ' epochs')
     if flags.get('--patience'):
         chips.append('patience ' + flags['--patience'])
-    if flags.get('--batch-size'):
-        chips.append('batch ' + flags['--batch-size'])
+    if flags.get('--batch-size') or flags.get('--batch'):
+        chips.append('batch ' + (flags.get('--batch-size') or flags['--batch']))
+    if flags.get('--learning-rate'):
+        chips.append('learning rate ' + flags['--learning-rate'])
     if flags.get('--num-workers'):
         chips.append(flags['--num-workers'] + ' workers')
     if flags.get('--anchor-min-ratio'):
@@ -257,8 +271,8 @@ ACTIONS = {
     # The classifier with "not a sign": the false boxes of the cutter in use mined, the classifier trained on them,
     # measured alone and in the chain, on a run of its own (its name is added by start(): <time>-classifier).
     'train_classifier': {'label': 'Train the classifier', 'group': 'train', 'command': [CLASSIFIER_SCRIPT]},
-    # The cutter: one detector of the size chosen, trained and measured on test and validation, on a run of its own
-    # (start() adds <time>-cutter and the size; {'size', 'families'}).
+    # The cutter: a SignNet with the car's setup (896 x 288, stride 8), trained and measured on validation and test, on
+    # a run of its own (start() adds <time>-cutter; {'families'}).
     'train_cutter': {'label': 'Train the cutter', 'group': 'train', 'command': [CUTTER_SCRIPT]},
     'train_decider': {'label': 'Train the decider', 'group': 'train', 'command': [DECIDER_SCRIPT]},
     'train_road_type': {'label': 'Train the road type', 'group': 'train', 'command': [ROAD_TYPE_SCRIPT]},
@@ -304,6 +318,8 @@ ACTIVITIES = (
     ('train', 'dataset and training', 'helpers/3_train.sh'),
     ('train', 'GPU training', 'run_v100_baseline.sh'),
     ('train', 'classifier training', 'run_classifier.sh'),
+    ('train', 'cutter training', 'run_signnet.sh'),
+    ('train', 'cutter training', 'nnslr train-signnet'),
     ('train', 'cutter training', 'run_detector_sizes.sh'),
     ('train', 'road type training', 'run_road_type.sh'),
     ('update', 'code update', 'helpers/update.sh'),
@@ -679,8 +695,7 @@ class Panel:
         payload['actions'] = self._action_states(payload, activities, ai_providers=ai_providers)
         # [ai-reviewer] - END
         # The choices of "Train the cutter", for its buttons.
-        payload['cutter_options'] = {'sizes': list(CUTTER_SIZES), 'size': CUTTER_SIZE, 'families': list(CUTTER_FAMILIES),
-                                     'family': CUTTER_FAMILY}
+        payload['cutter_options'] = {'families': list(CUTTER_FAMILIES), 'family': CUTTER_FAMILY, 'band': CUTTER_BAND}
         # The Mapillary switch of "Train the classifier": whether its crops are prepared (helpers/mapillary.sh), and
         # the regions its photos can be chosen by (helpers/mapillary_locations.sh).
         from nnslr_tools.mapillary import crops_state, regions_state
@@ -698,8 +713,10 @@ class Panel:
         """A training started from a terminal (helpers/3_train.sh) is no job of the panel: its progress comes
         from the log the helper writes itself, the newest data/logs/train-<run>.log; the classifier's
         (scripts/run_classifier.sh) from the newest data/runs/<run>/classifier.log; the cutter's
-        (scripts/run_detector_sizes.sh) from the newest data/runs/<run>/detector-sizes/<size>.log, which holds the
-        training of a size alone (its epochs: the checks before it are over)."""
+        (scripts/run_signnet.sh) from the newest data/runs/<run>/signnet.log, or the train.log of a SignNet trained by
+        hand (a run with signnet-best.pt); the old detector's (scripts/run_detector_sizes.sh) from the newest
+        data/runs/<run>/detector-sizes/<size>.log, which holds the training of a size alone. The cutter's logs are read
+        as its training step (its epochs: the checks before it are over)."""
         from_panel = any(job['state'] == 'running' and ACTIONS[job['action']]['group'] == 'train'
                          for job in payload['jobs'])
         trainings = [item for item in payload['activities'] if item['group'] == 'train']
@@ -707,19 +724,25 @@ class Panel:
             return
         terminal = {'classifier training': 'train_classifier', 'cutter training': 'train_cutter',
                     'road type training': 'train_road_type'}
-        patterns = (('train', 'logs/train-*.log'), ('train_classifier', 'runs/*/classifier.log'),
-                    ('train_cutter', 'runs/*/detector-sizes/*.log'), ('train_road_type', 'runs/*/road-type.log'))
-        for action, pattern in patterns:
+        patterns = (('train', ('logs/train-*.log',)), ('train_classifier', ('runs/*/classifier.log',)),
+                    ('train_cutter', ('runs/*/signnet.log', 'runs/*/train.log', 'runs/*/detector-sizes/*.log')),
+                    ('train_road_type', ('runs/*/road-type.log',)))
+        for action, globs in patterns:
             items = [item for item in trainings if terminal.get(item['label'], 'train') == action]
-            logs = sorted(self.root.glob(pattern), key=lambda path: path.stat().st_mtime) if items else []
+            found = [path for pattern in globs for path in self.root.glob(pattern) if items]
+            # A train.log of a run is a SignNet's only next to its weights.
+            found = [path for path in found if path.name != 'train.log' or (path.parent / 'signnet-best.pt').is_file()]
+            logs = sorted(found, key=lambda path: path.stat().st_mtime)
             if not logs:
                 continue
             size = logs[-1].stat().st_size
             with logs[-1].open('rb') as log:
                 log.seek(max(0, size - PROGRESS_BYTES))
                 text = log.read().decode('utf-8', 'replace')
-            if action == 'train_cutter':
+            if action == 'train_cutter' and logs[-1].parent.name == 'detector-sizes':
                 text = '== 3/4 Train the detector at ' + logs[-1].stem + ' ==\n' + text
+            elif action == 'train_cutter':
+                text = '== 3/3 Train SignNet ==\n' + text
             result = progress(action, 'running', text)
             for item in items:
                 item['progress'] = result
@@ -1319,7 +1342,7 @@ class Panel:
     def start(self, action: str, options: dict | None = None) -> dict:
         """Starts an action. The only options are the starting point of a training ({'start': key} of
         training_starts()), turned into a flag or the environment of helpers/3_train.sh, the run to resume, and the
-        cutter's size and families (one of CUTTER_SIZES, CUTTER_FAMILIES), the route, provider, save and limit of an AI
+        cutter's families (one of CUTTER_FAMILIES), the route, provider, save and limit of an AI
         action (_ai_arguments), and whether the classifier adds the Mapillary signs ('on', 'off', or 'pretrain': first
         on them alone, then on ours from those weights): never a command.
         The classifier's and the cutter's trainings run on a new run named here (new_run_name)."""
@@ -1327,9 +1350,12 @@ class Panel:
             raise PanelError(404, 'unknown_action', 'Unknown action.')
         start_env = {}
         start_args = []
-        for key in ('size', 'families'):
-            if (options or {}).get(key) is not None and key not in ACTION_OPTIONS.get(action, ()):
-                raise PanelError(400, 'bad_option', 'Only "Train the cutter" takes a ' + ('size' if key == 'size' else 'choice of signs') + '.')
+        if (options or {}).get('size') is not None:
+            # The cutter is trained at the car's band only (CUTTER_BAND): no action takes a size any more.
+            raise PanelError(400, 'bad_option', 'The cutter is trained at the comma’s band, ' + CUTTER_BAND.replace('x', ' × ')
+                             + ': no size to choose.')
+        if (options or {}).get('families') is not None and 'families' not in ACTION_OPTIONS.get(action, ()):
+            raise PanelError(400, 'bad_option', 'Only "Train the cutter" takes a choice of signs.')
         # [ai-reviewer] - START
         for key in AI_OPTIONS:
             value = (options or {}).get(key)
@@ -1368,10 +1394,7 @@ class Panel:
                     raise PanelError(409, 'gpu_taken', taken + '.')
             start_env['NNSLR_PROPOSER'] = proposer
         if action == 'train_cutter':
-            size = (options or {}).get('size') or CUTTER_SIZE
             families = (options or {}).get('families') or CUTTER_FAMILY
-            if size not in CUTTER_SIZES:
-                raise PanelError(400, 'bad_option', 'Unknown size of the cutter: ' + ', '.join(CUTTER_SIZES) + '.')
             if families not in CUTTER_FAMILIES:
                 raise PanelError(400, 'bad_option', 'Unknown signs for the cutter: all or speed.')
             start_env['NNSLR_CUTTER_FAMILIES'] = families
@@ -1411,9 +1434,13 @@ class Panel:
         if action in SIGNNET_ACTIONS:
             # A finished SignNet of the Models tab, by its run name: nothing else reaches the command line.
             wanted = f'cutter:{signnet}/{SIGNNET_PART}' if isinstance(signnet, str) and RUN_NAME.fullmatch(signnet) else None
-            if wanted is None or not any(entry['id'] == wanted and entry['finished']
-                                         for entry in self.models_index.artifacts(('cutter',))['cutter']):
+            entry = next((entry for entry in self.models_index.artifacts(('cutter',))['cutter']
+                          if wanted is not None and entry['id'] == wanted and entry['finished']), None)
+            if entry is None:
                 raise PanelError(400, 'bad_option', 'Unknown SignNet: choose a finished one on the Models tab.')
+            if not entry.get('fits_the_car'):
+                # Another band or stride: the car's vision.py cannot run it (car_release.choose would fail later).
+                raise PanelError(409, 'not_for_the_car', NOT_SELECTABLE['not_for_the_car'][1])
             script = CAR_SCRIPT if action == 'send_to_car' else TRY_SCRIPT
             if not (self.repo / script).is_file():
                 raise PanelError(403, 'actions_disabled', script + ' is missing in this installation.')
@@ -1509,8 +1536,8 @@ class Panel:
             if action == 'train_road_type':
                 command.append(self.new_run_name('road-type'))
             if action == 'train_cutter':
-                # NAME SIZE: one size, so the run holds one cutter.
-                command += [self.new_run_name('cutter'), size]
+                # NAME: one SignNet, at the car's band, on a run of its own.
+                command.append(self.new_run_name('cutter'))
             # Temporary files in the data root, not in /tmp: the service has a private /tmp (PrivateTmp)
             # that systemd empties at every restart, which broke a pip download of a running training.
             temporary = self.root / 'tmp'

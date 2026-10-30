@@ -120,6 +120,25 @@ def test_our_networks_propose_only_whole(root, checkout):
     assert panel.proposers()['best'] != 'ours'
 
 
+
+def test_our_networks_take_signnet_as_the_cutter(root):
+    from nnslr_tools import preannotate
+    weights = {'s1/signnet-best.pt': 'cutter:s1/signnet', 'k1/classifier/reader-best.pt': 'classifier:k1/classifier',
+               'd1/experiment-b/full/full-best.pt': 'decider:d1/experiment-b/full'}
+    for path in weights:
+        (root / 'runs' / path).parent.mkdir(parents=True, exist_ok=True)
+        (root / 'runs' / path).write_bytes(b'weights')
+    (root / 'models').mkdir(parents=True, exist_ok=True)
+    (root / 'models' / 'active.json').write_text(json.dumps(
+        {part: {'id': model_id} for part, model_id in zip(('cutter', 'classifier', 'decider'), weights.values())}))
+    networks = preannotate.our_networks(root)
+    assert networks['cutter'] == 'cutter:s1/signnet'
+    assert networks['cutter_path'] == str((root / 'runs' / 's1' / 'signnet-best.pt').resolve())
+    assert (networks['classifier'], networks['decider']) == ('classifier:k1/classifier', 'decider:d1/experiment-b/full')
+    (root / 'runs' / 's1' / 'signnet-best.pt').unlink()
+    with pytest.raises(preannotate.PreannotationError, match='cutter:s1/signnet has no runs/s1/signnet-best.pt'):
+        preannotate.our_networks(root)
+
 def test_qwen_is_refused_and_said_so_when_the_gpu_is_taken(root, checkout, monkeypatch):
     monkeypatch.setattr('nnslr_tools.preannotate.vlm_missing', lambda root: None)
     panel = Panel(root, repo=checkout)

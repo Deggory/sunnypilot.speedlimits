@@ -8,14 +8,20 @@ import type {RunSummary} from '../common/panel-types';
 import {pct, plain, points, signed} from './evaluate';
 
 const props = defineProps<{runs: RunSummary[]}>();
-/** The last (largest) size of the cutter in a run, if it has one. */
-const lastCutter = (run: RunSummary) => run.cutters?.[run.cutters.length - 1] ?? null;
-type Unit = 'percent' | 'count' | 'number';
+/** The last (largest) size of an old Detector in a run, if it has one. */
+const lastCutter = (run: RunSummary) => {
+  const line = run.cutters?.[run.cutters.length - 1] ?? null;
+  return line?.kind === 'signnet' ? null : line;
+};
+/** The SignNet of a run as the car reads it (its best 5 boxes of score 0.3 or more), if it has one. */
+const signnetLine = (run: RunSummary) => run.cutters?.find((line) => line.kind === 'signnet' && line.evaluated) ?? null;
+type Unit = 'percent' | 'count' | 'number' | 'score';
 interface Measure {
   key: string;
   label: string;
   unit: Unit;
-  better: 'higher' | 'lower';
+  /** null: shown, never green or red (the score the chain was judged at). */
+  better: 'higher' | 'lower' | null;
   pick: (run: RunSummary) => number | null | undefined;
 }
 const MEASURES: Measure[] = [
@@ -31,20 +37,29 @@ const MEASURES: Measure[] = [
   {key: 'false', label: 'False boxes', unit: 'count', better: 'lower', pick: (run) => run.detector?.false_boxes},
   {key: 'val_accuracy', label: 'Reader, best validation accuracy', unit: 'percent', better: 'higher', pick: (run) => run.best.reader_val_accuracy},
   {key: 'val_loss', label: 'Detector, best validation loss', unit: 'number', better: 'lower', pick: (run) => run.best.detector_val_loss},
-  // The classifier with “not a sign” (scripts/run_classifier.sh) and the chain at the cutter's score 0.1.
+  // The classifier with “not a sign” (scripts/run_classifier.sh) and the chain at its report's main score (a SignNet's
+  // 0.3, the car's floor; a Detector's 0.1): the score each run was judged at is a row of its own.
   {key: 'classifier', label: 'Classifier, signs read right', unit: 'percent', better: 'higher', pick: (run) => run.classifier?.accuracy},
   {key: 'classifier_human', label: 'Classifier, human-reviewed', unit: 'percent', better: 'higher', pick: (run) => run.classifier?.human_accuracy},
   {key: 'classifier_family', label: 'Classifier, other signs folded', unit: 'percent', better: 'higher', pick: (run) => run.classifier?.family_accuracy},
   {key: 'rejection', label: '“Not a sign” rejected', unit: 'percent', better: 'higher', pick: (run) => run.classifier?.rejection_rate},
   {key: 'signs_rejected', label: 'Signs thrown away', unit: 'percent', better: 'lower', pick: (run) => run.classifier?.signs_rejected_rate},
+  {key: 'chain_score', label: 'Chain, judged at the cutter’s score', unit: 'score', better: null, pick: (run) => run.chain?.score_threshold},
   {key: 'chain_recall', label: 'Chain, speed signs end to end', unit: 'percent', better: 'higher', pick: (run) => run.chain?.recall},
   {key: 'chain_surviving', label: 'Chain, false boxes left per frame', unit: 'number', better: 'lower', pick: (run) => run.chain?.surviving_false_per_frame},
-  // The cutter of scripts/run_detector_sizes.sh (its last size) at score 0.1: the speed signs alone stay comparable
-  // between a cutter of every sign and one of the speed signs only.
-  {key: 'cutter_recall', label: 'Cutter, signs found at 0.1', unit: 'percent', better: 'higher', pick: (run) => lastCutter(run)?.recall},
-  {key: 'cutter_speed', label: 'Cutter, speed signs found at 0.1', unit: 'percent', better: 'higher',
+  // SignNet (scripts/run_signnet.sh) as the car reads it, its best 5 boxes a frame of score 0.3 or more; an old Detector
+  // of scripts/run_detector_sizes.sh (its last size) at score 0.1, rows of their own: the two are judged differently.
+  // The speed signs alone stay comparable between a cutter of every sign and one of the speed signs only.
+  {key: 'signnet_recall', label: 'Cutter (SignNet), as the car reads: signs found', unit: 'percent', better: 'higher',
+    pick: (run) => signnetLine(run)?.recall},
+  {key: 'signnet_speed', label: 'Cutter (SignNet), as the car reads: speed signs found', unit: 'percent', better: 'higher',
+    pick: (run) => { const line = signnetLine(run); return line?.families === 'all' ? line.speed_recall : line?.recall; }},
+  {key: 'signnet_false', label: 'Cutter (SignNet), as the car reads: false boxes per frame', unit: 'number', better: 'lower',
+    pick: (run) => signnetLine(run)?.false_per_frame},
+  {key: 'cutter_recall', label: 'Cutter (old Detector), signs found at 0.1', unit: 'percent', better: 'higher', pick: (run) => lastCutter(run)?.recall},
+  {key: 'cutter_speed', label: 'Cutter (old Detector), speed signs found at 0.1', unit: 'percent', better: 'higher',
     pick: (run) => { const line = lastCutter(run); return line?.families === 'all' ? line.speed_recall : line?.recall; }},
-  {key: 'cutter_false', label: 'Cutter, false boxes per frame', unit: 'number', better: 'lower', pick: (run) => lastCutter(run)?.false_per_frame},
+  {key: 'cutter_false', label: 'Cutter (old Detector), false boxes per frame at 0.1', unit: 'number', better: 'lower', pick: (run) => lastCutter(run)?.false_per_frame},
 ];
 
 /** By default the newest evaluated run against the one before it. */
@@ -58,7 +73,7 @@ const runB = computed(() => props.runs.find((run) => run.name === nameB.value) ?
 
 function text(unit: Unit, value: number | null | undefined): string {
   if (value === null || value === undefined) return '–';
-  return unit === 'percent' ? pct(value) : unit === 'count' ? thousands(value) : plain(value);
+  return unit === 'percent' ? pct(value) : unit === 'count' ? thousands(value) : unit === 'score' ? String(value) : plain(value);
 }
 const rows = computed(() => {
   const a = runA.value;
@@ -69,18 +84,27 @@ const rows = computed(() => {
     const second = measure.pick(b) ?? null;
     let change = '';
     let tone = '';
-    if (first !== null && second !== null) {
+    if (first !== null && second !== null && measure.unit === 'score') {
+      change = Math.abs(second - first) < 1e-9 ? 'same' : 'differs';
+    } else if (first !== null && second !== null) {
       const difference = second - first;
       change = measure.unit === 'percent' ? points(difference) : measure.unit === 'count' ? signed(difference)
         : difference === 0 ? '±0' : (difference > 0 ? '+' : '−') + plain(Math.abs(difference));
       const rounded = measure.unit === 'percent' ? Math.round(difference * 1000) : measure.unit === 'count' ? difference : Math.round(difference * 1000);
-      if (rounded !== 0) tone = (rounded > 0) === (measure.better === 'higher') ? 'better' : 'worse';
+      if (rounded !== 0 && measure.better !== null) tone = (rounded > 0) === (measure.better === 'higher') ? 'better' : 'worse';
     }
     return {...measure, first: text(measure.unit, first), second: text(measure.unit, second), change, tone};
   }).filter((row) => row.first !== '–' || row.second !== '–');
 });
 const sameTest = computed(() => !runA.value || !runB.value || !runA.value.split_sha256 || !runB.value.split_sha256
   || runA.value.split_sha256 === runB.value.split_sha256);
+/** The two chains judged at different scores of the cutter (a Detector's 0.1, a SignNet's 0.3): [first, second]. */
+const chainScores = computed((): [number, number] | null => {
+  const first = runA.value?.chain?.score_threshold;
+  const second = runB.value?.chain?.score_threshold;
+  if (first === undefined || second === undefined || first === null || second === null || Math.abs(first - second) < 1e-9) return null;
+  return [first, second];
+});
 </script>
 
 <template>
@@ -95,6 +119,9 @@ const sameTest = computed(() => !runA.value || !runB.value || !runA.value.split_
     </div>
     <p v-if="!sameTest" class="ds-warn compare-warn">The two runs were measured on different test sets (another split): the difference mixes the
       model and the data.</p>
+    <p v-if="chainScores" class="ds-warn compare-warn" id="compare-chain-score">The two chains were judged at different scores of the
+      cutter ({{ chainScores[0] }} and {{ chainScores[1] }}): the cutter passes on fewer boxes at the higher score, so their chain numbers
+      differ also because of that.</p>
     <div v-if="rows.length" class="table-wrap"><table class="eval-table compare" id="compare-table">
       <thead><tr><th>Measure</th><th class="num">{{ nameA }}</th><th class="num">{{ nameB }}</th><th class="num">Change</th></tr></thead>
       <tbody>

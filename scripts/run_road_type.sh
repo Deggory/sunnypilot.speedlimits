@@ -123,12 +123,17 @@ fi
 RUN_ROOT="$DATA_ROOT/runs/$RUN_ID"
 OUT="$RUN_ROOT/road-type"
 # A folder of another kind of run is never written into.
-for part in detector reader export bundle experiment-b detector-sizes classifier signnet; do
+for part in detector reader export bundle experiment-b detector-sizes classifier; do
   if [[ -e "$RUN_ROOT/$part" ]]; then
     echo "error: $RUN_ROOT is another kind of run (it has $part/): choose a new NAME" >&2
     exit 3
   fi
 done
+# SignNet (the cutter) writes its weights at the root of its run, not in a folder.
+if [[ -e "$RUN_ROOT/signnet-best.pt" ]]; then
+  echo "error: $RUN_ROOT is another kind of run (it has signnet-best.pt, a SignNet): choose a new NAME" >&2
+  exit 3
+fi
 
 mkdir -p "$OUT"
 # Everything printed from here on also goes to the run's own log (the panel reads its steps and epochs).

@@ -8,12 +8,20 @@ import type {RunSummary} from '../common/panel-types';
 import {RUN_STATE, modeText, notEvaluatedText, pct, runWhen, stageText} from './evaluate';
 import {perFrame} from './models';
 
-/** A cutter run in one line: "Cutter 960 × 544: 81.0% of the signs found at score 0.1 (speed signs 83.0%) · 2.10 boxes per
- * frame". */
+/** A cutter run in one line: a SignNet as the car reads it, "Cutter (SignNet), as the car reads: 40.0% of the signs found
+ * (speed signs 45.0%) · 0.22 false boxes per frame"; an old Detector at its last size, "Cutter 960 × 544: 81.0% of the
+ * signs found at score 0.1 (speed signs 83.0%) · 2.10 boxes per frame". */
 function cutterLine(run: RunSummary): string {
   const line = run.cutters?.[run.cutters.length - 1];
-  if (!line) return 'Cutter: no numbers yet.';
-  return 'Cutter ' + line.size.replace('x', ' × ') + ': ' + pct(line.recall) + ' of the signs found at score ' + (line.score_threshold ?? '–')
+  if (!line) return 'Cutter: open the run for its numbers.';
+  if (line.kind === 'signnet') {
+    if (!line.evaluated) return 'Cutter (SignNet): not measured as the car reads it yet; open the run for its numbers.';
+    return 'Cutter (SignNet), as the car reads (best ' + (line.max_boxes ?? 5) + ' at ' + (line.score_threshold ?? 0.3) + '): '
+      + pct(line.recall) + ' of the ' + (line.families === 'speed' ? 'speed signs' : 'signs') + ' found'
+      + (line.families === 'all' && line.speed_recall != null ? ' (speed signs ' + pct(line.speed_recall) + ')' : '')
+      + ' · ' + perFrame(line.false_per_frame) + ' false boxes per frame';
+  }
+  return 'Cutter ' + (line.size ?? '–').replace('x', ' × ') + ': ' + pct(line.recall) + ' of the signs found at score ' + (line.score_threshold ?? '–')
     + (line.families === 'all' ? ' (speed signs ' + pct(line.speed_recall) + ')' : '') + ' · ' + perFrame(line.boxes_per_frame) + ' boxes per frame';
 }
 

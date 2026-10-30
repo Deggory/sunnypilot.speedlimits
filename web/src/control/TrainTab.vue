@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // Training: from the reviews to a model, as an app on the phone. One line says what the networks learn from (objects,
 // frames, drives; the reviews not imported yet), a link to Data › Training dataset, where they are imported. Then one network at a time, chosen
-// in a switcher with a dot on the one training: the cutter (scripts/run_detector_sizes.sh, its input size and the
-// signs it finds), the classifier with "not a sign" (scripts/run_classifier.sh), the decider (in preparation:
+// in a switcher with a dot on the one training: the cutter (scripts/run_signnet.sh: SignNet, the cutter the comma runs,
+// at the car's band; the signs it finds), the classifier with "not a sign" (scripts/run_classifier.sh), the decider (in preparation:
 // experiment B), the road type with memory (scripts/run_road_type.sh), the whole pipeline (helpers/3_train.sh, with
 // where it starts). Each has the same place for its work:
 // the Train button, or its training running (or failed) with its steps, then its curves and its latest version
@@ -110,23 +110,17 @@ const latestHeadline = computed(() => sectionLatest.value ? headlineOf(sectionLa
 const sectionVersions = computed(() => section.value === 'cutter' || section.value === 'classifier' || section.value === 'decider'
   ? roleOf(section.value)?.versions.length ?? 0 : section.value === 'road' ? roleOf('road_type')?.versions.length ?? 0 : 0);
 
-/** The cutter: its input size and the signs it learns to find (status.cutter_options; these when the server is older). */
-const sizeOptions = computed(() => (props.status?.cutter_options?.sizes ?? ['640x360', '960x544', '1344x760'])
-  .map((size) => ({key: size, label: sizeText(size)})));
+/** The cutter: a SignNet at the car's band (status.cutter_options.band), and the signs it learns to find. */
 const FAMILY_OPTIONS: {key: CutterFamilies; label: string}[] = [{key: 'all', label: 'Every sign'}, {key: 'speed', label: 'Speed signs only'}];
-const pickedSize = ref<string | null>(null);
 const pickedFamilies = ref<CutterFamilies | null>(null);
-const cutterSize = computed({
-  get: (): string => pickedSize.value ?? props.status?.cutter_options?.size ?? '1344x760',
-  set: (value: string) => { pickedSize.value = value; },
-});
+const cutterBand = computed(() => sizeText(props.status?.cutter_options?.band ?? '896x288'));
 const cutterFamilies = computed({
   get: (): CutterFamilies => pickedFamilies.value ?? props.status?.cutter_options?.family ?? 'all',
   set: (value: CutterFamilies) => { pickedFamilies.value = value; },
 });
 const CUTTER_ACTIONS = computed((): [ActionName, string][] => [
-  ['train_cutter', 'A new cutter at ' + sizeText(cutterSize.value) + ' for '
-    + (cutterFamilies.value === 'all' ? 'every sign' : 'speed signs only') + '. Takes a few hours on the GPU.'],
+  ['train_cutter', 'A new SignNet, the cutter the comma runs, for ' + (cutterFamilies.value === 'all' ? 'every sign'
+    : 'speed signs only') + ': it looks at the ' + cutterBand.value + ' band at the top of the frame. About 80 minutes on the GPU.'],
 ]);
 /** The classifier's training, in its card. */
 /** The decider's training, in its card: experiment B, its three variants. */
@@ -193,7 +187,8 @@ const charted = computed((): {progress: Progress; running: boolean} | null => {
   if (value === null || !CHARTED_ACTIONS.includes(value.action)) return null;
   const curves = value.progress.curves ?? {};
   const shown = value.state === 'running'
-    || Boolean(curves.detector?.points.length || curves.reader?.points.length || curves.classifier?.points.length);
+    || Boolean(curves.detector?.points.length || curves.reader?.points.length || curves.classifier?.points.length
+      || curves.signnet?.points.length);
   return shown ? {progress: value.progress, running: value.state === 'running'} : null;
 });
 const numbers = computed(() => {
@@ -234,7 +229,7 @@ const numbers = computed(() => {
   </a>
 
   <section class="card role-card train-section" :id="'train-' + section" :data-role="section" aria-live="polite">
-    <p v-if="section === 'cutter'" class="role-what">Finds every box that could be a sign. It must miss nothing: the classifier drops its false boxes.</p>
+    <p v-if="section === 'cutter'" class="role-what">SignNet, the same network the comma runs: it finds every box that could be a sign at the top of the frame. It must miss nothing: the classifier drops its false boxes.</p>
     <p v-else-if="section === 'classifier'" class="role-what">Says what each box of the cutter is: a speed value, end of limit, another sign and its kind, or not a sign.</p>
     <p v-else-if="section === 'decider'" class="role-what">Says whom each sign applies to: our road, another road, or abstain.</p>
     <p v-else-if="section === 'road'" class="role-what">Says from the camera what road the car is on, once a second: town, rural,
@@ -249,11 +244,10 @@ const numbers = computed(() => {
       </template>
       <template v-else-if="section === 'cutter'">
         <div class="seg-row">
-          <Segmented v-model="cutterSize" :options="sizeOptions" label="Input size of the cutter"/>
           <Segmented v-model="cutterFamilies" :options="FAMILY_OPTIONS" label="Signs the cutter finds"/>
         </div>
         <ActionList :items="CUTTER_ACTIONS" :actions="status?.actions ?? null"
-                    @run="(name, state) => emit('run', name, state, undefined, {size: cutterSize, families: cutterFamilies})"/>
+                    @run="(name, state) => emit('run', name, state, undefined, {families: cutterFamilies})"/>
       </template>
       <template v-else-if="section === 'classifier'">
         <div v-if="mapillaryState?.available" class="seg-row">
@@ -308,8 +302,10 @@ const numbers = computed(() => {
       <strong v-if="latestHeadline" class="latest-value">{{ latestHeadline.value }}</strong>
       <span class="latest-chev" aria-hidden="true">›</span>
     </a>
-    <p v-else-if="section === 'cutter' || section === 'classifier'" class="latest-none">{{ models === null ? 'Loading…'
-      : 'None trained yet: the ' + (section === 'cutter' ? 'detector' : 'reader') + ' of a whole pipeline plays this role.' }}</p>
+    <p v-else-if="section === 'cutter'" class="latest-none">{{ models === null ? 'Loading…'
+      : 'None trained yet: train a SignNet, then choose it in Models.' }}</p>
+    <p v-else-if="section === 'classifier'" class="latest-none">{{ models === null ? 'Loading…'
+      : 'None trained yet: the reader of a whole pipeline plays this role.' }}</p>
     <p v-else-if="section === 'road'" class="latest-none">{{ models === null ? 'Loading…' : 'None trained yet.' }}</p>
 
     <TrainingCharts v-if="charted?.running" :progress="charted.progress" :running="true"/>

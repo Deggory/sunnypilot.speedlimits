@@ -4,13 +4,15 @@ set -euo pipefail
 # The classifier of the pipeline (cutter -> classifier -> decider, docs/NEURAL_NETWORK.md, step 2 of the plan): the
 # network that says what each box of the cutter is, "not a sign" included. On one GPU, one step after the other:
 #
-#   1. checks the dataset, the split and the cutter on the CPU (the cutter in use of the Models tab by default);
+#   1. checks the dataset, the split and the cutter on the CPU (the cutter in use of the Models tab by default: a
+#      SignNet, the network the comma runs, or an old Detector a run started with);
 #   2. a CUDA smoke test;
 #   3. mines the false boxes of that cutter (nnslr mine-negatives): on every reviewed frame of train, validation and
-#      test, its boxes of score >= 0.1 that overlap no reviewed box, at most 3 per frame and 3 x the sign crops of
-#      each partition, from the frames a person reviewed first; each partition from its own frames only; in the
-#      frames an AI reviewed before the other-sign rule (it left those signs without a box) only boxes under 0.3,
-#      and the other-sign proposals it removed there are not "not a sign" either;
+#      test, its boxes of score >= 0.1 (with a SignNet among the 5 a frame the car passes on) that overlap no
+#      reviewed box, at most 3 per frame and 3 x the sign crops of each partition, from the frames a person reviewed
+#      first; each partition from its own frames only; in the frames an AI reviewed before the other-sign rule (it
+#      left those signs without a box) only boxes under 0.3, and the other-sign proposals it removed there are not
+#      "not a sign" either;
 #   4. trains the classifier (nnslr train --task reader --classes v2): the reviewed sign crops with their labels and
 #      the kinds of other signs, and "not a sign" from the proposals reviewers removed, the boxes marked not a sign
 #      and the mined boxes; ImageNet start, darker and lower-contrast crops with jittered boxes, best epoch by the
@@ -24,7 +26,8 @@ set -euo pipefail
 #      person confirmed);
 #   6. evaluates the chain on test and validation (nnslr evaluate-chain): the cutter on every frame, each box cut at
 #      full resolution and classified; the speed signs found AND read right, overall, by width and on the signs a
-#      person confirmed, and the false boxes per frame that survive, at cutter scores 0.05, 0.1 and 0.25;
+#      person confirmed, and the false boxes per frame that survive, at cutter scores 0.1, 0.2 and 0.3 with a SignNet
+#      (the car's 5 boxes a frame; 0.3 is the car's), 0.05, 0.1 and 0.25 with an old Detector;
 #   7. runs the same chain on test with the old reader (NNSLR_OLD_READER_RUN, default 2026-10-24_1452) and prints a
 #      short comparison, also saved as comparison.txt.
 #
@@ -40,7 +43,7 @@ set -euo pipefail
 # started with, an evaluation older than the weights is redone.
 #
 # Environment: NNSLR_GPU_INDEX (default 0), NNSLR_DATASET_KIND (gold), NNSLR_GPU_VENV (.venv-gpu),
-# NNSLR_CUTTER (active: the cutter in use; or a detector-best.pt), NNSLR_CLASSIFIER_EPOCHS (30),
+# NNSLR_CUTTER (active: the cutter in use; or a signnet-best.pt, or an old detector-best.pt), NNSLR_CLASSIFIER_EPOCHS (30),
 # NNSLR_CLASSIFIER_PATIENCE (5), NNSLR_CLASSIFIER_BATCH_SIZE (64), NNSLR_NUM_WORKERS (half the cores, 4 to 16),
 # NNSLR_NEGATIVE_SCORE (0.1), NNSLR_NEGATIVES_PER_FRAME (3), NNSLR_NEGATIVES_FACTOR (3),
 # NNSLR_OLD_READER_RUN (2026-10-24_1452; empty: no comparison), NNSLR_CLASSIFIER_AUGMENT=0 to train without the
@@ -158,13 +161,18 @@ CLASSIFIER_RUN="$RUN_ROOT/classifier"
 PRETRAIN_RUN="$RUN_ROOT/pretrain"
 EVAL_DIR="$RUN_ROOT/evaluation"
 NEGATIVES="$RUN_ROOT/negatives.jsonl"
-# A folder of another kind of run (the training pipeline, experiment B, the detector sizes) is never written into.
+# A folder of another kind of run (the training pipeline, experiment B, the detector sizes) is never written into,
+# nor a SignNet's run (the cutter: its weights at the root of the run).
 for part in detector reader export bundle experiment-b detector-sizes; do
   if [[ -e "$RUN_ROOT/$part" ]]; then
     echo "error: $RUN_ROOT is another kind of run (it has $part/): choose a new NAME" >&2
     exit 3
   fi
 done
+if [[ -e "$RUN_ROOT/signnet-best.pt" ]]; then
+  echo "error: $RUN_ROOT is another kind of run (it has signnet-best.pt, a SignNet): choose a new NAME" >&2
+  exit 3
+fi
 for folder in "$CLASSIFIER_RUN" "$PRETRAIN_RUN"; do
   if [[ -e "$folder" && ! -f "$folder/result.json" && ! -f "$folder/training-state.pt" ]]; then
     echo "error: $folder exists without result.json or training-state.pt" >&2

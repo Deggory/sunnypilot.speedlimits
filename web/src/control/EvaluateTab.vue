@@ -4,7 +4,8 @@
 // version of it in one table, judged by the one number that matters for that network, next to the version in use;
 // the version chosen (or the one “Open the run ›” of Models and Train asks for, ?model=) played frame by frame on the
 // test (WatchSection), and all the numbers of its run folded below. Chains measured with another cutter are marked
-// not comparable.
+// not comparable. A SignNet cutter is judged as the car reads it (its best 5 boxes a frame of score 0.3 or more), an old
+// Detector at score 0.1: the two are marked not comparable.
 // The proposers of Prepare (the Vietnamese YOLO, our networks, Qwen3-VL) are judged the same way, each measured on the
 // reviewed test frames with its Measure button (helpers/measure_proposer.sh); so are the AI reviewers of Settings, each
 // asked about the same frames a person reviewed (helpers/measure_ai_reviewer.sh).
@@ -55,8 +56,9 @@ const GOAL: Record<View, string> = {
     + 'signs, how many it proposes with the right number, and how many false proposals per frame you would have to delete.',
   chain: 'The cutter and the classifier together, on the test roads no training saw. What counts: of the test speed '
     + 'signs, how many are found and read right, and how many false boxes are left per frame.',
-  cutter: 'Finds every box that could be a sign. What counts: how many of the test speed signs it finds. Many '
-    + 'boxes per frame are expected: the classifier drops them.',
+  cutter: 'Finds every box that could be a sign. What counts: how many of the test speed signs it finds; a SignNet as '
+    + 'the car reads it, among its best 5 boxes of each frame of score 0.3 or more. False boxes are expected: the '
+    + 'classifier drops them.',
   classifier: 'Says what each box is, or “not a sign”. What counts: the test signs read right, and the false boxes '
     + 'it throws away.',
   decider: 'Says whom a sign applies to: our road or another. What counts: the “Another road” signs it finds. '
@@ -197,7 +199,8 @@ const rows = computed((): Row[] => {
       const oldMain = old ? share(old.correct, old.truth) : null;
       const other = common !== null && chain.cutter_id != null && chain.cutter_id !== common;
       list.push({id: version.id, name: 'Classifier',
-        when: isoWhen(version.trained_at) + (chain.cutter_size ? ' · cutter ' + sizeText(chain.cutter_size) : ''), main,
+        when: isoWhen(version.trained_at) + (chain.cutter_size ? ' · cutter ' + sizeText(chain.cutter_size) : '')
+          + ' · at score ' + chain.score_threshold, main,
         mainText: ofText(chain.correct, chain.truth, 'found and read right'),
         second: perFrame(chain.surviving_false_per_frame) + ' false boxes per frame left, of '
           + perFrame(chain.false_per_frame) + ' from the cutter',
@@ -209,6 +212,19 @@ const rows = computed((): Row[] => {
   } else if (view.value === 'cutter') {
     for (const version of versionsOf('cutter') as CutterModel[]) {
       const test = version.test;
+      const car = version.kind === 'signnet' ? test?.car ?? null : null;
+      if (car) {
+        // A SignNet as the car reads it: its best 5 boxes a frame of score 0.3 or more; compared with SignNets only.
+        const read = version.families === 'all' ? car.by_family?.speed ?? null : null;
+        const truth = read ? read.truth : car.truth_boxes;
+        list.push({id: version.id, name: version.label + (version.families === 'all' ? ' · all signs' : ' · speed signs'),
+          when: isoWhen(version.trained_at), main: read ? share(read.found, read.truth) : share(car.found, car.truth_boxes),
+          mainText: ofText(read ? read.found : car.found, truth, (read || version.families !== 'all' ? 'speed signs' : 'signs')
+            + ' found as the car reads them (best ' + car.max_boxes + ' at ' + car.score_threshold + ')'),
+          second: perFrame(car.false_per_frame) + ' false boxes per frame', inUse: version.in_use, run: version.run,
+          watch: version.part, basis: 'car ' + (read ? 'speed' : 'all') + ' of ' + (truth ?? '?')});
+        continue;
+      }
       const speed = test?.by_family?.speed;
       list.push({id: version.id, name: (version.kind === 'signnet' ? version.label : 'Cutter ' + sizeText(version.input_size))
         + (version.families === 'all' ? ' · all signs' : ' · speed signs'),
@@ -257,7 +273,10 @@ function versus(row: Row): {text: string; kind: string} {
   const ref0 = reference.value;
   if (row.main === null || !ref0 || ref0.main === null || ref0.id === row.id) return {text: '', kind: ''};
   if (!comparable(row, ref0)) {
-    return {text: row.basis?.startsWith('reader') ? 'another kind of network: not comparable' : 'measured on another test: not comparable', kind: 'same'};
+    const carRead = (one: Row) => one.basis?.startsWith('car ') ?? false;
+    return {text: row.basis?.startsWith('reader') ? 'another kind of network: not comparable'
+      : carRead(row) !== carRead(ref0) ? 'judged another way (a SignNet as the car reads, a Detector at 0.1): not comparable'
+        : 'measured on another test: not comparable', kind: 'same'};
   }
   const difference = row.main - ref0.main;
   return {text: points(difference) + ' vs ' + (ref0.inUse ? 'the one in use' : 'the best'),

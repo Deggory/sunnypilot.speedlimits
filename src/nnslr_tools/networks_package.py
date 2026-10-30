@@ -5,7 +5,9 @@ catalog the car reads (scripts/publish_networks.sh, the Publish card of the Mode
 A package is a folder <data root>/publish/networks/<name>/ holding exactly PACKAGE_FILES:
 
 - ``cutter.onnx``, ``classifier.onnx``, ``decider.onnx`` and the contract of each (``<file>.contract.json``: inputs,
-  outputs, classes, the sha256 of the ONNX), written by nnslr_tools.exporting with a parity check against PyTorch;
+  outputs, classes, the sha256 of the ONNX), written by nnslr_tools.exporting with a parity check against PyTorch. The
+  cutter is the one in use: SignNet, the network the comma runs (nnslr_tools.signnet.export_signnet_onnx, one output
+  ``out``: the heat map and the box shapes), or an old Detector still in use (SSDlite, export_detector_onnx);
 - ``networks.json``: the manifest, the id of each network on this server, how to run them in a row, what they
   measured on the test drives;
 - ``README.md``: the model card;
@@ -30,6 +32,8 @@ import re
 import shutil
 from typing import Any, Callable
 
+from nnslr_tools.signnet import CAR_MAX_BOXES, CAR_MIN_SCORE
+
 KIND = 'nnslr-networks'
 SCHEMA_VERSION = 1
 PACKAGE_DIR = Path('publish') / 'networks'
@@ -42,8 +46,10 @@ PACKAGE_FILES = (*NETWORK_FILES, *(f'{name}.contract.json' for name in NETWORK_F
 # Written next to the package once it is on Hugging Face (not one of its files).
 PUBLISHED_FILE = 'published.json'
 LICENSE = 'MIT'
-# The lowest cutter score kept, as Prepare's "ours" proposer (nnslr_tools.preannotate.proposer_setup).
+# The lowest score an old Detector's boxes are kept at, as Prepare's "ours" proposer used it. A SignNet keeps the car's:
+# its best CAR_MAX_BOXES heat-map peaks of score >= CAR_MIN_SCORE.
 CUTTER_SCORE = 0.1
+FRAME_WIDTH = 1344
 
 
 class PackageError(ValueError):
@@ -84,7 +90,22 @@ def measured(entries: dict[str, dict]) -> dict[str, Any]:
     cutter, classifier, decider = (entries.get(role) or {} for role in ROLES)
     result: dict[str, Any] = {}
     test = cutter.get('test') or {}
-    if test:
+    budget = test.get('budget') or {}
+    car = test.get('car') or {}
+    if test and cutter.get('kind') == 'signnet' and car:
+        # As the car reads it: the signs among its best CAR_MAX_BOXES boxes of each frame of score CAR_MIN_SCORE or more.
+        result['cutter'] = {'kind': 'signnet', 'as_the_car': True, 'boxes': car.get('max_boxes'),
+                            'score_threshold': car.get('score_threshold'), 'signs': car.get('truth_boxes'),
+                            'found': car.get('found'), 'recall': car.get('recall'),
+                            'false_boxes_per_frame': car.get('false_per_frame'),
+                            'ms_per_frame': test.get('ms_per_frame'), 'device': test.get('device')}
+    elif test and cutter.get('kind') == 'signnet' and budget:
+        # Without the car's numbers: its best boxes of each frame at any score, more than the car keeps.
+        result['cutter'] = {'kind': 'signnet', 'as_the_car': False, 'boxes': budget.get('boxes'),
+                            'score_threshold': None, 'signs': budget.get('truth_boxes'),
+                            'found': budget.get('found'), 'recall': budget.get('recall'),
+                            'ms_per_frame': test.get('ms_per_frame'), 'device': test.get('device')}
+    elif test:
         result['cutter'] = {'score_threshold': test.get('score_threshold'), 'signs': test.get('truth_boxes'),
                             'found': test.get('found'), 'recall': test.get('recall'),
                             'ms_per_frame': test.get('ms_per_frame'), 'device': test.get('device')}
@@ -105,14 +126,33 @@ def measured(entries: dict[str, dict]) -> dict[str, Any]:
     return result
 
 
-def pipeline(decider_contract: dict, cutter_score: float, max_sign_side: float, classifier_size: int) -> dict:
-    """How the three run in a row, as Prepare's "ours" proposer runs them (nnslr_tools._chain_proposer)."""
+def _signnet_step(cutter_contract: dict, cutter_score: float) -> dict:
+    """The cutter's step for a SignNet, from its contract: as the comma's vision.py runs it."""
+    _, _, band_h, band_w = cutter_contract['input']['shape']
+    stride = cutter_contract['stride']
+    return {'network': 'cutter',
+            'input': f'the frame scaled to {band_w} px wide (x {band_w}/{FRAME_WIDTH}) and its top {band_h} rows (the '
+                     f'band), RGB values 0..1, 1 x 3 x {band_h} x {band_w}',
+            'then': f'Take the 3 x 3 local maxima of the heat map (channel 0 of out) of score >= {cutter_score}, best '
+                    f'first, at most {CAR_MAX_BOXES}; each is a box centred at ((x + offset_x) x {stride}, (y + '
+                    f'offset_y) x {stride}) of size (exp(log_width), exp(log_height)) in band pixels, times frame '
+                    f'width / {band_w} in frame pixels'}
+
+
+def pipeline(decider_contract: dict, cutter_score: float, max_sign_side: float | None, classifier_size: int,
+             cutter_contract: dict | None = None) -> dict:
+    """How the three run in a row: a SignNet cutter (its contract's task) as the comma's vision.py runs it, an old
+    Detector as Prepare's "ours" proposer ran it (nnslr_tools._chain_proposer)."""
+    signnet = isinstance(cutter_contract, dict) and cutter_contract.get('task') == 'signnet'
+    cutter = _signnet_step(cutter_contract, cutter_score) if signnet else {
+        'network': 'cutter', 'input': 'the frame as RGB values 0..1, 1 x 3 x 760 x 1344',
+        'then': f'Keep the boxes of score >= {cutter_score} whose longest side is at most {max_sign_side} of the '
+                'frame height'}
     return {
         'camera': 'comma narrow road camera (fcamera), 1344 x 760 RGB',
+        'cutter_kind': 'signnet' if signnet else 'detector',
         'steps': [
-            {'network': 'cutter', 'input': 'the frame as RGB values 0..1, 1 x 3 x 760 x 1344',
-             'then': f'Keep the boxes of score >= {cutter_score} whose longest side is at most {max_sign_side} of '
-                     'the frame height'},
+            cutter,
             {'network': 'classifier', 'input': f'each box cut from the frame (rounded outwards, at least 2 px), '
                                                f'resized to {classifier_size} x {classifier_size}, ImageNet '
                                                'normalisation; all the boxes of a frame in one batch',
@@ -124,7 +164,9 @@ def pipeline(decider_contract: dict, cutter_score: float, max_sign_side: float, 
                      'abstains'},
         ],
         'cutter_score': cutter_score,
-        'max_sign_side': max_sign_side,
+        'max_sign_side': None if signnet else max_sign_side,
+        **({'max_boxes': CAR_MAX_BOXES, 'band': [cutter_contract['input']['shape'][3], cutter_contract['input']['shape'][2]],
+            'stride': cutter_contract['stride']} if signnet else {}),
     }
 
 
@@ -142,6 +184,17 @@ def model_card(manifest: dict) -> str:
     cutter = numbers.get('cutter', {})
     chain = numbers.get('cutter_and_classifier', {})
     decider = numbers.get('decider', {})
+    steps = manifest['pipeline']
+    signnet = steps.get('cutter_kind') == 'signnet'
+    if signnet:
+        band_w, band_h = steps.get('band') or ('?', '?')
+        cutter_row = (f'| Cutter | SignNet, the network the comma runs: plain 3 x 3 convolutions trained from scratch on '
+                      f'the top {band_h} rows of the frame scaled to {band_w} px; a heat map of sign centres and their '
+                      f'sizes, the best {steps.get("max_boxes")} boxes a frame | `cutter.onnx` | '
+                      f'`{networks["cutter"]["id"]}` |')
+    else:
+        cutter_row = (f'| Cutter | SSDlite MobileNetV3-Large on the whole 1344 x 760 frame: a box on everything that '
+                      f'could be a sign | `cutter.onnx` | `{networks["cutter"]["id"]}` |')
     lines = [
         '---', f'license: {LICENSE.lower()}', 'tags:', '- onnx', '- traffic-sign-recognition', '- openpilot',
         '- sunnypilot', '---', '',
@@ -151,8 +204,7 @@ def model_card(manifest: dict) -> str:
         '([sunnypilot.speedlimits](https://github.com/cristianku/sunnypilot.speedlimits)).', '',
         '**Experimental.** A help, never a guarantee: the driver always stays responsible for the speed.', '',
         '| Network | What it does | File | Version |', '|---|---|---|---|',
-        f'| Cutter | SSDlite MobileNetV3-Large on the whole 1344 x 760 frame: a box on everything that could be a '
-        f'sign | `cutter.onnx` | `{networks["cutter"]["id"]}` |',
+        cutter_row,
         f'| Classifier | MobileNetV3-Small on each box: what it is (a speed limit and its number, end of limit, '
         f'variable display, other signs, not a sign) | `classifier.onnx` | `{networks["classifier"]["id"]}` |',
         f'| Decider | MobileNetV3-Small with the box position, the car speed and the scene: whom a speed sign '
@@ -165,8 +217,20 @@ def model_card(manifest: dict) -> str:
               '## Measured', '', 'On test drives kept apart by place (never trained on):', '']
     if cutter:
         found = _share(cutter.get('found'), cutter.get('signs'))
-        lines.append(f'- Cutter at score {cutter.get("score_threshold")}: found {found} '
-                     f'signs, {_number(cutter.get("ms_per_frame"), 1)} ms a frame on a {cutter.get("device")}.')
+        speed = cutter.get('ms_per_frame')
+        timing = (f', {_number(speed, 1)} ms a frame' + (f' on a {cutter["device"]}' if cutter.get('device') else '')
+                  if isinstance(speed, (int, float)) else '')
+        if cutter.get('kind') == 'signnet' and cutter.get('as_the_car'):
+            false = cutter.get('false_boxes_per_frame')
+            lines.append(f'- Cutter: finds {found} signs as the car reads them: its best {cutter.get("boxes")} boxes '
+                         f'of each frame at score {cutter.get("score_threshold")} or more'
+                         + (f', {_number(false)} false boxes per frame' if isinstance(false, (int, float)) else '')
+                         + f'{timing}.')
+        elif cutter.get('kind') == 'signnet':
+            lines.append(f'- Cutter among its {cutter.get("boxes")} best boxes of each frame at any score (the car '
+                         f'keeps only those of {CAR_MIN_SCORE} or more): found {found} signs{timing}.')
+        else:
+            lines.append(f'- Cutter at score {cutter.get("score_threshold")}: found {found} signs{timing}.')
     if chain:
         right = _share(chain.get('read_right'), chain.get('speed_signs'))
         lines.append(f'- Cutter and classifier: {right} speed signs '
@@ -174,7 +238,7 @@ def model_card(manifest: dict) -> str:
                      + ('' if chain.get('with_this_cutter') else ' (measured with another cutter)') + '.')
     if decider:
         lines.append(f'- Decider: "another road" precision {_number(decider.get("another_road_precision"))} and recall '
-                     f'{_number(decider.get("another_road_recall"))} on {decider.get("another_road_boxes")} such '
+                     f'{_number(decider.get("another_road_recall"))} on {_count(decider.get("another_road_boxes"))} such '
                      'boxes; '
                      f'ownership macro-F1 {_number(decider.get("macro_f1"))}.')
     lines += ['', '## Trained on', '',
@@ -182,7 +246,9 @@ def model_card(manifest: dict) -> str:
               f'{_count(data.get("drives"))} drives in Switzerland and Germany, checked by a person or by an AI '
               'reviewer. No image is published. '
               f'Dataset sha256 `{data.get("dataset_sha256")}`.', '',
-              '## Licence', '', f'{LICENSE}. The networks start from torchvision\'s ImageNet weights.', '']
+              '## Licence', '', f'{LICENSE}. ' + ('The classifier and the decider start from torchvision\'s ImageNet '
+                                                  'weights; SignNet is trained from scratch.' if signnet else
+                                                  'The networks start from torchvision\'s ImageNet weights.'), '']
     return '\n'.join(lines)
 
 
@@ -260,14 +326,28 @@ def example_frame(root: Path) -> Path | None:
     return None
 
 
+def _signnet_data(checkpoint: Path) -> dict:
+    """The dataset and split a SignNet was trained on, from the result.json beside its weights (its contract does
+    not say them): only the sha256 values found."""
+    try:
+        result = json.loads((checkpoint.parent / 'result.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return {}
+    return {key: result[key] for key in ('dataset_sha256', 'split_sha256')
+            if isinstance(result, dict) and isinstance(result.get(key), str)}
+
+
 def prepare_package(root: Path, name: str, *, log: Callable[[str], None] = print) -> dict:
     """Export the three networks in use into a new package <data root>/publish/networks/<name>/ (replacing one of
-    the same name), write its manifest, model card and sums, and verify it."""
+    the same name), write its manifest, model card and sums, and verify it. The cutter by its kind: a SignNet as the
+    car runs it (export_signnet_onnx, its dataset and split from the result.json beside its weights), an old Detector
+    still in use as before."""
     from nnslr_tools.chain import MAX_SIGN_SIDE, resolve_model
     from nnslr_tools.exporting import export_decider_onnx, export_detector_onnx, export_reader_onnx
-    from nnslr_tools.model_roles import ModelIndex
+    from nnslr_tools.model_roles import SIGNNET_ID, ModelIndex
     from nnslr_tools.preannotate import ours_missing
     from nnslr_tools.runs import RunsIndex
+    from nnslr_tools.signnet import export_signnet_onnx
 
     root = Path(root)
     target = package_path(root, name)
@@ -283,6 +363,8 @@ def prepare_package(root: Path, name: str, *, log: Callable[[str], None] = print
     index = ModelIndex(RunsIndex(root))
     artifacts = index.artifacts()
     entries = {role: next((e for e in artifacts[role] if e['id'] == resolved[role]['id']), {}) for role in ROLES}
+    cutter_id = resolved['cutter'].get('id')
+    signnet = resolved['cutter'].get('kind') == 'signnet' or bool(isinstance(cutter_id, str) and SIGNNET_ID.fullmatch(cutter_id))
 
     work = target.with_name('.' + name + '.tmp')
     shutil.rmtree(work, ignore_errors=True)
@@ -292,7 +374,9 @@ def prepare_package(root: Path, name: str, *, log: Callable[[str], None] = print
         frame = example_frame(root)
         for number, role in enumerate(ROLES, 1):
             log(f'== {number}/4 Export the {role} ({resolved[role]["id"]})')
-            if role == 'cutter':
+            if role == 'cutter' and signnet:
+                exports[role] = export_signnet_onnx(resolved[role]['path'], work / 'cutter.onnx', verify=True)
+            elif role == 'cutter':
                 exports[role] = export_detector_onnx(resolved[role]['path'], work / 'cutter.onnx', example_image=frame)
             else:
                 export = export_reader_onnx if role == 'classifier' else export_decider_onnx
@@ -305,6 +389,8 @@ def prepare_package(root: Path, name: str, *, log: Callable[[str], None] = print
             contract = json.loads(path.read_text(encoding='utf-8'))
             # The id of the model, never a path of this server.
             contract['checkpoint'] = resolved[role]['id']
+            if role == 'cutter' and signnet:
+                contract.update(_signnet_data(Path(resolved[role]['path'])))
             _write_json(path, contract)
             contracts[role] = contract
         classifier_size = int(contracts['classifier']['input']['resize'][0])
@@ -317,7 +403,8 @@ def prepare_package(root: Path, name: str, *, log: Callable[[str], None] = print
                                 'checkpoint_sha256': contracts[role].get('checkpoint_sha256'),
                                 'dataset_sha256': contracts[role].get('dataset_sha256'),
                                 'split_sha256': contracts[role].get('split_sha256')} for role in ROLES},
-            'pipeline': pipeline(contracts['decider'], CUTTER_SCORE, MAX_SIGN_SIDE, classifier_size),
+            'pipeline': pipeline(contracts['decider'], CAR_MIN_SCORE if signnet else CUTTER_SCORE,
+                                 None if signnet else MAX_SIGN_SIDE, classifier_size, contracts['cutter']),
             'measured': measured(entries),
             'training_data': training_data(root, contracts['decider'].get('dataset_sha256')),
         }

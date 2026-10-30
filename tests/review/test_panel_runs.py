@@ -892,3 +892,180 @@ def test_an_unreadable_size_of_a_cutter_run(root, index):
     summary = next(item for item in index.summaries()['runs'] if item['name'] == run.name)
     assert summary['problems'] == ['detector-sizes/960x544/evaluation/detector-test.json is unreadable']
     assert summary['cutters'][0]['partition'] == 'validation'
+
+
+# -- a SignNet run: "Train the cutter" (scripts/run_signnet.sh NAME) --------------------------------------------------
+SIGNNET_LOG = '''== scripts/run_signnet.sh {name}
+run:          {name}
+band:         896x288
+settings:     --families all --band-width 896 --stride 8 --fuse-kernel 1 --widths 16,24,32,48 --epochs 3 --batch 16
+== 1/3 Check the training population (CPU-only) ==
+== 2/3 Explicit CUDA smoke test ==
+== 3/3 Train SignNet ==
+signnet epoch 1/3 train_loss 4.0846 val_recall 0.064 val_false_per_frame 4.98 80s
+signnet epoch 2/3 train_loss 2.9279 val_recall 0.173 val_false_per_frame 4.90 81s
+'''
+SIGNNET_END = 'signnet measure the best epoch 2 on validation and test\nSignNet complete: {run}\n'
+
+
+def signnet_measure(recall: float, false_per_frame: float, car_recall: float, *, car: bool = True) -> dict:
+    """validation or test of a SignNet's result.json (signnet.measure), with its signs found at 3, 5 and 10 boxes,
+    at score 0.3 and, unless car is False (one written before 30 Oct 2026), as the car reads it (car_recall)."""
+    budget = lambda boxes: {'recall_iou': recall * boxes / 5, 'false_positives_per_image': false_per_frame * boxes / 5,
+                            'true_positives': 2, 'truth_box_count': 4}
+    measured = {'by_score_threshold': {'0.3': {'recall_iou': 0.5, 'false_positives_per_image': 0.25, 'true_positives': 2,
+                                               'truth_box_count': 4, 'predictions_per_image': 0.75}},
+                'by_box_budget': {'3': budget(3), '5': budget(5), '10': budget(10)}, 'ignore_boxes': 0,
+                'found_on_ignore_boxes': 0}
+    if car:
+        measured['car'] = {'recall_iou': car_recall, 'false_positives_per_image': 0.2, 'true_positives': 1,
+                           'truth_box_count': 4, 'predictions_per_image': 0.5,
+                           'recall_by_family': {'speed': {'truth': 2, 'found': 1, 'recall': 0.5}}}
+    return measured
+
+
+def signnet_result(band=(896, 288), stride: int = 8, car: bool = True) -> dict:
+    """result.json of nnslr train-signnet: the car's setup by default."""
+    return {'task': 'signnet', 'widths': [16, 24, 32, 48], 'stride': stride, 'fuse_kernel': 1, 'band': list(band),
+            'parameters': 62997, 'epochs': 3, 'best_epoch': 2, 'dataset_sha256': DATASET_SHA, 'split_sha256': SPLIT_SHA,
+            'families': 'all', 'counts_by_split': {'train': 60, 'validation': 10, 'test': 4},
+            'boxes_by_split': {'train': 40, 'validation': 8, 'test': 4},
+            'history': [{'epoch': 1, 'loss': 4.08, 'focal': 3.1, 'shape': 0.97, 'validation_recall_at_5': 0.064,
+                         'validation_false_positives_per_image_at_5': 4.98, 'seconds': 80.3},
+                        {'epoch': 2, 'loss': 2.93, 'focal': 2.0, 'shape': 0.9, 'validation_recall_at_5': 0.173,
+                         'validation_false_positives_per_image_at_5': 4.9, 'seconds': 81.0}],
+            'validation': signnet_measure(0.6, 4.8, 0.375, car=car), 'test': signnet_measure(0.55, 4.5, 0.25, car=car)}
+
+
+def make_signnet_run(root: Path, name: str = '2026-10-30_1200-cutter', *, upto: str = 'done', hand: bool = False, **result) -> Path:
+    """A run folder as scripts/run_signnet.sh NAME leaves it at the step `upto` (checks, signnet, evaluate) or at its
+    end ('done'); hand: as nnslr train-signnet by hand leaves it (train.log, epochs in the old words)."""
+    make_run(root, 'r1')
+    run = root / 'runs' / name
+    reached = ('checks', 'signnet', 'evaluate', 'done').index(upto)
+    log = SIGNNET_LOG.format(name=name)
+    if reached == 0:
+        log = log.split('== 3/3')[0]
+    if reached >= 1:
+        write(run / 'signnet-best.pt', 'weights')
+    if reached >= 2:
+        log += SIGNNET_END.format(run=run).splitlines(keepends=True)[0]
+    if reached >= 3:
+        log += SIGNNET_END.format(run=run).splitlines(keepends=True)[1]
+        write(run / 'result.json', signnet_result(**result))
+    if hand:
+        write(run / 'train.log', 'signnet epoch 1/3 loss 4.0846 validation recall@5 0.064\n'
+                                 'signnet epoch 2/3 loss 2.9279 validation recall@5 0.173\n')
+    else:
+        write(run / 'signnet.log', log)
+    return run
+
+
+def test_a_signnet_run_is_a_cutter_run(root, index):
+    make_signnet_run(root)
+    runs = {run['name']: run for run in index.summaries()['runs']}
+    run = runs['2026-10-30_1200-cutter']
+    assert (run['kind'], run['state'], run['stage'], run['stage_label']) == ('cutter', 'finished', 'done', 'finished')
+    assert run['started_at'].startswith('2026-10-30T12:00:00') and run['finished_at'] and run['evaluated']
+    assert (run['split_sha256'], run['dataset_sha256'], run['start']['kind']) == (SPLIT_SHA, DATASET_SHA, 'random')
+    assert run['problems'] == [] and runs['r1']['kind'] == 'training'
+    # Its line among the cutters (Compare, the run list): what the car reads, its best 5 boxes of 0.3 or more on test.
+    assert run['cutters'] == [{
+        'kind': 'signnet', 'size': '896x288', 'families': 'all', 'finished': True, 'evaluated': True,
+        'partition': 'test', 'score_threshold': 0.3, 'max_boxes': 5, 'recall': 0.25, 'found': 1, 'truth_boxes': 4,
+        'speed_recall': 0.5, 'boxes_per_frame': 0.5, 'false_per_frame': 0.2, 'ms_per_frame': None,
+        'fits_the_car': True}]
+
+
+def test_an_old_signnet_result_is_read_at_the_cars_score(root, index):
+    """A result.json written before measure's 'car' entry: the car's numbers are those at score 0.3 (the cap of 5
+    boxes almost never bites there)."""
+    run = make_signnet_run(root, car=False)
+    [line] = next(item for item in index.summaries()['runs'] if item['name'] == run.name)['cutters']
+    assert (line['kind'], line['recall'], line['false_per_frame'], line['found'], line['speed_recall']) == (
+        'signnet', 0.5, 0.25, 2, None)
+    test = index.detail(run.name)['signnet_run']['test']
+    assert test['car']['recall'] == 0.5 and test['recall'] == 0.55  # the 5 best boxes at any score stay
+    # Without a result.json: no line.
+    (run / 'result.json').unlink()
+    assert next(item for item in index.summaries()['runs'] if item['name'] == run.name)['cutters'] is None
+
+
+@pytest.mark.parametrize('upto, stage, label', [('checks', 'checks', 'checking the dataset and the GPU'),
+                                                ('signnet', 'signnet', 'training SignNet'),
+                                                ('evaluate', 'evaluate', 'evaluating on test and validation')])
+def test_the_steps_of_a_signnet_run(root, index, upto, stage, label):
+    make_signnet_run(root, 's1', upto=upto)
+    run = next(run for run in index.summaries()['runs'] if run['name'] == 's1')
+    assert (run['kind'], run['state'], run['stage'], run['stage_label']) == ('cutter', 'incomplete', stage, label)
+    assert run['finished_at'] is None and run['started_at']
+    index.running_runs = lambda: {'s1': {'cutter'}}
+    run = next(run for run in index.summaries()['runs'] if run['name'] == 's1')
+    assert run['state'] == 'running'
+    if upto == 'signnet':
+        assert run['progress'] == 'SignNet · epoch 2 of 3'
+
+
+def test_the_detail_of_a_signnet_run(root, index):
+    run = make_signnet_run(root)
+    detail = index.detail(run.name)
+    assert detail['signnet_run'] == {
+        'band': [896, 288], 'stride': 8, 'fuse_kernel': 1, 'widths': [16, 24, 32, 48], 'parameters': 62997, 'epochs': 3,
+        'best_epoch': 2, 'families': 'all', 'split_sha256': SPLIT_SHA, 'fits_the_car': True,
+        # The best 5 boxes at any score, and in 'car' as the car reads them (those of score 0.3 or more).
+        'validation': {'recall': 0.6, 'false_per_frame': 4.8, 'car': {
+            'recall': 0.375, 'false_per_frame': 0.2, 'found': 1, 'truth_boxes': 4, 'speed_recall': 0.5,
+            'boxes_per_frame': 0.5, 'score_threshold': 0.3, 'max_boxes': 5}},
+        'test': {'recall': 0.55, 'false_per_frame': 4.5, 'car': {
+            'recall': 0.25, 'false_per_frame': 0.2, 'found': 1, 'truth_boxes': 4, 'speed_recall': 0.5,
+            'boxes_per_frame': 0.5, 'score_threshold': 0.3, 'max_boxes': 5}}}
+    # The curve of its log: the loss, the recall and the false boxes in the 5 best boxes of a frame.
+    assert detail['curves'] == {'signnet': {'epochs': 3, 'points': [
+        {'epoch': 1, 'train_loss': 4.0846, 'val_recall': 0.064, 'val_false_per_frame': 4.98, 'seconds': 80},
+        {'epoch': 2, 'train_loss': 2.9279, 'val_recall': 0.173, 'val_false_per_frame': 4.9, 'seconds': 81}]}}
+    assert (detail['cutter_run'], detail['classifier_run']) == (None, None)
+    # Without its log, the curve of its result.json.
+    (run / 'signnet.log').unlink()
+    assert index.detail(run.name)['curves']['signnet']['points'][1] == {
+        'epoch': 2, 'train_loss': 2.93, 'val_recall': 0.173, 'val_false_per_frame': 4.9, 'seconds': 81.0}
+    json.dumps(index.detail(run.name), allow_nan=False)
+    # Other runs have none.
+    assert index.detail('r1')['signnet_run'] is None
+
+
+def test_a_signnet_of_another_band_does_not_fit_the_car(root, index):
+    run = make_signnet_run(root, 'wide', band=(1344, 416), stride=4)
+    signnet = index.detail(run.name)['signnet_run']
+    assert (signnet['band'], signnet['stride'], signnet['fits_the_car']) == ([1344, 416], 4, False)
+
+
+def test_a_signnet_trained_by_hand(root, index):
+    """The SignNets of 28 Oct 2026: signnet-best.pt, result.json and train.log, whose epochs carry the loss in words."""
+    run = make_signnet_run(root, '2026-10-28_1028-signnet-twothirds-s8-f1', hand=True)
+    detail = index.detail(run.name)
+    assert (detail['kind'], detail['state'], detail['stage']) == ('cutter', 'finished', 'done')
+    assert detail['signnet_run']['fits_the_car'] and detail['curves']['signnet']['points'][0]['train_loss'] == 4.08
+    # Stopped before result.json: an incomplete SignNet, still training by its weights.
+    (run / 'result.json').unlink()
+    detail = index.detail(run.name)
+    assert (detail['kind'], detail['state'], detail['stage'], detail['signnet_run']) == ('cutter', 'incomplete', 'signnet', None)
+    assert [point['epoch'] for point in detail['curves']['signnet']['points']] == [1, 2]
+
+
+def test_an_unreadable_signnet_result(root, index):
+    run = make_signnet_run(root, 's1')
+    (run / 'result.json').write_text('{"task": ')
+    summary = next(item for item in index.summaries()['runs'] if item['name'] == 's1')
+    assert (summary['kind'], summary['stage'], summary['problems']) == ('cutter', 'evaluate', ['result.json is unreadable'])
+
+
+def test_a_chain_report_names_its_signnet_by_the_path_of_its_weights(root, index):
+    """A chain measured with a SignNet (no id recorded): its id from <run>/signnet-best.pt, judged at its main score 0.3."""
+    report = chain_report('test')
+    report['cutter'] = {**report['cutter'], 'checkpoint': str(root / 'runs' / 's1' / 'signnet-best.pt'), 'id': None,
+                        'input_size': [896, 288]}
+    report['by_score_threshold']['0.3'] = report['by_score_threshold'].pop('0.25')
+    report.update({'score_thresholds': [0.05, 0.1, 0.3], 'main_score_threshold': 0.3})
+    headline = runs_module.chain_headline(runs_module.chain_digest(report))
+    assert (headline['cutter_id'], headline['score_threshold'], headline['at_chain_score']) == ('cutter:s1/signnet', 0.3, True)
+    assert headline['cutter_size'] == '896x288'

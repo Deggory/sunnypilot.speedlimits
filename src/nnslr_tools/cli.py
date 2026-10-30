@@ -990,10 +990,12 @@ def _cmd_evaluate_chain(args: argparse.Namespace) -> int:
         report = chain_dry_run(dataset, splits, root, dataset_kind=args.dataset_kind, partition=args.partition)
         print(json.dumps(report, indent=2, sort_keys=True))
         return 0 if report["image_count"] else 1
-    try:
-        thresholds = tuple(float(value) for value in args.score_thresholds.split(",") if value.strip())
-    except ValueError as exc:
-        raise ValueError(f"invalid --score-thresholds {args.score_thresholds!r}: numbers separated by commas") from exc
+    thresholds = None
+    if args.score_thresholds is not None:
+        try:
+            thresholds = tuple(float(value) for value in args.score_thresholds.split(",") if value.strip())
+        except ValueError as exc:
+            raise ValueError(f"invalid --score-thresholds {args.score_thresholds!r}: numbers separated by commas") from exc
     report = evaluate_chain(dataset, splits, root, args.cutter, args.classifier, dataset_kind=args.dataset_kind,
                             partition=args.partition, score_thresholds=thresholds,
                             main_score_threshold=args.main_score_threshold, iou_threshold=args.iou_threshold,
@@ -1535,24 +1537,34 @@ def build_parser() -> argparse.ArgumentParser:
     p_junctions.add_argument("--all", action="store_true", help="every route with GPS positions (nnslr gps)")
     p_junctions.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_junctions.set_defaults(func=_cmd_junctions)
-    p_signnet = sub.add_parser("train-signnet", help="train SignNet, the sign detector made for the comma's Adreno, on "
-                                                     "the cutter's plan (GPU, .venv-gpu); writes signnet-best.pt and "
-                                                     "result.json with the cutter's test measures")
-    p_signnet.add_argument("--run-dir", required=True, help="output folder, e.g. data/runs/<time>-signnet")
+    from nnslr_tools import signnet as signnet_settings
+    car_widths = ",".join(str(value) for value in signnet_settings.CAR_WIDTHS)
+    p_signnet = sub.add_parser("train-signnet", help="train SignNet, the cutter: the sign detector the comma runs on "
+                                                     "its Adreno, on the cutter's plan (GPU, .venv-gpu); writes "
+                                                     "signnet-best.pt and result.json with the cutter's test measures. "
+                                                     "The defaults are the car's SignNet")
+    p_signnet.add_argument("--run-dir", required=True, help="output folder, e.g. data/runs/<time>-cutter")
     p_signnet.add_argument("--dataset", default=None, help="default: <data root>/annotations/objects.jsonl")
     p_signnet.add_argument("--split", default=None, help="default: <data root>/splits/latest.json")
-    p_signnet.add_argument("--families", default="all", help="speed or all, as the cutter")
-    p_signnet.add_argument("--stride", type=int, default=8, choices=(4, 8))
-    p_signnet.add_argument("--fuse-kernel", type=int, default=3, choices=(1, 3),
-                           help="the convolution that joins the deep map with the skip: 3, or 1 (faster on the Adreno)")
-    p_signnet.add_argument("--widths", default="16,32,48,64", help="channels at strides 2,4,8,16")
-    p_signnet.add_argument("--band-width", type=int, default=1344,
-                           help="the band's width in pixels: 1344 full resolution, 672 half")
+    p_signnet.add_argument("--dataset-kind", choices=("gold", "training-candidate"), default="gold")
+    p_signnet.add_argument("--families", default="all", choices=("all", "speed"), help="speed or all, as the cutter")
+    p_signnet.add_argument("--stride", type=int, default=signnet_settings.CAR_STRIDE, choices=(4, 8),
+                           help=f"the heat map's stride (default {signnet_settings.CAR_STRIDE}, the car's)")
+    p_signnet.add_argument("--fuse-kernel", type=int, default=signnet_settings.CAR_FUSE_KERNEL, choices=(1, 3),
+                           help="the convolution that joins the deep map with the skip: 3, or 1 (faster on the "
+                                f"Adreno; default {signnet_settings.CAR_FUSE_KERNEL}, the car's)")
+    p_signnet.add_argument("--widths", default=car_widths,
+                           help=f"channels at strides 2,4,8,16 (default {car_widths}, the car's)")
+    p_signnet.add_argument("--band-width", type=int, default=signnet_settings.CAR_BAND[0],
+                           help="the band's width in pixels: 1344 full resolution, 896 two thirds (default, the "
+                                "car's: only 896 with stride 8 runs on the comma), 672 half")
     p_signnet.add_argument("--epochs", type=int, default=40)
     p_signnet.add_argument("--batch", type=int, default=16)
     p_signnet.add_argument("--learning-rate", type=float, default=3e-3)
     p_signnet.add_argument("--workers", type=int, default=8)
     p_signnet.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+    p_signnet.add_argument("--dry-run", action="store_true",
+                           help="build the plan only (no torch): one JSON line with its frames and boxes by split")
     p_signnet.set_defaults(func=_cmd_train_signnet)
     p_road_net = sub.add_parser("train-road-type", help="train the road-type network with memory (town, rural, "
                                                         "expressway, motorway, ramp, parking from the camera, a GRU "
@@ -1844,7 +1856,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _dataset_arguments(p_negatives)
     p_negatives.add_argument("--cutter", default="active",
-                             help="detector-best.pt, or active: the cutter in use (models/active.json; default)")
+                             help="signnet-best.pt (or an old detector-best.pt), or active: the cutter in use "
+                                  "(models/active.json; default). A SignNet gives its best 5 boxes a frame, as the car, "
+                                  "but from --score-threshold (the car keeps those of 0.3 or more)")
     p_negatives.add_argument("--output", help="new JSONL file, e.g. <data-root>/runs/<run>/negatives.jsonl; "
                                               "required unless --dry-run")
     p_negatives.add_argument("--score-threshold", type=float, default=0.1,
@@ -1883,14 +1897,24 @@ def build_parser() -> argparse.ArgumentParser:
              "per frame that survive, at several cutter thresholds (GPU); --dry-run for CPU-only counts",
     )
     _dataset_arguments(p_chain)
-    p_chain.add_argument("--cutter", default="active", help="detector-best.pt, or active (default)")
+    p_chain.add_argument("--cutter", default="active",
+                         help="signnet-best.pt (or an old detector-best.pt), or active: the cutter in use (default)")
     p_chain.add_argument("--classifier", default="active",
                          help="reader-best.pt of a classifier (v2) or of an old reader (v1), or active (default)")
     p_chain.add_argument("--partition", choices=("train", "validation", "test"), default="test")
-    p_chain.add_argument("--score-thresholds", default="0.05,0.1,0.25",
-                         help="cutter score thresholds, separated by commas (default 0.05,0.1,0.25)")
-    p_chain.add_argument("--main-score-threshold", type=float, default=0.1,
-                         help="the threshold whose frames the report lists (default 0.1)")
+    from nnslr_tools import chain as chain_settings
+
+    def scores(values) -> str:
+        return ",".join(f"{value:g}" for value in values)
+    signnet_scores, signnet_main = chain_settings.chain_scores("signnet")
+    detector_scores, detector_main = chain_settings.chain_scores("detector")
+    p_chain.add_argument("--score-thresholds", default=None,
+                         help="cutter score thresholds, separated by commas (default by the cutter's kind: "
+                              f"{scores(signnet_scores)} with a SignNet, {scores(detector_scores)} with an old "
+                              "Detector)")
+    p_chain.add_argument("--main-score-threshold", type=float, default=None,
+                         help=f"the threshold whose frames the report lists (default {signnet_main:g} with a SignNet, "
+                              f"the car's; {detector_main:g} with an old Detector)")
     p_chain.add_argument("--iou-threshold", type=float, default=.5, help="IoU of a box that finds a sign")
     p_chain.add_argument("--dry-run", action="store_true",
                          help="count the frames and the reviewed boxes without torch")
@@ -2357,21 +2381,41 @@ def _cmd_mapillary_locations(args: argparse.Namespace) -> int:
 
 def _cmd_train_signnet(args: argparse.Namespace) -> int:
     from nnslr_tools.preannotate import resolve_data_root
-    from nnslr_tools.signnet import train_signnet
+    from nnslr_tools.signnet import band_size, fits_the_car, signnet_not_trainable, train_signnet
     from nnslr_tools.training import prepare_detector_training
     root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    try:
+        widths = tuple(int(value) for value in args.widths.split(","))
+    except ValueError as exc:
+        raise ValueError(f"invalid --widths {args.widths!r}: four whole numbers separated by commas") from exc
+    if len(widths) != 4 or min(widths) < 1:
+        raise ValueError(f"invalid --widths {args.widths!r}: four whole numbers separated by commas")
     plan = prepare_detector_training(Path(args.dataset or root / "annotations" / "objects.jsonl"),
-                                     Path(args.split or root / "splits" / "latest.json"), root, families=args.families)
-    widths = tuple(int(value) for value in args.widths.split(","))
+                                     Path(args.split or root / "splits" / "latest.json"), root,
+                                     dataset_kind=args.dataset_kind, families=args.families)
+    if args.dry_run:
+        print(json.dumps({"dry_run": True, "task": "signnet", "dataset_sha256": plan.get("dataset_sha256"),
+                          "split_sha256": plan.get("split_sha256"), "families": plan.get("families"),
+                          "counts_by_split": plan.get("counts_by_split"), "boxes_by_split": plan.get("boxes_by_split"),
+                          "band": list(band_size(args.band_width)), "stride": args.stride,
+                          "fits_the_car": fits_the_car(band_size(args.band_width), args.stride),
+                          "trainable": bool(plan.get("trainable"))},
+                         sort_keys=True), flush=True)
+        return 0 if plan.get("trainable") else 1
+    if not plan.get("trainable"):
+        raise ValueError(signnet_not_trainable(plan))
     result = train_signnet(plan, root, Path(args.run_dir), widths=widths, stride=args.stride, epochs=args.epochs,
                            batch=args.batch, learning_rate=args.learning_rate, workers=args.workers,
-                           band_width=args.band_width, fuse_kernel=args.fuse_kernel)
+                           band_width=args.band_width, fuse_kernel=args.fuse_kernel,
+                           log=lambda line: print(line, flush=True))
     summary = {split: {budget: {key: result[split]["by_box_budget"][budget][key]
                                 for key in ("recall_iou", "false_positives_per_image")}
                        for budget in result[split]["by_box_budget"]}
                for split in ("validation", "test")}
+    car = {split: {key: result[split]["car"][key] for key in ("recall_iou", "false_positives_per_image")}
+           for split in ("validation", "test")}
     print(json.dumps({"run_dir": args.run_dir, "best_epoch": result["best_epoch"], "parameters": result["parameters"],
-                      "by_box_budget": summary}, sort_keys=True), flush=True)
+                      "by_box_budget": summary, "car": car}, sort_keys=True), flush=True)
     return 0
 
 

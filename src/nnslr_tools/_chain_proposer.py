@@ -1,5 +1,7 @@
 """The proposals of a route made by our own networks (nnslr preannotate --proposer ours): the cutter in use finds the
-boxes on the full-resolution frame, the classifier reads each box cut from it, and every box it does not call
+boxes (a SignNet: its best 5 a frame in the frame's top band, from the request's confidence, the car keeping those of
+0.3 or more; an old Detector: on the whole frame), the classifier reads each box cut from the full-resolution frame,
+and every box it does not call
 "not a sign" becomes a proposal, in the same rows as _preannotate_worker writes; the decider in use then says whom
 each speed sign applies to (its applicability: own_road, other_road, or unresolved when it abstains), with the car's
 speed from the route's positions (nnslr gps) when they exist. Run with the GPU environment (.venv-gpu: torch,
@@ -45,9 +47,11 @@ def run(request: dict) -> None:
     import torch
     import torchvision.transforms.functional as TF
     from nnslr_tools import chain
-    from nnslr_tools.chain import (CLASSIFIER_BATCH, _device, _load_classifier, _load_cutter, cutter_boxes)
+    from nnslr_tools.chain import (CLASSIFIER_BATCH, _device, _load_classifier, _load_cutter, cutter_boxes,
+                                   cutter_kind)
     from nnslr_tools.context_experiment import Decider
     from nnslr_tools.preannotate import suppress_overlaps
+    from nnslr_tools.signnet import CAR_MAX_BOXES
     from nnslr_tools.training import crop_rectangle
 
     root = Path(request['data_root'])
@@ -55,14 +59,18 @@ def run(request: dict) -> None:
     chain.report_progress = lambda *args, **kwargs: None
     device = _device(torch, 'cuda' if torch.cuda.is_available() else 'cpu')
     proposer = request['model']
-    cutter, _, _ = _load_cutter({'path': Path(proposer['cutter_path']), 'id': proposer['cutter']}, device)
+    cutter, _, input_size = _load_cutter({'path': Path(proposer['cutter_path']), 'id': proposer['cutter']}, device)
+    kind = cutter_kind(cutter)
+    # What the rows say of the cutter: a SignNet's band, stride and box cap; a Detector's own non-maximum suppression.
+    found_by = ({'cutter_kind': kind, 'band': list(cutter.band), 'stride': cutter.stride, 'max_boxes': CAR_MAX_BOXES}
+                if kind == 'signnet' else {'cutter_kind': kind, 'input_size': input_size, 'nms_iou': .5})
     classifier, _, classes, transform = _load_classifier({'path': Path(proposer['classifier_path']),
                                                           'id': proposer['classifier']}, device)
     decider = Decider(Path(proposer['decider_path']), device)
     # The speed of the car at each frame, when nnslr gps has run for its route (Propose again); else the decider is
     # told it is missing, as for the training rows without one.
     positions: dict[str, dict] = {}
-    print(f"Proposals with our networks on {device}: cutter {proposer['cutter']}, classifier {proposer['classifier']}, "
+    print(f"Proposals with our networks on {device}: cutter {proposer['cutter']} ({kind}), classifier {proposer['classifier']}, "
           f"decider {proposer['decider']}", file=sys.stderr, flush=True)
     output = Path(request['output'])
     (output / 'images').mkdir()
@@ -112,7 +120,7 @@ def run(request: dict) -> None:
                    'width': width, 'height': height, 'preview_path': preview, 'detections': detections,
                    'review_state': 'pending', 'ground_truth': False, 'model': proposer, 'road_model': None, 'ocr': None,
                    'inference': {'provider': 'CUDAExecutionProvider' if device.type == 'cuda' else 'CPUExecutionProvider',
-                                 'confidence': request['confidence'], 'nms_iou': .5, 'tiles': 1}}
+                                 'confidence': request['confidence'], 'tiles': 1, **found_by}}
             manifest.write(json.dumps(row, allow_nan=False) + '\n')
             manifest.flush()
             print(f"Preannotating {ordinal + 1}/{len(frames)}: segment {frame['segment_index']}, frame "

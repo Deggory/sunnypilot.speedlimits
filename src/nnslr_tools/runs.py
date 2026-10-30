@@ -25,10 +25,15 @@ use; kind ``classifier``) has its own files, read the same way:
   (cutter -> classifier), with the new classifier and with the old reader, at a few scores of the cutter;
 - ``comparison.txt``: the new classifier against the old reader, in plain text.
 
-A run of scripts/run_detector_sizes.sh alone (the panel's "Train the cutter": one input size; kind ``cutter``) has
-``detector-sizes/<size>/`` (training-plan.json, detector-best.pt, result.json, evaluation/detector-{test,validation}.json),
-``detector-sizes/<size>.log`` (the epochs) and ``detector-sizes/comparison.txt``; the same folders in a run of the
-pipeline are shown with it.
+A run of scripts/run_signnet.sh (the panel's "Train the cutter": SignNet, the cutter the comma runs; kind ``cutter``)
+has at its root ``signnet-best.pt``, ``result.json`` (task signnet: how it was trained, its history, its measures on
+validation and test) and ``signnet.log`` (the whole output of the script, its epochs); a SignNet trained by hand with
+nnslr train-signnet has ``train.log`` instead of signnet.log.
+
+A run of scripts/run_detector_sizes.sh alone (the old cutter, a detector of one input size, kept to compare; kind
+``cutter`` too) has ``detector-sizes/<size>/`` (training-plan.json, detector-best.pt, result.json,
+evaluation/detector-{test,validation}.json), ``detector-sizes/<size>.log`` (the epochs) and
+``detector-sizes/comparison.txt``; the same folders in a run of the pipeline are shown with it.
 
 The Watch panel of the Evaluate tab plays the frames of one route of an evaluation (the detector of the pipeline, a
 cutter of the sizes, the chain and the chain with the old reader) with the reviewed boxes and the cutter's boxes over
@@ -72,16 +77,19 @@ STAGE_LABELS = {'checks': 'checking the dataset and the GPU', 'detector': 'train
                 'experiment': 'training the variants of experiment B',
                 # A run of scripts/run_classifier.sh (its checks are the dataset, the split and the cutter).
                 'mine': 'mining the cutter’s false boxes', 'classifier': 'training the classifier',
-                'chain': 'evaluating the chain end to end'}
+                'chain': 'evaluating the chain end to end',
+                # A SignNet run (scripts/run_signnet.sh).
+                'signnet': 'training SignNet'}
 # The same steps in a classifier run and in a cutter run, where they mean something else.
 CLASSIFIER_STAGE_LABELS = {'checks': 'checking the dataset, the split and the cutter',
                            'evaluate': 'evaluating the classifier alone'}
-CUTTER_STAGE_LABELS = {'detector': 'training the cutter', 'evaluate': 'evaluating on test and validation'}
+CUTTER_STAGE_LABELS = {'detector': 'training the cutter', 'evaluate': 'evaluating on test and validation',
+                       'signnet': 'training SignNet'}
 CLASSIFIER_STAGES = ('checks', 'mine', 'classifier', 'evaluate', 'chain', 'done')
 
 # The scripts that write into a run folder, named by the run in their first argument.
 SCRIPTS = ((b'run_v100_baseline.sh', 'pipeline'), (b'run_experiment_b.sh', 'experiment'),
-           (b'run_classifier.sh', 'classifier'), (b'run_detector_sizes.sh', 'cutter'))
+           (b'run_classifier.sh', 'classifier'), (b'run_signnet.sh', 'cutter'), (b'run_detector_sizes.sh', 'cutter'))
 # Folders and files of the training pipeline (a folder with none of them holds only experiment B).
 PIPELINE_PARTS = ('detector', 'reader', 'evaluation', 'export', 'bundle')
 # What scripts/run_classifier.sh writes first; a folder with one of them and none of the pipeline's own networks
@@ -91,11 +99,19 @@ PIPELINE_ONLY = ('detector', 'reader', 'export', 'bundle')
 # scripts/run_detector_sizes.sh: a folder per input size (WIDTHxHEIGHT) and its log next to it.
 SIZES_DIR = 'detector-sizes'
 SIZE_FOLDER = re.compile(r'[1-9][0-9]{0,4}x[1-9][0-9]{0,4}')
-# The score of the cutter the chain is judged at (the cutter's own, nnslr_tools.model_roles.CUTTER_SCORE).
+# scripts/run_signnet.sh: SignNet's weights, result and log at the root of its run; train.log for one trained by hand.
+SIGNNET_FILES = {'weights': 'signnet-best.pt', 'result': 'result.json', 'log': 'signnet.log', 'hand_log': 'train.log'}
+# SignNet's best 5 boxes of a frame at any score (signnet.CAR_MAX_BOXES; what its training keeps the best epoch by).
+# What the car reads is narrower: those 5 of score 0.3 or more (signnet.car_measure, each partition's 'car').
+SIGNNET_BUDGET = '5'
+# The score of the cutter the chain is judged at when its report names none (the old Detector's,
+# nnslr_tools.model_roles.CUTTER_SCORE); a report made with a SignNet names its own (the car's 0.3).
 CHAIN_SCORE = 0.1
-# The weights a chain report names, <data root>/runs/<run>/<part>/<file>: the id of the Models tab, <role>:<run>/<part>.
+# The weights a chain report names, <data root>/runs/<run>/<part>/<file> (a SignNet: <run>/signnet-best.pt): the id of
+# the Models tab, <role>:<run>/<part>.
 CHAIN_WEIGHTS = {
-    'cutter': re.compile(rf'/runs/({RUN_NAME.pattern})/(detector|{SIZES_DIR}/{SIZE_FOLDER.pattern})/detector-best\.pt$'),
+    'cutter': re.compile(rf'/runs/({RUN_NAME.pattern})/((?:detector|{SIZES_DIR}/{SIZE_FOLDER.pattern})(?=/detector-best\.pt$)'
+                         r'|signnet(?=-best\.pt$))(?:/detector)?-best\.pt$'),
     'classifier': re.compile(rf'/runs/({RUN_NAME.pattern})/(reader|classifier)/reader-best\.pt$'),
 }
 NOT_A_SIGN = 'not_a_sign'
@@ -510,8 +526,9 @@ def chain_digest(report: Any) -> dict:
 
 
 def _chain_entry(thresholds: list[dict], main: float | None) -> dict | None:
-    """The score the chain is judged at: CHAIN_SCORE when measured, else the report's main score, else the first."""
-    for wanted in (CHAIN_SCORE, main):
+    """The score the chain is judged at: the report's main score (a SignNet's 0.3, the car's floor; a Detector's 0.1)
+    when measured, else CHAIN_SCORE, else the first."""
+    for wanted in (main, CHAIN_SCORE):
         found = next((item for item in thresholds if wanted is not None and abs(item['score'] - wanted) < 1e-9), None)
         if found is not None:
             return found
@@ -519,15 +536,18 @@ def _chain_entry(thresholds: list[dict], main: float | None) -> dict | None:
 
 
 def chain_headline(digest: dict) -> dict | None:
-    """The numbers that judge the chain, at the cutter's score 0.1 (CHAIN_SCORE): the speed signs found and read right
-    end to end, found by the cutter alone, on the frames a person reviewed; the boxes and false boxes per frame of
-    the cutter, and the false ones that survive the classifier. None when the report has no score."""
-    entry = _chain_entry(digest['thresholds'], CHAIN_SCORE)
+    """The numbers that judge the chain, at its report's main score (0.3 with a SignNet, 0.1 with a Detector; CHAIN_SCORE
+    when it names none): the speed signs found and read right end to end, found by the cutter alone, on the frames a
+    person reviewed; the boxes and false boxes per frame of the cutter, and the false ones that survive the
+    classifier. None when the report has no score."""
+    main = digest.get('main_score_threshold')
+    entry = _chain_entry(digest['thresholds'], main)
     if entry is None:
         return None
     signs = entry['speed_signs'] or {}
     human = signs.get('human') or {}
-    return {'score_threshold': entry['score'], 'at_chain_score': abs(entry['score'] - CHAIN_SCORE) < 1e-9,
+    wanted = main if main is not None else CHAIN_SCORE
+    return {'score_threshold': entry['score'], 'at_chain_score': abs(entry['score'] - wanted) < 1e-9,
             'truth': signs.get('truth'), 'found': signs.get('found'), 'correct': signs.get('correct'),
             'recall': signs.get('recall'), 'recall_found': signs.get('recall_found'),
             'read_right_when_found': signs.get('read_right_when_found'),
@@ -1132,22 +1152,90 @@ def classifier_log_digest(text: str) -> dict:
 
 
 def cutter_log_digest(text: str) -> dict:
-    """detector-sizes/<size>.log (the training of one size of scripts/run_detector_sizes.sh): the curves of the
-    detector, its last epoch in words, the last error line."""
+    """<run>/signnet.log (scripts/run_signnet.sh; train.log of a SignNet trained by hand) or detector-sizes/<size>.log
+    (the training of one size of the old scripts/run_detector_sizes.sh): the curves of SignNet or of the detector,
+    its last epoch in words, the step it reached, the last error line."""
     error = None
     for line in reversed(text.splitlines()[-400:]):
         line = line.strip()
         if ERROR_LINE.match(line):
             error = line[:300]
             break
-    curves = progress('train_cutter', 'running', text)['curves']
-    curve = curves.get('detector')
+    running = progress('train_cutter', 'running', text)
+    curves = running['curves']
+    net = 'signnet' if 'signnet' in curves else 'detector'
+    name = 'SignNet' if net == 'signnet' else 'detector'
+    curve = curves.get(net)
     detail = ''
     if curve and curve['points']:
         last = max(point['epoch'] for point in curve['points'])
-        detail = ('detector · stopped early after epoch ' + str(curve['stopped_early']) if curve.get('stopped_early')
-                  else 'detector · epoch ' + str(last) + ' of ' + str(curve['epochs']))
-    return {'curves': curves, 'detail': detail, 'error': error}
+        detail = (name + ' · stopped early after epoch ' + str(curve['stopped_early']) if curve.get('stopped_early')
+                  else name + ' · epoch ' + str(last) + ' of ' + str(curve['epochs']))
+    step = next((row['key'] for row in running['steps'] if row['state'] == 'current'), None)
+    return {'curves': curves, 'detail': detail, 'error': error, 'step': step,
+            'complete': all(row['state'] == 'done' for row in running['steps'])}
+
+
+def signnet_run_digest(result: Any) -> dict:
+    """<run>/result.json of SignNet (nnslr train-signnet): its shape (band, stride, fuse kernel, widths), its training,
+    whether the car runs it as it is (signnet.fits_the_car), and on validation and test the signs found and the false
+    boxes per frame among its 5 best boxes of a frame at any score (SIGNNET_BUDGET), with ``car``: the same as the car
+    reads it, the best 5 of score 0.3 or more (signnet.car_measure, with the found and reviewed boxes, the speed
+    signs' recall and the boxes passed on per frame for the run's cutter line); its epochs as a curve."""
+    from nnslr_tools import signnet
+    if not isinstance(result, dict) or result.get('task') != 'signnet':
+        raise ValueError('not a SignNet result')
+    band = result.get('band')
+    band = [int(side) for side in band] if (isinstance(band, list) and len(band) == 2
+                                            and all(_int(side) and side > 0 for side in band)) else None
+    widths = result.get('widths')
+    widths = [int(width) for width in widths] if isinstance(widths, list) and widths and all(_int(width) for width in widths) else None
+    stride = _int(result.get('stride'))
+
+    def car(partition: str) -> dict | None:
+        found = signnet.car_measure(result.get(partition))
+        if found is None:
+            return None
+        speed = _dig(found, ('recall_by_family', 'speed'))
+        return {'recall': _num(found.get('recall_iou')), 'false_per_frame': _num(found.get('false_positives_per_image')),
+                'found': _int(found.get('true_positives')), 'truth_boxes': _int(found.get('truth_box_count')),
+                'speed_recall': _num(speed.get('recall')) if isinstance(speed, dict) else None,
+                'boxes_per_frame': _num(found.get('predictions_per_image')),
+                'score_threshold': signnet.CAR_MIN_SCORE, 'max_boxes': signnet.CAR_MAX_BOXES}
+
+    def budget(partition: str) -> dict | None:
+        found = _dig(result, (partition, 'by_box_budget', SIGNNET_BUDGET))
+        at_car = car(partition)
+        if not isinstance(found, dict) and at_car is None:
+            return None
+        found = found if isinstance(found, dict) else {}
+        return {'recall': _num(found.get('recall_iou')), 'false_per_frame': _num(found.get('false_positives_per_image')),
+                'car': at_car}
+    points = []
+    for item in result.get('history') if isinstance(result.get('history'), list) else []:
+        if not isinstance(item, dict) or _int(item.get('epoch')) is None:
+            continue
+        point: dict = {'epoch': _int(item['epoch'])}
+        for key, name in (('loss', 'train_loss'), ('validation_recall_at_5', 'val_recall'),
+                          ('validation_false_positives_per_image_at_5', 'val_false_per_frame'), ('seconds', 'seconds')):
+            if _num(item.get(key)) is not None:
+                point[name] = _num(item[key])
+        points.append(point)
+    text = lambda key: result.get(key) if isinstance(result.get(key), str) else None  # noqa: E731
+    return {
+        'band': band, 'stride': stride, 'fuse_kernel': _int(result.get('fuse_kernel')), 'widths': widths,
+        'parameters': _int(result.get('parameters')), 'epochs': _int(result.get('epochs')),
+        'best_epoch': _int(result.get('best_epoch')), 'families': text('families'), 'split_sha256': text('split_sha256'),
+        'fits_the_car': band is not None and stride is not None and signnet.fits_the_car(band, stride),
+        'validation': budget('validation'), 'test': budget('test'),
+        # Not part of the detail's signnet_run: the summary's dataset, and the curve when the log has none.
+        'dataset_sha256': text('dataset_sha256'), 'history': points,
+    }
+
+
+# What the detail of a run says of its SignNet (signnet_run_digest without its history).
+SIGNNET_RUN_KEYS = ('band', 'stride', 'fuse_kernel', 'widths', 'parameters', 'epochs', 'best_epoch', 'families',
+                    'split_sha256', 'fits_the_car', 'validation', 'test')
 
 
 def comparison_digest(text: str) -> str:
@@ -1545,17 +1633,20 @@ class RunsIndex:
 
         cutters = self._cutters(run)
         problems += cutters['problems']
+        signnet = self._signnet(run)
+        problems += signnet['problems']
 
         kinds = running.get(name, set())
         variants = self._variants(run)
         # A folder of scripts/run_experiment_b.sh alone has experiment-b/ and nothing of the pipeline; a folder of
         # scripts/run_classifier.sh has its files and none of the pipeline's networks; a folder of
-        # scripts/run_detector_sizes.sh alone has detector-sizes/ and none of them.
+        # scripts/run_signnet.sh has SignNet's files at its root, one of scripts/run_detector_sizes.sh alone has
+        # detector-sizes/, and none of them.
         pipeline = log_path is not None or any((run / part).exists() for part in PIPELINE_PARTS)
         alone = log_path is None and not any((run / part).exists() for part in PIPELINE_ONLY)
         if alone and ('classifier' in kinds or any((run / part).exists() for part in CLASSIFIER_PARTS)):
             kind = 'classifier'
-        elif alone and ('cutter' in kinds or (run / SIZES_DIR).is_dir()):
+        elif alone and ('cutter' in kinds or signnet['found'] or (run / SIZES_DIR).is_dir()):
             kind = 'cutter'
         else:
             kind = 'training' if pipeline or not (run / EXPERIMENT_DIR).is_dir() else 'experiment'
@@ -1564,6 +1655,8 @@ class RunsIndex:
             experiment_log = self._experiment_log(run)
         if kind == 'classifier':
             stage = self._classifier_stage(classifier_files, classifier_log, 'classifier' in kinds)
+        elif kind == 'cutter' and (signnet['found'] or not cutters['sizes']):
+            stage = signnet['stage']
         elif kind == 'cutter':
             sizes = cutters['sizes']
             stage = ('checks' if not sizes else 'detector' if not all(item['files']['result'] for item in sizes)
@@ -1591,7 +1684,8 @@ class RunsIndex:
         experiment_files = [path for _, path in variants]
         experiment_files += [self._inside(run / EXPERIMENT_DIR / (variant + '.log'), run) for variant in VARIANTS]
         times = [time for time in (_mtime(path) for path in [*files.values(), log_path, *experiment_files,
-                                                             *classifier_files.values(), *cutters['paths']]) if time is not None]
+                                                             *classifier_files.values(), *cutters['paths'],
+                                                             *signnet['paths']]) if time is not None]
         started = None
         match = TIME_NAME.fullmatch(name)
         if match:
@@ -1607,13 +1701,17 @@ class RunsIndex:
             started = _iso(min((time for time in (_mtime(classifier_files['classifier_log']), _mtime(classifier_files['negatives']))
                                 if time is not None), default=None) or _mtime(run))
         if started is None and kind == 'cutter':
-            started = _iso(min((time for time in (_mtime(item['files']['log']) for item in cutters['sizes']) if time is not None),
+            logs = [item['files']['log'] for item in cutters['sizes']] + [signnet['files']['log']]
+            started = _iso(min((time for time in (_mtime(path) for path in logs) if time is not None),
                                default=None) or _mtime(run))
         finished = None
         if stage == 'done' and kind == 'training':
             finished = _iso(_mtime(files['bundle']))
         elif stage == 'done' and kind == 'experiment':
             finished = max((_iso(_mtime(path)) or '' for _, path in variants), default=None) or None
+        elif stage == 'done' and kind == 'cutter' and signnet['found']:
+            # SignNet writes its result.json last, once measured on validation and test.
+            finished = _iso(_mtime(signnet['files']['result']))
         elif stage == 'done' and kind == 'cutter':
             # The comparison is the last file of the sizes, else their last evaluation.
             finished = _iso(max((time for time in [_mtime(cutters['comparison'])] + [
@@ -1628,7 +1726,37 @@ class RunsIndex:
                 'stage': stage, 'state': state, 'started_at': started, 'variants': variants,
                 'experiment_running': 'experiment' in kinds, 'experiment_log': experiment_log,
                 'classifier_files': classifier_files, 'classifier': classifier, 'classifier_log': classifier_log,
-                'cutters': cutters, 'updated_at': _iso(max(times)) if times else None, 'finished_at': finished}
+                'cutters': cutters, 'signnet': signnet, 'updated_at': _iso(max(times)) if times else None,
+                'finished_at': finished}
+
+    def _signnet(self, run: Path) -> dict:
+        """SignNet in this run (scripts/run_signnet.sh, or nnslr train-signnet by hand): its files at the run's root,
+        its result.json (signnet_run_digest), its log (cutter_log_digest: signnet.log, else the train.log beside a
+        signnet-best.pt), the step it reached (checks, signnet, evaluate, done once result.json is written).
+        {'found', 'files', 'result', 'log', 'stage', 'paths', 'problems'}."""
+        weights = self._file(run, SIGNNET_FILES['weights'])
+        hand_log = self._file(run, SIGNNET_FILES['hand_log']) if weights is not None else None
+        files = {'weights': weights, 'result': self._file(run, SIGNNET_FILES['result']),
+                 'log': self._file(run, SIGNNET_FILES['log']) or hand_log}
+        result = self._load(files['result'], signnet_run_digest)
+        log = self._load(files['log'], cutter_log_digest, text=True)
+        log = None if log is UNREADABLE else log
+        # A result.json of another kind (a detector's, in an old run) is not SignNet's: neither found nor unreadable.
+        found = files['weights'] is not None or files['log'] is not None or (result is not None and result is not UNREADABLE)
+        problems = ['signnet_result'] if found and result is UNREADABLE and files['weights'] is not None else []
+        result = None if result is UNREADABLE else result
+        step = (log or {}).get('step')
+        if result is not None:
+            stage = 'done'
+        elif step == 'evaluate' or (log or {}).get('complete'):
+            # Measuring the best epoch, or done by its log with no result.json to read.
+            stage = 'evaluate'
+        elif files['weights'] is not None or (log or {}).get('curves', {}).get('signnet') or step == 'signnet':
+            stage = 'signnet'
+        else:
+            stage = 'checks'
+        return {'found': found, 'files': files, 'result': result, 'log': log, 'stage': stage,
+                'paths': [path for path in files.values() if path is not None], 'problems': problems}
 
     def _cutters(self, run: Path) -> dict:
         """The detectors of scripts/run_detector_sizes.sh in this run (detector-sizes/<size>/ or its log), with their
@@ -1710,6 +1838,9 @@ class RunsIndex:
             results = [gathered['classifier']['classifier_result']]
         if gathered['kind'] == 'cutter':
             results = [item['training'] for item in gathered['cutters']['sizes']]
+            if gathered['signnet']['result'] is not None:
+                # SignNet always starts from random weights (nnslr_tools.signnet.build_signnet).
+                results.append({'initialization': 'random'})
         if gathered['kind'] == 'experiment':
             results = [self._load(path, experiment_digest) for _, path in gathered['variants'] if path is not None]
         initialization = next((digest['initialization'] for digest in results
@@ -1771,6 +1902,11 @@ class RunsIndex:
             dataset_sha = next((item['dataset_sha256'] for item in sources if item and item.get('dataset_sha256')), None)
             classifier_log = gathered['classifier_log'] or {}
             progress_text, error = classifier_log.get('detail') or None, classifier_log.get('error')
+        elif gathered['kind'] == 'cutter' and gathered['signnet']['found']:
+            signnet = gathered['signnet']
+            split_sha = (signnet['result'] or {}).get('split_sha256')
+            dataset_sha = (signnet['result'] or {}).get('dataset_sha256')
+            progress_text, error = (signnet['log'] or {}).get('detail') or None, (signnet['log'] or {}).get('error')
         elif gathered['kind'] == 'cutter':
             plans = [item['plan'] for item in gathered['cutters']['sizes'] if item['plan']]
             split_sha = next((plan['split_sha256'] for plan in plans if plan.get('split_sha256')), None)
@@ -1787,6 +1923,9 @@ class RunsIndex:
         if gathered['kind'] == 'cutter':
             stage_label = CUTTER_STAGE_LABELS.get(stage, stage_label)
         cutters = [self._cutter_headline(item) for item in gathered['cutters']['sizes']]
+        signnet_line = self._signnet_headline(gathered['signnet'])
+        if signnet_line is not None:
+            cutters.append(signnet_line)
         summary = {
             'name': gathered['name'],
             'kind': gathered['kind'],
@@ -1804,7 +1943,8 @@ class RunsIndex:
             'dataset_sha256': dataset_sha,
             'split_sha256': split_sha,
             'evaluated': (reader is not None or detector is not None or classifier_eval is not None or chain is not None
-                          or any(item['evaluated'] for item in cutters)),
+                          or any(item['evaluated'] for item in cutters)
+                          or bool(gathered['signnet']['result'] and gathered['signnet']['result']['test'])),
             'reader': None if reader is None else {
                 'samples': reader['samples'], 'accuracy': reader['accuracy'],
                 'human_samples': (reader['human'] or {}).get('samples'), 'human_accuracy': (reader['human'] or {}).get('accuracy')},
@@ -1824,7 +1964,9 @@ class RunsIndex:
                 'best_epoch': trained.get('best_epoch')},
             'chain': None if chain is None else chain_headline(chain),
             'chain_old_reader': None if classifier['chain_old_reader'] is None else chain_headline(classifier['chain_old_reader']),
-            # The detectors of scripts/run_detector_sizes.sh (a cutter run, or the sizes compared in a pipeline run).
+            # The detectors of scripts/run_detector_sizes.sh (a cutter run, or the sizes compared in a pipeline run),
+            # kind 'detector' at their score 0.1; then the run's SignNet, kind 'signnet': what the car reads of it
+            # (its best max_boxes boxes of score_threshold 0.3 or more).
             'cutters': cutters or None,
             'experiment_b': [variant for variant, path in experiment if path is not None],
             'problems': [PROBLEM_FILES.get(key, key) + ' is unreadable' for key in gathered['problems']],
@@ -1836,7 +1978,8 @@ class RunsIndex:
     @staticmethod
     def _stat_key(gathered: dict) -> list:
         key = []
-        for path in [*gathered['files'].values(), *gathered['classifier_files'].values(), *gathered['cutters']['paths']]:
+        for path in [*gathered['files'].values(), *gathered['classifier_files'].values(), *gathered['cutters']['paths'],
+                     *gathered['signnet']['paths']]:
             if path is not None:
                 try:
                     info = path.stat()
@@ -1846,13 +1989,33 @@ class RunsIndex:
         return key
 
     @staticmethod
+    def _signnet_headline(signnet: dict) -> dict | None:
+        """The SignNet of this run in the shape of a cutter line (kind 'signnet'): what the car reads of it, its best 5
+        boxes of score 0.3 or more, on test, else validation. None without its result.json."""
+        result = signnet['result']
+        if result is None:
+            return None
+        partition = next((name for name in ('test', 'validation') if (result[name] or {}).get('car')), None)
+        car = (result[partition] or {})['car'] if partition else {}
+        band = result['band']
+        from nnslr_tools.signnet import CAR_MAX_BOXES, CAR_MIN_SCORE
+        return {'kind': 'signnet', 'size': f'{band[0]}x{band[1]}' if band else 'signnet',
+                'families': result['families'] or 'all', 'finished': True, 'evaluated': partition is not None,
+                'partition': partition, 'score_threshold': car.get('score_threshold', CAR_MIN_SCORE),
+                'max_boxes': car.get('max_boxes', CAR_MAX_BOXES), 'recall': car.get('recall'), 'found': car.get('found'),
+                'truth_boxes': car.get('truth_boxes'), 'speed_recall': car.get('speed_recall'),
+                'boxes_per_frame': car.get('boxes_per_frame'), 'false_per_frame': car.get('false_per_frame'),
+                'ms_per_frame': None, 'fits_the_car': result['fits_the_car']}
+
+    @staticmethod
     def _cutter_headline(item: dict) -> dict:
         """One size of the cutter in a line: its signs found at score 0.1 (on test, else validation), the speed signs
         among them for a cutter that also finds the other signs, the boxes per frame it passes on."""
         measured = item['test'] or item['validation'] or {}
         trained = item['training'] or {}
         speed = (measured.get('by_family') or {}).get('speed') or {}
-        return {'size': item['size'], 'families': measured.get('families') or trained.get('families') or 'speed',
+        return {'kind': 'detector', 'size': item['size'],
+                'families': measured.get('families') or trained.get('families') or 'speed',
                 'finished': item['training'] is not None, 'evaluated': bool(measured),
                 'partition': measured.get('partition'), 'score_threshold': measured.get('score_threshold'),
                 'recall': measured.get('recall'), 'found': measured.get('found'), 'truth_boxes': measured.get('truth_boxes'),
@@ -1986,6 +2149,18 @@ class RunsIndex:
                 if history:
                     curves['detector'] = {'epochs': history['epochs'] or history['history'][-1]['epoch'],
                                           'points': history['history']}
+        signnet = gathered['signnet']
+        if signnet['found']:
+            # SignNet: from its log when its epochs carry the numbers (scripts/run_signnet.sh), else from its
+            # result.json (a SignNet trained by hand logged only the loss and the recall in words).
+            logged = ((signnet['log'] or {}).get('curves') or {}).get('signnet')
+            history = (signnet['result'] or {}).get('history')
+            if logged and any('train_loss' in point for point in logged['points']):
+                curves['signnet'] = logged
+            elif history:
+                curves['signnet'] = {'epochs': signnet['result']['epochs'] or history[-1]['epoch'], 'points': history}
+            elif logged:
+                curves['signnet'] = logged
         logged = ((gathered['classifier_log'] or {}).get('curves') or {}).get('classifier')
         pretraining = ((gathered['classifier_log'] or {}).get('curves') or {}).get('pretrain')
         if pretraining:
@@ -2063,6 +2238,10 @@ class RunsIndex:
             'experiment': self._experiment(run),
             'classifier_run': self._classifier_detail(gathered),
             'cutter_run': self._cutter_detail(gathered),
+            # A SignNet run: its shape, training and numbers at its best 5 boxes a frame at any score, and in each
+            # partition's 'car' as the car reads it (those 5 of score 0.3 or more).
+            'signnet_run': (None if gathered['signnet']['result'] is None else
+                            {key: gathered['signnet']['result'][key] for key in SIGNNET_RUN_KEYS}),
             'watch': self._watch_models(run, gathered),
         }
 
@@ -2171,5 +2350,5 @@ CLASSIFIER_FILES = {
 PROBLEM_FILES = {'detector_plan': 'detector/training-plan.json', 'reader_plan': 'reader/training-plan.json',
                  'detector_result': 'detector/result.json', 'reader_result': 'reader/result.json',
                  'detector_eval': 'evaluation/detector-test.json', 'reader_eval': 'evaluation/reader-test.json',
-                 **CLASSIFIER_FILES}
+                 'signnet_result': 'result.json', **CLASSIFIER_FILES}
 # [control-panel] - END

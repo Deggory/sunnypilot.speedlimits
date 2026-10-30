@@ -298,6 +298,41 @@ def test_the_cutter_that_stops_early_and_its_reports():
     assert states(progress('train', 'running', '== a. importo\n== 3/4 Train the detector at 960x544 ==\n'))['import'] == 'current'
 
 
+# -- scripts/run_signnet.sh: "Train the cutter" since SignNet is the one cutter ----------------------------------------
+SIGNNET_LOG = """== scripts/run_signnet.sh 2026-10-30_1200-cutter
+== scripts/run_signnet.sh 2026-10-30_1200-cutter
+run:          2026-10-30_1200-cutter
+band:         896x288
+== 1/3 Check the training population (CPU-only) ==
+== 2/3 Explicit CUDA smoke test ==
+== 3/3 Train SignNet ==
+signnet epoch 3/40 train_loss 2.4924 val_recall 0.198 val_false_per_frame 4.91 87s
+"""
+
+
+def test_the_signnet_training_has_its_own_steps():
+    from nnslr_tools.job_progress import SIGNNET_STEPS
+    assert sum(weight for _, _, weight in SIGNNET_STEPS) == 100
+    result = progress('train_cutter', 'running', SIGNNET_LOG)
+    assert result['signnet'] and states(result) == {'checks': 'done', 'signnet': 'current', 'evaluate': 'todo'}
+    assert [step['label'] for step in result['steps']] == ['Checks and GPU smoke test', 'Train SignNet',
+                                                            'Measure on validation and test']
+    # 5 done, and 3 of 40 epochs of SignNet's 85.
+    assert result['percent'] == 11.4 and result['detail'] == 'SignNet · epoch 3 of 40'
+    assert result['curves'] == {'signnet': {'epochs': 40, 'points': [
+        {'epoch': 3, 'train_loss': 2.4924, 'val_recall': 0.198, 'val_false_per_frame': 4.91, 'seconds': 87}]}}
+    checks = progress('train_cutter', 'running', SIGNNET_LOG.split('== 2/3')[0])
+    assert states(checks)['checks'] == 'current' and checks['percent'] == 0.0
+    measuring = progress('train_cutter', 'running', SIGNNET_LOG + 'signnet measure the best epoch 3 on validation and test\n')
+    assert states(measuring) == {'checks': 'done', 'signnet': 'done', 'evaluate': 'current'} and measuring['percent'] == 90.0
+    done = progress('train_cutter', 'ok', SIGNNET_LOG + 'signnet measure the best epoch 3 on validation and test\n'
+                                                        'SignNet complete: data/runs/2026-10-30_1200-cutter\n')
+    assert set(states(done).values()) == {'done'} and done['percent'] == 100.0
+    # The old detector's log keeps its steps, and another action never reads SignNet's.
+    assert not progress('train_cutter', 'running', CUTTER_LOG)['signnet']
+    assert 'signnet' not in progress('train', 'running', TRAIN_LOG)
+
+
 def test_the_last_line_is_the_error_not_the_hint_after_it():
     log = ('== 3/3 Try it on the GPU\ntorch.AcceleratorError: CUDA error: out of memory\n'
            "Search for `cudaErrorMemoryAllocation' in https://docs.nvidia.com/cuda/ for more information.\n\n== finito con codice 1\n")

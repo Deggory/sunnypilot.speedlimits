@@ -3,8 +3,10 @@
 // per epoch and about how long the network still needs), the detector's loss, the reader's accuracy and
 // loss, train against validation; for the classifier with “not a sign”, the sign crops read right and the “not a
 // sign” crops rejected on validation, their mean that chooses its best epoch, and its loss; before it, in two stages,
-// its pretraining on the Mapillary signs alone (accuracy on our validation signs, and loss). Data: progress.curves of
-// the job, one point per finished epoch.
+// its pretraining on the Mapillary signs alone (accuracy on our validation signs, and loss); for SignNet (the cutter the
+// comma runs), the validation signs found in its 5 best boxes of each frame at any score (the car also drops the boxes
+// below 0.3: those numbers come once it is measured, on the run's SignNet card), its false boxes per frame among those
+// 5, and its train loss. Data: progress.curves of the job, one point per finished epoch.
 import {computed} from 'vue';
 import type {CurveNet, EpochPoint, JobProgress, TrainingCurve} from '../common/panel-types';
 import LineChart, {type ChartSeries} from './charts/LineChart.vue';
@@ -14,11 +16,12 @@ import {elapsedText, roughText} from './jobs';
 // those of the job's steps, else those with curves, else the detector and the reader.
 const props = defineProps<{progress: JobProgress; running: boolean; title?: string; nets?: CurveNet[]}>();
 type Net = CurveNet;
-const ALL_NETS: Net[] = ['detector', 'reader', 'pretrain', 'classifier'];
-const NET_NAME: Record<Net, string> = {detector: 'Detector', reader: 'Reader', pretrain: 'Pretraining on Mapillary',
+const ALL_NETS: Net[] = ['signnet', 'detector', 'reader', 'pretrain', 'classifier'];
+const NET_NAME: Record<Net, string> = {signnet: 'SignNet', detector: 'Detector', reader: 'Reader', pretrain: 'Pretraining on Mapillary',
   classifier: 'Classifier'};
 /** A network in a sentence ("the classifier ends in ..."). */
-const NET_WORD: Record<Net, string> = {detector: 'detector', reader: 'reader', pretrain: 'pretraining', classifier: 'classifier'};
+const NET_WORD: Record<Net, string> = {signnet: 'SignNet', detector: 'detector', reader: 'reader', pretrain: 'pretraining',
+  classifier: 'classifier'};
 const TRAIN = 'var(--c-train)';
 const VAL = 'var(--c-val)';
 const REJECT = 'var(--split-3)';
@@ -30,6 +33,7 @@ const detector = computed(() => curves.value.detector ?? null);
 const reader = computed(() => curves.value.reader ?? null);
 const classifier = computed(() => curves.value.classifier ?? null);
 const pretrain = computed(() => curves.value.pretrain ?? null);
+const signnet = computed(() => curves.value.signnet ?? null);
 const hasPoints = (curve: TrainingCurve | null | undefined): curve is TrainingCurve => curve !== null && curve !== undefined
   && curve.points.length > 0;
 /** The networks shown, in the order they train. */
@@ -84,6 +88,11 @@ const detectorBest = computed(() => shows('detector') && hasPoints(detector.valu
 const detectorRecall = computed(() => hasPoints(detector.value) && detector.value.points.some((point) => point.val_recall !== undefined));
 const detectorBestRecall = computed(() => shows('detector') && detectorRecall.value && hasPoints(detector.value)
   ? best(detector.value, (point) => point.val_recall, true) : null);
+/** SignNet's best epoch: the most validation signs found in its 5 best boxes of each frame, at any score (the weights
+ * it keeps). */
+const signnetBest = computed(() => shows('signnet') && hasPoints(signnet.value) ? best(signnet.value, (point) => point.val_recall, true) : null);
+const signnetLowest = computed(() => hasPoints(signnet.value) ? best(signnet.value, (point) => point.train_loss, false) : null);
+const signnetFalse = computed(() => hasPoints(signnet.value) && signnet.value.points.some((point) => point.val_false_per_frame !== undefined));
 const readerBestLoss = computed(() => hasPoints(reader.value) ? best(reader.value, (point) => point.val_loss, false) : null);
 const readerBestAccuracy = computed(() => shows('reader') && hasPoints(reader.value)
   ? best(reader.value, (point) => point.val_accuracy, true) : null);
@@ -144,7 +153,7 @@ const beforeEpochs = computed(() => running.value && ['import', 'split', 'gpu_en
   .includes(props.progress.steps.find((item) => item.state === 'current')?.key ?? ''));
 const beforeText = computed(() => shows('reader')
   ? 'First the training imports the reviews, checks the dataset and prepares the GPU: a few minutes.'
-  : shows('detector') ? 'First it checks the frames of the training and of the evaluation, and the GPU: a few minutes.'
+  : shows('detector') || shows('signnet') ? 'First it checks the frames of the training and of the evaluation, and the GPU: a few minutes.'
     : 'First it checks the dataset, the split and the cutter in use, then runs the cutter on every frame to mine its false boxes.');
 const isRunning = (net: Net): boolean => running.value && current.value === net;
 /** Every value, for the table under the charts. */
@@ -170,6 +179,12 @@ const tables = computed(() => nets.value.flatMap((net) => {
           <span class="tile-value">{{ lastEpoch }}<small> of {{ currentCurve?.epochs ?? '–' }}</small></span>
           <span class="tile-note">{{ current === null ? '' : NET_WORD[current] + (currentCurve?.stopped_early !== undefined
             ? ', stopped early after epoch ' + currentCurve.stopped_early : running ? ', running' : '') }}</span>
+        </div>
+        <div v-if="signnetBest" class="tile" id="signnet-best">
+          <span class="tile-label">Best 5 boxes, any score</span>
+          <span class="tile-value">{{ percent(signnetBest.value * 100) }}</span>
+          <span class="tile-note">SignNet on validation, epoch {{ signnetBest.epoch }}<template v-if="signnetBest.val_false_per_frame !== undefined">,
+            {{ signnetBest.val_false_per_frame.toFixed(2) }} false boxes per frame</template></span>
         </div>
         <div v-if="detectorBestRecall" class="tile" id="detector-best-recall">
           <span class="tile-label">Best validation recall</span>
@@ -203,6 +218,25 @@ const tables = computed(() => nets.value.flatMap((net) => {
           <span class="tile-value">{{ elapsedText(perEpoch * 1000) }}</span>
           <span class="tile-note">{{ left || ((current === null ? '' : NET_WORD[current]) + ', mean of the last epochs') }}</span>
         </div>
+      </div>
+
+      <div v-if="shows('signnet')" class="net" id="signnet-curves">
+        <h3>{{ NET_NAME.signnet }}<span>finds the signs at the top of the frame · on validation, found in its 5 best boxes of each
+          frame at any score, higher is better, and loss</span></h3>
+        <div v-if="hasPoints(signnet)" class="net-charts">
+          <LineChart title="SignNet on validation" :top="100" :format="percentAxis" :epochs="span(signnet)"
+                     :series="[{key: 'val', label: 'best 5 boxes, any score', color: VAL, values: column(signnet, (point) => point.val_recall, 100)}]"
+                     :best="signnetBest ? {series: 'val', epoch: signnetBest.epoch, label: 'best'} : null"
+                     :running="isRunning('signnet')"/>
+          <LineChart title="SignNet loss" :epochs="span(signnet)" :format="lossAxis"
+                     :series="[{key: 'train', label: 'train', color: TRAIN, values: column(signnet, (point) => point.train_loss)}]"
+                     :best="signnetLowest ? {series: 'train', epoch: signnetLowest.epoch, label: 'lowest'} : null"
+                     :running="isRunning('signnet')"/>
+        </div>
+        <p v-else class="net-wait">SignNet’s curves appear at the end of its first epoch.</p>
+        <p v-if="hasPoints(signnet)" class="note">It keeps the weights of the epoch that finds the most validation signs in its 5
+          best boxes of each frame, at any score; then it is measured on validation and test, also as the car reads it (its best
+          5 boxes of score 0.3 or more): those numbers are on the run's SignNet card.</p>
       </div>
 
       <div v-if="shows('detector')" class="net">
@@ -278,21 +312,26 @@ const tables = computed(() => nets.value.flatMap((net) => {
         <div v-for="table in tables" :key="table.net" class="table-wrap">
           <table>
             <caption>{{ NET_NAME[table.net] }}</caption>
-            <thead><tr><th class="num">Epoch</th><th class="num">Train loss</th><th class="num">Val loss</th>
-              <template v-if="table.net !== 'detector'"><th class="num">Train acc.</th><th class="num">Val acc.</th></template>
+            <thead><tr><th class="num">Epoch</th><th class="num">Train loss</th><th v-if="table.net !== 'signnet'" class="num">Val loss</th>
+              <template v-if="table.net !== 'detector' && table.net !== 'signnet'"><th class="num">Train acc.</th><th class="num">Val acc.</th></template>
               <th v-if="table.net === 'detector' && detectorRecall" class="num">Val recall</th>
+              <template v-if="table.net === 'signnet'"><th class="num" title="Its 5 best boxes of each frame, at any score">Best 5, any score</th><th v-if="signnetFalse" class="num">False per frame</th></template>
               <template v-if="table.net === 'classifier' && withRejection"><th class="num">Signs</th><th class="num">Not a sign</th>
                 <th class="num">Balanced</th></template><th class="num">Time</th></tr></thead>
             <tbody>
               <tr v-for="point in table.rows" :key="point.epoch">
                 <td class="num">{{ point.epoch }}</td>
                 <td class="num">{{ cell(point.train_loss, loss) }}</td>
-                <td class="num">{{ cell(point.val_loss, loss) }}</td>
-                <template v-if="table.net !== 'detector'">
+                <td v-if="table.net !== 'signnet'" class="num">{{ cell(point.val_loss, loss) }}</td>
+                <template v-if="table.net !== 'detector' && table.net !== 'signnet'">
                   <td class="num">{{ cell(point.train_accuracy, (value) => percent(value * 100)) }}</td>
                   <td class="num">{{ cell(point.val_accuracy, (value) => percent(value * 100)) }}</td>
                 </template>
                 <td v-if="table.net === 'detector' && detectorRecall" class="num">{{ cell(point.val_recall, (value) => percent(value * 100)) }}</td>
+                <template v-if="table.net === 'signnet'">
+                  <td class="num">{{ cell(point.val_recall, (value) => percent(value * 100)) }}</td>
+                  <td v-if="signnetFalse" class="num">{{ cell(point.val_false_per_frame, (value) => value.toFixed(2)) }}</td>
+                </template>
                 <template v-if="table.net === 'classifier' && withRejection">
                   <td class="num">{{ cell(point.val_sign_accuracy, (value) => percent(value * 100)) }}</td>
                   <td class="num">{{ cell(point.val_rejection, (value) => percent(value * 100)) }}</td>

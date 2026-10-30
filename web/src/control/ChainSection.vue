@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // The chain end to end (evaluation/chain-<partition>.json): the cutter draws its boxes on the frames, the classifier says
-// what each is. At a score of the cutter (0.1 by default, the cutter's own): the speed signs found and read right
+// what each is. At a score of the cutter (the report's main one by default: a SignNet's 0.3, the car's floor; a Detector's
+// 0.1): the speed signs found and read right
 // (end to end) next to the share the cutter alone finds, overall, on the frames a person confirmed and by the width of
 // the sign; the boxes and false boxes per frame the cutter passes on against the false ones the classifier lets
 // through, and what it calls them; the old reader in the same chain side by side (it has no “not a sign”: every box
@@ -22,14 +23,16 @@ const partitions = computed(() => (['test', 'validation'] as Partition[]).filter
 const report = computed((): ChainEvaluation | null => props.chains[chosen.value] ?? props.chains.test ?? props.chains.validation);
 const partition = computed(() => report.value?.partition ?? 'test');
 
-/** The score of the cutter shown: the one chosen when the report has it, else 0.1, else the report's main one. */
+/** The score of the cutter shown: the one chosen when the report has it, else the report's main one (as
+ * nnslr_tools.runs._chain_entry, so the run list, Models and Watch judge the chain at the same score), else 0.1. */
 const pickedScore = ref<string | null>(null);
 const scores = computed(() => (report.value?.thresholds ?? []).map((item) => ({key: String(item.score), label: 'score ' + item.score})));
 const near = (a: number, b: number | null | undefined): boolean => b !== null && b !== undefined && Math.abs(a - b) < 1e-9;
 const entry = computed((): ChainThreshold | null => {
   const list = report.value?.thresholds ?? [];
-  return list.find((item) => String(item.score) === pickedScore.value) ?? list.find((item) => near(item.score, CHAIN_SCORE))
-    ?? list.find((item) => near(item.score, report.value?.main_score_threshold)) ?? list[0] ?? null;
+  return list.find((item) => String(item.score) === pickedScore.value)
+    ?? list.find((item) => near(item.score, report.value?.main_score_threshold)) ?? list.find((item) => near(item.score, CHAIN_SCORE))
+    ?? list[0] ?? null;
 });
 const score = computed({
   get: (): string => entry.value === null ? '' : String(entry.value.score),

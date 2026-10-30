@@ -18,6 +18,13 @@ the comparison of a classifier with the old reader (scripts/run_classifier.sh).
   with the classifier's answers (evaluation.per_frame_record), for the Watch panel of the Evaluate tab.
 - A cutter or classifier is a checkpoint path or "active": the model in use of its role, from
   <data root>/models/active.json (written by the Models tab of the site).
+- The cutter is SignNet, the network the car runs (nnslr_tools.signnet; "cutter:<run>/signnet", its weights
+  <run>/signnet-best.pt), or an old Detector (SSDlite, ".../detector-best.pt") kept to compare: its kind comes from the
+  checkpoint's task, never from the id. A SignNet is read as the car reads it: the frame's top band
+  (signnet._band_of), the heat map's best CAR_MAX_BOXES of at least the score asked, scaled to frame pixels (frame
+  width / band width), with no MAX_SIGN_SIDE filter (the car has none). The car keeps those of CAR_MIN_SCORE (0.3)
+  or more: mining and Prepare's Our networks go down to 0.1, so they also take boxes the car drops; only
+  evaluate-chain at its main score 0.3 is exactly the car. A Detector keeps its own resize and boxes, as before.
 
 Torch is imported only by mine_negatives and evaluate_chain; the dry runs, the reports and the comparison are
 stdlib-only.
@@ -37,6 +44,7 @@ import time
 from typing import Any, Iterator
 
 from nnslr_tools.progress import report as report_progress
+from nnslr_tools.signnet import CAR_MAX_BOXES, CAR_MIN_SCORE
 from nnslr_tools.training import (BOXES_OTHER_SIGNS, DEFAULT_WORKERS, DETECTOR_FAMILIES, NEGATIVE_MAX_IOU, NEGATIVE_PARTITIONS, NEGATIVES_KIND,
                                   NOT_A_SIGN, OTHER_SIGN_RULE_AT, READER_NORMALIZE_MEAN, READER_NORMALIZE_STD,
                                   REVIEW_TIERS, _label_basis, _safe_image_path, box_overlap, checkpoint_class_scheme,
@@ -44,9 +52,13 @@ from nnslr_tools.training import (BOXES_OTHER_SIGNS, DEFAULT_WORKERS, DETECTOR_F
                                   load_reviewed_dataset, negative_id, _prepare_classifier, reviewed_frames,
                                   scheme_label)
 
-# The thresholds of the cutter's score at which the chain is measured; the first measure of the site is at 0.1.
+# The thresholds of an old Detector's score at which the chain is measured; the first measure of the site is at 0.1.
 CHAIN_SCORE_THRESHOLDS = (0.05, 0.1, 0.25)
 CHAIN_MAIN_SCORE = 0.1
+# A SignNet's (heat peaks, its best 5 boxes a frame, as the car): its main score is the car's floor, so at the main
+# score the chain reads exactly the car's boxes.
+SIGNNET_CHAIN_SCORE_THRESHOLDS = (0.1, 0.2, CAR_MIN_SCORE)
+SIGNNET_CHAIN_MAIN_SCORE = CAR_MIN_SCORE
 # A box of the cutter finds a reviewed box when their IoU is at least this (as nnslr evaluate).
 CHAIN_IOU_THRESHOLD = 0.5
 # Mining: a box of at least this score, at most PER_FRAME of them per frame, at most TOTAL_FACTOR x the sign crops
@@ -65,6 +77,9 @@ MODEL_REFERENCE = re.compile(r'(cutter|classifier|decider):([A-Za-z0-9][A-Za-z0-
                              r'|experiment-b/(crop|crop_geom|full))')
 # The decider's weights are named after its variant: experiment-b/full/full-best.pt.
 WEIGHTS_FILE = {"cutter": "detector-best.pt", "classifier": "reader-best.pt", "decider": "{variant}-best.pt"}
+# SignNet, the cutter: "cutter:<run>/signnet", its weights at the root of its run (model_roles.SIGNNET_ID).
+SIGNNET_REFERENCE = re.compile(r'cutter:([A-Za-z0-9][A-Za-z0-9._-]{0,99})/signnet')
+SIGNNET_FILE = "signnet-best.pt"
 # No sign is boxed bigger than this share of the frame height on its longest side: in the reviews the biggest sign
 # boxes are about 240 px and a road marking 312 px wide, on 760 px; the cutter's boxes over half the sky or the road
 # are junk the classifier is not trained to reject.
@@ -82,29 +97,55 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _weights_of(model_id: str, role: str) -> str | None:
+    """The weights of a model id, relative to <data root>/runs; None when the id is not one of the role."""
+    if role == "cutter" and (signnet := SIGNNET_REFERENCE.fullmatch(model_id)):
+        return f"{signnet.group(1)}/{SIGNNET_FILE}"
+    match = MODEL_REFERENCE.fullmatch(model_id)
+    if match is None or match.group(1) != role:
+        return None
+    return f"{match.group(2)}/{match.group(3)}/{WEIGHTS_FILE[role].format(variant=match.group(4))}"
+
+
+def _id_of(path: Path, role: str, runs: Path) -> str | None:
+    """The model id of a checkpoint path inside <data root>/runs, None for any other file: a script that passes the
+    weights by path still gets its headers and reports named after the model."""
+    try:
+        parts = path.resolve().relative_to(runs).parts
+    except ValueError:
+        return None
+    if len(parts) < 2:
+        return None
+    candidate = (f"{role}:{parts[0]}/signnet" if role == "cutter" and parts[1:] == (SIGNNET_FILE,)
+                 else f"{role}:{parts[0]}/{'/'.join(parts[1:-1])}")
+    weights = _weights_of(candidate, role)
+    return candidate if weights is not None and tuple(weights.split("/")) == parts else None
+
+
 def resolve_model(spec: str, role: str, data_root: Path) -> dict[str, Any]:
     """{"path", "id"} of a cutter, classifier or decider given as a checkpoint path or as "active" (the model in use
-    of the role in <data root>/models/active.json; its weights must be inside <data root>/runs)."""
+    of the role in <data root>/models/active.json; its weights must be inside <data root>/runs). A path inside
+    <data root>/runs gets the id of its model; any other path None."""
     if role not in WEIGHTS_FILE:
         raise ValueError(f"unknown role {role!r}")
+    runs = (Path(data_root) / "runs").resolve()
     if spec != "active":
         path = Path(spec)
         if not path.is_file():
             raise ValueError(f"{role}_checkpoint_missing: {spec}")
-        return {"path": path, "id": None}
+        return {"path": path, "id": _id_of(path, role, runs)}
     root = Path(data_root)
     try:
         chosen = json.loads((root / "models" / "active.json").read_text(encoding="utf-8")).get(role)
     except (OSError, ValueError, AttributeError) as exc:
         raise ValueError(f"no_{role}_in_use: models/active.json cannot be read ({exc})") from exc
     model_id = chosen.get("id") if isinstance(chosen, dict) else None
-    match = MODEL_REFERENCE.fullmatch(model_id) if isinstance(model_id, str) else None
-    if match is None or match.group(1) != role:
+    weights = _weights_of(model_id, role) if isinstance(model_id, str) else None
+    if weights is None:
         raise ValueError(f"no_{role}_in_use: choose one on the Models tab of the site (models/active.json)")
-    runs = (root / "runs").resolve()
-    path = (runs / match.group(2) / match.group(3) / WEIGHTS_FILE[role].format(variant=match.group(4))).resolve()
+    path = (runs / weights).resolve()
     if not path.is_relative_to(runs) or not path.is_file():
-        raise ValueError(f"{role}_in_use_missing: {model_id} has no {WEIGHTS_FILE[role]} on this server")
+        raise ValueError(f"{role}_in_use_missing: {model_id} has no runs/{weights} on this server")
     return {"path": path, "id": model_id}
 
 
@@ -115,16 +156,59 @@ def _model_summary(checkpoint: dict[str, Any], resolved: dict[str, Any], split_s
 
 
 # -- the cutter -------------------------------------------------------------------------------------------
-def _load_cutter(resolved: dict[str, Any], device):
-    from nnslr_tools.checkpoints import detector_input_size, load_detector
-    from nnslr_tools.evaluation import _load_checkpoint
+class SignNetCutter:
+    """A SignNet as the cutter (cutter_boxes tells it from a Detector by its kind): the network, its stride and its
+    band [width, height]."""
+    kind = "signnet"
 
-    torch, *_ = _require()
-    checkpoint = _load_checkpoint(torch, resolved["path"], "detector")
-    model = load_detector(checkpoint)
+    def __init__(self, model, stride: int, band: list[int]):
+        self.model, self.stride, self.band = model, int(stride), [int(band[0]), int(band[1])]
+
+    def __call__(self, bands):
+        return self.model(bands)
+
+
+def cutter_kind(cutter) -> str:
+    """"signnet" or "detector" for a cutter of _load_cutter."""
+    return getattr(cutter, "kind", "detector")
+
+
+def _load_cutter(resolved: dict[str, Any], device):
+    """(the cutter, its checkpoint, its input size [width, height]) by the checkpoint's task: a SignNet
+    (SignNetCutter; its input is its band, its checkpoint's data from result.json when it lacks them) or a
+    Detector (the torchvision model, as before)."""
+    from nnslr_tools import checkpoints, signnet
+
+    _require()
+    checkpoint = checkpoints.safe_torch_load(Path(resolved["path"]))
+    task = checkpoint.get("task") if isinstance(checkpoint, dict) else None
+    if task == "signnet":
+        model = signnet.model_of(checkpoint)
+        band = [int(value) for value in checkpoint.get("band") or ()]
+        if len(band) != 2 or list(signnet.band_size(band[0])) != band:
+            raise ValueError(f"signnet_band_invalid: {checkpoint.get('band')!r}")
+        model.to(device)
+        checkpoint = signnet.checkpoint_data(checkpoint, Path(resolved["path"]))
+        return SignNetCutter(model, checkpoint["stride"], band), checkpoint, band
+    if task != "detector":
+        raise ValueError("checkpoint_task_mismatch: expected signnet or detector")
+    if not checkpoint.get("state_dict") or not isinstance(checkpoint["state_dict"], dict):
+        raise ValueError("checkpoint_missing_state_dict")
+    model = checkpoints.load_detector(checkpoint)
     model.to(device)
     model.eval()
-    return model, checkpoint, list(detector_input_size(checkpoint))
+    return model, checkpoint, list(checkpoints.detector_input_size(checkpoint))
+
+
+def cutter_summary(cutter, checkpoint: dict[str, Any], resolved: dict[str, Any], split_sha256: str,
+                   input_size: list[int]) -> dict[str, Any]:
+    """The cutter block of the negatives header and the chain report: the model, its data and split, its kind, its
+    input (a SignNet's: its band, and its stride), its families."""
+    info = {**_model_summary(checkpoint, resolved, split_sha256), "kind": cutter_kind(cutter),
+            "input_size": list(input_size), "families": cutter_families(checkpoint)}
+    if info["kind"] == "signnet":
+        info.update(band=list(cutter.band), stride=cutter.stride, max_boxes=CAR_MAX_BOXES)
+    return info
 
 
 def _require():
@@ -144,14 +228,33 @@ def _device(torch, name: str):
     return device
 
 
+def _signnet_boxes(cutter: SignNetCutter, heat, shape, width: int, height: int, min_score: float,
+                   limit: int) -> list[dict[str, Any]]:
+    """The boxes of one frame from SignNet's output as the car decodes them (signnet.frame_boxes_of, at most
+    ``limit`` of at least ``min_score``: the car's own at CAR_MIN_SCORE), clamped to the frame."""
+    from nnslr_tools.signnet import frame_boxes_of
+
+    found = frame_boxes_of(heat, shape, cutter.stride, cutter.band[0], width, limit=limit, min_score=min_score)
+    for item in found:
+        x1, y1, x2, y2 = item["box"]
+        item["box"] = [min(max(x1, 0.0), width), min(max(y1, 0.0), height),
+                       min(max(x2, 0.0), width), min(max(y2, 0.0), height)]
+    return found
+
+
 def cutter_boxes(model, device, frames: list[dict[str, Any]], data_root: Path, *, min_score: float,
                  batch_size: int = CUTTER_BATCH, num_workers: int = DEFAULT_WORKERS, task: str = "chain",
-                 ) -> Iterator[tuple[dict[str, Any], Any, list[dict[str, Any]]]]:
-    """(frame, its pixels as a 3 x H x W uint8 tensor, the cutter's boxes of score >= min_score and no bigger than
-    MAX_SIGN_SIDE, best first) for every frame, in order. The frames are decoded by loader workers; the cutter sees
-    them as nnslr evaluate does (values 0..1, its own resize inside the model)."""
+                 limit: int = CAR_MAX_BOXES) -> Iterator[tuple[dict[str, Any], Any, list[dict[str, Any]]]]:
+    """(frame, its pixels as a 3 x H x W uint8 tensor, the cutter's boxes of score >= min_score in frame pixels,
+    best first) for every frame, in order. The frames are decoded by loader workers. A SignNet (see the module)
+    sees the band made from the same decoded frame, values / 255, and gives its best ``limit`` boxes (the car's
+    CAR_MAX_BOXES; the car's own boxes only when min_score is CAR_MIN_SCORE) clamped to the frame. A Detector sees the frame as nnslr evaluate does (values 0..1, its own
+    resize inside the model); its boxes bigger than MAX_SIGN_SIDE are dropped."""
     torch, Image, DataLoader, Dataset, TF, _, _ = _require()
     root = Path(data_root).resolve()
+    from nnslr_tools.signnet import _band_of
+
+    signnet = model if cutter_kind(model) == "signnet" else None
 
     class Frames(Dataset):
         def __len__(self):
@@ -159,23 +262,33 @@ def cutter_boxes(model, device, frames: list[dict[str, Any]], data_root: Path, *
 
         def __getitem__(self, index):
             with Image.open(_safe_image_path(root, frames[index]["image_path"])) as source:
-                return index, TF.pil_to_tensor(source.convert("RGB"))
+                image = source.convert("RGB")
+                band = _band_of(image, signnet.band[0]) if signnet is not None else None
+                return index, TF.pil_to_tensor(image), band
 
     loader = DataLoader(Frames(), batch_size=batch_size, shuffle=False, num_workers=num_workers,
                         collate_fn=lambda batch: batch)
     done = 0
     with torch.no_grad():
         for batch in loader:
-            images = [pixels.to(device).float().div_(255.0) for _, pixels in batch]
-            outputs = model(images)
-            for (index, pixels), output in zip(batch, outputs):
-                keep = (output["labels"] == 1) & (output["scores"] >= min_score)
-                boxes = output["boxes"][keep].float().cpu().tolist()
-                scores = output["scores"][keep].float().cpu().tolist()
-                largest = MAX_SIGN_SIDE * int(pixels.shape[1])
-                predictions = sorted(({"box": box, "score": score} for box, score in zip(boxes, scores)
-                                      if max(box[2] - box[0], box[3] - box[1]) <= largest),
-                                     key=lambda item: -item["score"])
+            if signnet is not None:
+                heat, shape = signnet(torch.stack([band for _, _, band in batch]).to(device).float().div_(255.0))
+                heat, shape = heat.float().cpu(), shape.float().cpu()
+                found = [_signnet_boxes(signnet, heat[b:b + 1], shape[b:b + 1], int(pixels.shape[2]),
+                                        int(pixels.shape[1]), min_score, limit)
+                         for b, (_, pixels, _) in enumerate(batch)]
+            else:
+                outputs = model([pixels.to(device).float().div_(255.0) for _, pixels, _ in batch])
+                found = []
+                for (_, pixels, _), output in zip(batch, outputs):
+                    keep = (output["labels"] == 1) & (output["scores"] >= min_score)
+                    boxes = output["boxes"][keep].float().cpu().tolist()
+                    scores = output["scores"][keep].float().cpu().tolist()
+                    largest = MAX_SIGN_SIDE * int(pixels.shape[1])
+                    found.append(sorted(({"box": box, "score": score} for box, score in zip(boxes, scores)
+                                         if max(box[2] - box[0], box[3] - box[1]) <= largest),
+                                        key=lambda item: -item["score"]))
+            for (index, pixels, _), predictions in zip(batch, found):
                 done += 1
                 report_progress(task, done, len(frames), f"{done} of {len(frames)} frames")
                 yield frames[index], pixels, predictions
@@ -315,8 +428,7 @@ def mine_negatives(dataset_path: Path, split_path: Path, data_root: Path, cutter
         "dataset_sha256": loaded["dataset_sha256"], "split_sha256": loaded["split_sha256"],
         "split_path": str(loaded["split_path"]),
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "cutter": {**_model_summary(checkpoint, resolved, loaded["split_sha256"]), "input_size": input_size,
-                   "families": cutter_families(checkpoint)},
+        "cutter": cutter_summary(model, checkpoint, resolved, loaded["split_sha256"], input_size),
         "settings": {"score_threshold": score_threshold, "max_iou": NEGATIVE_MAX_IOU, "per_frame": per_frame,
                      "total_factor": total_factor, "seed": seed, "rule_change_at": OTHER_SIGN_RULE_AT,
                      "sign_score": sign_score, "boxes_other_signs": list(BOXES_OTHER_SIGNS),
@@ -490,16 +602,24 @@ def chain_dry_run(dataset_path: Path, split_path: Path, data_root: Path, *, data
             "reviewed_box_count": len(truth), "gpu_required": True}
 
 
+def chain_scores(kind: str) -> tuple[tuple[float, ...], float]:
+    """(the score thresholds, the main one) the chain is measured at by default for a cutter of this kind."""
+    if kind == "signnet":
+        return SIGNNET_CHAIN_SCORE_THRESHOLDS, SIGNNET_CHAIN_MAIN_SCORE
+    return CHAIN_SCORE_THRESHOLDS, CHAIN_MAIN_SCORE
+
+
 def evaluate_chain(dataset_path: Path, split_path: Path, data_root: Path, cutter: str, classifier: str, *,
                    dataset_kind: str = "gold", partition: str = "test",
-                   score_thresholds: tuple[float, ...] = CHAIN_SCORE_THRESHOLDS,
-                   main_score_threshold: float = CHAIN_MAIN_SCORE, iou_threshold: float = CHAIN_IOU_THRESHOLD,
+                   score_thresholds: tuple[float, ...] | None = None,
+                   main_score_threshold: float | None = None, iou_threshold: float = CHAIN_IOU_THRESHOLD,
                    device_name: str = "cuda", batch_size: int = CUTTER_BATCH, num_workers: int = DEFAULT_WORKERS) -> dict[str, Any]:
-    """The cutter and the classifier on every reviewed frame of a partition (see the module)."""
+    """The cutter and the classifier on every reviewed frame of a partition (see the module). The score thresholds
+    and the main one default by the cutter's kind (chain_scores): a SignNet's main score is the car's floor."""
     from nnslr_tools.evaluation import per_frame_descriptor, per_frame_record
 
-    thresholds = sorted({float(value) for value in (*score_thresholds, main_score_threshold)})
-    if not all(0 <= value <= 1 for value in thresholds):
+    given = [*(score_thresholds or ()), *(() if main_score_threshold is None else (main_score_threshold,))]
+    if not all(0 <= float(value) <= 1 for value in given):
         raise ValueError("invalid_score_threshold")
     if not 0 < iou_threshold <= 1:
         raise ValueError("invalid_iou_threshold")
@@ -514,6 +634,9 @@ def evaluate_chain(dataset_path: Path, split_path: Path, data_root: Path, cutter
     device = _device(torch, device_name)
     started = time.perf_counter()
     cutter_model, cutter_checkpoint, input_size = _load_cutter(cutter_ref, device)
+    default_thresholds, default_main = chain_scores(cutter_kind(cutter_model))
+    main_score_threshold = float(default_main if main_score_threshold is None else main_score_threshold)
+    thresholds = sorted({float(value) for value in (*(score_thresholds or default_thresholds), main_score_threshold)})
     model, checkpoint, classes, transform = _load_classifier(classifier_ref, device)
     scheme = checkpoint_class_scheme(checkpoint)
     folded = checkpoint.get("folded_labels") if isinstance(checkpoint.get("folded_labels"), dict) else {}
@@ -541,7 +664,7 @@ def evaluate_chain(dataset_path: Path, split_path: Path, data_root: Path, cutter
         for value in thresholds:
             selected = [item for item in predictions if item["score"] >= value]
             pairs = tallies[value].add(frame["label_basis"], truth, selected, iou_threshold)
-            if value == float(main_score_threshold):
+            if value == main_score_threshold:
                 by_truth = {index: selected[position] for position, index in pairs.items()}
                 images.append({
                     "image_path": frame["image_path"], "image_sha256": frame["image_sha256"],
@@ -561,13 +684,15 @@ def evaluate_chain(dataset_path: Path, split_path: Path, data_root: Path, cutter
                 })
 
     split_sha = loaded["split_sha256"]
-    cutter_info = {**_model_summary(cutter_checkpoint, cutter_ref, split_sha), "input_size": input_size,
-                   "families": cutter_families(cutter_checkpoint)}
+    cutter_info = cutter_summary(cutter_model, cutter_checkpoint, cutter_ref, split_sha, input_size)
     classifier_info = {**_model_summary(checkpoint, classifier_ref, split_sha), "class_scheme": scheme,
                        "classes": len(classes), "rejects": NOT_A_SIGN in classes}
     limitations = ["speed_signs_are_the_speed_sign_families_other_signs_are_in_all_boxes",
                    "found_is_iou_0.5_greedy_by_score_one_box_per_sign",
                    "crops_cut_from_the_cutter_box_at_full_resolution"]
+    if cutter_info["kind"] == "signnet":
+        limitations.append(f"signnet_top_band_and_{CAR_MAX_BOXES}_boxes_a_frame_as_the_car: a sign below the band "
+                           "counts as missed")
     if not cutter_info["same_split"]:
         limitations.append("cutter_trained_on_another_split: the partition may hold frames it trained on")
     if not classifier_info["same_split"]:
@@ -583,7 +708,7 @@ def evaluate_chain(dataset_path: Path, split_path: Path, data_root: Path, cutter
         "human_image_count": sum(1 for frame in frames if frame["label_basis"] == "human_review"),
         "speed_sign_count": sum(1 for item in truth_all if item["speed_sign"]),
         "reviewed_box_count": len(truth_all),
-        "score_thresholds": thresholds, "main_score_threshold": float(main_score_threshold),
+        "score_thresholds": thresholds, "main_score_threshold": main_score_threshold,
         "by_score_threshold": {f"{value:g}": tallies[value].metrics() for value in thresholds},
         "images": images,
         # How each image keeps every box of the cutter from the lowest threshold, with the classifier's answer.

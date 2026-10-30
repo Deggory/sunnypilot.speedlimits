@@ -3,8 +3,9 @@
 // its headline numbers on the test, then the reader label by label, the detector by sign size and route, the dataset
 // and split it used, its training curves (TrainingCharts, as on the Train tab) and experiment B when it has one. A run
 // of the classifier with “not a sign” (scripts/run_classifier.sh): the classifier alone, the chain end to end against
-// the old reader, the false boxes it learnt from, the comparison in plain text. A run of the cutter
-// (scripts/run_detector_sizes.sh): each size as the Models tab judges a cutter. Watch plays the frames of a route with
+// the old reader, the false boxes it learnt from, the comparison in plain text. A run of the cutter: SignNet
+// (scripts/run_signnet.sh) in its 5 best boxes of each frame, as the car reads it (SignNetSection); an old Detector run
+// (scripts/run_detector_sizes.sh), each size as the Models tab judges a cutter. Watch plays the frames of a route with
 // the cutter's boxes over them, for every report of the run that has frames (WatchSection).
 import {computed} from 'vue';
 import {thousands} from '../common/format';
@@ -17,6 +18,7 @@ import {RUN_STATE, modeText, notEvaluatedText, pct, plain, runWhen, shortSha} fr
 import ExperimentSection from './ExperimentSection.vue';
 import {perFrame} from './models';
 import NegativesSection from './NegativesSection.vue';
+import SignNetSection from './SignNetSection.vue';
 import ReaderSection from './ReaderSection.vue';
 import SplitSection from './SplitSection.vue';
 import TrainingCharts from './TrainingCharts.vue';
@@ -33,7 +35,7 @@ const nets = computed((): CurveNet[] => {
   const value = detail.value;
   if (value === null || value.kind === 'experiment') return [];
   if (value.kind === 'classifier') return value.curves.pretrain?.points.length ? ['pretrain', 'classifier'] : ['classifier'];
-  if (value.kind === 'cutter') return ['detector'];
+  if (value.kind === 'cutter') return value.signnet_run || value.curves.signnet?.points.length ? ['signnet'] : ['detector'];
   return value.curves.classifier?.points.length ? ['detector', 'reader', 'classifier'] : ['detector', 'reader'];
 });
 /** The curves as the Train tab's charts take them (a job's progress without steps). */
@@ -50,8 +52,11 @@ const classifierRun = computed(() => detail.value?.classifier_run ?? null);
 const classifierTraining = computed(() => classifierRun.value?.training ?? null);
 const hasClassifierEval = computed(() => Boolean(classifierRun.value?.evaluations.test || classifierRun.value?.evaluations.validation));
 const hasChain = computed(() => Boolean(classifierRun.value?.chains.test || classifierRun.value?.chains.validation));
-/** A cutter run: its (last) size in the tiles. */
-const cutterLine = computed(() => run.value.cutters?.[run.value.cutters.length - 1] ?? null);
+/** An old Detector's cutter run: its (last) size in the tiles (a SignNet run's numbers are on its SignNet card). */
+const cutterLine = computed(() => {
+  const line = run.value.cutters?.[run.value.cutters.length - 1] ?? null;
+  return line?.kind === 'signnet' ? null : line;
+});
 const where = computed(() => {
   const value = run.value;
   if (value.state === 'running') return 'Running: ' + (value.progress || value.stage_label) + '.';
@@ -131,7 +136,7 @@ const where = computed(() => {
         <span class="tile-label">Cutter, signs found</span>
         <span class="tile-value">{{ pct(cutterLine.recall) }}</span>
         <span class="tile-note">{{ thousands(cutterLine.found ?? 0) }} of {{ thousands(cutterLine.truth_boxes ?? 0) }} at score {{ cutterLine.score_threshold ?? '–' }},
-          {{ cutterLine.size.replace('x', ' × ') }}</span>
+          {{ (cutterLine.size ?? '–').replace('x', ' × ') }}</span>
       </div>
       <div class="tile">
         <span class="tile-label">Speed signs alone</span>
@@ -149,7 +154,7 @@ const where = computed(() => {
         <span class="tile-note">the model alone</span>
       </div>
     </div>
-    <div v-else-if="run.evaluated" class="tiles" id="run-tiles">
+    <div v-else-if="run.evaluated && run.kind !== 'cutter'" class="tiles" id="run-tiles">
       <div class="tile">
         <span class="tile-label">Reader accuracy</span>
         <span class="tile-value">{{ pct(run.reader?.accuracy) }}</span>
@@ -171,7 +176,7 @@ const where = computed(() => {
         <span class="tile-note">{{ run.detector ? thousands(run.detector.false_boxes) + ' false boxes' : '' }}</span>
       </div>
     </div>
-    <p v-else-if="run.kind !== 'experiment'" class="net-wait" id="run-not-evaluated">{{ notEvaluatedText(run) }}</p>
+    <p v-else-if="run.kind !== 'experiment' && !(run.evaluated && run.kind === 'cutter')" class="net-wait" id="run-not-evaluated">{{ notEvaluatedText(run) }}</p>
   </section>
 
   <p v-if="error" class="banner">The details of {{ run.name }} cannot be read: {{ error }}</p>
@@ -179,6 +184,7 @@ const where = computed(() => {
   <template v-if="detail">
     <ReaderSection v-if="detail.reader_eval" :reader="detail.reader_eval"/>
     <DetectorSection v-if="detail.detector_eval" :detector="detail.detector_eval"/>
+    <SignNetSection v-if="detail.signnet_run" :signnet="detail.signnet_run"/>
     <CutterSection v-if="detail.cutter_run" :sizes="detail.cutter_run.sizes" :comparison="detail.cutter_run.comparison"/>
     <ClassifierSection v-if="classifierRun && hasClassifierEval" :evaluations="classifierRun.evaluations"/>
     <ChainSection v-if="classifierRun && hasChain" :chains="classifierRun.chains"/>

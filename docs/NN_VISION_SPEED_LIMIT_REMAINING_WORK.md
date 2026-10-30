@@ -974,7 +974,7 @@ Chestnut with tinygrad (`DEV=AMD`, the device sunnypilot's modeld uses), comma o
 |---|---|---|---|---|
 | classifier (160 px crop) | as is | runs | 6e-6, same class | 8–13 ms a crop |
 | decider (8 boxes) | `RoiAlign` not supported | runs with RoIAlign written with gathers (2e-7 from torchvision) | 5e-6, same classes | 14 ms |
-| cutter (1344 × 760) | `NonMaxSuppression` not supported (data-dependent shapes) | runs without its post-processing: boxes and scores of all 32,292 default boxes, the filter and NMS after it on the CPU (same top detection as the full model) | boxes 0.004 px, scores 3e-6 | 119 ms a frame |
+| cutter (1344 × 760, the old Detector) | `NonMaxSuppression` not supported (data-dependent shapes) | runs without its post-processing: boxes and scores of all 32,292 default boxes, the filter and NMS after it on the CPU (same top detection as the full model) | boxes 0.004 px, scores 3e-6 | 119 ms a frame |
 
 The Chestnut stayed at 48–52 °C (memory 63–67 °C), 22–25 W, fan 0–2 rpm. In the drive `00000141` the driving model
 alone used it at about 40 % (49 W, 52–55 °C, 27 ms a frame).
@@ -993,7 +993,7 @@ upload over USB is likely most of the 119 ms); then the memory, and one ONNX (or
   Chestnut, would avoid the upload but ties us to every driving-model release and to its 10–13 ms of spare time.
 - **Adreno (the comma's own GPU, tinygrad `DEV=QCOM`, a process of its own like dmonitoringmodeld)**, outputs
   identical to the server: classifier 5.8 ms a crop, decider 213 ms for 8 boxes (fine when a sign appears, not every
-  frame), **cutter 1,697 ms a frame at 1344 × 760**: too slow.
+  frame), **cutter (the old Detector) 1,697 ms a frame at 1344 × 760**: too slow.
 
 Next: a cutter made for the Adreno: lower input (e.g. 672 × 380) and/or only the part of the picture where signs
 stand, a lighter backbone, at 2–5 frames a second (a sign stays in view 1–3 s); measured on the Adreno before training
@@ -1009,14 +1009,14 @@ OPENPILOT_HACKS=1`), TinyJit, outputs checked against PyTorch:
 
 | finder | picture | parameters | Adreno | all signs, 5 boxes | speed signs, 5 boxes | far (< 12 px) |
 |---|---|---|---|---|---|---|
-| cutter in use (SSDlite) | 1344 × 760 | — | 540 ms | 61 % | 62 % | 29 % |
+| old Detector (SSDlite), the cutter then | 1344 × 760 | — | 540 ms | 61 % | 62 % | 29 % |
 | SignNet stride 8 | 1344 × 416 | 163 k | 138 ms | 58 % | 67 % | 40 % |
 | SignNet stride 4 | 1344 × 416 | 81 k | 119 ms | 59 % | 66 % | 45 % |
 | SignNet stride 4 | 896 × 288 (2/3) | 81 k | 63 ms | 54 % | 64 % | 34 % |
 | SignNet stride 4 | 672 × 208 (half) | 156 k | 87 ms | 49 % | 59 % | 22 % |
 
-Untrained, timed only: 672 × 208 at stride 8 51 ms, 448 × 144 at stride 4 49 ms; the cutter at 640 × 360 122 ms.
-SignNet is weaker than the cutter on the big signs (≥ 40 px: 43–54 % against 67 %) and the other signs; to look at
+Untrained, timed only: 672 × 208 at stride 8 51 ms, 448 × 144 at stride 4 49 ms; the old Detector at 640 × 360 122 ms.
+SignNet is weaker than the old Detector on the big signs (≥ 40 px: 43–54 % against 67 %) and the other signs; to look at
 before the next round.
 
 **Where those milliseconds go** (profiled the same day, 896 × 288 at stride 4): of the 63 ms, 20 are the upload of
@@ -1107,3 +1107,33 @@ Still to do:
   displays (the test's 40 are mostly off or unreadable); dusk, rain and low sun (signs of poor visibility score 40 %
   against 58 % clear). Each new drive on a new road lands whole in one area of the split; drives repeated on the
   same roads add little.
+
+### One cutter: SignNet (30 Oct 2026)
+
+SignNet is now the one cutter, on the server as on the car; the SSDlite Detector is kept only to compare (its
+versions stay on the Models tab and cannot be put in use; one already in `models/active.json` stays until a SignNet
+is chosen). Why: the classifier learns the false boxes of the cutter, so they must be those of the cutter the car
+runs; and there is one network to train and measure.
+
+- **Train the cutter** runs `scripts/run_signnet.sh NAME`: `nnslr train-signnet` with the car's setup (band
+  896 × 288, stride 8, fuse 1 × 1, widths 16,24,32,48; families all or speed), about 80 minutes on the server's GPU,
+  into `data/runs/NAME/signnet-best.pt`, `result.json` and `signnet.log`. A NAME stopped half way is trained again
+  from scratch, its old `signnet.log` moved aside first; the dry run of step 1/3 exits 1, and stops the script before
+  the GPU, when the plan has nothing to train or validate on.
+- **Use this one** takes only a finished SignNet whose band is 896 × 288 and stride 8 (`signnet.fits_the_car`, the
+  `SIGNNET_WIDTH`, `SIGNNET_HEIGHT` and `SIGNNET_STRIDE` of the car's `vision.py`); a Detector is refused
+  (`compare_only`), another band or stride too (`not_for_the_car`). **Send to the car** and **Try on the comma now**
+  refuse such a SignNet, or an unfinished one, before starting.
+- Prepare's Our networks, `mine-negatives` and `evaluate-chain` take the car's best 5 boxes a frame, from score 0.1
+  (the car keeps those of 0.3 or more), from the SignNet in use: the heat map decoded best first, at most 5 a frame
+  (`CAR_MAX_BOXES`), scaled to frame pixels, no size filter.
+  `evaluate-chain` measures at cutter scores 0.1, 0.2 and 0.3 and judges at 0.3 (`CAR_MIN_SCORE`); mining keeps
+  score 0.1, 3 a frame and sign score 0.3, on those 5 boxes.
+- The trade-off, on the split of 26 October and the best 5 boxes a frame at any score: the SignNet on the car
+  (`2026-10-28_1028-signnet-twothirds-s8-f1`) has 55 % of all test signs, 62 % of the speed signs and 26 % of those
+  under 12 px, against 61 %, 62 % and 29 % for the 1344 × 760 Detector. What the car reads, at score 0.3: 40 % of
+  all test signs (152 of 381), 58 % of the speed signs (120 of 208), 0.22 false boxes a frame. Signs below the band
+  (road markings, low signs close by) are not found, as on the car, so chain and proposer numbers are not comparable
+  with the old ones.
+- Every SignNet so far was trained on the split of 26 October (`b0c47a58…`); a new **Train the cutter** on the
+  current split is needed before one is put in use.

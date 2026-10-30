@@ -117,7 +117,10 @@ def test_every_artifact_by_role_with_its_numbers(root, models):
     # The detector of the pipeline: its report has no 0.1, so the numbers are at the report's 0.25; the widths come from
     # its frames (detector_report of test_panel_runs: 10 and 30 px found, 15 and 50 px missed, 2 false boxes).
     main = cutters['detector']
-    assert (main['label'], main['detail'], main['finished'], main['in_use']) == ('Detector 320 × 320', 'training pipeline', True, False)
+    assert (main['label'], main['detail'], main['finished'], main['in_use']) == (
+        'Detector 320 × 320', 'old, to compare · training pipeline', True, False)
+    # An old Detector: kept to compare, never chosen again.
+    assert (main['selectable'], main['not_selectable_reason']) == (False, 'An old Detector: kept to compare.')
     assert (main['input_size'], main['input_size_recorded'], main['anchor_min_ratio'], main['anchor_recorded']) == ('320x320', False, 0.2, False)
     assert main['best_epoch'] == 2 and main['epochs_run'] == 2 and main['trained_at']
     test = main['test']
@@ -130,7 +133,7 @@ def test_every_artifact_by_role_with_its_numbers(root, models):
     # A size of scripts/run_detector_sizes.sh: at the cutter's score 0.1, on test and validation.
     size = cutters['detector-sizes/640x360']
     assert (size['label'], size['detail'], size['input_size'], size['anchor_min_ratio'], size['best_epoch']) == (
-        'Detector 640 × 360', 'input-size comparison', '640x360', 0.1, 6)
+        'Detector 640 × 360', 'old, to compare · input-size comparison', '640x360', 0.1, 6)
     assert size['augmentation'] is True and size['epochs_run'] == 11
     test = size['test']
     assert (test['score_threshold'], test['at_cutter_score'], test['found'], test['truth_boxes'], test['recall']) == (0.1, True, 2, 4, 0.5)
@@ -145,6 +148,7 @@ def test_every_artifact_by_role_with_its_numbers(root, models):
         'classifier:r1/reader', 'Reader', True, 2, 0.8)
     assert reader['test'] == {'samples': 6, 'accuracy': pytest.approx(4 / 6), 'human_samples': 2, 'human_accuracy': 1.0}
     assert reader['classes'] == 3
+    assert reader['selectable'] is True and 'not_selectable_reason' not in reader
 
     deciders = {entry['variant']: entry for entry in roles['decider']['versions']}
     assert set(deciders) == {'crop', 'crop_geom'} and deciders['crop']['id'] == 'decider:expB/experiment-b/crop'
@@ -154,7 +158,8 @@ def test_every_artifact_by_role_with_its_numbers(root, models):
     assert crop['validation'] == {'boxes': 40, 'reading_accuracy': 0.9, 'ownership_samples': 30, 'macro_f1': 0.6,
                                   'abstain_rate': 0.1, 'other_road_recall': 0.6, 'other_road_precision': 0.5,
                                   'other_road_support': None, 'other_road_found': None}
-    assert crop['test']['reading_accuracy'] == 0.9
+    assert crop['test']['reading_accuracy'] == 0.9 and crop['selectable'] is True
+    assert (roles['cutter']['old_kind_in_use'], roles['cutter']['notice']) == (False, None)
     json.dumps(models.index(), allow_nan=False)
 
 
@@ -201,11 +206,12 @@ def test_a_weights_file_outside_its_run_is_not_listed(root, models, tmp_path):
 
 # -- the model in use -------------------------------------------------------------------------------------
 def test_choosing_the_model_in_use_writes_only_active_json(root, models):
-    run = pipeline(root)
-    make_size(run, '640x360')
+    pipeline(root)
+    make_signnet(root, 's1')
+    make_signnet(root, 's2')
     experiment(root)
-    entry = models.set_active('cutter', 'cutter:r1/detector-sizes/640x360', who='admin', via='sign-in')
-    assert (entry['id'], entry['who'], entry['via']) == ('cutter:r1/detector-sizes/640x360', 'admin', 'sign-in') and entry['at']
+    entry = models.set_active('cutter', 'cutter:s1/signnet', who='admin', via='sign-in')
+    assert (entry['id'], entry['who'], entry['via']) == ('cutter:s1/signnet', 'admin', 'sign-in') and entry['at']
     path = root / 'models' / 'active.json'
     saved = json.loads(path.read_text())
     assert saved == {'schema_version': 1, 'cutter': entry, 'classifier': None, 'decider': None,
@@ -215,14 +221,14 @@ def test_choosing_the_model_in_use_writes_only_active_json(root, models):
 
     models.set_active('decider', 'decider:expB/experiment-b/crop_geom', who=None, via='token')
     roles = by_role(models.index())
-    assert roles['cutter']['active']['id'] == 'cutter:r1/detector-sizes/640x360' and roles['cutter']['active']['found']
-    assert [entry['in_use'] for entry in roles['cutter']['versions'] if entry['part'] == 'detector-sizes/640x360'] == [True]
+    assert roles['cutter']['active']['id'] == 'cutter:s1/signnet' and roles['cutter']['active']['found']
+    assert [entry['in_use'] for entry in roles['cutter']['versions'] if entry['run'] == 's1'] == [True]
     assert sum(entry['in_use'] for entry in roles['cutter']['versions']) == 1
     assert roles['decider']['active']['via'] == 'token' and roles['classifier']['active'] is None
     # Another cutter replaces the first; the other roles stay.
-    models.set_active('cutter', 'cutter:r1/detector', who='admin', via='sign-in')
+    models.set_active('cutter', 'cutter:s2/signnet', who='admin', via='sign-in')
     saved = json.loads(path.read_text())
-    assert saved['cutter']['id'] == 'cutter:r1/detector' and saved['decider']['id'] == 'decider:expB/experiment-b/crop_geom'
+    assert saved['cutter']['id'] == 'cutter:s2/signnet' and saved['decider']['id'] == 'decider:expB/experiment-b/crop_geom'
 
 
 @pytest.mark.parametrize('role, model_id, status, reason', [
@@ -237,13 +243,20 @@ def test_choosing_the_model_in_use_writes_only_active_json(root, models):
     ('cutter', 'cutter:r1/detector-sizes/../detector', 400, 'bad_id'),
     ('cutter', 'cutter:r1/detector' + 'x' * 400, 400, 'bad_id'),
     ('cutter', 'classifier:r1/reader', 400, 'wrong_role'),
+    # The signnet part is the cutter's alone.
+    ('classifier', 'classifier:r1/signnet', 400, 'wrong_role'),
     ('cutter', 'cutter:nope/detector', 404, 'unknown_model'),
+    ('cutter', 'cutter:nope/signnet', 404, 'unknown_model'),
     ('cutter', 'cutter:r1/detector-sizes/1280x720', 404, 'unknown_model'),
-    ('cutter', 'cutter:r1/detector-sizes/640x360', 409, 'not_finished'),
+    # The old Detectors, finished or not, are kept to compare only.
+    ('cutter', 'cutter:r1/detector', 409, 'compare_only'),
+    ('cutter', 'cutter:r1/detector-sizes/640x360', 409, 'compare_only'),
+    ('classifier', 'classifier:r2/reader', 409, 'not_finished'),
 ])
 def test_a_choice_is_checked_against_the_index(root, models, role, model_id, status, reason):
     run = pipeline(root)
     make_size(run, '640x360', finished=False)
+    write(root / 'runs/r2/reader/reader-best.pt', 'weights')
     with pytest.raises(ModelChoiceError) as error:
         models.set_active(role, model_id, who='admin', via='sign-in')
     assert (error.value.status, error.value.reason) == (status, reason)
@@ -252,13 +265,14 @@ def test_a_choice_is_checked_against_the_index(root, models, role, model_id, sta
 
 def test_an_unreadable_active_json_is_never_overwritten(root, models):
     pipeline(root)
+    make_signnet(root, 's1')
     path = write(root / 'models' / 'active.json', '{"cutter": ')
     index = models.index()
     assert index['active_problem'] == 'models/active.json cannot be read'
     assert all(role['active'] is None for role in index['roles'])
     with pytest.raises(ModelChoiceError) as error:
-        models.set_active('cutter', 'cutter:r1/detector', who='admin', via='sign-in')
-    assert error.value.status == 409 and path.read_text() == '{"cutter": '
+        models.set_active('cutter', 'cutter:s1/signnet', who='admin', via='sign-in')
+    assert (error.value.status, error.value.reason) == (409, 'active_unreadable') and path.read_text() == '{"cutter": '
 
 
 def test_a_choice_whose_files_are_gone_and_entries_that_are_not_choices(root, models):
@@ -275,7 +289,8 @@ def test_a_choice_whose_files_are_gone_and_entries_that_are_not_choices(root, mo
 
 def test_a_failed_write_leaves_the_old_choice_and_no_temporary_file(root, models, monkeypatch):
     pipeline(root)
-    models.set_active('cutter', 'cutter:r1/detector', who='admin', via='sign-in')
+    make_signnet(root, 's1')
+    models.set_active('cutter', 'cutter:s1/signnet', who='admin', via='sign-in')
     path = root / 'models' / 'active.json'
     before = path.read_text()
 
@@ -292,9 +307,10 @@ def test_models_folder_leading_out_of_the_data_root_is_refused(root, models, tmp
     outside = tmp_path / 'outside-models'
     outside.mkdir()
     (root / 'models').symlink_to(outside)
+    make_signnet(root, 's1')
     assert models.index()['active_problem'] == 'models/ of the data root leads outside it'
     with pytest.raises(ModelChoiceError) as error:
-        models.set_active('cutter', 'cutter:r1/detector', who='admin', via='sign-in')
+        models.set_active('cutter', 'cutter:s1/signnet', who='admin', via='sign-in')
     assert error.value.reason == 'bad_models_folder' and list(outside.iterdir()) == []
 
 
@@ -317,10 +333,11 @@ def test_models_over_http_with_the_sign_in(tmp_path):
     make_report(tmp_path)
     run = pipeline(tmp_path)
     make_size(run, '640x360')
+    make_signnet(tmp_path, 's1')
     server = RunningServer(tmp_path, token=TOKEN, require_token=True)
     server.app.panel.runs_index.running_runs = lambda: {}
     active = tmp_path / 'models' / 'active.json'
-    body = {'role': 'cutter', 'id': 'cutter:r1/detector-sizes/640x360'}
+    body = {'role': 'cutter', 'id': 'cutter:s1/signnet'}
     try:
         # Signed out: the page is the sign-in page, the API answers 401 and nothing is written.
         status, response, data = server.request('GET', '/models')
@@ -352,6 +369,10 @@ def test_models_over_http_with_the_sign_in(tmp_path):
         status, response, data = server.request('POST', '/api/panel/models/active', body={'role': 'cutter', 'id': 'cutter:r2/detector'},
                                                 headers=cookie)
         assert status == 404 and json_of(data)['error'] == 'unknown_model'
+        status, response, data = server.request('POST', '/api/panel/models/active',
+                                                body={'role': 'cutter', 'id': 'cutter:r1/detector-sizes/640x360'},
+                                                headers=cookie)
+        assert status == 409 and json_of(data)['error'] == 'compare_only'
         assert server.request('GET', '/api/panel/models/active', headers=cookie)[0] == 405
         assert not active.exists()
 
@@ -470,11 +491,12 @@ def test_the_classifier_with_not_a_sign_can_be_put_in_use(root, models):
 
 def test_the_cutter_in_use_with_its_files(root, models):
     assert models.in_use('cutter') == (None, 'no cutter in use: choose one on the Models tab')
-    run = pipeline(root)
-    models.set_active('cutter', 'cutter:r1/detector', who='admin', via='sign-in')
+    pipeline(root)
+    run = make_signnet(root, 's1')
+    models.set_active('cutter', 'cutter:s1/signnet', who='admin', via='sign-in')
     version, why = models.in_use('cutter')
-    assert (version['id'], why) == ('cutter:r1/detector', '')
-    (run / 'detector/detector-best.pt').unlink()
+    assert (version['id'], version['kind'], why) == ('cutter:s1/signnet', 'signnet', '')
+    (run / 'signnet-best.pt').unlink()
     assert models.in_use('cutter') == (None, 'the cutter in use is no longer on this server: choose another one on the Models tab')
     (root / 'models/active.json').write_text('{"cutter": ')
     assert models.in_use('cutter') == (None, 'models/active.json cannot be read')
@@ -507,31 +529,39 @@ def signnet_metrics(speed: int, other: int, boxes: float) -> dict:
             'recall_by_width': {'lt12': {'truth': 2, 'found': 1, 'recall': 0.5}}}
 
 
-def make_signnet(root: Path, name: str = 's1', *, finished: bool = True, share: float | None = None) -> Path:
-    """A run folder as ``nnslr train-signnet`` leaves it."""
+def make_signnet(root: Path, name: str = 's1', *, finished: bool = True, share: float | None = None,
+                 band: list[int] | None = None, stride: int = 8, car: bool = True) -> Path:
+    """A run folder as ``nnslr train-signnet`` leaves it: by default the car's band (896 x 288) and stride (8), so
+    set_active('cutter', 'cutter:<name>/signnet') takes it; car False: a result.json written before measure's 'car'."""
     run = root / 'runs' / name
     write(run / 'signnet-best.pt', 'signnet weights')
     write(run / 'train.log', 'epoch 1\n')
     if share is not None:
         write(run / 'subset.json', {'share': share, 'segments_kept': 4})
     if finished:
-        partition = {'by_score_threshold': {'0.05': signnet_metrics(5, 4, 9.0), '0.1': signnet_metrics(4, 2, 3.0)},
+        partition = {'by_score_threshold': {'0.05': signnet_metrics(5, 4, 9.0), '0.1': signnet_metrics(4, 2, 3.0),
+                                            '0.3': signnet_metrics(3, 1, 1.5)},
                      'by_box_budget': {'3': signnet_metrics(3, 1, 3.0), '5': signnet_metrics(5, 2, 5.0)}}
-        write(run / 'result.json', {'task': 'signnet', 'band': [896, 288], 'stride': 8, 'fuse_kernel': 1,
+        if car:
+            partition['car'] = signnet_metrics(2, 1, 1.0)
+        write(run / 'result.json', {'task': 'signnet', 'band': band or [896, 288], 'stride': stride, 'fuse_kernel': 1,
                                     'parameters': 62997, 'best_epoch': 27, 'epochs': 40, 'families': 'all',
                                     'history': [{'epoch': n} for n in range(1, 41)], 'test': partition})
     return run
 
 
-def test_signnet_is_a_cutter_of_the_models_tab_never_the_one_in_use(root, models):
+def test_signnet_is_the_cutter_in_use_when_it_fits_the_car(root, models):
     pipeline(root)
     make_signnet(root, 's1')
     make_signnet(root, 's2', share=0.25)
     make_signnet(root, 's3', finished=False)
+    make_signnet(root, 'wide', band=[1344, 416])
+    make_signnet(root, 'fine', stride=4)
     cutters = {entry['id']: entry for entry in by_role(models.index())['cutter']['versions']}
     signnet = cutters['cutter:s1/signnet']
-    assert (signnet['kind'], signnet['label'], signnet['detail']) == ('signnet', 'SignNet 896 × 288', 'for the comma’s GPU')
+    assert (signnet['kind'], signnet['label'], signnet['detail']) == ('signnet', 'SignNet 896 × 288', 'the comma’s cutter')
     assert (signnet['finished'], signnet['in_use'], signnet['on_car'], signnet['problems']) == (True, False, False, [])
+    assert (signnet['fits_the_car'], signnet['selectable']) == (True, True) and 'not_selectable_reason' not in signnet
     assert (signnet['input_size'], signnet['anchor_min_ratio'], signnet['stride'], signnet['parameters']) == ('896x288', None, 8, 62997)
     assert (signnet['best_epoch'], signnet['epochs_run'], signnet['families']) == (27, 40, 'all')
     test = signnet['test']
@@ -541,16 +571,60 @@ def test_signnet_is_a_cutter_of_the_models_tab_never_the_one_in_use(root, models
     # Among its 5 best boxes of each frame.
     assert test['budget'] == {'boxes': 5, 'truth_boxes': 10, 'found': 7, 'recall': 0.7, 'by_family': {
         'speed': {'truth': 6, 'found': 5, 'recall': pytest.approx(5 / 6)}, 'other_sign': {'truth': 4, 'found': 2, 'recall': 0.5}}}
+    # What the car reads: its best 5 boxes of score 0.3 or more.
+    car = test['car']
+    assert (car['found'], car['truth_boxes'], car['recall'], car['false_per_frame'], car['boxes_per_frame']) == (
+        3, 10, 0.3, 0.25, 1.0)
+    assert (car['score_threshold'], car['max_boxes'], car['by_family']['speed']['found']) == (0.3, 5, 2)
     assert signnet['validation'] is None
-    assert cutters['cutter:s2/signnet']['detail'] == 'for the comma’s GPU · 25 % of the training drives'
+    assert cutters['cutter:s2/signnet']['detail'] == 'the comma’s cutter · 25 % of the training drives'
     assert cutters['cutter:s2/signnet']['train_share'] == 0.25
-    assert cutters['cutter:s3/signnet']['finished'] is False
     assert cutters['cutter:r1/detector']['kind'] == 'detector'
-    # Prepare and the classifier's training load a detector: SignNet is never written in active.json.
+    # Not finished, not the car's band or grid, an old Detector: listed, never chosen.
+    reasons = {'s3': ('not_finished', 'Not finished.', 'not finished'),
+               'wide': ('not_for_the_car', 'Not the comma’s 896 × 288 band at stride 8: it cannot run on the car.',
+                        'not the comma’s band or grid, to compare'),
+               'fine': ('not_for_the_car', 'Not the comma’s 896 × 288 band at stride 8: it cannot run on the car.',
+                        'not the comma’s band or grid, to compare')}
+    for run, (reason, text, detail) in reasons.items():
+        entry = cutters[f'cutter:{run}/signnet']
+        assert (entry['selectable'], entry['not_selectable_reason'], entry['detail']) == (False, text, detail), run
+        with pytest.raises(ModelChoiceError) as error:
+            models.set_active('cutter', f'cutter:{run}/signnet', who='admin', via='sign-in')
+        assert (error.value.status, error.value.reason) == (409, reason), run
     with pytest.raises(ModelChoiceError) as error:
-        models.set_active('cutter', 'cutter:s1/signnet', who='admin', via='sign-in')
-    assert (error.value.status, error.value.reason) == (409, 'not_selectable')
+        models.set_active('cutter', 'cutter:r1/detector', who='admin', via='sign-in')
+    assert (error.value.status, error.value.reason) == (409, 'compare_only')
     assert not (root / 'models').exists()
+
+    # The one of the car's band and grid: written, read back, the cutter in use.
+    entry = models.set_active('cutter', 'cutter:s1/signnet', who='admin', via='sign-in')
+    assert json.loads((root / 'models/active.json').read_text())['cutter'] == entry
+    active, problem = models.read_active()
+    assert (active['cutter']['id'], problem) == ('cutter:s1/signnet', None)
+    version, why = models.in_use('cutter')
+    assert (version['id'], version['kind'], version['fits_the_car'], why) == ('cutter:s1/signnet', 'signnet', True, '')
+    role = by_role(models.index())['cutter']
+    assert role['active']['found'] and (role['old_kind_in_use'], role['notice']) == (False, None)
+    assert [item['id'] for item in role['versions'] if item['in_use']] == ['cutter:s1/signnet']
+
+
+def test_an_old_detector_already_in_use_is_still_read_back(root, models):
+    pipeline(root)
+    make_signnet(root, 's1')
+    write(root / 'models/active.json', {'schema_version': 1, 'cutter': {
+        'id': 'cutter:r1/detector', 'who': 'admin', 'via': 'sign-in', 'at': '2026-10-30T08:12:00+01:00'}})
+    version, why = models.in_use('cutter')
+    assert (version['id'], version['kind'], version['selectable'], why) == ('cutter:r1/detector', 'detector', False, '')
+    role = by_role(models.index())['cutter']
+    assert role['active']['id'] == 'cutter:r1/detector' and role['active']['found']
+    assert (role['old_kind_in_use'], role['notice']) == (True, 'The cutter in use is an old Detector: choose a SignNet.')
+    # Choosing a SignNet replaces it; a Detector cannot be chosen back.
+    models.set_active('cutter', 'cutter:s1/signnet', who='admin', via='sign-in')
+    assert by_role(models.index())['cutter']['old_kind_in_use'] is False
+    with pytest.raises(ModelChoiceError) as error:
+        models.set_active('cutter', 'cutter:r1/detector', who='admin', via='sign-in')
+    assert error.value.reason == 'compare_only'
 
 
 def test_a_result_that_is_not_a_signnet_is_unreadable(root, models):
@@ -699,3 +773,16 @@ def test_nnslr_on_car_prints_the_record(root, tmp_path, capsys):
     assert json.loads(capsys.readouterr().out)['cutter']['id'] == 'cutter:s1/signnet'
     assert not (root / 'models/on-car.json').exists()
     assert main(['on-car', '--models', str(tmp_path / 'nowhere'), '--data-root', str(root)]) == 2
+
+
+def test_an_old_signnet_result_gives_the_car_its_numbers_at_0_3(root, models):
+    """A result.json written before measure's 'car': what the car reads is by_score_threshold 0.3."""
+    pipeline(root)
+    make_signnet(root, 's1', car=False)
+    car = {entry['id']: entry for entry in by_role(models.index())['cutter']['versions']}['cutter:s1/signnet']['test']['car']
+    assert (car['found'], car['recall'], car['false_per_frame'], car['score_threshold']) == (4, 0.4, 0.5, 0.3)
+
+
+def test_the_compare_only_text_does_not_say_the_cutter_in_use_is_a_signnet():
+    from nnslr_tools.model_roles import NOT_SELECTABLE
+    assert 'in use' not in NOT_SELECTABLE['compare_only'][1] and 'SignNet' in NOT_SELECTABLE['compare_only'][1]

@@ -254,6 +254,16 @@ def test_an_older_chain_report_plays_its_verdicts_at_its_main_score(root, index)
     assert payload['routes'][0]['missed'] == 0
 
 
+
+def test_a_chain_measured_with_signnet_starts_at_the_cars_score(root, index):
+    """A chain whose cutter is a SignNet (report of chain.py: scores 0.1, 0.2, 0.3, main 0.3, the car's floor)."""
+    run = make_classifier_run(root)
+    report = {**chain_report(root, new=False), 'score_thresholds': [0.1, 0.2, 0.3], 'main_score_threshold': 0.3,
+              'cutter': {'checkpoint': str(root / 'runs' / 's1' / 'signnet-best.pt'), 'id': None, 'input_size': [896, 288]}}
+    write(run / 'evaluation/chain-test.json', report)
+    payload = index.frames(run.name, 'chain', 'test', None, previews(root))
+    assert (payload['kind'], payload['default_score']) == ('chain', 0.3)
+
 def test_a_new_chain_report_keeps_every_box_with_the_classifiers_answer(root, index):
     run = make_classifier_run(root)
     write(run / 'evaluation/chain-test.json', chain_report(root, new=True))

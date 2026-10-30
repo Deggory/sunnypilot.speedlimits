@@ -8,22 +8,23 @@ A plan, started on 24 October 2026 from Codex's "teacher and student" proposal, 
 
 **All training happens on the server**, on the V100. The comma never trains anything.
 
-- **The networks for the car** are trained on the server from the reviews, then copied to the car. They run on **Chestnut**, comma's external GPU, not on the comma four's own chip (decided on 24 October 2026): the chip would need the frame shrunk until distant signs disappear, while Chestnut takes the full 1344 × 760 frame. Chestnut also runs openpilot's driving model, which always comes first: the room left next to it is still to be measured. In the car they learn nothing and see only the past, since there are no future frames while driving.
+- **The networks for the car** are trained on the server from the reviews, then copied to the car. They run on **Chestnut**, comma's external GPU, not on the comma four's own chip (decided on 24 October 2026): the chip would need the frame shrunk until distant signs disappear, while Chestnut takes the full 1344 × 760 frame. Chestnut also runs openpilot's driving model, which always comes first: the room left next to it is still to be measured. The cutter is the exception: SignNet was made for the comma's own GPU (step 1 below). In the car they learn nothing and see only the past, since there are no future frames while driving.
 - **The same networks prepare new drives on the server** (Prepare, the "Our networks" proposer). There a drive can also be looked at with its later frames, its GPS and the map: that extra step (the teacher below) makes better proposals than the car can, without needing a different network.
 
 ## Three networks, each trained and measured on its own
 
 1. **Cut: the cutter finds every box that could be a sign.**
-   - It looks at the frame of the main road camera (1344 × 760 on the comma four, full resolution), scaled down, plus the band where signs appear.
+   - **SignNet plays this role** (since 30 October 2026, see the decisions), the same network the comma runs. It looks at the band at the top of the frame of the main road camera (the top 432 of the 760 rows of the comma four's 1344 × 760, scaled to 896 × 288; the top 416 rows alone hold 97% of the reviewed signs), and gives a heat map of sign centres with each sign's size (stride 8, `nnslr train-signnet`, the **Train the cutter** button). The car keeps the best 5 boxes of a frame that score 0.3 or more. On the server the SignNet in use gives the car's best 5 boxes a frame, from score 0.1 (the car keeps those of 0.3 or more), to Prepare's Our networks, to the mined false boxes and to the chain, in frame pixels and with no size filter; the chain is judged at 0.3, as the car reads it.
    - It must miss nothing. False boxes are fine, because the classifier drops them, so it can be a small network.
-   - It is measured on **signs missed, by size**, and on how many boxes per frame it passes on.
-   - A new cutter also cuts the other traffic signs (`--cutter-families all`, the default; `speed` is the speed signs only, as before), so that the classifier sees them and says what they are: 34 more boxes in train, 12 in validation and 54 in test, all reviewed by people. Its speed-sign recall is still reported alone (`recall_by_family`), to compare with the older cutters.
-   - Today's detector plays this role and finds only 6% of the test signs (see the results).
+   - It is measured on **signs missed, by size**, and on how many boxes per frame it passes on; for SignNet, on the signs among the boxes the car keeps (score 0.3 or more, at most 5 a frame), and among the best 5 boxes of a frame at any score.
+   - It also cuts the other traffic signs (`--families all`, the default; `speed` is the speed signs only), so that the classifier sees them and says what they are. Its speed-sign recall is still reported alone (`recall_by_family`).
+   - The one on the car (`2026-10-28_1028-signnet-twothirds-s8-f1`, 63 k parameters) finds, at the car's score of 0.3, 40% of the test signs (152 of 381) and 58% of the speed signs (120 of 208), with 0.22 false boxes a frame, measured on the split of 26 October; among its best 5 boxes at any score it has 55% (209) and 62% (130), with 4.8 false boxes a frame. A sign below the band (a road marking, a low sign close by) is not found, as on the car.
+   - Before it, an SSDlite detector on the whole frame played this role (the old Detector, kept to compare: see the results). The very first one found only 6% of the test signs.
 2. **Classify: the classifier says what each box is.**
    - It takes the box cut from the full-resolution frame, never from the scaled-down one.
    - Its answers are a speed value, end of limit, zone, variable display, "?" (a limit it cannot read), another sign with its kind (town entry, direction, give way…), or **not a sign**.
    - Today's reader plays this role. It still lacks "not a sign": the 2,431 model boxes that reviewers removed, plus the cutter's own mistakes, teach it.
-   - `scripts/run_classifier.sh` (the **Train the classifier** button) trains it with those classes (`nnslr train --classes v2`): the removed proposals that overlap no kept box, the boxes marked "not a sign" and up to 3 × the signs of false boxes mined with the cutter in use (`nnslr mine-negatives`), darker crops and jittered boxes. It then measures it alone and the whole chain on the test (`nnslr evaluate-chain`: signs found **and** read right, false boxes per frame that survive), next to the old reader. First results below.
+   - `scripts/run_classifier.sh` (the **Train the classifier** button) trains it with those classes (`nnslr train --classes v2`): the removed proposals that overlap no kept box, the boxes marked "not a sign" and up to 3 × the signs of false boxes mined with the cutter in use (`nnslr mine-negatives`; with a SignNet, among the car's best 5 boxes a frame, from score 0.1), darker crops and jittered boxes. It then measures it alone and the whole chain on the test (`nnslr evaluate-chain`: signs found **and** read right, false boxes per frame that survive), next to the old reader. First results below.
    - Frames an AI reviewed before the other-sign rule have their other signs without a box. There, the other-sign proposals the AI removed and the cutter's boxes scoring 0.3 or more are not used as "not a sign" (see the results).
    - It is measured on right answers per sign.
 3. **Decide: the decider says whom each sign applies to.**
@@ -38,9 +39,11 @@ A plan, started on 24 October 2026 from Codex's "teacher and student" proposal, 
 
 ## Why the cutter needs pixels
 
+History (24 October 2026): the old Detector. SignNet keeps the pixels another way: it reads only the band where the signs stand, at two thirds of the full width (896 of 1344 px).
+
 The cutter has to find a sign before anything can cut it out, and the median sign is only about 20 px wide in the frame:
 
-| Cutter input | A 20 px sign becomes | Cost compared with 320 |
+| Detector input | A 20 px sign becomes | Cost compared with 320 |
 |---|---|---|
 | 320 × 320 (today, squashed) | about 5 × 8 px | 1× |
 | 640 × 360 | about 10 px | about 2.3× |
@@ -52,7 +55,7 @@ The cutter only answers "could this be a sign?" and may leave false boxes, so it
 - run it a few times a second instead of 20;
 - once a sign is found, follow it with the tracker and crop it at full resolution.
 
-`scripts/run_detector_sizes.sh` measures each size: signs missed by size at low score thresholds, boxes per frame and time per frame.
+`scripts/run_detector_sizes.sh` measures each size: signs missed by size at low score thresholds, boxes per frame and time per frame. It trains the old Detector, kept to compare: a Detector can no longer be put in use.
 
 ## First results (24 October 2026)
 
@@ -68,7 +71,7 @@ Measured on the test areas of route 0000012d, which no training sees. 35% of tho
 
 Its validation loss was best at epoch 8 of 20: after that it memorised the training images. Training now stops after 5 epochs without improvement.
 
-**Cutter comparison (`scripts/run_detector_sizes.sh 2026-10-24_1452`)**
+**Old Detector comparison (`scripts/run_detector_sizes.sh 2026-10-24_1452`)**
 
 All three sizes use small default boxes (the smallest is 0.02 of the image side), 10% of the sign-free frames per epoch, and the best epoch chosen by validation recall. Scores are at the cutter's low threshold (0.1), on the 80 test signs.
 
@@ -79,7 +82,7 @@ All three sizes use small default boxes (the smallest is 0.02 of the image side)
 | 640 × 360 | 62% | 17% | 61% | 89% | 92% | 78% | 237 |
 | **960 × 544** | **79%** | **44%** | **81%** | **100%** | 92% | **96%** | **42** |
 
-- **960 × 544 is the cutter in use** (Models tab). The small default boxes alone take 320 × 320 from 6% to 38%, and the larger input takes it to 79%.
+- **960 × 544 was the cutter in use that day**, then the 1344 × 760 Detector; since 30 October 2026 the cutter is SignNet. The small default boxes alone take 320 × 320 from 6% to 38%, and the larger input takes it to 79%.
 - **Cost:** on the V100, 11.1, 11.3 and 13.3 ms per frame, which says little about the comma; 960 × 544 has about 5× the pixels of 320 × 320.
 - **Every box goes to the classifier, and almost all are junk.** Dropping them is the classifier's job.
 - **Still hard:** signs under 12 px. The next steps are the full-resolution band and more drives.
@@ -152,7 +155,7 @@ The test stays human: route 0000012d, reviewed by hand, split by place, never tr
 
 | Step | What | Why |
 |---|---|---|
-| 1. Cutter | Compare input sizes and the full-resolution band; judge on signs missed (by size) at low thresholds and boxes per frame | No sign is cut out if the cutter misses it |
+| 1. Cutter | Compare input sizes and the full-resolution band; judge on signs missed (by size) at low thresholds and boxes per frame. Done: SignNet on the band, the network the comma runs, is the one cutter (30 Oct 2026) | No sign is cut out if the cutter misses it |
 | 2. Classifier | Add "not a sign" (removed proposals, cutter mistakes) and the kinds of other signs as classes; darker images in training; a button to train it alone | It drops the cutter's false boxes, and the test has many dark frames and other signs |
 | 3. Decider | A small network over the classifier's answers, positions, speed and a small scene image; collect "Another" cases (ramps, parallel roads, exits), proposed from GPS and map | Position helped in experiment B; the full image memorised places; 125 "Another" against 1463 "Ours" |
 | 4. Site | Every network by role (cutter, classifier, decider): versions, numbers, a training button, the version in use; the whole chain measured end to end | Each network is replaced on its own, and the site must show what is in use |
@@ -182,8 +185,9 @@ It added two points, both taken: "Unclear" is taught as abstain rather than drop
 - **Other traffic signs** get a box with their kind, from people and from the AI reviewer alike.
 - **On a vehicle** (25 October 2026): a sign-like disc or panel on a vehicle, such as the top-speed sticker on the back of a truck, is boxed as "Not a sign" with the kind `on_vehicle` (key V). Cut to its box it is the same pixels as a sign, so the classifier does not learn from it (it would learn to reject signs); the decider, which sees the scene, learns it as not ours (`other_road`).
 - **Painted on the road** (28 October 2026): an other sign painted on the road, such as the children's triangle with "SCHULE" in front of a school, keeps its kind (Children) and is marked "Painted on the road" on the review page (`painted: true`, other signs only). The networks learn it from the picture; the flag keeps these cases countable apart. A painted number is not this: it is a road marking.
-- **Road markings are speed limits** (26 October 2026): a number painted on the road ("30", "30 ZONE") counts as a speed sign. It is often the only one a driver gets, for example when leaving a parking space inside a 30 zone, past its entry sign. The cutter learns to box it (both "Every sign" and "Speed signs only"), the classifier reads it (`road_marking:30`) and the decider says whose road it is on. Older reviews left many painted numbers without a box, so until they are boxed, those frames teach the cutter that the paint is background.
+- **Road markings are speed limits** (26 October 2026): a number painted on the road ("30", "30 ZONE") counts as a speed sign. It is often the only one a driver gets, for example when leaving a parking space inside a 30 zone, past its entry sign. The cutter learns to box it (both "Every sign" and "Speed signs only"), the classifier reads it (`road_marking:30`) and the decider says whose road it is on. Older reviews left many painted numbers without a box, so until they are boxed, those frames teach the cutter that the paint is background. SignNet, the cutter since 30 October 2026, reads only the band at the top of the frame, so it does not find most painted numbers, as on the car.
 - **Published together, on Hugging Face** (25 October 2026): the three networks in use go out as one package (ONNX, contracts, model card, `networks.json`) in the catalog `speed_networks.json` of `cristianku/sunnypilot-speedlimits-models`, so that other people can use them; a car will download from that catalog, as sunnypilot's model picker does from its own. Prepared and published from the Models tab (`scripts/publish_networks.sh`).
+- **One cutter: SignNet** (30 October 2026): the cutter is SignNet, the network the comma runs (band 896 × 288, stride 8, fuse 1 × 1, widths 16,24,32,48), and no longer an SSDlite Detector on the server next to SignNet on the car. Why: the classifier learns the false boxes of the cutter, so they must be the false boxes of the cutter the car runs; and there is one network to train and measure. **Train the cutter** (`scripts/run_signnet.sh`, about 80 minutes on the GPU) trains a SignNet with the car's setup; **Use this one** takes only a finished SignNet at 896 × 288 and stride 8, the only one the car's `vision.py` runs, and **Send to the car** and **Try on the comma now** refuse any other. Prepare's Our networks, the mined false boxes and `evaluate-chain` use the SignNet in use, with the car's best 5 boxes a frame, from score 0.1 (the car keeps those of 0.3 or more), no size filter; `evaluate-chain` measures at cutter scores 0.1, 0.2 and 0.3 and judges at 0.3, the car's floor. The old Detectors (`scripts/run_detector_sizes.sh`, the whole pipeline's detector) are kept to compare, and cannot be put in use. The cost: signs below the band (road markings, low signs close by) are not found, as on the car, and on the split of 26 October the SignNet on the car finds fewer test signs among its best 5 boxes at any score than the 1344 × 760 Detector did with its best 5 (55% against 61% of all signs, 26% against 29% of those under 12 px); at the car's 0.3 it finds 40% of all signs (152 of 381) with 0.22 false boxes a frame. Every SignNet so far was trained on the split of 26 October: a new **Train the cutter** is needed before one is put in use.
 - **Our networks propose only whole** (25 October 2026): Prepare offers "Our networks" only when the cutter, the classifier and the decider are all in use (`preannotate.ours_missing`). The decider sets the road (ours, another, or unresolved when it abstains) of every speed sign proposed, with the car's speed from `nnslr gps` when the drive has it (`_chain_proposer`); the other signs stay unresolved, since it learnt ownership only on the speed signs.
 
 ## The road type with memory (29 October 2026)

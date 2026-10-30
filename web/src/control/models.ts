@@ -18,10 +18,10 @@ const INTERVAL_MS = 10000;
 export const ROLE_TEXT: Record<ModelRole, {what: string; today: string; empty: string; emptyMore: string; uses: string}> = {
   cutter: {
     what: 'Finds every box that could be a sign. It must miss nothing: the classifier drops its false boxes. '
-      + 'A detector does it here; SignNet, made small for the comma’s GPU, does it in the car.',
-    today: 'Today: the detector, judged on the signs it misses by size.',
-    empty: 'No cutter trained yet: the detector of a training run plays this role.',
-    emptyMore: 'Start a training on the Train tab; its detector appears here.',
+      + 'The cutter is SignNet, the same network the comma runs; the old Detectors are kept to compare.',
+    today: 'Today: SignNet, judged on the speed signs as the car reads them: its 5 best boxes of each frame of score 0.3 or more.',
+    empty: 'No cutter trained yet: train a SignNet, then choose it here.',
+    emptyMore: '“Train the cutter” on the Train tab; its SignNet appears here.',
     uses: 'Prepare’s “Our networks” finds the signs with it. The next “Train the classifier” learns from its '
       + 'false boxes and is measured with it.',
   },
@@ -209,9 +209,10 @@ export interface Metric {
   detail: string;
 }
 
-/** The numbers that judge a version, side by side (MetricTiles, the Models table): the cutter: the speed signs and
- * every sign found on the test at its score, and the speed signs among its 5 best boxes a frame (what the car reads:
- * a detector passes on a couple of hundred boxes a frame at that score, SignNet a few); the classifier with “not a sign”: the speed-sign crops and every sign
+/** The numbers that judge a version, side by side (MetricTiles, the Models table): the cutter: a SignNet's speed signs
+ * as the car reads them (its best 5 boxes a frame of score 0.3 or more), the speed signs and every sign found on the
+ * test at its score (a detector passes on a couple of hundred boxes a frame at that score, SignNet a few), and the
+ * speed signs among its 5 best boxes a frame at any score; the classifier with “not a sign”: the speed-sign crops and every sign
  * crop read right (the kind of an other sign aside), and the chain with the cutter; an old reader: its crops read
  * right; the decider: the “Another” signs found on validation and on the test; the road type: the merges where the
  * ramp's limit ends in time by the comma's rule (since the second version), the motorway said right in the first minute
@@ -228,18 +229,33 @@ export function metricsOf(version: ModelVersion): Metric[] {
     const boxes = cut.budget?.boxes ?? 5;
     const kept = cut.budget ? (version.families === 'all' ? cut.budget.by_family?.['speed'] ?? null
       : {truth: cut.budget.truth_boxes, found: cut.budget.found, recall: cut.budget.recall}) : null;
+    const budgetLabel = 'Speed signs, best ' + boxes + ' boxes, any score';
     const budget: Metric = kept
-      ? {key: 'budget', label: 'Speed signs in ' + boxes + ' boxes', short: 'In ' + boxes + ' boxes', value: kept.recall,
-        count: of(kept.found, kept.truth), detail: of(kept.found, kept.truth) + ' in the ' + boxes + ' best boxes of each frame'}
-      : {key: 'budget', label: 'Speed signs in ' + boxes + ' boxes', short: 'In ' + boxes + ' boxes', value: null,
+      ? {key: 'budget', label: budgetLabel, short: 'Best ' + boxes + ', any score', value: kept.recall,
+        count: of(kept.found, kept.truth), detail: of(kept.found, kept.truth) + ' in the ' + boxes + ' best boxes of each frame, whatever their score'}
+      : {key: 'budget', label: budgetLabel, short: 'Best ' + boxes + ', any score', value: null,
         count: 'not measured', detail: 'Its report did not keep the boxes of each frame'};
+    // A SignNet as the car reads it: its best 5 boxes a frame of score 0.3 or more (missing from an older server).
+    const metrics: Metric[] = [];
+    if (version.kind === 'signnet') {
+      const car = cut.car ?? null;
+      const rule = 'best ' + (car?.max_boxes ?? 5) + ' at ' + (car?.score_threshold ?? 0.3);
+      const read = car ? (version.families === 'all' ? car.by_family?.['speed'] ?? null
+        : {truth: car.truth_boxes ?? 0, found: car.found ?? 0, recall: car.recall}) : null;
+      metrics.push(read
+        ? {key: 'car', label: 'Speed signs as the car reads them (' + rule + ')', short: 'As the car reads', value: read.recall,
+          count: of(read.found, read.truth), detail: of(read.found, read.truth) + ' found, '
+            + perFrame(car?.false_per_frame) + ' false boxes per frame'}
+        : {key: 'car', label: 'Speed signs as the car reads them (' + rule + ')', short: 'As the car reads', value: null,
+          count: 'not measured', detail: car === null && cut.car === undefined ? 'Not sent by this server' : 'Its report did not measure it'});
+    }
     const speed = version.families === 'all' ? cut.by_family?.['speed'] ?? null : null;
     if (speed) {
-      return [{key: 'speed', label: 'Speed signs', value: speed.recall, count: of(speed.found, speed.truth),
+      return [...metrics, {key: 'speed', label: 'Speed signs', value: speed.recall, count: of(speed.found, speed.truth),
         detail: of(speed.found, speed.truth) + ' found'}, every, budget];
     }
-    if (version.families === 'all') return [every, budget];
-    return [{...every, key: 'speed', label: 'Speed signs'},
+    if (version.families === 'all') return [...metrics, every, budget];
+    return [...metrics, {...every, key: 'speed', label: 'Speed signs'},
       {key: 'every', label: 'Every sign', value: null, count: 'speed only', detail: 'Trained on speed signs only'}, budget];
   }
   if (version.role === 'classifier') {

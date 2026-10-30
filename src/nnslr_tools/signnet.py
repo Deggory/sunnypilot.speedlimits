@@ -1,6 +1,6 @@
 """SignNet: a sign detector made for the comma's own GPU (the Adreno), to cut the signs out of the road frame in the car.
 
-The cutter in use (SSDlite MobileNetV3 at 1344 x 760) takes 540 ms a frame on the Adreno with openpilot's tinygrad
+The old Detector (SSDlite MobileNetV3 at 1344 x 760, the cutter until 30 Oct 2026) takes 540 ms a frame on the Adreno with openpilot's tinygrad
 flags, too slow; on the Chestnut it would stall the driving model (docs/NN_VISION_SPEED_LIMIT_REMAINING_WORK.md).
 SignNet is the other way round: few layers of plain 3 x 3 convolutions (tinygrad pays for every layer), one output,
 and only the top band of the frame (BAND_HEIGHT rows: 97 % of the reviewed signs end above row 420 of 760) at full
@@ -10,13 +10,21 @@ resolution, so the small far signs are not lost to a smaller picture. 141 ms on 
 The output is a heat map at ``stride`` (a sign centred in this cell, sure this much) and, per cell, the sign's log
 width and height in pixels and the offset of its centre in the cell (CenterNet): no default boxes, no non-maximum
 suppression but the local maxima of the heat map. The classifier reads each box from the full frame, as with the
-cutter.
+old Detector.
 
-``nnslr train-signnet`` trains it on the cutter's plan (prepare_detector_training: the same frames, boxes, families
-and split) and measures it on validation and test with the cutter's own scoring (evaluation.score_frame,
+``nnslr train-signnet`` trains it on the old Detector's plan (prepare_detector_training: the same frames, boxes,
+families and split) and measures it on validation and test with the old Detector's scoring (evaluation.score_frame,
 detector_size_metrics), so the two compare one to one. The plan's ignore boxes (switched-off variable displays) are
 neither signs nor background: the loss does not judge their cells, and a box found on one is dropped before scoring.
 Needs the GPU environment (.venv-gpu).
+
+SignNet is the one cutter: the car runs it (sunnypilot's speed_limits/vision.py, mirrored by the CAR_* constants), and
+the server's chain (nnslr_tools.chain: Prepare's Our networks, mine-negatives, evaluate-chain) reads it the same way:
+the band made by _band_of, the heat map decoded by frame_boxes_of, at most CAR_MAX_BOXES a frame. The car keeps those
+of CAR_MIN_SCORE or more; Prepare and mining go down to score 0.1, and only evaluate-chain's main score (0.3) is
+exactly what the car reads. Only a
+SignNet that fits_the_car can be the cutter in use. Torch is imported only where a network runs: the constants and
+helpers below the imports need none.
 """
 from __future__ import annotations
 
@@ -37,6 +45,17 @@ MAX_DETECTIONS = 50
 SCORE_THRESHOLDS = (0.05, 0.1, 0.2, 0.3, 0.5)
 # Boxes per frame the classifier after it can afford on the Adreno (about 5 ms a box).
 BOX_BUDGETS = (3, 5, 10)
+# The SignNet the car runs (sunnypilot/speed_limits/vision.py: SIGNNET_WIDTH x SIGNNET_HEIGHT, SIGNNET_STRIDE,
+# MAX_BOXES, MIN_BOX_SCORE): the band, stride and boxes of the cutter in use; "Train the cutter" trains this one
+# (the run on the car, 2026-10-28_1028-signnet-twothirds-s8-f1, had these fuse kernel and widths).
+CAR_BAND = (896, 288)
+CAR_STRIDE = 8
+CAR_FUSE_KERNEL = 1
+CAR_WIDTHS = (16, 24, 32, 48)
+CAR_MAX_BOXES = 5
+CAR_MIN_SCORE = 0.3
+# What a signnet-best.pt says of its data; one written before 30 Oct 2026 lacks them, its result.json has them.
+DATA_KEYS = ('dataset_sha256', 'split_sha256', 'families')
 
 
 def _torch():
@@ -52,6 +71,15 @@ def band_size(band_width: int = BAND_WIDTH) -> tuple[int, int]:
     """The band at ``band_width`` pixels across: the same share of the frame as BAND_HEIGHT, its height rounded up to
     a multiple of 16 (the deepest stride)."""
     return band_width, math.ceil(BAND_HEIGHT * band_width / BAND_WIDTH / 16) * 16
+
+
+def fits_the_car(band, stride) -> bool:
+    """Whether a SignNet of this band [width, height] and stride runs on the car (vision.py takes CAR_BAND and
+    CAR_STRIDE only)."""
+    try:
+        return [int(v) for v in band] == list(CAR_BAND) and int(stride) == CAR_STRIDE
+    except (TypeError, ValueError):
+        return False
 
 
 def build_signnet(widths=DEFAULT_WIDTHS, stride: int = DEFAULT_STRIDE, fuse_kernel: int = 3):
@@ -175,20 +203,39 @@ def decode(heat, shape, stride: int, *, limit: int = MAX_DETECTIONS, min_score: 
     return found
 
 
-def _band_image(path: Path, band_width: int = BAND_WIDTH):
-    """The frame's top band as a uint8 tensor (3, band height, band_width), and the frame's width."""
+def _band_of(image, band_width: int = BAND_WIDTH):
+    """The top band of a decoded frame (a PIL image) as a uint8 tensor (3, band height, band_width): the frame
+    scaled to band_width (PIL bilinear, the car does the same arithmetic) and its top rows. No normalisation: the
+    network takes it / 255."""
     torch, _ = _torch()
+    import numpy as np
     from PIL import Image
     band_w, band_h = band_size(band_width)
+    if image.mode != 'RGB':
+        image = image.convert('RGB')
+    width, height = image.size
+    if width != band_w:
+        image = image.resize((band_w, round(height * band_w / width)), Image.BILINEAR)
+    array = np.asarray(image.crop((0, 0, band_w, band_h)), dtype=np.uint8)
+    return torch.from_numpy(array.copy()).permute(2, 0, 1)
+
+
+def _band_image(path: Path, band_width: int = BAND_WIDTH):
+    """The frame's top band as a uint8 tensor (3, band height, band_width), and the frame's width."""
+    from PIL import Image
     with Image.open(path) as image:
         image = image.convert('RGB')
-        width, height = image.size
-        if width != band_w:
-            image = image.resize((band_w, round(height * band_w / width)), Image.BILINEAR)
-        band = image.crop((0, 0, band_w, band_h))
-        import numpy as np
-        array = np.asarray(band, dtype=np.uint8)
-    return torch.from_numpy(array.copy()).permute(2, 0, 1), width
+        return _band_of(image, band_width), image.size[0]
+
+
+def frame_boxes_of(heat, shape, stride: int, band_width: int, frame_width: float, *, limit: int = CAR_MAX_BOXES,
+                   min_score: float = CAR_MIN_SCORE) -> list[dict]:
+    """The boxes of one frame (heat (1, 1, H, W), shape (1, 4, H, W) on the CPU) in frame pixels, best first: the
+    local maxima of decode, at most ``limit`` of at least ``min_score``, each coordinate times frame_width /
+    band_width, as the car's vision.signnet_boxes (not clamped to the frame)."""
+    scale = float(frame_width) / band_width
+    return [{'box': [v * scale for v in p['box']], 'score': p['score']}
+            for p in decode(heat, shape, stride, limit=limit, min_score=min_score)[0]]
 
 
 def _dataset(frames: list[dict], data_root: Path, stride: int, *, train: bool, seed: int, band_width: int = BAND_WIDTH):
@@ -229,8 +276,9 @@ def _in_ignore(box: list[float], ignore: list[list[float]]) -> bool:
 def measure(model, frames: list[dict], data_root: Path, stride: int, device, *, batch: int = 16,
             workers: int = 8, band_width: int = BAND_WIDTH) -> dict[str, Any]:
     """The cutter's measures on ``frames``: per score threshold (detector_size_metrics, reviewed boxes of the whole
-    frame, those below the band count as missed) and per box budget (the best N boxes of each frame). A box found
-    on an ignore box of the frame (a switched-off display) is dropped before either: neither found nor false."""
+    frame, those below the band count as missed), per box budget (the best N boxes of each frame, at any score) and
+    ``car``: what the car reads, the best CAR_MAX_BOXES boxes of score CAR_MIN_SCORE or more. A box found on an
+    ignore box of the frame (a switched-off display) is dropped before any of them: neither found nor false."""
     torch, _ = _torch()
     from torch.utils.data import DataLoader
 
@@ -243,16 +291,16 @@ def measure(model, frames: list[dict], data_root: Path, stride: int, device, *, 
     with torch.no_grad():
         for image, _, _, _, _, indexes in loader:
             heat, shape = model(image.to(device))
-            for index, found in zip(indexes.tolist(), decode(heat.float().cpu(), shape.float().cpu(), stride)):
-                scale = float(frames[index]['width']) / band_width
+            heat, shape = heat.float().cpu(), shape.float().cpu()
+            for b, index in enumerate(indexes.tolist()):
                 ignore = frames[index].get('ignore_boxes') or []
                 kept = []
-                for p in found:
-                    box = [v * scale for v in p['box']]
-                    if ignore and _in_ignore(box, ignore):
+                for p in frame_boxes_of(heat[b:b + 1], shape[b:b + 1], stride, band_width, frames[index]['width'],
+                                        limit=MAX_DETECTIONS, min_score=0.01):
+                    if ignore and _in_ignore(p['box'], ignore):
                         ignored += 1
                         continue
-                    kept.append({'box': box, 'score': p['score']})
+                    kept.append(p)
                 predictions[index] = kept
 
     def scored(select) -> dict[str, Any]:
@@ -269,17 +317,72 @@ def measure(model, frames: list[dict], data_root: Path, stride: int, device, *, 
         'by_score_threshold': {str(t): scored(lambda found, t=t: [p for p in found if p['score'] >= t])
                                for t in SCORE_THRESHOLDS},
         'by_box_budget': {str(n): scored(lambda found, n=n: found[:n]) for n in BOX_BUDGETS},
+        'car': scored(lambda found: [p for p in found if p['score'] >= CAR_MIN_SCORE][:CAR_MAX_BOXES]),
         'ignore_boxes': sum(len(f.get('ignore_boxes') or []) for f in frames),
         'found_on_ignore_boxes': ignored,
     }
 
 
-def train_signnet(plan: dict[str, Any], data_root: Path, run_dir: Path, *, widths=DEFAULT_WIDTHS,
-                  stride: int = DEFAULT_STRIDE, epochs: int = 40, batch: int = 16, learning_rate: float = 3e-3,
-                  workers: int = 8, seed: int = 1, band_width: int = BAND_WIDTH, fuse_kernel: int = 3,
-                  log=print) -> dict[str, Any]:
+def car_measure(measured: Any) -> dict[str, Any] | None:
+    """What the car reads of one partition of a result.json (measure's output): its ``car`` entry, the best
+    CAR_MAX_BOXES boxes of score CAR_MIN_SCORE or more; for a result written before it, by_score_threshold at
+    CAR_MIN_SCORE (the cap of 5 boxes almost never bites there: about 0.35 boxes a frame). None without either."""
+    if not isinstance(measured, dict):
+        return None
+    for found in (measured.get('car'), (measured.get('by_score_threshold') or {}).get(str(CAR_MIN_SCORE))):
+        if isinstance(found, dict):
+            return found
+    return None
+
+
+def checkpoint_of(model, plan: dict[str, Any], *, widths, stride: int, fuse_kernel: int, band_width: int,
+                  epoch: int) -> dict[str, Any]:
+    """What signnet-best.pt holds: the weights, the network's settings, and the data it learnt from (DATA_KEYS:
+    the cutter's checks of the same split and its families read them, as a detector's)."""
+    return {'task': 'signnet', 'state_dict': model.state_dict(), 'widths': list(widths), 'stride': stride,
+            'fuse_kernel': fuse_kernel, 'band': list(band_size(band_width)), 'epoch': epoch,
+            **{key: plan.get(key) for key in DATA_KEYS}}
+
+
+def checkpoint_data(checkpoint: dict[str, Any], checkpoint_path: Path) -> dict[str, Any]:
+    """The checkpoint with DATA_KEYS filled from the result.json beside it when it lacks them (one written before
+    they were saved in it). Without either, families is 'all': every SignNet so far learnt all the families (the
+    legacy 'speed' of a cutter without families is the old Detector's)."""
+    if all(checkpoint.get(key) is not None for key in DATA_KEYS):
+        return checkpoint
+    try:
+        result = json.loads((Path(checkpoint_path).parent / 'result.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        result = None
+    if isinstance(result, dict) and result.get('task') == 'signnet':
+        checkpoint = {**checkpoint, **{key: result.get(key) for key in DATA_KEYS if checkpoint.get(key) is None}}
+    if checkpoint.get('task') == 'signnet' and checkpoint.get('families') is None:
+        checkpoint = {**checkpoint, 'families': 'all'}
+    return checkpoint
+
+
+def signnet_not_trainable(plan: dict[str, Any]) -> str:
+    """Why a plan cannot train a SignNet: it needs frames and boxes in train and validation (the plan's
+    ``trainable``, as the old Detector's)."""
+    return ("training_plan_not_trainable: SignNet needs frames with boxes in train and validation; this plan has "
+            f"frames {plan.get('counts_by_split') or {}} and boxes {plan.get('boxes_by_split') or {}} "
+            f"(families {plan.get('families')!r})")
+
+
+def train_signnet(plan: dict[str, Any], data_root: Path, run_dir: Path, *, widths=CAR_WIDTHS,
+                  stride: int = CAR_STRIDE, epochs: int = 40, batch: int = 16, learning_rate: float = 3e-3,
+                  workers: int = 8, seed: int = 1, band_width: int = CAR_BAND[0], fuse_kernel: int = CAR_FUSE_KERNEL,
+                  log=None) -> dict[str, Any]:
     """Train on the plan's train frames, keep the epoch with the best validation recall at 5 boxes a frame, then
-    measure it on validation and test. Writes signnet-best.pt and result.json in run_dir."""
+    measure it on validation and test. Writes signnet-best.pt and result.json in run_dir. The defaults are the car's
+    SignNet (CAR_*). Every epoch logs one line (the panel reads it): ``signnet epoch E/N train_loss L val_recall R
+    val_false_per_frame F Ss``, with the validation at 5 boxes a frame. ``log`` defaults to a print that flushes:
+    the script tees it into a file, and the panel follows the epochs as they come."""
+    if not plan.get('trainable'):
+        raise ValueError(signnet_not_trainable(plan))
+    if log is None:
+        def log(line):
+            print(line, flush=True)
     torch, _ = _torch()
     from torch.utils.data import DataLoader
     random.seed(seed)
@@ -294,7 +397,8 @@ def train_signnet(plan: dict[str, Any], data_root: Path, run_dir: Path, *, width
     model = build_signnet(widths, stride, fuse_kernel).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-4)
     loader = DataLoader(_dataset(train_frames, data_root, stride, train=True, seed=seed, band_width=band_width),
-                        batch_size=batch, shuffle=True, num_workers=workers, drop_last=True, persistent_workers=True)
+                        batch_size=batch, shuffle=True, num_workers=workers, drop_last=True,
+                        persistent_workers=workers > 0)
     scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=learning_rate, total_steps=epochs * len(loader))
     best, best_epoch, history = -1.0, -1, []
     for epoch in range(1, epochs + 1):
@@ -308,7 +412,7 @@ def train_signnet(plan: dict[str, Any], data_root: Path, run_dir: Path, *, width
             value.backward()
             optimizer.step()
             scheduler.step()
-            total += float(value)
+            total += value.item()
             for key in parts:
                 parts[key] += detail[key]
         steps = max(len(loader), 1)
@@ -318,12 +422,13 @@ def train_signnet(plan: dict[str, Any], data_root: Path, run_dir: Path, *, width
                         'shape': parts['shape'] / steps, 'validation_recall_at_5': checked['recall_iou'],
                         'validation_false_positives_per_image_at_5': checked['false_positives_per_image'],
                         'seconds': round(time.monotonic() - started, 1)})
-        log(f"signnet epoch {epoch}/{epochs} loss {total / steps:.4f} validation recall@5 {checked['recall_iou']:.3f}")
+        log(f"signnet epoch {epoch}/{epochs} train_loss {total / steps:.4f} val_recall {checked['recall_iou']:.3f} "
+            f"val_false_per_frame {checked['false_positives_per_image']:.2f} {history[-1]['seconds']:.0f}s")
         if checked['recall_iou'] > best:
             best, best_epoch = checked['recall_iou'], epoch
-            torch.save({'task': 'signnet', 'state_dict': model.state_dict(), 'widths': list(widths), 'stride': stride,
-                        'fuse_kernel': fuse_kernel, 'band': list(band_size(band_width)), 'epoch': epoch},
-                       run_dir / 'signnet-best.pt')
+            torch.save(checkpoint_of(model, plan, widths=widths, stride=stride, fuse_kernel=fuse_kernel,
+                                     band_width=band_width, epoch=epoch), run_dir / 'signnet-best.pt')
+    log(f"signnet measure the best epoch {best_epoch} on validation and test")
     checkpoint = torch.load(run_dir / 'signnet-best.pt', map_location=device, weights_only=True)
     model.load_state_dict(checkpoint['state_dict'])
     result = {
@@ -338,6 +443,7 @@ def train_signnet(plan: dict[str, Any], data_root: Path, run_dir: Path, *, width
         'test': measure(model, test, data_root, stride, device, workers=workers, band_width=band_width),
     }
     (run_dir / 'result.json').write_text(json.dumps(result, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+    log(f"SignNet complete: {run_dir}")
     return result
 
 
@@ -346,15 +452,22 @@ def decode_output(out, stride: int, **kw) -> list[list[dict]]:
     return decode(out[:, :1], out[:, 1:], stride, **kw)
 
 
+def model_of(checkpoint: dict[str, Any]):
+    """The network of a loaded signnet-best.pt, in eval mode on the CPU (an old one without fuse_kernel: 3)."""
+    if not isinstance(checkpoint, dict) or checkpoint.get('task') != 'signnet':
+        raise ValueError('checkpoint_task_mismatch: expected signnet')
+    if not checkpoint.get('state_dict') or not isinstance(checkpoint['state_dict'], dict):
+        raise ValueError('checkpoint_missing_state_dict')
+    model = build_signnet(tuple(checkpoint['widths']), checkpoint['stride'], checkpoint.get('fuse_kernel', 3))
+    model.load_state_dict(checkpoint['state_dict'], strict=True)
+    return model.eval()
+
+
 def load_signnet(checkpoint_path: Path):
     """The network of a signnet-best.pt in eval mode, and the checkpoint."""
     torch, _ = _torch()
     checkpoint = torch.load(Path(checkpoint_path), map_location='cpu', weights_only=True)
-    if not isinstance(checkpoint, dict) or checkpoint.get('task') != 'signnet':
-        raise ValueError('checkpoint_task_mismatch: expected signnet')
-    model = build_signnet(tuple(checkpoint['widths']), checkpoint['stride'], checkpoint.get('fuse_kernel', 3))
-    model.load_state_dict(checkpoint['state_dict'], strict=True)
-    return model.eval(), checkpoint
+    return model_of(checkpoint), checkpoint
 
 
 def export_signnet_onnx(checkpoint_path: Path, output_path: Path, *, verify: bool = True) -> dict[str, Any]:

@@ -21,7 +21,7 @@ from test_panel_runs import write
 
 from nnslr_tools import car_release, car_settings
 from nnslr_tools.job_progress import progress
-from nnslr_tools.model_roles import ModelIndex
+from nnslr_tools.model_roles import NOT_SELECTABLE, ModelIndex
 from nnslr_tools.panel import Panel, PanelError
 from nnslr_tools.runs import RunsIndex
 
@@ -102,6 +102,7 @@ def test_the_version_is_the_day_then_numbered_the_same_day():
     ('r1', None, 'has no SignNet on the Models tab'),
     ('s3', None, 'has not finished its training'),
     ('s1', 'cutter:r1/detector', 'is not the id of a classifier'),
+    ('s1', 'classifier:r1/signnet', 'is not the id of a classifier'),
     ('s1', 'classifier:r9/reader', 'is not on this server'),
 ])
 def test_only_a_finished_signnet_of_the_models_tab_and_a_classifier_of_it(tmp_path, signnet, classifier, message):
@@ -120,6 +121,39 @@ def test_the_classifier_is_the_one_in_use_unless_one_is_given(tmp_path):
     chosen = car_release.choose(data, 's1', 'classifier:r1/reader')
     assert chosen['finder']['id'] == 'cutter:s1/signnet' and chosen['finder']['weights'].name == 'signnet-best.pt'
     assert chosen['classifier']['weights'] == (data / 'runs/r1/reader/reader-best.pt').resolve()
+
+
+@pytest.mark.parametrize('band, stride, size', [([1344, 416], 8, '1344 x 416 at stride 8'),
+                                                ([896, 288], 4, '896 x 288 at stride 4')])
+def test_only_a_signnet_of_the_cars_band_and_grid_goes(tmp_path, band, stride, size):
+    data = tmp_path / 'data'
+    servers_runs(data)
+    make_signnet(data, 'wide', band=band, stride=stride)
+    with pytest.raises(ValueError, match=f'the SignNet of wide is {size}: the comma runs 896 x 288 at stride 8'):
+        car_release.choose(data, 'wide')
+
+
+def test_without_a_run_the_cutter_in_use_goes(tmp_path):
+    data = tmp_path / 'data'
+    servers_runs(data)
+    with pytest.raises(ValueError, match='no cutter in use: choose one on the Models tab'):
+        car_release.choose(data)
+    # An old Detector still in use (written before SignNet was the cutter): it never goes on the car.
+    active = data / 'models' / 'active.json'
+    value = json.loads(active.read_text())
+    active.write_text(json.dumps({**value, 'cutter': {'id': 'cutter:r1/detector', 'via': 'local'}}))
+    with pytest.raises(ValueError, match='the cutter in use, cutter:r1/detector, is an old Detector: choose a SignNet'):
+        car_release.choose(data, None, 'classifier:r1/reader')
+    runs = RunsIndex(data)
+    runs.running_runs = dict
+    ModelIndex(runs).set_active('cutter', 'cutter:s1/signnet', who=None, via='local')
+    chosen = car_release.choose(data)
+    assert (chosen['finder']['id'], chosen['finder']['run']) == ('cutter:s1/signnet', 's1')
+    assert chosen['finder']['weights'] == (data / 'runs/s1/signnet-best.pt').resolve()
+    assert chosen['classifier']['id'] == 'classifier:r1/reader'
+    # A run given still wins over the one in use.
+    make_signnet(data, 's2')
+    assert car_release.choose(data, 's2')['finder']['id'] == 'cutter:s2/signnet'
 
 
 def test_published_once_then_nothing_then_a_new_version_the_same_day(tmp_path):
@@ -534,6 +568,14 @@ def test_send_to_car_takes_only_a_finished_signnet_of_the_models_tab(root, check
     with pytest.raises(PanelError) as refused:
         panel.start('networks_prepare', {'signnet': 's1'})
     assert refused.value.reason == 'bad_option'
+    # A finished SignNet of another band or grid: refused before any job starts, in the Models tab's words.
+    make_signnet(root, 'wide', band=[1344, 416], stride=4)
+    for action in ('send_to_car', 'try_on_comma'):
+        with pytest.raises(PanelError) as refused:
+            panel.start(action, {'signnet': 'wide'})
+        assert (refused.value.status, refused.value.reason) == (409, 'not_for_the_car'), action
+        assert str(refused.value) == NOT_SELECTABLE['not_for_the_car'][1]
+    assert panel.jobs() == []  # no job started
     job = panel.start('send_to_car', {'signnet': 's1'})
     done = finished(panel, job['id'])
     assert done['state'] == 'ok' and done['run'] == 's1'

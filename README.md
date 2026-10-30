@@ -4,7 +4,7 @@
 
 This project teaches small neural networks to find the speed-limit signs in the road camera of a comma device, read them, and work out whether they apply to the road the car is on. The goal is a third source for sunnypilot's Speed Limit Assist, next to the map and the car. The repository also contains a web portal where drives are prepared, signs are reviewed by people and by AI assistants, and networks are trained, measured and chosen.
 
-> **Status: research.** Nothing runs in a car yet, and no trained weights are published. When it does reach a car, it will start out advisory only: the limit it reads is shown on screen and does not change the car's speed.
+> **Status: research.** A SignNet and the classifier run on Cristian's own comma 4 in a research build of sunnypilot (`speedvisiond`, see [what runs on the comma now](docs/NN_VISION_SPEED_LIMIT_REMAINING_WORK.md#60-what-runs-on-the-comma-now-28-oct-2026)): the limit they read is shown on the driving screen, and Speed Limit Assist uses it only when sunnylink's Speed Limit Source is Map Data + Vision. No trained weights are published.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/review-dark.jpg">
@@ -28,9 +28,9 @@ The job is split into small steps. Each network is trained, measured and replace
 
 ![The planned pipeline: the cutter finds boxes, the classifier says what each box is, the decider says whom each sign applies to, tracks follow signs over time, and rules keep the current limit for Speed Limit Assist.](docs/neural-network.png)
 
-<sub>The pipeline as planned on 24 October 2026. The cutter box still shows the very first detector, which found 6% of the signs. The cutter in use now finds 81% of the test speed signs (see [Results so far](#results-so-far)).</sub>
+<sub>The pipeline as planned on 24 October 2026. The cutter box still shows the very first detector, which found 6% of the signs. Since 30 October 2026 the cutter is SignNet, the network the comma runs: the one on the car passes on 40% of the test signs at its score floor of 0.3 (see [Results so far](#results-so-far)).</sub>
 
-1. **Cut.** The cutter looks at each frame of the main road camera (1344 × 760 pixels on the comma four) and draws a box around anything that could be a sign. It must miss nothing. False boxes are fine, because the next step drops them. Signs are tiny: in these drives the median sign is 17 pixels wide.
+1. **Cut.** The cutter, SignNet, looks at the band at the top of each frame of the main road camera (the top 432 of 760 rows of the comma four's 1344 × 760 pixels, scaled to 896 × 288; the top 416 rows alone hold 97% of the reviewed signs) and draws a box around anything that could be a sign; the car keeps the best 5 boxes of a frame that score 0.3 or more. It must miss nothing. False boxes are fine, because the next step drops them. Signs are tiny: in these drives the median sign is 17 pixels wide. A sign below the band (a road marking, a low sign close by) is not found.
 2. **Classify.** The classifier gets each box, cut from the full-resolution frame, and says what it is: a speed limit and its value, end of limit, zone, variable display, a limit too blurred to read, another kind of sign (town entry, give way, direction and so on), or not a sign at all.
 3. **Decide.** The decider says whom each sign is for: our road, another road (an exit ramp, a parallel road, the other carriageway), or "not sure", in which case it abstains. It looks at the recognised signs, where they are in the image, and the car's speed.
 4. **Follow over time.** The same sign is followed from frame to frame as the car gets closer, so the reading steadies and the system knows when the sign has been passed. In the car only past frames exist, so this step never looks ahead.
@@ -43,8 +43,11 @@ Three separate networks, joined by a little code ([`chain.py`](src/nnslr_tools/c
 ```
 frame [3, 760, 1344]
   │
-  ▼  cutter (SSDlite, MobileNetV3-Large)          1 call
-boxes [N, 4] + scores                             N ≈ 40, false ones included
+  ▼  top 432 rows, scaled to 896 × 288
+band [3, 288, 896]
+  │
+  ▼  cutter (SignNet, a heat map of sign centres) 1 call
+boxes [N, 4] + scores                             the best N ≤ 5, score ≥ 0.3, false ones included
   │
   ▼  cut each box from the full-resolution frame, resize to 160 × 160
 crops [N, 3, 160, 160]                            stacked into one tensor
@@ -66,7 +69,7 @@ All training happens on a server with one GPU (a Tesla V100). The networks train
 
 | Step | Where it stands (24 October 2026) |
 |---|---|
-| Cutter | Trained and measured. One version is chosen in the portal. |
+| Cutter | SignNet, the network the comma runs, is the one cutter (30 October 2026). The one in use (Models) gives the boxes of the server too. The SignNets so far were trained on the split of 26 October: a new one is needed before one is put in use. |
 | Classifier | A first version with "not a sign" is trained and measured. None is chosen yet. |
 | Decider | Prototypes (experiment B). The one chosen sets the road of Our networks' proposals. |
 | Road type | A prototype with memory (29 October 2026): the kind of road from the camera, one frame a second, and the merge after a ramp. Measured on a held-out drive; nothing uses it yet. |
@@ -78,7 +81,7 @@ The plan for sunnypilot is a Vision option next to Car and Map in Speed Limit As
 
 ### Where it would run: Chestnut
 
-The networks are sized for Chestnut, comma's external GPU, and not for the comma four's own chip. To fit that chip, the frame would have to shrink so much that distant signs, already under 20 pixels wide, disappear. At 320 × 320 the cutter found 38% of the test speed signs, and at full resolution it finds 81%. Chestnut has far more compute. It also runs openpilot's driving model, though, and the driving model always comes first. How much room is left next to it, and how a second model can share it, still has to be measured. Nothing has run on Chestnut, or in a car, yet.
+The networks are sized for Chestnut, comma's external GPU, and not for the comma four's own chip. To fit that chip, the frame would have to shrink so much that distant signs, already under 20 pixels wide, disappear: the old Detector found 38% of the test speed signs at 320 × 320, and 81% at full resolution. The cutter, SignNet, is the exception: it was made for the comma's own GPU, and reads only the 896 × 288 band where the signs stand (12 ms of the Adreno's GPU). Chestnut has far more compute. It also runs openpilot's driving model, though, and the driving model always comes first. How much room is left next to it, and how a second model can share it, still has to be measured. Nothing has run on Chestnut, or in a car, yet.
 
 ## The portal
 
@@ -120,12 +123,12 @@ The review page is the picture at the top of this page. This is the one step don
 
 The Train tab has one card per network:
 
-- **Cutter.** Pick the input size (640 × 360, 960 × 544 or the full 1344 × 760, the default) and whether it boxes every sign or only speed signs, then press **Train the cutter**.
+- **Cutter.** **Train the cutter** trains a SignNet with the car's setup (the 896 × 288 band, stride 8), in about 80 minutes on the GPU. Its one option is whether it learns every sign or only speed signs. It writes `data/runs/<name>/signnet-best.pt`, `result.json` and `signnet.log`; **Use this one** on the Models tab then puts it in use.
 - **Classifier.** **Train the classifier** collects the cutter's false boxes, trains the classifier with "not a sign", and measures it on its own and together with the cutter. Once `helpers/mapillary.sh` has cut the signs of the Mapillary Traffic Sign Dataset, a switch adds them to its training crops (**With Mapillary**); the measures stay on our drives. **Mapillary, then ours** trains in two stages instead: first on the Mapillary signs alone, then on ours from those weights. **Where** keeps the signs of some continents or countries (Europe, or only Switzerland, Germany and Italy), once **Locate the photos** has found where each photo was taken; **Share** takes a fixed random part of them (5 %, say).
 - **Decider.** **Train the decider** trains experiment B's three variants (the crop alone, with position and speed, with the scene) in about 15 minutes, and compares them. It is a prototype; the one in use (Models) sets OURS or another on the speed signs Our networks propose.
 - **Road type.** **Train the road type** trains the network that tells town, 30 zone, rural, expressway, motorway, ramp and parking from the camera, with memory and the motorway sign, without the sign and without memory, in about 20 minutes (40 the first time, when it reads the signs as the car does), compares them by when a ramp's limit ends and exports the first as an ONNX step for the car. It learns from the road types of Data › Roads, and needs no reviewed sign. It is a prototype: nothing uses it yet ([docs/NEURAL_NETWORK.md](docs/NEURAL_NETWORK.md#the-road-type-with-memory-29-october-2026)).
 
-Two more buttons cover the dataset and the older pipeline. **Import reviews** turns the confirmed frames into the dataset. **Whole pipeline** runs the older detector-and-reader baseline, from the import to a packaged model.
+Two more buttons cover the dataset and the older pipeline. **Import reviews** turns the confirmed frames into the dataset. **Whole pipeline** runs the older detector-and-reader baseline, from the import to a packaged model; its detector is kept to compare and cannot be the cutter in use.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/train-charts-dark.png">
@@ -161,7 +164,7 @@ The chain card answers the question that matters: how many of the test's speed s
   <img src="docs/images/models-light.png" alt="Models tab: the cutter, the classifier and the decider in use with their numbers; below, the versions of one of them as a table to compare (speed signs, every sign, the chain), each row opening its card with Use this one.">
 </picture>
 
-For each network (cutter, classifier and decider), this tab lists every version trained here, each with its main test number and the rest under **Details**, and the one in use. **Use this one** records the choice, with who made it and when. Other steps then use that version: for example, the classifier training learns from the false boxes of the cutter in use. Choosing copies, exports or installs nothing.
+For each network (cutter, classifier and decider), this tab lists every version trained here, each with its main test number and the rest under **Details**, and the one in use. **Use this one** records the choice, with who made it and when. Other steps then use that version: for example, the classifier training learns from the false boxes of the cutter in use, the boxes the car sees. Only a SignNet that fits the car (896 × 288, stride 8) can be the cutter in use; the old Detectors stay in the list to compare. Choosing copies, exports or installs nothing.
 
 **Publish**, under the three columns, shares the three networks in use with other people, together, on Hugging Face:
 
@@ -173,7 +176,7 @@ The commands are in [docs/COMMANDS.md](docs/COMMANDS.md#publishing-when-there-is
 
 ## Results so far
 
-These are the first measurements, taken on 24 October 2026. The dataset is small and comes from one country. Most of it was labelled by AI reviewers, and everything is measured on a single test area. Read the numbers as a direction, not a promise.
+These are the first measurements, taken on 24 October 2026 (SignNet's on 28 October). The dataset is small and comes from one country. Most of it was labelled by AI reviewers, and everything is measured on a single test area. Read the numbers as a direction, not a promise.
 
 ### The data
 
@@ -193,17 +196,41 @@ These are the first measurements, taken on 24 October 2026. The dataset is small
 
 ### Finding the signs (cutter)
 
-This table shows how many test signs each cutter finds, at a cutter score of 0.1:
+**One cutter: SignNet (30 October 2026).** The cutter is SignNet, the network the comma runs: plain convolutions on the band at the top of the frame, a heat map of sign centres with each sign's size, no NMS. The car passes on the best 5 boxes of a frame that score 0.3 or more. On the server, the SignNet in use gives the car's best 5 boxes a frame, from score 0.1 (the car keeps those of 0.3 or more), to Prepare's Our networks and to the classifier's false boxes; the chain is judged at 0.3, as the car reads it. Why one: the classifier learns the false boxes of the cutter, so they must be those of the cutter the car runs; and there is one network to train and measure.
 
-| Cutter input | Learns to box | Speed signs found (of 80) | All signs found (of 134) | Boxes passed on per frame | Time per frame on a V100 |
+SignNets trained on 28 October 2026, measured on the test of the split of 26 October (1,133 frames with 381 signs, 208 of them speed signs; a newer split than the one above). What the car reads: the boxes that score 0.3 or more, at most 5 a frame (at most about 0.35 a frame here, so the cap of 5 almost never bites):
+
+| Band | Stride | Parameters | All signs found (of 381) | Speed signs found (of 208) | Under 12 px (of 65) | False boxes per frame |
+|---|---|---|---|---|---|---|
+| 1344 × 416 | 4 | 81 k | 110 (29%) | 108 (52%) | 13 (20%) | 0.05 |
+| 1344 × 416 | 8 | 163 k | 148 (39%) | 125 (60%) | 17 (26%) | 0.11 |
+| **896 × 288 (on the car)** | 8, fuse 1 × 1 | 63 k | **152 (40%)** | **120 (58%)** | 13 (20%) | 0.22 |
+| 896 × 288 | 4 | 81 k | 107 (28%) | 101 (49%) | 9 (14%) | 0.06 |
+| 672 × 208 | 4 | 156 k | 111 (29%) | 103 (50%) | 10 (15%) | 0.08 |
+
+The best 5 boxes of each frame at any score, what the same networks can give with no score floor:
+
+| Band | Stride | Parameters | All signs found (of 381) | Speed signs found (of 208) | Under 12 px (of 65) |
+|---|---|---|---|---|---|
+| 1344 × 416 | 4 | 81 k | 226 (59%) | 138 (66%) | 29 (45%) |
+| 1344 × 416 | 8 | 163 k | 221 (58%) | 139 (67%) | 26 (40%) |
+| **896 × 288 (on the car)** | 8, fuse 1 × 1 | 63 k | **209 (55%)** | **130 (62%)** | 17 (26%) |
+| 896 × 288 | 4 | 81 k | 207 (54%) | 133 (64%) | 22 (34%) |
+| 672 × 208 | 4 | 156 k | 186 (49%) | 123 (59%) | 14 (22%) |
+
+The best 5 boxes at any score mean about 4.8 false ones a frame, which the classifier would have to drop; at the car's floor of 0.3 the one on the car keeps 0.22. Only a SignNet at 896 × 288 and stride 8 runs on the car, so only such a one can be put in use. All of them were trained on the split of 26 October: a new **Train the cutter** on the current split is needed before one is put in use.
+
+**The old Detector (24 October 2026).** Until 30 October the cutter was an SSDlite detector (MobileNetV3-Large) on the whole frame. Its versions are kept to compare, and can no longer be put in use. This table shows how many test signs each one finds, at a cutter score of 0.1:
+
+| Detector input | Learns to box | Speed signs found (of 80) | All signs found (of 134) | Boxes passed on per frame | Time per frame on a V100 |
 |---|---|---|---|---|---|
 | 320 × 320 | speed signs | 30 (38%) | – | 80 | 11.1 ms |
 | 640 × 360 | speed signs | 50 (62%) | – | 238 | 11.3 ms |
 | 960 × 544 | speed signs | 63 (79%) | – | 42 | 13.3 ms |
 | 960 × 544 | every sign | 62 (78%) | 90 (67%) | 118 | 16.9 ms |
-| **1344 × 760 (in use)** | every sign | **65 (81%)** | **90 (67%)** | 210 | 47.6 ms |
+| 1344 × 760 | every sign | 65 (81%) | 90 (67%) | 210 | 47.6 ms |
 
-The very first detector, at 320 × 320 with its default settings, found 5 of the 80 speed signs (6%). Smaller default boxes and more pixels did the rest. The cutter in use reads the full frame and boxes every kind of sign, so that the classifier also learns the other signs. By sign width, it finds 11 of 18 signs under 12 px, 30 of 45 at 12 to 20 px, 27 of 35 at 20 to 40 px, and 22 of 36 at 40 px and wider. The times are for the network alone on a server GPU, and say little about the car.
+The very first detector, at 320 × 320 with its default settings, found 5 of the 80 speed signs (6%). Smaller default boxes and more pixels did the rest. The 1344 × 760 detector reads the full frame and boxes every kind of sign, so that the classifier also learns the other signs. By sign width, it finds 11 of 18 signs under 12 px, 30 of 45 at 12 to 20 px, 27 of 35 at 20 to 40 px, and 22 of 36 at 40 px and wider. The times are for the network alone on a server GPU, and say little about the car.
 
 ### Reading the signs (classifier) and the whole chain
 
@@ -215,9 +242,9 @@ This is the classifier on its own, on the reviewed boxes of the test:
 | Boxes that are not a sign, rejected | 436 of 444 (98.2%) |
 | Other signs (town entry, directions and so on) | 0 of 54: all taken for "not a sign" |
 
-The next table shows the whole chain on the test frames, the cutter followed by the classifier, at a cutter score of 0.1. This chain was measured with the 960 × 544 cutter that boxes speed signs only. The full-resolution cutter now in use has not been measured in the chain yet.
+The next table shows the whole chain on the test frames, the cutter followed by the classifier, at a cutter score of 0.1. This chain was measured with the old 960 × 544 Detector that boxes speed signs only. It has not been measured with SignNet yet.
 
-| Cutter score 0.1 | Test |
+| Detector score 0.1 | Test |
 |---|---|
 | Speed signs found **and** read right | **49 of 80 (61%)** |
 | Found by the cutter | 63 of 80 (79%) |
@@ -281,9 +308,11 @@ Two helpers belong to the AI reviewer. `helpers/ai_review.sh` (**Review with AI*
 
 Two helpers prepare the Mapillary signs of the classifier. `helpers/mapillary.sh` cuts the signs of ours out of the Mapillary Traffic Sign Dataset. `helpers/mapillary_locations.sh` (**Locate the photos** in Train › Classifier) asks Mapillary where each photo was taken, so that **Where** can choose a continent or a country; it needs a Mapillary client token in `.env` (`MAPILLARY_TOKEN`) and resumes where it stopped.
 
+One script trains the cutter. `scripts/run_signnet.sh NAME` (**Train the cutter** in Train › Cutter) checks the training population on the CPU (`nnslr train-signnet --dry-run`, which fails, and so stops the script, when the plan has nothing to train or validate on), runs a CUDA smoke test and trains a SignNet with the car's setup (`nnslr train-signnet`, band 896 × 288, stride 8, about 80 minutes on the GPU), then measures its best epoch on validation and test. It writes only `data/runs/NAME/signnet-best.pt`, `result.json` and `signnet.log`, and puts nothing in use. A NAME stopped half way is trained again from scratch, and the old `signnet.log` is moved aside first, so its epochs do not mix with the new ones. `scripts/run_detector_sizes.sh` still trains the old Detector, only to compare.
+
 One script trains the road type. `scripts/run_road_type.sh NAME` (**Train the road type** in Train › Road type) checks the pipeline on the CPU, reads the motorway signs as the car does (`nnslr road-type-signs`), trains the network with memory and the sign, the one without the sign and the one without memory on the GPU, compares them in `comparison.txt` and exports the first as an ONNX step with its contract (`nnslr train-road-type`, `release-road-type`, `compare-road-type`, `export-road-type`). It writes only under `data/runs/NAME/` and the frame cache, and publishes nothing.
 
-Two scripts take a SignNet to the comma, from its card on Models › Versions. `scripts/send_to_car.sh` (**Send to the car**) publishes it with the classifier in use and the road type in use in `speed-limits-models`, moves the sunnypilot `speed-limits` branch and builds `psa-torque-sunny-testing`; the comma then installs the update. `scripts/try_on_comma.sh` (**Try on the comma now**) copies them straight onto the comma over ssh after checking them with the comma's own code, until its next software update; `--restore` (**Back to the build's networks**) undoes it. Both carry the settings of Models › On the car (how sure and how long, `data/models/car-settings.json`) in `speed_limits.json`.
+Two scripts take a SignNet to the comma, from its card on Models › Versions. `scripts/send_to_car.sh` (**Send to the car**) publishes it with the classifier in use and the road type in use in `speed-limits-models`, moves the sunnypilot `speed-limits` branch and builds `psa-torque-sunny-testing`; the comma then installs the update. `scripts/try_on_comma.sh` (**Try on the comma now**) copies them straight onto the comma over ssh after checking them with the comma's own code, until its next software update; `--restore` (**Back to the build's networks**) undoes it. Both carry the settings of Models › On the car (how sure and how long, `data/models/car-settings.json`) in `speed_limits.json`. Both refuse, before starting, a SignNet that does not fit the car (another band or stride than 896 × 288 and 8) or that has not finished.
 
 ## Data, privacy, licences and credits
 
@@ -308,7 +337,7 @@ Two scripts take a SignNet to the comma, from its card on Models › Versions. `
 
 - [comma.ai](https://comma.ai) and [openpilot](https://github.com/commaai/openpilot) (MIT), for the device that records the drives and the log formats read here.
 - [sunnypilot](https://github.com/sunnypilot/sunnypilot) and its Speed Limit Assist, which this work is meant to feed.
-- [PyTorch and torchvision](https://pytorch.org) (BSD-3-Clause), for the SSDLite and MobileNetV3 networks and the ImageNet-pretrained weights they start from.
+- [PyTorch and torchvision](https://pytorch.org) (BSD-3-Clause), for the MobileNetV3 networks, the old SSDLite Detector and the ImageNet-pretrained weights they start from. SignNet is plain convolutions of our own, trained from scratch.
 - The pre-annotation models, which only propose boxes for review. They are downloaded at run time with a SHA-256 check, never committed, and not part of the trained models:
   - the traffic-sign detector [`star092304/traffic-sign-detection-vietnam-yolo`](https://huggingface.co/star092304/traffic-sign-detection-vietnam-yolo) (YOLO, 82 classes of Vietnamese signs). Its model card says Apache-2.0, but the model file's own metadata says AGPL-3.0. This has not been resolved.
   - the road segmentation [`Xenova/segformer-b0-finetuned-cityscapes-1024-1024`](https://huggingface.co/Xenova/segformer-b0-finetuned-cityscapes-1024-1024), an ONNX conversion of NVIDIA SegFormer. [NVIDIA's licence](https://github.com/NVlabs/SegFormer/blob/master/LICENSE) allows non-commercial research and evaluation only, and the Cityscapes dataset has terms of its own.

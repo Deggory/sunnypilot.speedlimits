@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import time
 from datetime import datetime
@@ -152,11 +153,12 @@ def classifier_script(checkout, text=FAKE_CLASSIFIER):
 
 
 def cutter_in_use(root, panel):
-    """A finished pipeline run whose detector is the cutter in use."""
+    """A finished SignNet of the car's band and grid (runs/s1: signnet-best.pt, result.json), the cutter in use."""
+    from test_panel_models import make_signnet
     from test_panel_runs import make_run
-    run = make_run(root, 'r1')
-    (run / 'detector' / 'detector-best.pt').write_bytes(b'weights')
-    panel.models_index.set_active('cutter', 'cutter:r1/detector', who='admin', via='sign-in')
+    make_run(root, 'r1')
+    run = make_signnet(root, 's1')
+    panel.models_index.set_active('cutter', 'cutter:s1/signnet', who='admin', via='sign-in')
     return run
 
 
@@ -184,7 +186,7 @@ def test_the_classifier_training_follows_the_rules_of_a_training_and_needs_a_cut
     assert panel._action_states(none, [])['train_classifier']['reason'] == 'no confirmed frame'
     busy = [{'group': 'train', 'label': 'classifier training', 'pid': 1}]
     assert panel._action_states(ready_payload(), busy)['train_classifier']['reason'] == 'A classifier training is running'
-    (run / 'detector' / 'detector-best.pt').unlink()
+    (run / 'signnet-best.pt').unlink()
     assert panel._action_states(ready_payload(), [])['train_classifier']['reason'] == (
         'the cutter in use is no longer on this server: choose another one on the Models tab')
     # The page's status has it too, with its reason.
@@ -280,14 +282,14 @@ def test_a_classifier_training_started_from_a_terminal_has_the_progress_of_its_r
     assert training['progress']['steps'][4] == {'key': 'detector', 'label': 'Train the detector', 'state': 'current'}
 
 
-# -- "Train the cutter" (scripts/run_detector_sizes.sh NAME SIZE) ----------------------------------------------------
-FAKE_SIZES = ('#!/usr/bin/env bash\necho "== Detector input sizes =="\necho "run:          $1"\n'
-              'echo "args $* families=${NNSLR_CUTTER_FAMILIES:-}"\nsleep "${FAKE_SIZES_SLEEP:-0}"\n')
+# -- "Train the cutter" (scripts/run_signnet.sh NAME): SignNet at the car's band ------------------------------------
+FAKE_SIGNNET = ('#!/usr/bin/env bash\necho "== scripts/run_signnet.sh $1"\necho "run:          $1"\n'
+                'echo "args $* families=${NNSLR_CUTTER_FAMILIES:-}"\nsleep "${FAKE_SIGNNET_SLEEP:-0}"\n')
 
 
-def sizes_script(checkout, text=FAKE_SIZES):
+def signnet_script(checkout, text=FAKE_SIGNNET):
     (checkout / 'scripts').mkdir(exist_ok=True)
-    script = checkout / 'scripts' / 'run_detector_sizes.sh'
+    script = checkout / 'scripts' / 'run_signnet.sh'
     script.write_text(text)
     script.chmod(0o755)
     return script
@@ -297,24 +299,22 @@ def test_the_cutter_training_follows_the_rules_of_a_training(root, checkout):
     panel = Panel(root, repo=checkout)
     states = panel._action_states(ready_payload(), [])
     assert states['train_cutter'] == {'label': 'Train the cutter', 'allowed': False,
-                                      'reason': 'scripts/run_detector_sizes.sh is missing in this installation'}
+                                      'reason': 'scripts/run_signnet.sh is missing in this installation'}
     assert states['train']['label'] == 'Whole pipeline'
-    sizes_script(checkout)
+    signnet_script(checkout)
     # No cutter in use is needed: it trains one.
     assert panel._action_states(ready_payload(), [])['train_cutter'] == {'label': 'Train the cutter', 'allowed': True, 'reason': ''}
     assert panel._action_states(ready_payload(gpu_processes=2), [])['train_cutter']['reason'] == 'the GPU is busy with another process'
     assert panel._action_states({**ready_payload(), 'reviewed_routes': 1}, [])['train_cutter']['reason'] == '3 reviewed drives are needed, now 1'
-    status = panel.status()
-    assert status['cutter_options'] == {'sizes': ['640x360', '960x544', '1344x760'], 'size': '1344x760',
-                                        'families': ['all', 'speed'], 'family': 'all'}
+    # The signs are the only choice: the band is the car's.
+    assert panel.status()['cutter_options'] == {'families': ['all', 'speed'], 'family': 'all', 'band': '896x288'}
 
 
-@pytest.mark.parametrize('options, expected', [
-    (None, '1344x760 families=all'), ({'size': '640x360'}, '640x360 families=all'),
-    ({'size': '1344x760', 'families': 'speed'}, '1344x760 families=speed')])
-def test_the_cutter_training_runs_one_size_on_a_new_run(root, checkout, monkeypatch, options, expected):
+@pytest.mark.parametrize('options, expected', [(None, 'families=all'), ({'families': 'all'}, 'families=all'),
+                                               ({'families': 'speed'}, 'families=speed')])
+def test_the_cutter_training_runs_signnet_on_a_new_run(root, checkout, monkeypatch, options, expected):
     from nnslr_tools.panel import _run_of
-    sizes_script(checkout)
+    signnet_script(checkout)
     panel = Panel(root, repo=checkout)
     monkeypatch.setattr(panel, 'activities', lambda: [])
     job = panel.start('train_cutter', options)
@@ -322,11 +322,14 @@ def test_the_cutter_training_runs_one_size_on_a_new_run(root, checkout, monkeypa
     log = full_log(panel, job['id'])
     first = log.splitlines()[0].split()
     name = first[2]
-    assert first[:2] == ['==', 'scripts/run_detector_sizes.sh'] and first[3] == expected.split()[0]
+    # The run name is its only argument.
+    assert first[:2] == ['==', 'scripts/run_signnet.sh'] and len(first) == 3
     assert re.fullmatch(r'\d{4}-\d{2}-\d{2}_\d{4}-cutter', name) and f'args {name} {expected}\n' in log
     assert (done['state'], done['run'], done['label']) == ('ok', name, 'Train the cutter')
+    assert _run_of(panel.logs / (job['id'] + '.log'), 'train_cutter') == name
+    # A log of the old detector sizes still names its run.
     other = panel.logs / '20261024-180000-train_cutter.log'
-    other.write_text('== Detector input sizes ==\nrun:          2026-10-24_1800-cutter-2\n')
+    other.write_text('== scripts/run_detector_sizes.sh 2026-10-24_1800-cutter-2 960x544\n')
     assert _run_of(other, 'train_cutter') == '2026-10-24_1800-cutter-2'
 
 
@@ -351,11 +354,12 @@ def test_the_decider_is_trained_from_the_train_tab_on_a_new_run(root, checkout, 
 
 
 @pytest.mark.parametrize('action, options, status', [
-    ('train_cutter', {'size': '320x320'}, 400), ('train_cutter', {'size': '960x544 ; rm -rf /'}, 400),
-    ('train_cutter', {'families': 'other'}, 400), ('train_cutter', {'start': 'random'}, 400),
+    ('train_cutter', {'size': '1344x760'}, 400), ('train_cutter', {'size': '896x288'}, 400),
+    ('train_cutter', {'size': '960x544 ; rm -rf /'}, 400), ('train_cutter', {'families': 'other'}, 400),
+    ('train_cutter', {'families': 'all ; rm -rf /'}, 400), ('train_cutter', {'start': 'random'}, 400),
     ('train_cutter', {'run': 'r1'}, 400), ('train', {'size': '960x544'}, 400), ('train_classifier', {'families': 'all'}, 400)])
 def test_bad_options_of_the_cutter_training_are_refused(root, checkout, monkeypatch, action, options, status):
-    sizes_script(checkout)
+    signnet_script(checkout)
     classifier_script(checkout)
     panel = Panel(root, repo=checkout)
     monkeypatch.setattr(panel, 'activities', lambda: [])
@@ -370,7 +374,7 @@ def test_the_cutter_training_needs_its_script_and_its_run_is_new(root, checkout,
     monkeypatch.setattr(panel, 'activities', lambda: [])
     with pytest.raises(PanelError) as missing:
         panel.start('train_cutter')
-    assert (missing.value.status, missing.value.message) == (403, 'scripts/run_detector_sizes.sh is missing in this installation.')
+    assert (missing.value.status, missing.value.message) == (403, 'scripts/run_signnet.sh is missing in this installation.')
 
     class Fixed(datetime):
         @classmethod
@@ -382,15 +386,15 @@ def test_the_cutter_training_needs_its_script_and_its_run_is_new(root, checkout,
 
 
 def test_a_running_cutter_training_is_seen_and_stopped_after_a_restart(root, checkout, monkeypatch):
-    monkeypatch.setenv('FAKE_SIZES_SLEEP', '30')
-    sizes_script(checkout)
+    monkeypatch.setenv('FAKE_SIGNNET_SLEEP', '30')
+    signnet_script(checkout)
     panel = Panel(root, repo=checkout)
-    job = panel.start('train_cutter', {'size': '640x360', 'families': 'speed'})
+    job = panel.start('train_cutter', {'families': 'speed'})
     assert any(item['label'] == 'cutter training' for item in panel.activities())
     with pytest.raises(PanelError) as busy:
         panel.start('train')
     assert (busy.value.status, busy.value.reason) == (409, 'busy')
-    # The wrapper has the run and the size after the command: a new server still knows it as this action's.
+    # The wrapper has the run after the command: a new server still knows it as this action's.
     restarted = Panel(root, repo=checkout)
     assert [item['stoppable'] for item in restarted.jobs() if item['id'] == job['id']] == [True]
     assert restarted.stop(job['id']) == {'id': job['id'], 'stopping': True}
@@ -399,23 +403,50 @@ def test_a_running_cutter_training_is_seen_and_stopped_after_a_restart(root, che
 
 def test_the_cutter_options_over_http(root, checkout):
     from review_helpers import RunningServer, json_of
-    sizes_script(checkout)
+    signnet_script(checkout)
     server = RunningServer(root)
     server.app.panel = Panel(root, repo=checkout)
     server.app.panel.activities = lambda: []
     try:
-        status, response, data = server.request('POST', '/api/panel/run/train_cutter', body={'size': '1344x760', 'families': 'x'})
+        status, response, data = server.request('POST', '/api/panel/run/train_cutter', body={'families': 'x'})
         assert status == 400 and json_of(data)['error'] == 'bad_option'
         status, response, data = server.request('POST', '/api/panel/run/train_cutter', body={'size': '1344x760', 'families': 'speed'})
+        assert status == 400 and 'band, 896 × 288' in json_of(data)['message']
+        status, response, data = server.request('POST', '/api/panel/run/train_cutter', body={'families': 'speed'})
         assert status == 200, data
         job_id = json_of(data)['id']
         finished(server.app.panel, job_id)
-        assert ' 1344x760 families=speed\n' in full_log(server.app.panel, job_id)
+        assert ' families=speed\n' in full_log(server.app.panel, job_id)
     finally:
         server.close()
 
 
-def test_a_cutter_training_started_from_a_terminal_has_the_progress_of_its_size_log(root, checkout):
+def test_a_cutter_training_started_from_a_terminal_has_the_progress_of_its_signnet_log(root, checkout):
+    panel = Panel(root, repo=checkout)
+    log = root / 'runs' / 'k1' / 'signnet.log'
+    log.parent.mkdir(parents=True)
+    log.write_text('== scripts/run_signnet.sh k1\n== 1/3 Check the training population (CPU-only) ==\n'
+                   '== 2/3 Explicit CUDA smoke test ==\n== 3/3 Train SignNet ==\n'
+                   'signnet epoch 4/40 train_loss 2.1000 val_recall 0.3000 val_false_per_frame 4.80 80s\n')
+    (root / 'logs').mkdir(exist_ok=True)
+    (root / 'logs' / 'train-r1.log').write_text('== a. importo\n== 5/10 Train reader ==\n')
+    payload = {'jobs': [], 'activities': [{'group': 'train', 'label': 'cutter training', 'pid': 1}]}
+    panel._terminal_training(payload)
+    progress = payload['activities'][0]['progress']
+    assert [(step['key'], step['state']) for step in progress['steps']] == [('checks', 'done'), ('signnet', 'current'), ('evaluate', 'todo')]
+    assert progress['detail'] == 'SignNet · epoch 4 of 40' and progress['curves']['signnet']['points'][0]['val_false_per_frame'] == 4.8
+    # nnslr train-signnet by hand: its train.log beside its weights, read from its epochs alone (the newest log).
+    os.utime(log, (time.time() - 60, time.time() - 60))
+    hand = root / 'runs' / 'k2'
+    hand.mkdir()
+    (hand / 'signnet-best.pt').write_bytes(b'weights')
+    (hand / 'train.log').write_text('signnet epoch 7/40 train_loss 1.9000 val_recall 0.4000 val_false_per_frame 4.70 81s\n')
+    payload = {'jobs': [], 'activities': [{'group': 'train', 'label': 'cutter training', 'pid': 1}]}
+    panel._terminal_training(payload)
+    assert payload['activities'][0]['progress']['detail'] == 'SignNet · epoch 7 of 40'
+
+
+def test_an_old_cutter_training_started_from_a_terminal_has_the_progress_of_its_size_log(root, checkout):
     panel = Panel(root, repo=checkout)
     log = root / 'runs' / 'k1' / 'detector-sizes' / '960x544.log'
     log.parent.mkdir(parents=True)

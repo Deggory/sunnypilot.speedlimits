@@ -8,12 +8,23 @@ torch = pytest.importorskip('torch')
 from nnslr_tools.signnet import (
     BAND_HEIGHT,
     BAND_WIDTH,
+    CAR_BAND,
+    CAR_MAX_BOXES,
+    CAR_MIN_SCORE,
+    CAR_STRIDE,
+    DATA_KEYS,
     band_boxes,
     band_size,
     build_signnet,
+    checkpoint_data,
+    checkpoint_of,
     decode,
     encode,
+    fits_the_car,
+    frame_boxes_of,
     loss,
+    model_of,
+    train_signnet,
 )
 
 
@@ -115,3 +126,156 @@ def test_export_gives_one_output_equal_to_the_two(tmp_path):
     first = decode_output(torch.from_numpy(out), 8, min_score=0.0)[0][0]
     same = decode(heat, shape, 8, min_score=0.0)[0][0]
     assert first['score'] == pytest.approx(same['score'], abs=1e-4) and first['box'] == pytest.approx(same['box'], abs=0.05)
+
+
+def _car_vision():
+    """The car's vision.py of the sunnypilot clone, loaded by its path (it imports only math and numpy), or None."""
+    import importlib.util
+    import os
+    from pathlib import Path
+    clone = Path(os.environ.get('NNSLR_SUNNYPILOT_CLONE', '/root/sunnypilot'))
+    path = clone / 'openpilot' / 'sunnypilot' / 'speed_limits' / 'vision.py'
+    if not path.is_file():
+        path = clone / 'sunnypilot' / 'speed_limits' / 'vision.py'
+    if not path.is_file():
+        return None
+    spec = importlib.util.spec_from_file_location('car_vision_for_test', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_car_constants_are_the_cars():
+    assert band_size(CAR_BAND[0]) == CAR_BAND and fits_the_car(CAR_BAND, CAR_STRIDE)
+    assert not fits_the_car((96, 32), CAR_STRIDE) and not fits_the_car(CAR_BAND, 16)
+    vision = _car_vision()
+    if vision is None:
+        pytest.skip('no sunnypilot clone with speed_limits/vision.py on this machine')
+    assert (vision.SIGNNET_WIDTH, vision.SIGNNET_HEIGHT) == CAR_BAND and vision.SIGNNET_STRIDE == CAR_STRIDE
+    assert vision.MAX_BOXES == CAR_MAX_BOXES and vision.MIN_BOX_SCORE == CAR_MIN_SCORE
+
+
+def test_the_server_decode_gives_the_boxes_of_the_car():
+    vision = _car_vision()
+    if vision is None:
+        pytest.skip('no sunnypilot clone with speed_limits/vision.py on this machine')
+    generator = torch.Generator().manual_seed(7)
+    height, width = CAR_BAND[1] // CAR_STRIDE, CAR_BAND[0] // CAR_STRIDE
+    out = torch.cat([torch.rand(1, 1, height, width, generator=generator),
+                     torch.randn(1, 2, height, width, generator=generator) + math.log(20),
+                     torch.rand(1, 2, height, width, generator=generator)], 1)
+    for frame_width in (1344, 1928, CAR_BAND[0]):
+        car = vision.signnet_boxes(out.numpy(), frame_width / CAR_BAND[0])
+        ours = frame_boxes_of(out[:, :1], out[:, 1:], CAR_STRIDE, CAR_BAND[0], frame_width)
+        assert len(ours) == len(car) == 5
+        for mine, theirs in zip(ours, car):
+            assert mine['score'] == theirs['score'] and mine['box'] == pytest.approx(theirs['box'], rel=1e-12)
+        few = frame_boxes_of(out[:, :1], out[:, 1:], CAR_STRIDE, CAR_BAND[0], frame_width, limit=50, min_score=0.9)
+        assert [p['score'] for p in few] == [p['score'] for p in vision.signnet_boxes(out.numpy(),
+                                             frame_width / CAR_BAND[0], 50, 0.9)]
+
+
+def test_the_checkpoint_carries_the_data_it_learnt_from(tmp_path):
+    import json
+    plan = {'dataset_sha256': 'd' * 64, 'split_sha256': 's' * 64, 'families': 'all', 'frames': []}
+    saved = checkpoint_of(build_signnet((4, 4, 4, 4), 8, 1), plan, widths=(4, 4, 4, 4), stride=8, fuse_kernel=1,
+                          band_width=96, epoch=3)
+    assert {key: saved[key] for key in DATA_KEYS} == {key: plan[key] for key in DATA_KEYS}
+    assert saved['task'] == 'signnet' and saved['band'] == list(band_size(96)) and saved['epoch'] == 3
+    assert checkpoint_data(saved, tmp_path / 'signnet-best.pt') is saved
+    old = {key: value for key, value in saved.items() if key not in DATA_KEYS}
+    # No result.json beside it: every SignNet so far learnt all the families, never the legacy 'speed'.
+    alone = checkpoint_data(old, tmp_path / 'signnet-best.pt')
+    assert alone['families'] == 'all' and alone.get('dataset_sha256') is None and alone.get('split_sha256') is None
+    assert 'families' not in old and alone['state_dict'] is old['state_dict']
+    (tmp_path / 'result.json').write_text(json.dumps({'task': 'detector', **plan, 'families': 'speed'}),
+                                          encoding='utf-8')
+    other = checkpoint_data(old, tmp_path / 'signnet-best.pt')  # another kind of run: not read
+    assert other['families'] == 'all' and other.get('dataset_sha256') is None
+    (tmp_path / 'result.json').write_text(json.dumps({'task': 'signnet', **plan}), encoding='utf-8')
+    filled = checkpoint_data(old, tmp_path / 'signnet-best.pt')
+    assert {key: filled[key] for key in DATA_KEYS} == {key: plan[key] for key in DATA_KEYS}
+    (tmp_path / 'result.json').write_text(json.dumps({'task': 'signnet', **plan, 'families': 'speed'}),
+                                          encoding='utf-8')
+    assert checkpoint_data(old, tmp_path / 'signnet-best.pt')['families'] == 'speed'  # its result.json says so
+    detector = {'task': 'detector', 'state_dict': {}}
+    (tmp_path / 'result.json').unlink()
+    assert checkpoint_data(detector, tmp_path / 'detector-best.pt') is detector  # a Detector keeps its legacy
+
+
+def test_a_tiny_training_logs_its_lines_and_saves_the_data(tmp_path):
+    from PIL import Image
+    frames = []
+    for index, split in enumerate(['train'] * 4 + ['validation', 'test']):
+        image = Image.new('RGB', (128, 96), (90, 90, 90))
+        image.paste((240, 20, 20), (40 + index, 6, 56 + index, 22))
+        image.save(tmp_path / f'f{index}.jpg')
+        frames.append({'image_path': f'f{index}.jpg', 'split': split, 'width': 128, 'height': 96,
+                       'boxes': [[40.0 + index, 6.0, 56.0 + index, 22.0]], 'box_families': ['speed_limit'],
+                       'label_basis': 'human_review'})
+    plan = {'frames': frames, 'dataset_sha256': 'd' * 64, 'split_sha256': 's' * 64, 'families': 'all',
+            'trainable': True}
+    lines = []
+    result = train_signnet(plan, tmp_path, tmp_path / 'run', widths=(4, 4, 4, 4), epochs=2, batch=2, workers=0,
+                           band_width=96, log=lines.append)
+    assert [line.split(' train_loss ')[0] for line in lines[:2]] == ['signnet epoch 1/2', 'signnet epoch 2/2']
+    assert all(' val_recall ' in line and ' val_false_per_frame ' in line and line.endswith('s') for line in lines[:2])
+    assert lines[2] == f"signnet measure the best epoch {result['best_epoch']} on validation and test"
+    assert lines[3] == f"SignNet complete: {tmp_path / 'run'}" and len(lines) == 4
+    saved = torch.load(tmp_path / 'run' / 'signnet-best.pt', map_location='cpu', weights_only=True)
+    assert {key: saved[key] for key in DATA_KEYS} == {key: plan[key] for key in DATA_KEYS}
+    assert saved['band'] == list(band_size(96)) and saved['fuse_kernel'] == 1 and saved['stride'] == 8
+    assert model_of(saved).training is False
+    assert {key: result[key] for key in DATA_KEYS} == {key: plan[key] for key in DATA_KEYS}
+    for split in ('validation', 'test'):
+        assert set(result[split]['car']) == set(result[split]['by_box_budget']['5'])
+
+
+def test_a_plan_that_cannot_train_is_refused_before_training(tmp_path):
+    plan = {'frames': [], 'trainable': False, 'families': 'all', 'counts_by_split': {'train': 0},
+            'boxes_by_split': {'train': 0}}
+    with pytest.raises(ValueError, match='training_plan_not_trainable'):
+        train_signnet(plan, tmp_path, tmp_path / 'run', log=lambda line: None)
+    assert not (tmp_path / 'run').exists()
+
+
+def test_the_default_log_flushes_every_line(tmp_path, monkeypatch):
+    """The script tees the lines into signnet.log: each must reach it as it comes, not when the process ends."""
+    import builtins
+
+    from PIL import Image
+
+    from nnslr_tools import signnet
+    printed = []
+    monkeypatch.setattr(builtins, 'print', lambda *args, **kw: printed.append(kw.get('flush')))
+    measured = {'recall_iou': 0.5, 'false_positives_per_image': 1.0}
+    monkeypatch.setattr(signnet, 'measure', lambda *a, **kw: {'by_box_budget': {'5': measured}, 'car': measured})
+    frames = []
+    for index, split in enumerate(['train', 'train', 'validation', 'test']):
+        Image.new('RGB', (128, 96)).save(tmp_path / f'f{index}.jpg')
+        frames.append({'image_path': f'f{index}.jpg', 'split': split, 'width': 128, 'height': 96,
+                       'boxes': [[40.0, 6.0, 56.0, 22.0]], 'box_families': ['speed_limit']})
+    plan = {'frames': frames, 'trainable': True, 'families': 'all'}
+    train_signnet(plan, tmp_path, tmp_path / 'run', widths=(4, 4, 4, 4), epochs=1, batch=2, workers=0, band_width=96)
+    assert printed == [True, True, True]  # the epoch, the measure and the complete lines
+
+
+def test_the_car_measure_keeps_the_best_5_boxes_of_0_3(tmp_path, monkeypatch):
+    """measure()['car'] is what the car reads: the best CAR_MAX_BOXES of score CAR_MIN_SCORE or more. A sign found
+    only by the 7th box (0.35) counts at 0.3 but not for the car; at 5 boxes at any score neither."""
+    from PIL import Image
+
+    from nnslr_tools import signnet
+    Image.new('RGB', (128, 96)).save(tmp_path / 'f.jpg')
+    truth = [100.0, 60.0, 120.0, 80.0]
+    found = [{'box': [10.0 * i, 0.0, 10.0 * i + 8, 8.0], 'score': score}
+             for i, score in enumerate((0.9, 0.8, 0.7, 0.6, 0.5, 0.4))]
+    found += [{'box': list(truth), 'score': 0.35}, {'box': [0.0, 50.0, 8.0, 58.0], 'score': 0.2}]
+    monkeypatch.setattr(signnet, 'frame_boxes_of', lambda *a, **kw: [dict(p) for p in found])
+    frames = [{'image_path': 'f.jpg', 'split': 'test', 'width': 128, 'height': 96, 'boxes': [truth],
+               'box_families': ['speed_limit']}]
+    result = signnet.measure(build_signnet((4, 4, 4, 4), 8, 1), frames, tmp_path, 8, 'cpu', workers=0, band_width=96)
+    assert result['car']['true_positives'] == 0 and result['car']['false_positives'] == CAR_MAX_BOXES
+    assert result['by_score_threshold'][str(CAR_MIN_SCORE)]['true_positives'] == 1
+    assert result['by_score_threshold'][str(CAR_MIN_SCORE)]['false_positives'] == 6
+    assert result['by_box_budget']['5']['true_positives'] == 0

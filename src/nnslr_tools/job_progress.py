@@ -2,10 +2,11 @@
 
 The helpers write a line per phase (``== a. ...`` in helpers/3_train.sh, ``== 4/10 Train detector`` in
 scripts/run_v100_baseline.sh, ``== 3/7 Mine the cutter's false boxes ==`` in scripts/run_classifier.sh,
-``== 3/4 Train the detector at 960x544 ==`` in scripts/run_detector_sizes.sh, ``== b+c. ...`` in helpers/1_prepare.sh,
-``== b. Map roads near the drives`` in helpers/road_types.sh) and the training one line per epoch (``detector epoch 3/20 ...``,
-``classifier epoch 3/20 ...``, ``pretrain epoch 3/20 ...`` for the first stage of a two-stage classifier,
-nnslr_tools.training). Nothing here guesses a time: a percent comes only from
+``== 3/3 Train SignNet ==`` in scripts/run_signnet.sh (``== 3/4 Train the detector at 960x544 ==`` in the old
+scripts/run_detector_sizes.sh), ``== b+c. ...`` in helpers/1_prepare.sh, ``== b. Map roads near the drives`` in
+helpers/road_types.sh) and the training one line per epoch (``detector epoch 3/20 ...``, ``classifier epoch 3/20 ...``,
+``pretrain epoch 3/20 ...`` for the first stage of a two-stage classifier, nnslr_tools.training; ``signnet epoch 3/40
+...``, nnslr_tools.signnet). Nothing here guesses a time: a percent comes only from
 steps and epochs actually written, or from the preparation's own count of finished routes.
 """
 from __future__ import annotations
@@ -43,7 +44,15 @@ CLASSIFIER_TWO_STAGE_STEPS = (
     ('classifier', 'Train on our signs', 30),
     *CLASSIFIER_STEPS[3:],
 )
-# scripts/run_detector_sizes.sh with one size: a detector trained as the cutter, then measured on test and validation.
+# scripts/run_signnet.sh: the cutter, a SignNet with the car's setup, then its best epoch measured on validation and
+# test ("signnet measure the best epoch ..."), until "SignNet complete: <run>".
+SIGNNET_STEPS = (
+    ('checks', 'Checks and GPU smoke test', 5),
+    ('signnet', 'Train SignNet', 85),
+    ('evaluate', 'Measure on validation and test', 10),
+)
+# The old cutter, scripts/run_detector_sizes.sh with one size: a detector trained as the cutter, then measured on test
+# and validation (the jobs of the history before SignNet; chosen by the log, see is_signnet).
 CUTTER_STEPS = (
     ('checks', 'Checks and GPU smoke test', 5),
     ('detector', 'Train the cutter', 80),
@@ -134,6 +143,11 @@ SUBSTEPS = {'train_classifier': (7, CLASSIFIER_PIPELINE), 'train_cutter': (None,
             'try_on_comma': (5, {1: 'check', 2: 'export', 3: 'verify', 4: 'copy', 5: 'prepare'}),
             'comma_restore': (2, {1: 'check', 2: 'restore'})}
 TITLES = {'train_cutter': CUTTER_TITLES}
+# scripts/run_signnet.sh ("== 3/3 Train SignNet ==") and the lines that close its training.
+SIGNNET_PIPELINE = {1: 'checks', 2: 'checks', 3: 'signnet'}
+SIGNNET_LOG = re.compile(r'^(?:== scripts/run_signnet\.sh |== \d+/\d+ Train SignNet\b|signnet epoch \d)', re.M)
+SIGNNET_MEASURE = re.compile(r'^signnet measure the best epoch\b')
+SIGNNET_COMPLETE = re.compile(r'^SignNet complete: ')
 MARKERS = (
     (re.compile(r'^== a\+b\. '), 'gpu_env', ('import', 'split')),
     (re.compile(r'^== a\. (?:importing|importo)'), 'import', ()),
@@ -149,7 +163,7 @@ MARKERS = (
     (re.compile(r'^== d\. Junctions of the drives'), 'junctions', ()),
 )
 SUBSTEP = re.compile(r'^== (\d+)/(\d+) ')
-EPOCH = re.compile(r'^(detector|reader|classifier|pretrain|experiment_b_crop_geom|experiment_b_crop|experiment_b_full|'
+EPOCH = re.compile(r'^(signnet|detector|reader|classifier|pretrain|experiment_b_crop_geom|experiment_b_crop|experiment_b_full|'
                    r'road_type_gru_nosign|road_type_gru_nomotion|road_type_gru|road_type_frame) epoch (\d+)/(\d+)\b')
 # "classifier stops early after epoch 12: ...": the training ends before its planned epochs.
 EARLY = re.compile(r'^(detector|reader|classifier|pretrain|road_type_gru_nosign|road_type_gru_nomotion|road_type_gru|'
@@ -157,9 +171,10 @@ EARLY = re.compile(r'^(detector|reader|classifier|pretrain|road_type_gru_nosign|
 # The values of an epoch line: "train_loss 0.5000 val_loss 0.6000 ... 40s" (the detector also writes
 # val_recall, its validation recall at score 0.1, which chooses its best epoch; the classifier with "not a sign"
 # val_sign_accuracy, the sign crops read right, and val_rejection, the "not a sign" crops it rejects: their mean,
-# the balanced accuracy, chooses its best epoch; the road-type network val_macro_f1, its F1 over the road types).
+# the balanced accuracy, chooses its best epoch; the road-type network val_macro_f1, its F1 over the road types;
+# SignNet val_recall and val_false_per_frame in the 5 best boxes of a frame, as the car keeps them).
 METRIC = re.compile(r'\b(train_loss|val_loss|train_accuracy|val_accuracy|val_recall|val_sign_accuracy|val_rejection|'
-                    r'val_balanced_accuracy|val_macro_f1) (-?[0-9.]+(?:e-?[0-9]+)?)\b')
+                    r'val_balanced_accuracy|val_macro_f1|val_false_per_frame) (-?[0-9.]+(?:e-?[0-9]+)?)\b')
 SECONDS = re.compile(r'\b([0-9]+)s$')
 FETCHED = re.compile(r'^== (\S+)--(\d+) -> ')
 # helpers/fetch_comma_segments.sh, a route and its segments (in Italian in the older logs).
@@ -240,19 +255,22 @@ def again_detail(preparation: dict) -> str:
 def progress(action: str, state: str, text: str, preparation: dict | None = None) -> dict:
     """{'steps': [{'key', 'label', 'state': done|current|todo|failed}], 'percent': 0-100 or None,
     'detail': str, 'last_line': str, 'step_progress': how far the current step is from the log alone (see
-    _inside_step) or None, 'curves': {'detector'|'reader'|'classifier': {'epochs': total, ('stopped_early': epoch,)
-    'points': [{'epoch', 'train_loss', 'val_loss', ('train_accuracy', 'val_accuracy',) ('val_recall',)
-    ('val_sign_accuracy', 'val_rejection', 'val_balanced_accuracy',) 'seconds'}]}}} for an action in state running,
-    ok, failed or interrupted; with 'seconds_left' (the server's time left, None while unknown) for Propose again
-    running and 'failure' (failure_text, '' when unknown) for a failed job."""
+    _inside_step) or None, 'curves': {'detector'|'reader'|'classifier'|'signnet': {'epochs': total, ('stopped_early':
+    epoch,) 'points': [{'epoch', 'train_loss', 'val_loss', ('train_accuracy', 'val_accuracy',) ('val_recall',)
+    ('val_false_per_frame',) ('val_sign_accuracy', 'val_rejection', 'val_balanced_accuracy',) 'seconds'}]}}} for an
+    action in state running, ok, failed or interrupted; with 'seconds_left' (the server's time left, None while
+    unknown) for Propose again running, 'signnet' (is_signnet) for the cutter's training and 'failure' (failure_text,
+    '' when unknown) for a failed job."""
     two_stages = action == 'train_classifier' and PRETRAINING.search(text) is not None
-    steps = steps_of(action, two_stages)
+    signnet = is_signnet(action, text)
+    steps = steps_of(action, two_stages, signnet)
     keys = [key for key, _, _ in steps]
     current = keys[0] if keys else ''
     done: set[str] = set()
     epoch: tuple[str, int, int] | None = None
     # The numbered sub-steps of the action's script, and the last one written: its number and its title.
-    count, pipeline = SUBSTEPS.get(action, (10, PIPELINE))
+    count, pipeline = (3, SIGNNET_PIPELINE) if signnet else SUBSTEPS.get(action, (10, PIPELINE))
+    complete = False
     substep: tuple[int, str] | None = None
     # The networks that stopped early, and after which epoch.
     stopped: dict[str, int] = {}
@@ -272,6 +290,10 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
             if pattern.match(line) and step in keys:
                 done.update(skipped)
                 current = step
+        if signnet and SIGNNET_MEASURE.match(line):
+            current = 'evaluate'
+        if signnet and SIGNNET_COMPLETE.match(line):
+            complete = True
         match = SUBSTEP.match(line)
         if match:
             number, title = int(match.group(1)), line[match.end():].strip(' =')
@@ -328,8 +350,11 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
         current = 'pretrain'
     if current in keys:
         done.update(keys[:keys.index(current)])
+    if complete:
+        # SignNet wrote its result: every step is over, also in a log read from a terminal.
+        done.update(keys)
 
-    inside = _inside_step(current, epoch, substep, pipeline, stopped) if current in keys else None
+    inside = _inside_step(current, epoch, substep, pipeline, stopped) if current in keys and not complete else None
     finished_ok = state == 'ok'
     rows = []
     for key, label, _ in steps:
@@ -387,6 +412,9 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
         runs_total = CHAIN_RUNS - (1 if 'no old reader' in text else 0)
         result['chain_runs'] = {'done': min(runs_done, runs_total), 'total': runs_total}
         result['two_stages'] = two_stages
+    if action == 'train_cutter':
+        # Which steps the log has (SIGNNET_STEPS, or the old detector's CUTTER_STEPS), for with_step_progress.
+        result['signnet'] = signnet
     preparing = action in ('prepare', 'prepare_again') and preparation is not None and state == 'running'
     if preparing:
         # Its drives are listed with their phase under the card: the raw line of the helper says it again.
@@ -429,11 +457,20 @@ CHAIN_RUN_DONE = re.compile(r'^(?:evaluated the chain on |skip evaluated chain )
 PRETRAINING = re.compile(r'^pretraining:\s', re.MULTILINE)
 SECOND_STAGE = re.compile(r'^-- the second stage', re.MULTILINE)
 # A network by its name in the line under the progress bar ("Mapillary · epoch 3 of 30").
-NET_NAMES = {'pretrain': 'Mapillary'}
+NET_NAMES = {'pretrain': 'Mapillary', 'signnet': 'SignNet'}
 
 
-def steps_of(action: str, two_stages: bool = False) -> tuple:
-    """The steps of an action: a classifier in two stages has its pretraining as a step of its own."""
+def is_signnet(action: str, text: str) -> bool:
+    """Whether a cutter training's log is a SignNet's (scripts/run_signnet.sh, its step, its epochs): else it is the old
+    detector's of scripts/run_detector_sizes.sh, with its own steps."""
+    return action == 'train_cutter' and SIGNNET_LOG.search(text) is not None
+
+
+def steps_of(action: str, two_stages: bool = False, signnet: bool = False) -> tuple:
+    """The steps of an action: a classifier in two stages has its pretraining as a step of its own; the cutter is a
+    SignNet, or the old detector."""
+    if action == 'train_cutter' and signnet:
+        return SIGNNET_STEPS
     return CLASSIFIER_TWO_STAGE_STEPS if action == 'train_classifier' and two_stages else STEPS.get(action, ())
 
 # The tasks that report their own progress (nnslr_tools.progress) and the step they belong to.
@@ -469,7 +506,7 @@ def with_step_progress(result: dict, action: str, record: dict | None, setup_lin
             share = min(runs['done'] + share, runs['total']) / runs['total']
             text = text + ' · run ' + str(min(runs['done'] + 1, runs['total'])) + ' of ' + str(runs['total'])
         step_progress = {'done': done, 'total': total, 'percent': round(share * 100, 1), 'text': text}
-        steps = steps_of(action, bool(result.get('two_stages')))
+        steps = steps_of(action, bool(result.get('two_stages')), bool(result.get('signnet')))
         if action in WEIGHTED and steps:
             weights = {key: weight for key, _, weight in steps}
             reached = sum(weights[step['key']] for step in result['steps'] if step['state'] == 'done')
