@@ -359,9 +359,9 @@ const numbers = computed(() => {
     <TrainSettingsSection v-if="settingsAction" :training="settingsAction"
                           :running="job?.state === 'running' || sectionActivities.length > 0"/>
 
-    <!-- The latest version in one row, a link to Models: its versions there, to compare and to choose (the choice
-         is made only there). -->
-    <a v-if="sectionLatest" class="latest-row latest-link" :href="'/models#role-' + sectionLatest.role" id="latest-version">
+    <!-- The latest version in one row, a link to Models: its versions there, opened on this one, to compare and to
+         choose (the choice is made only there). -->
+    <a v-if="sectionLatest" class="latest-row latest-link" :href="'/models#role-' + sectionLatest.role + ':' + encodeURIComponent(sectionLatest.id)" id="latest-version">
       <span class="latest-what"><span class="latest-kicker">{{ section === 'decider' || section === 'road' ? 'Latest prototype' : 'Latest' }} ·
         {{ sectionLatest.trained_at ? isoWhen(sectionLatest.trained_at) : sectionLatest.run }}<span
         v-if="sectionLatest.in_use" class="latest-use">in use</span><span v-else-if="!sectionLatest.finished" class="latest-wait">not finished</span></span>
@@ -376,8 +376,9 @@ const numbers = computed(() => {
       : 'None trained yet: the reader of a whole pipeline plays this role.' }}</p>
     <p v-else-if="section === 'road'" class="latest-none">{{ models === null ? 'Loading…' : 'None trained yet.' }}</p>
 
+    <!-- The curves stay open once the training ends: closing them is a tap. -->
     <TrainingCharts v-if="charted?.running" :progress="charted.progress" :running="true"/>
-    <details v-else-if="charted" class="latest-row curves-row">
+    <details v-else-if="charted" class="latest-row curves-row" open>
       <summary><span class="latest-what"><span class="latest-name">Curves of the last training</span>
         <span class="latest-text">{{ section === 'road' ? 'road score' : section === 'decider' ? 'the chosen measure' : 'recall' }} and loss, epoch by epoch</span></span><span class="latest-chev" aria-hidden="true">›</span></summary>
       <TrainingCharts :progress="charted.progress" :running="false"/>

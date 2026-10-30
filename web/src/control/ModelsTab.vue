@@ -37,8 +37,12 @@ const readOnly = computed(() => (props.status !== null && !props.status.actions_
 const busy = ref<string | null>(null);
 
 const ROLES: readonly ModelRole[] = ['cutter', 'classifier', 'decider', 'road_type'];
-/** The role whose versions are listed: the address's (/models#role-classifier, Train's link), else the cutter. */
-const fromHash = ROLES.find((role) => location.hash === '#role-' + role) ?? null;
+/** The role whose versions are listed: the address's (/models#role-classifier, or /models#role-decider:<version id>,
+ * Train's link to its latest version), else the cutter. */
+const hashRole = location.hash.split(':')[0];
+const fromHash = ROLES.find((role) => hashRole === '#role-' + role) ?? null;
+/** The version the address names, opened and scrolled to once drawn, or ''. */
+const fromHashVersion = fromHash && location.hash.includes(':') ? decodeURIComponent(location.hash.slice(location.hash.indexOf(':') + 1)) : '';
 const picked = ref<ModelRole>(fromHash ?? 'cutter');
 const pickedRole = computed(() => roles.value.find((role) => role.role === picked.value) ?? null);
 /** A tap on a card in use: its versions, scrolled to (below the cards on a phone). */
@@ -46,12 +50,22 @@ function pick(role: ModelRole): void {
   picked.value = role;
   void nextTick(() => document.querySelector('.versions-card')?.scrollIntoView({behavior: 'smooth', block: 'nearest'}));
 }
-// Arrived from a link to a role: its versions, once they are drawn.
+/** A version of the list opened and scrolled to (Train's link to the latest version). */
+function openVersion(id: string): void {
+  const row = document.querySelector<HTMLDetailsElement>('.versions-card details[data-model="' + CSS.escape(id) + '"]');
+  if (row === null) return;
+  row.open = true;
+  row.scrollIntoView({behavior: 'smooth', block: 'center'});
+}
+// Arrived from a link to a role: its versions, once they are drawn (opened on the version named, if any).
 let arrived = fromHash === null;
 watch(payload, (value) => {
   if (arrived || value === null || fromHash === null) return;
   arrived = true;
-  pick(fromHash);
+  if (fromHashVersion) {
+    picked.value = fromHash;
+    void nextTick(() => openVersion(fromHashVersion));
+  } else pick(fromHash);
 }, {immediate: true});
 const roleOptions = computed(() => roles.value.map((role) => ({key: role.role, label: role.label})));
 
