@@ -72,6 +72,8 @@ const roleOf = (role: ModelRole) => models.value?.roles.find((item) => item.role
 /** The latest version of a role (newest weights), or null. */
 const latest = (role: ModelRole): ModelVersion | null => roleOf(role)?.versions[0] ?? null;
 const latestCutter = computed(() => latest('cutter'));
+/** The cutter in use (Models): the classifier's training mines its false boxes and measures the chain with it. */
+const cutterInUse = computed(() => roleOf('cutter')?.versions.find((version) => version.in_use) ?? null);
 const latestClassifier = computed(() => latest('classifier'));
 const latestDecider = computed(() => latest('decider'));
 /** The road type: the newest network with memory and the sign (road-type/gru, the one for the car), else the newest. */
@@ -266,6 +268,10 @@ const numbers = computed(() => {
         </div>
         <ActionList :items="CLASSIFIER_ACTIONS" :actions="classifierActions"
                     @run="(name, state) => emit('run', name, state, undefined, mapillaryOptions)"/>
+        <p class="latest-none" id="train-classifier-cutter"><template v-if="cutterInUse">Cutter: the one in use,
+          <strong>{{ cutterInUse.label }}</strong> · {{ cutterInUse.trained_at ? isoWhen(cutterInUse.trained_at) : cutterInUse.run }}.
+          Its mistakes are the “not a sign” the classifier learns, and the chain is measured with it. Another one: Models › Use this one.</template><template
+          v-else-if="models">No cutter in use: choose one in Models first.</template></p>
         <p v-if="mapillaryState?.available" class="latest-none" id="train-mapillary-note">Mapillary: {{ thousands(mapillaryState.crops) }}
           street-photo signs of {{ plural(mapillaryState.labels, 'kind') }}, added to train only: every measure stays on your drives.<template
           v-if="mapillary === 'on'"> The same share always takes the same signs; then at most 300 of each kind.</template><template
