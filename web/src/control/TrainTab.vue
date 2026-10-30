@@ -5,12 +5,13 @@
 // at the car's band; the signs it finds), the classifier with "not a sign" (scripts/run_classifier.sh), the decider (in preparation:
 // experiment B), the road type with memory (scripts/run_road_type.sh), the whole pipeline (helpers/3_train.sh, with
 // where it starts). Each has the same place for its work:
-// the Train button, or its training running (or failed) with its steps, then its curves and its latest version
+// the Train button, or its training running (or failed) with its steps, its Settings for the next training
+// (TrainSettingsSection), then its curves and its latest version
 // (GET /api/panel/models, a link to its versions in Models). The page does not move while work runs.
 import {computed, ref} from 'vue';
 import {isoWhen, plural, thousands} from '../common/format';
 import type {ActionName, ActionOptions, ActionState, Activity, ClassifierModel, CutterFamilies, Job, JobProgress as Progress,
-  ModelRole, ModelVersion, PanelStatus, TrainingStart} from '../common/panel-types';
+  ModelRole, ModelVersion, PanelStatus, TrainingStart, TrainSettingsAction} from '../common/panel-types';
 import ActionList from './ActionList.vue';
 import JobProgress from './JobProgress.vue';
 import {CHARTED_ACTIONS, JOB_STATE, jobOf, PIPELINE_ACTIONS, startedWhen, terminalActivities} from './jobs';
@@ -23,6 +24,7 @@ import Segmented from './Segmented.vue';
 import TerminalActivity from './TerminalActivity.vue';
 import TrainingCharts from './TrainingCharts.vue';
 import TrainStart from './TrainStart.vue';
+import TrainSettingsSection from './TrainSettingsSection.vue';
 import SectionHead from './SectionHead.vue';
 
 const props = defineProps<{status: PanelStatus | null}>();
@@ -62,6 +64,10 @@ const section = computed({
   set: (value: Section) => { picked.value = value; },
 });
 const job = computed(() => jobFor(section.value));
+/** The training whose settings the section shows (Settings, under its action): none for the whole pipeline. */
+const SETTINGS_OF: Partial<Record<Section, TrainSettingsAction>> = {cutter: 'train_cutter', classifier: 'train_classifier',
+  decider: 'train_decider', road: 'train_road_type'};
+const settingsAction = computed(() => SETTINGS_OF[section.value] ?? null);
 /** The job of the section in its slot: running or failed; one done or stopped by hand is a line. */
 const bigJob = computed(() => job.value && (job.value.state === 'running' || job.value.state === 'failed') ? job.value : null);
 /** Importing the reviews (Data › Training dataset): said in the line of data. */
@@ -344,6 +350,10 @@ const numbers = computed(() => {
         {{ job.state === 'interrupted' ? 'stopped' : JOB_STATE[job.state][0] }} ·
         <button type="button" class="link-button" @click="emit('details', job)">Details</button></p>
     </div>
+
+    <!-- The settings of the next training of this network, also while one runs (it keeps its own). -->
+    <TrainSettingsSection v-if="settingsAction" :training="settingsAction"
+                          :running="job?.state === 'running' || sectionActivities.length > 0"/>
 
     <!-- The latest version in one row, a link to Models: its versions there, to compare and to choose (the choice
          is made only there). -->

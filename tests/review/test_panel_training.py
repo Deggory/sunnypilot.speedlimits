@@ -628,7 +628,7 @@ def test_a_classifier_job_in_two_stages_shows_them(tmp_path):
                    '--mapillary /d/crops.jsonl --mapillary-share 5 --mapillary-only\nsettings:     --classes v2 --epochs 30 '
                    '--init-from /d/runs/r/pretrain/reader-best.pt\n')
     assert _settings_of(log, 'train_classifier') == ['classes v2', 'Mapillary first, then ours', 'Mapillary 5 %',
-                                                     '30 epochs', 'pretrained']
+                                                     'Mapillary 20 epochs', '30 epochs', 'pretrained']
     log.write_text('== scripts/run_classifier.sh r\nrun:          r\nsettings:     --classes v2 --epochs 30 '
                    '--init-from /d/runs/2026-10-29_1602-classifier/classifier/reader-best.pt\n')
     assert _settings_of(log, 'train_classifier') == ['classes v2', '30 epochs', 'from 2026-10-29_1602-classifier']

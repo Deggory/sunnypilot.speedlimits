@@ -158,6 +158,9 @@ def _run_of(log: Path, action: str = 'train') -> str | None:
 # "settings:     --epochs 20 --batch-size 8 ... --pretrained".
 SETTING_LINE = re.compile(r'^([a-z][a-z ]{1,20}):\s+(.+)$')
 FAMILY_TEXT = {'all': 'every sign', 'speed': 'speed signs only'}
+# The "negatives:" line of scripts/run_classifier.sh: the score, per frame and factor of its mined false boxes.
+NEGATIVES_LINE = re.compile(r'score >= (\S+) .*at most (\S+) per frame and (\S+) x')
+NEGATIVES_DEFAULT = ('0.1', '3', '3')
 
 
 def _settings_of(log: Path, action: str) -> list[str]:
@@ -207,6 +210,9 @@ def _settings_of(log: Path, action: str) -> list[str]:
         chips.append('Mapillary ' + _region_words(flags['--mapillary-region']))
     if flags.get('--mapillary-share'):
         chips.append('Mapillary ' + flags['--mapillary-share'] + ' %')
+    # The first stage's epochs (Train › Classifier › Settings), when not the same as the second's.
+    if pretraining.get('--epochs') and pretraining['--epochs'] != flags.get('--epochs'):
+        chips.append('Mapillary ' + pretraining['--epochs'] + ' epochs')
     epochs = flags.get('--epochs') or fields.get('epochs')
     if epochs:
         chips.append(epochs + ' epochs')
@@ -216,8 +222,15 @@ def _settings_of(log: Path, action: str) -> list[str]:
         chips.append('batch ' + (flags.get('--batch-size') or flags['--batch']))
     if flags.get('--learning-rate'):
         chips.append('learning rate ' + flags['--learning-rate'])
-    if flags.get('--num-workers'):
-        chips.append(flags['--num-workers'] + ' workers')
+    # The classifier's and the road type's flag; SignNet's own line ("workers:      16").
+    workers = flags.get('--num-workers') or fields.get('workers')
+    if workers:
+        chips.append(workers + ' workers')
+    # The classifier's false boxes ("negatives:    cutter boxes of score >= 0.1 ..., at most 3 per frame and 3 x the
+    # sign crops per partition"), when not the defaults of its script.
+    negatives = NEGATIVES_LINE.search(fields.get('negatives', ''))
+    if negatives and negatives.groups() != NEGATIVES_DEFAULT:
+        chips.append('false boxes ≥ {}, {} a frame, {} × signs'.format(*negatives.groups()))
     if flags.get('--anchor-min-ratio'):
         chips.append('default box ' + flags['--anchor-min-ratio'])
     if flags.get('--negative-frame-fraction'):
@@ -1451,6 +1464,9 @@ class Panel:
         start_env.update(self._mapillary_choice(action, options or {}, mapillary in ('on', 'pretrain')))
         if action == 'train_classifier':
             start_env.update(self._classifier_start((options or {}).get('start'), mapillary))
+        # The settings of the training changed in Train (nnslr_tools.train_settings): the variables its script reads.
+        from nnslr_tools import train_settings
+        start_env.update(train_settings.environment(self.root, action))
         package = (options or {}).get('package')
         if package is not None and action != 'networks_publish':
             raise PanelError(400, 'bad_option', 'Only "Publish on Hugging Face" takes a package.')
@@ -1603,6 +1619,26 @@ class Panel:
         # Reaps the process as soon as it ends, so it never stays a zombie.
         threading.Thread(target=process.wait, daemon=True).start()
         return {'id': job_id, 'action': action, 'label': ACTIONS[action]['label']}
+
+    def train_settings(self) -> dict:
+        """The settings of the trainings of Train (nnslr_tools.train_settings), and whether this panel can change
+        them."""
+        from nnslr_tools import train_settings
+        return {**train_settings.view(self.root), 'can_edit': self.actions_enabled and self.available()}
+
+    def save_train_settings(self, body, who: str) -> dict:
+        """Train › Settings: {"training": action, "values": {setting: number or null}} saved for the next training
+        of that kind; a read-only panel refuses it, as it refuses the actions."""
+        from nnslr_tools import train_settings
+        if not self.actions_enabled or not self.available():
+            raise PanelError(403, 'actions_disabled', 'The panel is read-only on this server.')
+        try:
+            record = train_settings.save(self.root, body, who)
+        except train_settings.SettingsError as exc:
+            raise PanelError(400, 'invalid_settings', str(exc)) from None
+        print(f'Panel: {train_settings.TRAININGS[body["training"]]["label"].lower()} training settings '
+              f'{record["values"] or "all default"} ({who!r})', flush=True)
+        return self.train_settings()
 
     def new_run_name(self, kind: str) -> str:
         """The run of a new classifier or cutter training: the time it starts and what it is,

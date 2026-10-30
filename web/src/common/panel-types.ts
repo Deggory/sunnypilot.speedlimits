@@ -1469,3 +1469,25 @@ export interface ActiveChosen {
   role: ModelRole;
   active: Omit<ActiveModel, 'found'>;
 }
+
+/** A setting of a training of Train (nnslr_tools.train_settings): a variable its script reads, used by the next run. */
+export interface TrainSetting {
+  key: string; label: string; help: string; default: number; min: number; max: number; step: number; unit: string;
+  value: number;
+}
+/** What a training keeps as it is: what the car needs (the cutter's band, grid, channels, fuse). */
+export interface TrainFixed {label: string; value: string; help: string}
+export type TrainSettingsAction = 'train_cutter' | 'train_classifier' | 'train_decider' | 'train_road_type';
+export interface TrainSettings {
+  label: string;
+  settings: TrainSetting[];
+  fixed: TrainFixed[];
+  by: string | null;
+  at: string | null;
+}
+/** GET/POST /api/panel/train-settings */
+export interface TrainSettingsPayload {
+  trainings: Record<TrainSettingsAction, TrainSettings>;
+  /** False on a read-only panel: shown, not changed. */
+  can_edit: boolean;
+}

@@ -19,7 +19,8 @@ set -euo pipefail
 #
 # Environment: NNSLR_GPU_INDEX (default 0), NNSLR_DATASET_KIND (gold), NNSLR_GPU_VENV (.venv-gpu),
 # NNSLR_CUTTER_FAMILIES (all: the speed signs and the other traffic signs; speed: the speed signs only),
-# NNSLR_SIGNNET_EPOCHS (40), NNSLR_SIGNNET_BATCH (16), NNSLR_NUM_WORKERS (half the cores, 4 to 16),
+# NNSLR_SIGNNET_EPOCHS (40), NNSLR_SIGNNET_BATCH (16), NNSLR_SIGNNET_LEARNING_RATE (0.003), NNSLR_NUM_WORKERS (half the
+# cores, 4 to 16) (the portal sets those changed in Train › Cutter › Settings, nnslr_tools.train_settings),
 # NNSLR_ALLOW_BUSY_GPU=1 to share a GPU that already has compute processes.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -41,7 +42,7 @@ BAND_HEIGHT=288
 STRIDE=8
 FUSE_KERNEL=1
 WIDTHS=16,24,32,48
-LEARNING_RATE=0.003
+LEARNING_RATE="${NNSLR_SIGNNET_LEARNING_RATE:-0.003}"
 
 if [[ -z "$RUN_ID" || $# -gt 1 ]]; then
   echo "usage: $0 NAME" >&2
@@ -70,6 +71,12 @@ for setting in EPOCHS BATCH NUM_WORKERS; do
     exit 2
   fi
 done
+
+# A positive number: 0.003, 3e-3, 1e-05.
+if [[ ! "$LEARNING_RATE" =~ ^([0-9]*\.)?[0-9]+([eE][-+]?[0-9]+)?$ ]]; then
+  echo "error: NNSLR_SIGNNET_LEARNING_RATE must be a number: $LEARNING_RATE" >&2
+  exit 2
+fi
 
 if [[ ! -x "$VENV/bin/nnslr" || ! -x "$VENV/bin/python" ]]; then
   echo "error: GPU environment missing: $VENV/bin/nnslr" >&2
@@ -142,6 +149,7 @@ echo "== scripts/run_signnet.sh $RUN_ID"
 echo "run:          $RUN_ID"
 echo "band:         ${BAND_WIDTH}x${BAND_HEIGHT}"
 echo "settings:     ${SETTINGS[*]}"
+echo "workers:      $NUM_WORKERS"
 echo "output:       $RUN_ROOT"
 echo "data root:    $DATA_ROOT"
 echo "dataset kind: $DATASET_KIND"

@@ -662,6 +662,10 @@ def make_handler(app: ReviewApp):
             if path == '/api/panel/car-settings':
                 self._json(200, self._car_settings_view())
                 return
+            # The settings of the trainings of Train, for their next run (nnslr_tools.train_settings).
+            if path == '/api/panel/train-settings':
+                self._json(200, app.panel.train_settings())
+                return
             match = re.fullmatch(r'/api/panel/job/([0-9a-z_-]+)/log', path)
             if match:
                 offset = parse_qs(urlsplit(self.path).query).get('offset', ['0'])[0]
@@ -1159,7 +1163,9 @@ def make_handler(app: ReviewApp):
             road = re.fullmatch(r'/api/panel/road-types/([^/]+)(/junction)?(/undo)?', path)
             # The settings of the comma's vision limit ({"values": {setting: number or null}}).
             settings = path == '/api/panel/car-settings'
-            if run or stop or active or chosen or road or settings:
+            # The settings of a training of Train ({"training": action, "values": {setting: number or null}}).
+            trainings = path == '/api/panel/train-settings'
+            if run or stop or active or chosen or road or settings or trainings:
                 # Same protections as saving a frame: same origin, JSON only (no form can send it).
                 if not self._same_origin():
                     self._problem(403, 'cross_origin', 'Request from another origin refused.', True)
@@ -1203,6 +1209,9 @@ def make_handler(app: ReviewApp):
                     self._json(200, {'ok': True, **app.panel.set_proposer(body)})
                 elif settings:
                     self._car_settings_post(body)
+                elif trainings:
+                    who, via = self._who()
+                    self._json(200, {'ok': True, **app.panel.save_train_settings(body, who or via)})
                 elif road and road.group(2):
                     self._junction_post(road.group(1), road.group(3) is not None, body)
                 elif road:
