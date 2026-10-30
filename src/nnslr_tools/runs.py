@@ -1249,9 +1249,18 @@ def signnet_run_digest(result: Any) -> dict:
         'best_epoch': _int(result.get('best_epoch')), 'families': text('families'), 'split_sha256': text('split_sha256'),
         'fits_the_car': band is not None and stride is not None and signnet.fits_the_car(band, stride),
         'validation': budget('validation'), 'test': budget('test'),
-        # Not part of the detail's signnet_run: the summary's dataset, and the curve when the log has none.
-        'dataset_sha256': text('dataset_sha256'), 'history': points,
+        # Not part of the detail's signnet_run: the summary's dataset, the run it went on from, and the curve when the
+        # log has none.
+        'dataset_sha256': text('dataset_sha256'), 'start': start_digest(result.get('start')), 'history': points,
     }
+
+
+def start_digest(start: Any) -> dict | None:
+    """The earlier run a SignNet or an applicability variant went on from (its result.json "start", --init-from): that
+    run's name and the file of its weights."""
+    if not isinstance(start, dict) or not isinstance(start.get('run'), str) or not RUN_NAME.fullmatch(start['run']):
+        return None
+    return {'run': start['run'], 'source': start['path'] if isinstance(start.get('path'), str) else None}
 
 
 # What the detail of a run says of its SignNet (signnet_run_digest without its history).
@@ -1438,7 +1447,7 @@ def experiment_digest(result: Any) -> dict:
         'epochs': _int(_dig(result, ('config', 'epochs'))),
         'selection_score': _num(result.get('best_validation_selection_score')),
         'selection_metric': text('selection_metric'),
-        'initialization': text('initialization'),
+        'initialization': text('initialization'), 'start': start_digest(result.get('start')),
         'dataset_sha256': text('dataset_sha256'), 'split_sha256': text('split_sha256'),
         'limit': _int(result.get('limit')),
     }
@@ -1859,13 +1868,16 @@ class RunsIndex:
             results = [gathered['classifier']['classifier_result']]
         if gathered['kind'] == 'cutter':
             results = [item['training'] for item in gathered['cutters']['sizes']]
-            if gathered['signnet']['result'] is not None:
-                # SignNet always starts from random weights (nnslr_tools.signnet.build_signnet).
-                results.append({'initialization': 'random'})
+            signnet = gathered['signnet']['result']
+            if signnet is not None:
+                # SignNet starts from random weights (nnslr_tools.signnet.build_signnet), or goes on from an earlier one.
+                results.append({'initialization': 'start', 'start': signnet['start']} if signnet['start'] else {'initialization': 'random'})
         if gathered['kind'] == 'experiment':
             results = [self._load(path, experiment_digest) for _, path in gathered['variants'] if path is not None]
         initialization = next((digest['initialization'] for digest in results
                                if isinstance(digest, dict) and digest.get('initialization')), None)
+        # A SignNet or an applicability variant that went on from an earlier run (--init-from).
+        went_on = next((digest['start'] for digest in results if isinstance(digest, dict) and digest.get('start')), None)
         if weights:
             from_run = FROM_RUN.search(weights)
             if from_run:
@@ -1877,6 +1889,9 @@ class RunsIndex:
             start['source'] = weights
         elif mode == 'continue':
             start = {'kind': 'stable', 'label': 'Continued from the stable model', 'run': None, 'source': None}
+        elif went_on:
+            start = {'kind': 'run', 'label': 'Continued from run ' + went_on['run'], 'run': went_on['run'],
+                     'source': went_on['source']}
         elif initialization == 'imagenet1k_v1':
             start = {'kind': 'imagenet', 'label': 'Pre-trained on ImageNet', 'run': None, 'source': None}
         elif initialization == 'random':

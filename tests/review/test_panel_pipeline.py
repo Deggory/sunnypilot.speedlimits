@@ -144,7 +144,9 @@ def test_the_classifier_alone_uses_the_cutter_in_use(panel, root):
     ({'steps': [{'action': 'train_cutter', 'options': {'mapillary': 'on'}}]}, 400),
     ({'steps': [{'action': 'train_cutter'}, {'action': 'train_classifier', 'options': {'cutter': 'cutter:x/signnet'}}]}, 400),
     ({'steps': [{'action': 'train_cutter'}, {'action': 'train_classifier', 'options': {'mapillary': 'on'}}]}, 409),
-    ({'steps': [{'action': 'train_cutter', 'options': {'families': 3}}]}, 400)])
+    ({'steps': [{'action': 'train_cutter', 'options': {'families': 3}}]}, 400),
+    ({'steps': [{'action': 'train_cutter', 'options': {'start': 'cutter:nothing/signnet'}}]}, 400),
+    ({'steps': [{'action': 'train_decider', 'options': {'start': 'decider:nothing/experiment-b/crop'}}]}, 400)])
 def test_a_bad_pipeline_is_refused_before_anything_starts(panel, body, status):
     with pytest.raises(PanelError) as error:
         panel.start_pipeline(body, None)

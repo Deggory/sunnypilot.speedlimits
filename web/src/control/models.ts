@@ -199,6 +199,7 @@ export function initText(initialization: string | null): string {
   if (initialization === 'random') return 'random weights';
   if (initialization === 'mapillary_pretraining') return 'Mapillary pretraining';
   if (initialization === 'checkpoint') return 'another classifier';
+  if (initialization === 'start') return 'an earlier run';
   return initialization ?? '–';
 }
 

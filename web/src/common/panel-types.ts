@@ -64,7 +64,9 @@ export interface ActionOptions {
   region?: string;
   share?: string;
   /** Where the classifier's training starts (train_classifier): "imagenet", or the id of a finished classifier of Models
-   * (classifier:<run>/classifier), whose weights it starts from. */
+   * (classifier:<run>/classifier), whose weights it starts from. Where the cutter's, the applicability's and the scene
+   * network's start (train_cutter, train_decider, train_road_type): "fresh" (random weights for SignNet, ImageNet for the
+   * others), or the id of a finished version of their role, whose run they go on from (network-start.ts). */
   start?: string;
 }
 /** Train › Pipeline: our networks trained one after the other (POST /api/panel/pipeline), each a job of its own. */
@@ -403,7 +405,8 @@ export interface PanelStatus {
    * and of how many labels, and why not when they are not. */
   classifier_options?: {mapillary: {available: boolean; crops: number; labels: number; reason: string};
     mapillary_regions?: MapillaryRegions;
-    /** The split the next classifier is measured on (splits/latest.json), to warn when its start learnt another one. */
+    /** The split the next training is measured on (splits/latest.json), to warn when its start learnt another one
+     * (the classifier, the cutter, applicability). */
     split_sha256?: string | null};
   /** Why a proposer cannot run on this server (null: it can): qwen not installed, or qwen_gpu, the GPU memory it
    * needs taken now. */
@@ -1206,6 +1209,9 @@ export interface CutterModel extends ModelBase {
   families_recorded: boolean;
   test: CutterNumbers | null;
   validation: CutterNumbers | null;
+  /** A SignNet: the split it learnt on, and the SignNet it went on from (null: random weights). */
+  split_sha256?: string | null;
+  start?: NetworkStart | null;
 }
 
 export interface ClassifierModel extends ModelBase {
@@ -1237,6 +1243,15 @@ export interface ClassifierStart {
   another_split: boolean;
 }
 
+/** The earlier run a SignNet, an applicability variant or a scene network went on from (--init-from): its run, that
+ * run's epoch, and whether it learnt on another split (a scene network: was tested on other drives), so its test may
+ * hold frames the start saw. */
+export interface NetworkStart {
+  run: string | null;
+  epoch: number | null;
+  another_split: boolean;
+}
+
 export interface DeciderModel extends ModelBase {
   role: 'decider';
   variant: string;
@@ -1246,6 +1261,9 @@ export interface DeciderModel extends ModelBase {
   smoke_limit: number | null;
   validation: DeciderNumbers | null;
   test: DeciderNumbers | null;
+  /** The split it learnt on, and the run whose same variant it went on from (null: ImageNet or random weights). */
+  split_sha256?: string | null;
+  start?: NetworkStart | null;
 }
 
 /** A road-type network on one partition (nnslr_tools.model_roles.road_type_digest), over its frames of weight 1. */
@@ -1327,6 +1345,8 @@ export interface RoadTypeTurnRule {
 
 export interface RoadTypeModel extends ModelBase {
   role: 'road_type';
+  /** The run whose same network it went on from (null: ImageNet). */
+  start?: NetworkStart | null;
   /** gru: with memory; none: the same encoder one frame at a time, to compare. */
   memory: 'gru' | 'none' | null;
   /** It takes the seconds since a motorway sign (since the second version; trained with the sign where each entry ramp of

@@ -21,7 +21,8 @@ set -euo pipefail
 # NNSLR_CUTTER_FAMILIES (all: the speed signs and the other traffic signs; speed: the speed signs only),
 # NNSLR_SIGNNET_EPOCHS (40), NNSLR_SIGNNET_BATCH (16), NNSLR_SIGNNET_LEARNING_RATE (0.003), NNSLR_NUM_WORKERS (half the
 # cores, 4 to 16) (the portal sets those changed in Train › Cutter › Settings, nnslr_tools.train_settings),
-# NNSLR_ALLOW_BUSY_GPU=1 to share a GPU that already has compute processes.
+# NNSLR_CUTTER_INIT_FROM (a finished SignNet's signnet-best.pt to go on from, instead of random weights: Train › Cutter
+# › Start from), NNSLR_ALLOW_BUSY_GPU=1 to share a GPU that already has compute processes.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DATA_ROOT="${NNSLR_DATA_ROOT:-$ROOT_DIR/data}"
@@ -43,6 +44,7 @@ STRIDE=8
 FUSE_KERNEL=1
 WIDTHS=16,24,32,48
 LEARNING_RATE="${NNSLR_SIGNNET_LEARNING_RATE:-0.003}"
+INIT_FROM="${NNSLR_CUTTER_INIT_FROM:-}"
 
 if [[ -z "$RUN_ID" || $# -gt 1 ]]; then
   echo "usage: $0 NAME" >&2
@@ -75,6 +77,11 @@ done
 # A positive number: 0.003, 3e-3, 1e-05.
 if [[ ! "$LEARNING_RATE" =~ ^([0-9]*\.)?[0-9]+([eE][-+]?[0-9]+)?$ ]]; then
   echo "error: NNSLR_SIGNNET_LEARNING_RATE must be a number: $LEARNING_RATE" >&2
+  exit 2
+fi
+
+if [[ -n "$INIT_FROM" && ! -f "$INIT_FROM" ]]; then
+  echo "error: NNSLR_CUTTER_INIT_FROM is not a file: $INIT_FROM" >&2
   exit 2
 fi
 
@@ -143,6 +150,10 @@ export PYTHONUNBUFFERED=1
 
 SETTINGS=(--families "$FAMILIES" --band-width "$BAND_WIDTH" --stride "$STRIDE" --fuse-kernel "$FUSE_KERNEL"
           --widths "$WIDTHS" --epochs "$EPOCHS" --batch "$BATCH" --learning-rate "$LEARNING_RATE")
+# Where it starts: random weights, or the weights of a finished SignNet it goes on from.
+if [[ -n "$INIT_FROM" ]]; then
+  SETTINGS+=(--init-from "$INIT_FROM")
+fi
 NN="$VENV/bin/nnslr"
 
 echo "== scripts/run_signnet.sh $RUN_ID"

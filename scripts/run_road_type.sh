@@ -46,8 +46,9 @@ set -euo pipefail
 # Environment: NNSLR_GPU_INDEX (default 0), NNSLR_GPU_VENV (.venv-gpu), NNSLR_ROAD_TYPE_EPOCHS (60),
 # NNSLR_ROAD_TYPE_PATIENCE (15), NNSLR_ROAD_TYPE_BATCH (12 sequences), NNSLR_NUM_WORKERS (half the cores, 4 to 16),
 # NNSLR_SIGN_WORKERS (processes reading the signs: the cores but two), NNSLR_SUNNYPILOT_CLONE (/root/sunnypilot),
-# NNSLR_ROAD_TYPE_BASELINE (earlier road-type-best.pt to compare with, separated by ":"), NNSLR_ALLOW_BUSY_GPU=1 to
-# share a GPU that already has compute processes.
+# NNSLR_ROAD_TYPE_BASELINE (earlier road-type-best.pt to compare with, separated by ":"), NNSLR_ROAD_TYPE_INIT_FROM (the
+# road-type folder of an earlier run: each network goes on from its own there, one it lacks from ImageNet; Train ›
+# Scene › Start from), NNSLR_ALLOW_BUSY_GPU=1 to share a GPU that already has compute processes.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DATA_ROOT="${NNSLR_DATA_ROOT:-$ROOT_DIR/data}"
@@ -63,6 +64,7 @@ NUM_WORKERS="${NNSLR_NUM_WORKERS:-$WORKERS_DEFAULT}"
 SIGN_WORKERS="${NNSLR_SIGN_WORKERS:-$(( CORES > 3 ? CORES - 2 : 1 ))}"
 BASELINE="${NNSLR_ROAD_TYPE_BASELINE:-}"
 JUNCTIONS="${NNSLR_ROAD_TYPE_JUNCTIONS:-1}"
+START="${NNSLR_ROAD_TYPE_INIT_FROM:-}"
 
 if [[ -z "$RUN_ID" || $# -ne 1 ]]; then
   echo "usage: $0 NAME" >&2
@@ -85,6 +87,11 @@ for checkpoint in "${BASELINES[@]}"; do
     exit 2
   fi
 done
+
+if [[ -n "$START" && ! -d "$START" ]]; then
+  echo "error: NNSLR_ROAD_TYPE_INIT_FROM is not a folder: $START" >&2
+  exit 2
+fi
 
 for setting in EPOCHS PATIENCE BATCH NUM_WORKERS SIGN_WORKERS; do
   if [[ ! "${!setting}" =~ ^[0-9]+$ ]]; then
@@ -154,6 +161,9 @@ echo "data root:    $DATA_ROOT"
 echo "physical GPU: $GPU_INDEX"
 echo "settings:     ${SETTINGS[*]}"
 echo "baseline:     ${BASELINE:-none}"
+if [[ -n "$START" ]]; then
+  echo "init:         $(basename "$(dirname "$START")")"
+fi
 echo "junctions:    $([[ "$JUNCTIONS" == "0" ]] && echo "no head" || echo "with the junction head")"
 echo
 
@@ -186,7 +196,14 @@ train() {
     echo "skip trained: $OUT/$folder/result.json"
     return
   fi
-  "$NN" train-road-type --memory "$memory" --run-dir "$OUT/$folder" "${SETTINGS[@]}" "$@"
+  # Each network goes on from its own of the start, when the start has it finished.
+  local from=()
+  if [[ -n "$START" && -f "$START/$folder/road-type-best.pt" && -f "$START/$folder/result.json" ]]; then
+    from=(--init-from "$START/$folder/road-type-best.pt")
+  elif [[ -n "$START" ]]; then
+    echo "the start has no finished $folder: it starts from ImageNet"
+  fi
+  "$NN" train-road-type --memory "$memory" --run-dir "$OUT/$folder" "${SETTINGS[@]}" "${from[@]}" "$@"
 }
 
 echo "== 5/8 Train with memory, the sign and the car's motion (GRU) =="

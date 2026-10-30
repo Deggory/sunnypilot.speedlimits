@@ -13,7 +13,9 @@ set -euo pipefail
 #
 # Environment: NNSLR_GPU_INDEX (default 0), NNSLR_DATASET_KIND (gold), NNSLR_GPU_VENV (.venv-gpu),
 # NNSLR_EXPERIMENT_EPOCHS (20), NNSLR_TRAIN_INIT=random for random weights instead of ImageNet ones,
-# NNSLR_ALLOW_BUSY_GPU=1 to share a GPU that already has compute processes.
+# NNSLR_DECIDER_INIT_FROM (the experiment-b folder of an earlier run: each variant goes on from its own there, a
+# variant it lacks from ImageNet; Train › Applicability › Start from), NNSLR_ALLOW_BUSY_GPU=1 to share a GPU that
+# already has compute processes.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DATA_ROOT="${NNSLR_DATA_ROOT:-$ROOT_DIR/data}"
@@ -22,6 +24,7 @@ RUN_ID="${1:-}"
 DATASET_KIND="${NNSLR_DATASET_KIND:-gold}"
 VENV="${NNSLR_GPU_VENV:-$ROOT_DIR/.venv-gpu}"
 EPOCHS="${NNSLR_EXPERIMENT_EPOCHS:-20}"
+START="${NNSLR_DECIDER_INIT_FROM:-}"
 VARIANTS=(crop crop_geom full)
 
 if [[ -z "$RUN_ID" ]]; then
@@ -42,6 +45,11 @@ fi
 
 if [[ ! "$EPOCHS" =~ ^[1-9][0-9]*$ ]]; then
   echo "error: NNSLR_EXPERIMENT_EPOCHS must be a positive integer" >&2
+  exit 2
+fi
+
+if [[ -n "$START" && ! -d "$START" ]]; then
+  echo "error: NNSLR_DECIDER_INIT_FROM is not a folder: $START" >&2
   exit 2
 fi
 
@@ -100,6 +108,11 @@ INIT=(--pretrained)
 if [[ "${NNSLR_TRAIN_INIT:-imagenet}" == "random" ]]; then
   INIT=()
 fi
+# Where the variants start: ImageNet (or random weights), or each from its own in an earlier run (its run's name).
+INIT_TEXT="${NNSLR_TRAIN_INIT:-imagenet}"
+if [[ -n "$START" ]]; then
+  INIT_TEXT="$(basename "$(dirname "$START")")"
+fi
 
 NN="$VENV/bin/nnslr"
 
@@ -110,7 +123,7 @@ echo "data root:    $DATA_ROOT"
 echo "dataset kind: $DATASET_KIND"
 echo "physical GPU: $GPU_INDEX"
 echo "epochs:       $EPOCHS"
-echo "init:         ${NNSLR_TRAIN_INIT:-imagenet}"
+echo "init:         $INIT_TEXT"
 echo "wandb:        project ${WANDB_PROJECT:-sunnypilot.speedlimits}, group $RUN_ID, mode ${WANDB_MODE:-online}"
 echo
 
@@ -149,8 +162,14 @@ for variant in "${VARIANTS[@]}"; do
   fi
   # The epoch lines and the final JSON go to the terminal and to <variant>.log; the measures are in
   # <variant>/result.json.
+  FROM=()
+  if [[ -n "$START" && -f "$START/$variant/$variant-best.pt" && -f "$START/$variant/result.json" ]]; then
+    FROM=(--init-from "$START/$variant/$variant-best.pt")
+  elif [[ -n "$START" ]]; then
+    echo "the start has no finished $variant: it starts from ${NNSLR_TRAIN_INIT:-imagenet}"
+  fi
   "$NN" experiment-b --variant "$variant" --dataset-kind "$DATASET_KIND" --device cuda \
-    --epochs "$EPOCHS" --output "$RUN_ROOT/$variant" "${INIT[@]}" 2>&1 | tee "$RUN_ROOT/$variant.log"
+    --epochs "$EPOCHS" --output "$RUN_ROOT/$variant" "${INIT[@]}" "${FROM[@]}" 2>&1 | tee "$RUN_ROOT/$variant.log"
 done
 
 echo

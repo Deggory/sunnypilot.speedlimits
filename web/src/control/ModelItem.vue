@@ -31,6 +31,9 @@ const forCar = computed(() => signnet.value && cutter.value?.fits_the_car !== fa
 const classifier = computed(() => props.version.role === 'classifier' ? props.version : null);
 const decider = computed(() => props.version.role === 'decider' ? props.version : null);
 const roadType = computed(() => props.version.role === 'road_type' ? props.version : null);
+/** The earlier run a SignNet, an applicability variant or a scene network went on from (Train › Start from). */
+const networkStart = computed(() => props.version.role === 'cutter' || props.version.role === 'decider'
+  || props.version.role === 'road_type' ? props.version.start ?? null : null);
 const roadMetrics = computed((): Metric[] => roadType.value ? metricsOf(roadType.value) : []);
 /** The cutter's numbers: on the test, else on validation (a size compared before its test was measured). */
 const cut = computed(() => cutter.value?.test ?? cutter.value?.validation ?? null);
@@ -344,6 +347,9 @@ const hourly = (value: number | null): string => value === null ? '–' : value 
       </template>
     </template>
 
+    <p v-if="networkStart" class="note" :class="{'warn-text': networkStart.another_split}" data-start>Went on from
+      {{ networkStart.run ?? 'an earlier run' }}<template v-if="networkStart.epoch !== null">, its epoch {{ networkStart.epoch }}</template><template
+      v-if="networkStart.another_split">: {{ roadType ? 'tested on other drives' : 'trained on another split' }}, so this test is not fair</template>.</p>
     <p v-if="!evaluated" class="model-wait">{{ version.finished ? 'Not evaluated: no numbers on the test yet.' : 'Still training, or stopped before its end.' }}</p>
     <p v-for="problem in version.problems" :key="problem" class="note ds-note">{{ problem }}.</p>
     <p v-if="notSelectable" class="note model-why-not">{{ notSelectable }}</p>

@@ -1047,7 +1047,10 @@ def _cmd_experiment_b(args: argparse.Namespace) -> int:
         device=args.device,
         pretrained=args.pretrained,
         amp=not args.no_amp,
+        init_from=args.init_from,
     )
+    if args.init_from and not Path(args.init_from).is_file():
+        raise ValueError(f"--init-from is not a file: {args.init_from}")
     result = train_experiment_b(plan, root, Path(args.output), config)
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
@@ -1562,6 +1565,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_signnet.add_argument("--batch", type=int, default=16)
     p_signnet.add_argument("--learning-rate", type=float, default=3e-3)
     p_signnet.add_argument("--workers", type=int, default=8)
+    p_signnet.add_argument("--init-from", default=None,
+                           help="a finished SignNet's signnet-best.pt to go on from (the same widths, grid, fuse and "
+                                "band), instead of random weights")
     p_signnet.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_signnet.add_argument("--dry-run", action="store_true",
                            help="build the plan only (no torch): one JSON line with its frames and boxes by split")
@@ -1627,6 +1633,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_road_net.add_argument("--junction-epochs", type=int, default=30,
                             help="the junction head's own stage after the road type's epoch is chosen (0: keep the "
                                  "shared head of the joint training)")
+    p_road_net.add_argument("--init-from", default=None,
+                            help="the road-type-best.pt of the same network (same memory) of an earlier run to go on "
+                                 "from, instead of ImageNet: every layer of the same shape")
     p_road_net.add_argument("--dry-run", action="store_true",
                             help="on the CPU, a few short sequences, one epoch of two steps: checks the pipeline")
     p_road_net.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
@@ -1984,6 +1993,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_expb.add_argument("--pretrained", action="store_true",
                         help="start the MobileNetV3-small backbones from torchvision ImageNet weights")
     p_expb.add_argument("--no-amp", action="store_true", help="disable CUDA automatic mixed precision")
+    p_expb.add_argument("--init-from", default=None,
+                        help="the <variant>-best.pt of the same variant of an earlier run to go on from: every layer, "
+                             "the reading head by class name")
     p_expb.set_defaults(func=_cmd_experiment_b)
     # [experiment-b] - END
 
@@ -2425,6 +2437,8 @@ def _cmd_train_signnet(args: argparse.Namespace) -> int:
     plan = prepare_detector_training(Path(args.dataset or root / "annotations" / "objects.jsonl"),
                                      Path(args.split or root / "splits" / "latest.json"), root,
                                      dataset_kind=args.dataset_kind, families=args.families)
+    if args.init_from and not Path(args.init_from).is_file():
+        raise ValueError(f"--init-from is not a file: {args.init_from}")
     if args.dry_run:
         print(json.dumps({"dry_run": True, "task": "signnet", "dataset_sha256": plan.get("dataset_sha256"),
                           "split_sha256": plan.get("split_sha256"), "families": plan.get("families"),
@@ -2439,6 +2453,7 @@ def _cmd_train_signnet(args: argparse.Namespace) -> int:
     result = train_signnet(plan, root, Path(args.run_dir), widths=widths, stride=args.stride, epochs=args.epochs,
                            batch=args.batch, learning_rate=args.learning_rate, workers=args.workers,
                            band_width=args.band_width, fuse_kernel=args.fuse_kernel,
+                           init_from=Path(args.init_from) if args.init_from else None,
                            log=lambda line: print(line, flush=True))
     summary = {split: {budget: {key: result[split]["by_box_budget"][budget][key]
                                 for key in ("recall_iou", "false_positives_per_image")}
@@ -2488,11 +2503,14 @@ def _cmd_train_road_type(args: argparse.Namespace) -> int:
     from nnslr_tools.preannotate import resolve_data_root
     from nnslr_tools.road_type_net import train_road_type
     root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    if args.init_from and not Path(args.init_from).is_file():
+        raise ValueError(f"--init-from is not a file: {args.init_from}")
     result = train_road_type(root, Path(args.run_dir), memory=args.memory, epochs=args.epochs, patience=args.patience,
                              batch=args.batch, dry_run=args.dry_run, workers=args.workers, seed=args.seed,
                              signs=not args.no_sign, sign_source=args.sign_source,
                              junctions=False if args.no_junctions else None,
-                             motion=False if args.no_motion else None, junction_epochs=args.junction_epochs)
+                             motion=False if args.no_motion else None, junction_epochs=args.junction_epochs,
+                             init_from=Path(args.init_from) if args.init_from else None)
     test = result["test"]
     operating = result.get("junction_operating") or {}
     junction_test = (test.get("junctions", {}).get("decodes", {}).get(operating.get("decode"), {})

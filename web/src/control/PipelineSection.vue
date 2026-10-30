@@ -1,5 +1,6 @@
 <script setup lang="ts">
-// Train › Pipeline: our networks trained one after the other, each with the choices of its own section, each a job of
+// Train › Pipeline: our networks trained one after the other, each with the choices of its own section (its signs, where
+// it starts...), each a job of
 // its own (POST /api/panel/pipeline; the server starts the next one when one ends well). A classifier after the
 // cutter learns the mistakes of that new cutter. While it runs: the queue, the training at work, "Stop after this
 // one". Below, folded: the first pipeline of all, the detector and the reader (helpers/3_train.sh).
@@ -10,11 +11,13 @@ import type {ActionName, ActionOptions, ActionState, CutterFamilies, Job, PanelS
 import type {ClassifierChoices as Choices} from './classifier-choices';
 import ClassifierChoices from './ClassifierChoices.vue';
 import JobProgress from './JobProgress.vue';
+import type {NetworkStartChoice, StartRole} from './network-start';
+import NetworkStartPicker from './NetworkStartPicker.vue';
 import Segmented from './Segmented.vue';
 import TrainStart from './TrainStart.vue';
 
-const props = defineProps<{status: PanelStatus | null; choices: Choices; fresh: number;
-  familyOptions: {key: CutterFamilies; label: string}[]}>();
+const props = defineProps<{status: PanelStatus | null; choices: Choices; starts: Record<StartRole, NetworkStartChoice>;
+  fresh: number; familyOptions: {key: CutterFamilies; label: string}[]}>();
 const families = defineModel<CutterFamilies>('families', {required: true});
 const emit = defineEmits<{pipeline: [steps: {action: PipelineAction; options: ActionOptions}[], text: string];
   stopPipeline: []; stop: [job: Job]; details: [job: Job]; run: [name: ActionName, state: ActionState, start?: TrainingStart]}>();
@@ -38,8 +41,10 @@ const chosen = computed(() => STEPS.filter((step) => on(step.action)));
 const withCutter = computed(() => on('train_cutter'));
 
 function optionsOf(action: PipelineAction): ActionOptions {
-  if (action === 'train_cutter') return {families: families.value};
+  if (action === 'train_cutter') return {families: families.value, ...props.starts.cutter.option};
   if (action === 'train_classifier') return props.choices.options;
+  if (action === 'train_decider') return props.starts.decider.option;
+  if (action === 'train_road_type') return props.starts.road_type.option;
   return {};
 }
 /** Why it cannot start now ('' when it can): the reason of a training chosen (the classifier after a new cutter needs
@@ -63,10 +68,11 @@ const startLabel = computed(() => chosen.value.length === 1 ? (chosen.value[0]!.
 function start(): void {
   const steps = chosen.value.map((step) => ({action: step.action, options: optionsOf(step.action)}));
   const words = chosen.value.map((step) => step.action === 'train_cutter'
-    ? 'the cutter (' + (families.value === 'all' ? 'every sign' : 'speed signs only') + ')'
+    ? 'the cutter (' + (families.value === 'all' ? 'every sign' : 'speed signs only') + props.starts.cutter.words + ')'
     : step.action === 'train_classifier' ? 'the classifier' + props.choices.words + (withCutter.value ? ', on that new cutter' : '')
-      : step.action === 'dataset' ? 'the import of the reviews' : step.action === 'train_road_type' ? 'the scene network'
-        : LABEL[step.action].toLowerCase());
+      : step.action === 'dataset' ? 'the import of the reviews'
+        : step.action === 'train_road_type' ? 'the scene network' + props.starts.road_type.words
+          : LABEL[step.action].toLowerCase() + props.starts.decider.words);
   emit('pipeline', steps, 'One after the other on the GPU, each a training of its own: ' + words.join(', then ')
     + '. The next one starts when one ends well; a failed one stops the pipeline. Each run is a new one, named by the time it starts.');
 }
@@ -116,12 +122,19 @@ const ENDED: Record<string, string> = {done: 'done', failed: 'failed', stopped: 
         </label>
         <div v-if="on(step.action) && step.action === 'train_cutter'" class="pl-choices">
           <div class="seg-row"><Segmented v-model="families" :options="familyOptions" label="Signs the cutter finds"/></div>
+          <NetworkStartPicker :start="starts.cutter" id="pipeline-cutter-start"/>
         </div>
         <div v-else-if="on(step.action) && step.action === 'train_classifier'" class="pl-choices">
           <ClassifierChoices :choices="choices" :status="status"
                              @locate="status && emit('run', 'mapillary_locations', status.actions.mapillary_locations)"/>
           <p class="latest-none" id="pipeline-cutter-note">{{ withCutter ? 'It learns the mistakes of the cutter trained just before.'
             : 'It learns the mistakes of the cutter in use (Models).' }}</p>
+        </div>
+        <div v-else-if="on(step.action) && step.action === 'train_decider' && starts.decider.options.length > 1" class="pl-choices">
+          <NetworkStartPicker :start="starts.decider" id="pipeline-decider-start"/>
+        </div>
+        <div v-else-if="on(step.action) && step.action === 'train_road_type' && starts.road_type.options.length > 1" class="pl-choices">
+          <NetworkStartPicker :start="starts.road_type" id="pipeline-road-start"/>
         </div>
       </li>
     </ol>

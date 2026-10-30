@@ -585,6 +585,9 @@ class ExperimentConfig:
     device: str = "cuda"
     pretrained: bool = False
     amp: bool = True
+    # The <variant>-best.pt of the same variant of an earlier run to go on from (decider_start), None: ImageNet or
+    # random weights (pretrained).
+    init_from: str | None = None
 
 
 def _require_experiment_stack():
@@ -648,6 +651,37 @@ def _build_model(torch, mobilenet_v3_small, weights, roi_align, variant: str, nu
             return self.reading_head(fused), self.ownership_head(fused)
 
     return ContextModel()
+
+
+def decider_start(torch, model, path: Path, variant: str, classes: list[str]) -> dict[str, Any]:
+    """The weights of the same variant of an earlier run (nnslr experiment-b --init-from) in a fresh network: every
+    layer of the same name and shape, the rows of the reading head by class name (a class the start lacks keeps the
+    fresh row). Returns what result.json records of it: its file and sha256, run, epoch, split, the layers copied and
+    the new classes."""
+    path = Path(path)
+    saved = torch_load(path)
+    if saved.get("task") != TASK or saved.get("variant") != variant:
+        raise ValueError(f"the start is not the {variant} variant of experiment B: {path}")
+    weights = model_weights(saved)
+    state = {key: value.detach().clone() for key, value in model.state_dict().items()}
+    head = "reading_head."
+    copied = [key for key in state if not key.startswith(head) and key in weights
+              and tuple(weights[key].shape) == tuple(state[key].shape)]
+    fresh = [key for key in state if not key.startswith(head) and key not in copied]
+    if fresh:
+        raise ValueError(f"the start's layers are not those of this network ({', '.join(fresh[:3])}): {path}")
+    for key in copied:
+        state[key] = weights[key]
+    rows = {label: row for row, label in enumerate(saved.get("classes") or [])}
+    for row, label in enumerate(classes):
+        if label in rows:
+            state[head + "weight"][row] = weights[head + "weight"][rows[label]]
+            state[head + "bias"][row] = weights[head + "bias"][rows[label]]
+    model.load_state_dict(state, strict=True)
+    return {"path": str(path), "sha256": _sha256(path), "run": path.parents[2].name if len(path.parents) > 2 else None,
+            "variant": variant, "epoch": saved.get("epoch"), "split_sha256": saved.get("split_sha256"),
+            "dataset_sha256": saved.get("dataset_sha256"),
+            "new_classes": [label for label in classes if label not in rows]}
 
 
 class Decider:
@@ -866,6 +900,13 @@ def train_experiment_b(
 
     weights = Weights.IMAGENET1K_V1 if config.pretrained else None
     model = _build_model(torch, mobilenet_v3_small, weights, roi_align, variant, len(classes))
+    start = None
+    if config.init_from:
+        start = decider_start(torch, model, Path(config.init_from), variant, classes)
+        print(f"{task_name} starts from {start['run']}: every layer, and the reading of "
+              f"{len(classes) - len(start['new_classes'])} of its {len(classes)} classes"
+              + (f" (new: {', '.join(start['new_classes'])})" if start["new_classes"] else "")
+              + ("" if start["split_sha256"] == plan["split_sha256"] else "; learnt on another split"), flush=True)
     model.to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
     use_amp = bool(config.amp and device.type == "cuda")
@@ -942,8 +983,9 @@ def train_experiment_b(
                     })
         return samples, loss_total / max(seen, 1)
 
-    initialization = "imagenet1k_v1" if config.pretrained else "random"
+    initialization = "start" if start else "imagenet1k_v1" if config.pretrained else "random"
     initialization_source = (
+        start["path"] if start else
         "torchvision.models.MobileNet_V3_Small_Weights.IMAGENET1K_V1" if config.pretrained else "random"
     )
     output_dir = Path(output_dir)
@@ -1143,6 +1185,7 @@ def train_experiment_b(
             "torchvision_version": str(torchvision.__version__),
             "initialization": initialization,
             "initialization_source": initialization_source,
+            "start": start,
             "config": config.__dict__,
             "history": history,
             "warnings": plan["warnings"],

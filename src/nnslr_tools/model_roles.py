@@ -310,6 +310,22 @@ def cutter_digest(report: Any) -> dict:
     }
 
 
+def network_start_digest(start: Any, split_sha256: Any) -> dict | None:
+    """The start of a SignNet, an applicability variant or a scene network (their result.json "start", --init-from)
+    without its path: the run it went on from, that run's epoch, and whether it learnt on another split than this one
+    (its test may then hold frames it saw); a scene network says instead whether it was tested on other drives."""
+    if not isinstance(start, dict):
+        return None
+    run = start.get('run')
+    if 'same_test_drives' in start:
+        another = start['same_test_drives'] is False
+    else:
+        theirs = start.get('split_sha256')
+        another = isinstance(theirs, str) and isinstance(split_sha256, str) and theirs != split_sha256
+    return {'run': run if isinstance(run, str) and RUN_NAME.fullmatch(run) else None,
+            'epoch': _int(start.get('epoch')), 'another_split': another}
+
+
 def signnet_digest(result: Any) -> dict:
     """result.json of ``nnslr train-signnet``: how it was trained (no history), and test and validation as a cutter
     is judged (cutter_digest of their by_score_threshold, the cutter's scoring on the cutter's frames), with the signs
@@ -350,6 +366,7 @@ def signnet_digest(result: Any) -> dict:
         'best_epoch': _int(result.get('best_epoch')), 'epochs': _int(result.get('epochs')),
         'epochs_run': len(history) if isinstance(history, list) and history else None,
         'split_sha256': result.get('split_sha256') if isinstance(result.get('split_sha256'), str) else None,
+        'start': network_start_digest(result.get('start'), result.get('split_sha256')),
         **measured,
     }
 
@@ -499,6 +516,7 @@ def road_type_digest(result: Any) -> dict:
         'release': {partition: _road_type_release(_dig(result, ('release', partition)))
                     for partition in ('validation', 'test')} if isinstance(result.get('release'), dict) else None,
         'junctions': _road_type_junctions(result),
+        'start': network_start_digest(result.get('start'), result.get('split_sha256')),
     }
 
 
@@ -538,6 +556,8 @@ def decider_digest(result: Any) -> dict:
         'epochs': _int(_dig(result, ('config', 'epochs'))),
         'epochs_run': len(result['history']) if isinstance(result.get('history'), list) and result['history'] else None,
         'limit': _int(result.get('limit')),
+        'split_sha256': text('split_sha256'),
+        'start': network_start_digest(result.get('start'), result.get('split_sha256')),
     }
 
 
@@ -811,7 +831,9 @@ class ModelIndex:
                        else 'not the comma’s band or grid, to compare')
                       + (f' · {round(share * 100)} % of the training drives' if share else ''),
             'fits_the_car': fits,
-            'architecture': None, 'initialization': None,
+            'architecture': None, 'initialization': 'start' if trained.get('start') else None,
+            # The split it learnt on, for the Train tab's "Start from", and the SignNet it went on from, if one.
+            'split_sha256': trained.get('split_sha256'), 'start': trained.get('start'),
             'best_epoch': trained.get('best_epoch'), 'epochs': trained.get('epochs'),
             'epochs_run': trained.get('epochs_run'),
             'input_size': band, 'input_size_recorded': band is not None,
@@ -911,6 +933,7 @@ class ModelIndex:
                 'epochs_run': trained.get('epochs_run'),
                 # A smoke run of experiment B (--limit): a few frames per partition, not a measure.
                 'smoke_limit': trained.get('limit'),
+                'split_sha256': trained.get('split_sha256'), 'start': trained.get('start'),
                 'validation': (trained.get('partitions') or {}).get('validation'),
                 'test': (trained.get('partitions') or {}).get('test'),
             })
@@ -939,7 +962,8 @@ class ModelIndex:
                 'label': label, 'detail': detail, 'memory': trained.get('memory'), 'signs': trained.get('signs', False),
                 'motion': trained.get('motion', False), 'speed_source': trained.get('speed_source', 'gps'),
                 'release': trained.get('release'), 'junctions': trained.get('junctions'),
-                'architecture': trained.get('architecture'), 'initialization': 'ImageNet',
+                'architecture': trained.get('architecture'),
+                'initialization': 'start' if trained.get('start') else 'ImageNet', 'start': trained.get('start'),
                 'best_epoch': trained.get('best_epoch'), 'epochs': trained.get('epochs'),
                 'epochs_run': trained.get('epochs_run'), 'classes': trained.get('classes'),
                 'parameters': trained.get('parameters'), 'flops_per_step': trained.get('flops_per_step'),

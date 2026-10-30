@@ -1101,11 +1101,53 @@ def turn_text(turn: dict) -> str:
             + junction_text(turn['metrics'], turn['numbers']))
 
 
+def road_type_start(torch, model, path: Path, memory: str, split: dict) -> dict:
+    """The weights of the same network of an earlier run (nnslr train-road-type --init-from) in a fresh one: every
+    layer of the same name and shape, the rows of the road-type head by class name (a class the start lacks keeps the
+    fresh row); a layer the start has in another shape (a new input of the memory, the junction head it lacks) stays
+    fresh. The image backbone must be the start's whole. Returns what result.json records of it: its file and sha256,
+    run, epoch, split, the layers left fresh, and whether it was tested on the same drives as this one (its split.json
+    beside it; None when missing)."""
+    path = Path(path)
+    saved = torch.load(path, map_location='cpu', weights_only=False)
+    if not isinstance(saved, dict) or saved.get('task') != 'road_type' or saved.get('memory') != memory:
+        raise ValueError(f'the start is not a road-type network {"with" if memory == "gru" else "without"} memory: {path}')
+    weights = saved['state_dict']
+    state = {key: value.detach().clone() for key, value in model.state_dict().items()}
+    head = 'head.' if memory == 'gru' else 'head.2.'
+    rows = {label: row for row, label in enumerate(saved.get('classes') or [])}
+    fresh = []
+    for key, current in state.items():
+        if key in (head + 'weight', head + 'bias') and key in weights:
+            for row, label in enumerate(data.CLASSES):
+                if label in rows:
+                    current[row] = weights[key][rows[label]]
+            if any(label not in rows for label in data.CLASSES):
+                fresh.append(key + ' (' + ', '.join(label for label in data.CLASSES if label not in rows) + ')')
+        elif key in weights and tuple(weights[key].shape) == tuple(current.shape):
+            state[key] = weights[key]
+        else:
+            fresh.append(key)
+    if any(key.startswith('backbone.') for key in fresh):
+        raise ValueError(f'the start has another image backbone: {path}')
+    model.load_state_dict(state, strict=True)
+    try:
+        tested = json.loads((path.parent / 'split.json').read_text(encoding='utf-8')).get('test_routes')
+    except (OSError, ValueError, AttributeError):
+        tested = None
+    return {'path': str(path), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
+            'run': path.parents[2].name if len(path.parents) > 2 else None, 'epoch': saved.get('epoch'),
+            'split_sha256': saved.get('split_sha256'), 'fresh': fresh,
+            'same_test_drives': None if not isinstance(tested, list)
+            else sorted(tested) == sorted(split.get('test_routes') or [])}
+
+
 def train_road_type(data_root: Path, run_dir: Path, *, memory: str = 'gru', epochs: int = EPOCHS,
                     patience: int = PATIENCE, batch: int = BATCH, device: str | None = None, dry_run: bool = False,
                     pretrained: bool | None = None, workers: int = 8, seed: int = 0, signs: bool = True,
                     sign_source: str = signs_data.DEFAULT_SOURCE, junctions: bool | None = None,
-                    motion: bool | None = None, junction_epochs: int = JUNCTION_EPOCHS, log=_print) -> dict:
+                    motion: bool | None = None, junction_epochs: int = JUNCTION_EPOCHS,
+                    init_from: Path | None = None, log=_print) -> dict:
     """Train the road-type network on the drives with road types and measure it on validation and test (see the
     module's text). Writes into run_dir: split.json, dataset.json, road-type-best.pt, result.json and the answers on
     test and validation (answers-test.json, answers-validation.json). A dry run: the CPU, a few short sequences, one
@@ -1113,7 +1155,8 @@ def train_road_type(data_root: Path, run_dir: Path, *, memory: str = 'gru', epoc
     when nnslr junctions has labelled the drives); motion: with the car's own motion as input (None: when nnslr
     car-motion has read every drive; the speed input is then carState.vEgo, else the GPS speed). The road type's epoch
     is chosen by road_score on validation, and only it stops the training early; the junction head then gets its own
-    stage (train_junction_stage, junction_epochs; 0: the shared head of the joint training as it is)."""
+    stage (train_junction_stage, junction_epochs; 0: the shared head of the joint training as it is). init_from: the
+    road-type-best.pt of the same network of an earlier run to go on from (road_type_start), else ImageNet."""
     torch = _torch()
     data_root, run_dir = Path(data_root), Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -1160,7 +1203,14 @@ def train_road_type(data_root: Path, run_dir: Path, *, memory: str = 'gru', epoc
         + f"; speed from {motion_coverage['speed_source']}")
     pictures = runs if dry_run else runs + drive_runs(dataset)
     store = FrameStore(_load_pictures(data_root, dataset, pictures, dry_run=dry_run, workers=workers, log=log), device)
-    model = build_road_type_net(memory, pretrained=pretrained, signs=signs, junctions=junctions, motion=motion).to(device)
+    model = build_road_type_net(memory, pretrained=pretrained, signs=signs, junctions=junctions, motion=motion)
+    start = None
+    if init_from is not None:
+        start = road_type_start(torch, model, Path(init_from), memory, dataset['split'])
+        log(f"{name} starts from {start['run']} (epoch {start['epoch']}): every layer"
+            + (f" but {', '.join(start['fresh'])}" if start['fresh'] else '')
+            + ('; tested on other drives' if start['same_test_drives'] is False else ''))
+    model = model.to(device)
     weights_of_class = torch.tensor(class_weights(dataset, by_partition['train']), device=device)
     junction_balance = torch.tensor(junction_pos_weights(dataset, by_partition['train']), device=device)
     backbone = list(model.backbone.parameters())
@@ -1315,7 +1365,7 @@ def train_road_type(data_root: Path, run_dir: Path, *, memory: str = 'gru', epoc
               'architecture': saved['architecture'], 'classes': list(data.CLASSES), 'best_epoch': best_epoch,
               'history': history, 'config': config, 'parameters': count_parameters(model),
               'flops_per_step': step_flops(model), 'split_sha256': dataset['split_sha256'],
-              'dataset_sha256': saved['dataset_sha256'], 'dataset': dataset['summary'],
+              'dataset_sha256': saved['dataset_sha256'], 'dataset': dataset['summary'], 'start': start,
               'finished_at': time.strftime('%Y-%m-%dT%H:%M:%S')}
     if stage is not None:
         result['junction_stage'] = stage

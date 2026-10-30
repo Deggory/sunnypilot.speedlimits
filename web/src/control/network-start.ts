@@ -1,0 +1,79 @@
+// Where the next training of the cutter, of applicability or of the scene network starts, kept once for its section and
+// for its step of Train › Pipeline (the same choice in both): its usual start (random weights for SignNet, ImageNet for
+// the others), or a finished version of its role in Models, whose weights it goes on from. An applicability run and a
+// scene run are one choice each: each of their networks goes on from its own of that run.
+import {computed, reactive, ref, type Ref} from 'vue';
+import {isoWhen, plural} from '../common/format';
+import type {ActionOptions, ModelRole, ModelVersion, PanelStatus} from '../common/panel-types';
+import type {PickerOption} from '../components/PickerSheet.vue';
+
+export type StartRole = 'cutter' | 'decider' | 'road_type';
+type Split = 'same' | 'another' | 'unknown';
+const SPLIT_WORDS: Record<Split, string> = {same: 'learnt on today’s split', another: 'learnt on another split',
+  unknown: 'its split not recorded'};
+/** The usual start of each, the first choice: its test stays fair. */
+const FRESH: Record<StartRole, string> = {cutter: 'Random weights', decider: 'ImageNet', road_type: 'ImageNet'};
+const NAME: Record<StartRole, string> = {cutter: 'SignNet', decider: 'Applicability', road_type: 'Scene'};
+export const FRESH_START = 'fresh';
+
+export function useNetworkStart(role: StartRole, status: Ref<PanelStatus | null>,
+  versionsOf: (role: ModelRole) => readonly ModelVersion[] | undefined) {
+  /** A finished version that can be a start: a SignNet the comma runs (its band and grid), a whole applicability
+   * training (not a smoke run), a scene network. */
+  const startable = (version: ModelVersion): boolean => version.role === role && version.finished
+    && (version.role !== 'cutter' || (version.kind === 'signnet' && version.fits_the_car === true))
+    && (version.role !== 'decider' || !version.smoke_limit);
+  /** One choice per run (the one in use there, else its newest), the run in use first, then the newest. */
+  const starts = computed(() => {
+    const byRun = new Map<string, ModelVersion[]>();
+    for (const version of versionsOf(role) ?? []) {
+      if (startable(version)) byRun.set(version.run, [...byRun.get(version.run) ?? [], version]);
+    }
+    return [...byRun.values()].map((items) => ({version: items.find((item) => item.in_use) ?? items[0]!,
+      count: items.length, inUse: items.some((item) => item.in_use)}))
+      .sort((a, b) => Number(b.inUse) - Number(a.inUse));
+  });
+  const titleOf = (version: ModelVersion): string => (role === 'cutter' ? version.label : NAME[role]) + ' '
+    + (version.trained_at ? isoWhen(version.trained_at) : version.run);
+  /** Whether it learnt on the split the new one is measured on; a scene network's test drives are checked when it
+   * trains (its run's split is a split of places, made again with every drive). */
+  const currentSplit = computed(() => status.value?.classifier_options?.split_sha256 ?? null);
+  const splitOf = (version: ModelVersion): Split | null => {
+    if (version.role !== 'cutter' && version.role !== 'decider') return null;
+    return !version.split_sha256 || !currentSplit.value ? 'unknown' : version.split_sha256 === currentSplit.value ? 'same' : 'another';
+  };
+  const options = computed((): PickerOption[] => [
+    {key: FRESH_START, title: FRESH[role], sub: 'the usual start: a fair test'},
+    ...starts.value.map(({version, count, inUse}) => {
+      const split = splitOf(version);
+      return {key: version.id, title: titleOf(version), short: titleOf(version), badge: inUse ? 'In use' : undefined,
+        sub: [split ? SPLIT_WORDS[split] : '', role === 'cutter' ? '' : plural(count, 'network')].filter(Boolean).join(' · ')};
+    }),
+  ]);
+  const picked = ref(FRESH_START);
+  const key = computed({
+    get: (): string => starts.value.some((item) => item.version.id === picked.value) ? picked.value : FRESH_START,
+    set: (value: string) => { picked.value = value; },
+  });
+  const version = computed(() => starts.value.find((item) => item.version.id === key.value)?.version ?? null);
+  /** A line under the choice: what it goes on from, and whether the new one's test stays fair. */
+  const note = computed((): {text: string; warn: boolean} | null => {
+    if (version.value === null) return null;
+    const split = splitOf(version.value);
+    const what = role === 'cutter' ? 'It goes on from that SignNet’s weights'
+      : role === 'decider' ? 'Each version goes on from its own of that run (one it lacks from ImageNet)'
+        : 'Each network goes on from its own of that run (one it lacks from ImageNet)';
+    if (split === 'another') return {text: 'Trained on another split: it may have seen some of today’s test frames, so the test '
+      + 'of the new one is not fair.', warn: true};
+    if (split === 'unknown') return {text: 'Its split is not recorded: it may have seen some of today’s test frames, so the test '
+      + 'of the new one may not be fair.', warn: true};
+    if (split === 'same') return {text: what + ', learnt on today’s split: the test stays fair.', warn: false};
+    return {text: what + '. If that run was tested on other drives, Models says the new one’s test is not fair.', warn: false};
+  });
+  /** The option of its training (ActionOptions.start). */
+  const option = computed((): ActionOptions => ({start: version.value?.id ?? FRESH_START}));
+  /** What it starts from, in words, after the training's own: "", or ", going on from SignNet 896 × 288 29 Oct 14:02". */
+  const words = computed(() => version.value ? ', going on from ' + titleOf(version.value) : '');
+  return reactive({options, key, version, note, option, words});
+}
+export type NetworkStartChoice = ReturnType<typeof useNetworkStart>;

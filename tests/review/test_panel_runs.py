@@ -333,6 +333,23 @@ def test_experiment_b_as_context_experiment_writes_it(root, index):
     assert rows['box_count']['values']['crop']['test'] == {'all': 2, 'human': 1}
 
 
+def test_a_signnet_and_an_applicability_run_that_went_on_from_an_earlier_one(root, index):
+    run = make_signnet_run(root)
+    result = json.loads((run / 'result.json').read_text())
+    write(run / 'result.json', {**result, 'start': {'path': '/srv/data/runs/older_1/signnet-best.pt', 'run': 'older_1', 'epoch': 9}})
+    base = root / 'runs' / 'experiment-b-002' / 'experiment-b'
+    write(base / 'crop/result.json', experiment_result('crop', 0.9, 0.2))
+    write(base / 'full/result.json', {**experiment_result('full', 0.9, 0.2), 'initialization': 'start',
+                                      'start': {'path': '/srv/data/runs/older_2/experiment-b/full/full-best.pt', 'run': 'older_2'}})
+    runs = {item['name']: item for item in index.summaries()['runs']}
+    assert runs['2026-10-30_1200-cutter']['start'] == {'kind': 'run', 'label': 'Continued from run older_1', 'run': 'older_1',
+                                                       'source': '/srv/data/runs/older_1/signnet-best.pt'}
+    assert (runs['experiment-b-002']['kind'], runs['experiment-b-002']['start']['run']) == ('experiment', 'older_2')
+    # A start without a run name of ours is not one.
+    write(run / 'result.json', {**result, 'start': {'run': '../x'}})
+    assert index.detail('2026-10-30_1200-cutter')['start']['kind'] == 'random'
+
+
 def test_a_folder_with_experiment_b_only(root, index):
     base = root / 'runs' / 'experiment-b-001' / 'experiment-b'
     write(base / 'crop/result.json', experiment_result('crop', 0.9, 0.2))

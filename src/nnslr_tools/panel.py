@@ -66,6 +66,13 @@ CLASSIFIER_SCRIPT = 'scripts/run_classifier.sh'
 # sign" of the Models tab, by its id (its reader-best.pt becomes NNSLR_CLASSIFIER_INIT_FROM).
 CLASSIFIER_IMAGENET = 'imagenet'
 CLASSIFIER_ID = re.compile(r'classifier:([A-Za-z0-9][A-Za-z0-9._-]{0,99})/classifier')
+# Where the cutter's, the applicability's and the scene network's trainings start ({'start': ...}): their default
+# (NETWORK_FRESH: random weights for SignNet, ImageNet for the others), or a finished version of their role in Models,
+# by its id; its script gets the earlier run's weights or folder (the variable here), where each applicability variant
+# and each scene network goes on from its own.
+NETWORK_FRESH = 'fresh'
+NETWORK_STARTS = {'train_cutter': ('cutter', 'NNSLR_CUTTER_INIT_FROM'), 'train_decider': ('decider', 'NNSLR_DECIDER_INIT_FROM'),
+                  'train_road_type': ('road_type', 'NNSLR_ROAD_TYPE_INIT_FROM')}
 # A split file's sha256 (splits/latest.json).
 SPLIT_SHA = re.compile(r'[0-9a-f]{64}')
 # The cutter is SignNet, the network the comma runs, trained with the car's setup (896 x 288, stride 8). The jobs of
@@ -117,7 +124,8 @@ CUTTER_FAMILY = 'all'
 # The options an action takes, besides a training's start and the run to resume (checked by Panel.start).
 # The GPU memory Qwen3-VL-8B takes in float16 (scripts/setup_vlm.sh: 17.5 GB), with a margin for one frame.
 QWEN_GPU_MB = 18 * 1024
-ACTION_OPTIONS = {'train_cutter': ('families',), 'train_classifier': ('mapillary', 'region', 'share', 'start', 'cutter'),
+ACTION_OPTIONS = {'train_cutter': ('families', 'start'), 'train_decider': ('start',), 'train_road_type': ('start',),
+                  'train_classifier': ('mapillary', 'region', 'share', 'start', 'cutter'),
                   'prepare': ('proposer',), 'prepare_again': ('proposer',),
                   'measure_proposer': ('proposer',), 'networks_publish': ('package',), 'send_to_car': ('signnet',),
                   'try_on_comma': ('signnet',),
@@ -266,9 +274,12 @@ def _flags(settings: str) -> dict[str, str]:
 
 
 def _start_words(path: str) -> str:
-    """The start of a classifier (--init-from) in words: the run of a .../runs/<run>/classifier/reader-best.pt."""
+    """The start of a classifier or a SignNet (--init-from) in words: the run of a
+    .../runs/<run>/classifier/reader-best.pt or of a .../runs/<run>/signnet-best.pt."""
     parts = Path(path).parts
-    return parts[-3] if len(parts) >= 3 and parts[-2] in ('classifier', 'pretrain', 'reader') else Path(path).name
+    if len(parts) >= 3 and parts[-2] in ('classifier', 'pretrain', 'reader'):
+        return parts[-3]
+    return parts[-2] if len(parts) >= 2 and parts[-1] == 'signnet-best.pt' else Path(path).name
 
 
 def _region_words(region: str) -> str:
@@ -735,7 +746,7 @@ class Panel:
         # the regions its photos can be chosen by (helpers/mapillary_locations.sh).
         from nnslr_tools.mapillary import crops_state, regions_state
         # And the split the next one learns on (splits/latest.json): a classifier to start from that learnt on another
-        # one may have seen some of its test signs ("Start from").
+        # one may have seen some of its test signs ("Start from"; the same for a SignNet or an applicability variant).
         payload['classifier_options'] = {'mapillary': crops_state(self.root),
                                          'mapillary_regions': regions_state(self.root, self.repo),
                                          'split_sha256': current_split(self.root)}
@@ -1417,6 +1428,31 @@ class Panel:
             raise PanelError(400, 'bad_option', 'The weights of that classifier are missing on this server.') from None
         return {'NNSLR_CLASSIFIER_INIT_FROM': str(weights)}
 
+    def _network_start(self, action: str, start: object) -> dict:
+        """The environment of where the cutter's, the applicability's or the scene network's training starts (one of
+        NETWORK_STARTS): nothing for its default (NETWORK_FRESH), or the variable of a finished version of its role in
+        Models given by its id: the signnet-best.pt of a SignNet of the comma's band and grid, the experiment-b folder
+        of an applicability run, the road-type folder of a scene run."""
+        if start is None or start == NETWORK_FRESH:
+            return {}
+        if not isinstance(start, str):
+            raise PanelError(400, 'bad_option', 'The start is a string: fresh, or the id of a version of Models.')
+        role, variable = NETWORK_STARTS[action]
+        entry = next((entry for entry in self.models_index.artifacts((role,))[role] if entry['id'] == start), None)
+        if entry is None or not RUN_NAME.fullmatch(entry['run']):
+            raise PanelError(400, 'bad_option', 'Unknown network to start from: choose one of Models.')
+        if not entry['finished']:
+            raise PanelError(400, 'bad_option', 'That network has not finished its training: choose a finished one.')
+        if entry.get('smoke_limit'):
+            raise PanelError(400, 'bad_option', 'A smoke run learnt on a few frames: choose a whole training.')
+        run = self.root / 'runs' / entry['run']
+        if role == 'cutter':
+            if entry.get('kind') != 'signnet' or not entry.get('fits_the_car'):
+                raise PanelError(400, 'bad_option', 'Only a SignNet of the comma’s band and grid can be a start.')
+            from nnslr_tools.chain import SIGNNET_FILE
+            return {variable: str(run / SIGNNET_FILE)}
+        return {variable: str(run / entry['part'].split('/')[0])}
+
     def start(self, action: str, options: dict | None = None, *, check_only: bool = False) -> dict | None:
         """Starts an action (check_only: only checks it and its options, for a pipeline, and returns None). The only options are the starting point of a training ({'start': key} of
         training_starts()), turned into a flag or the environment of helpers/3_train.sh, the run to resume, and the
@@ -1494,6 +1530,8 @@ class Panel:
         start_env.update(self._mapillary_choice(action, options or {}, mapillary in ('on', 'pretrain')))
         if action == 'train_classifier':
             start_env.update(self._classifier_start((options or {}).get('start'), mapillary))
+        if action in NETWORK_STARTS:
+            start_env.update(self._network_start(action, (options or {}).get('start')))
         cutter_choice = (options or {}).get('cutter')
         if cutter_choice is not None and action != 'train_classifier':
             raise PanelError(400, 'bad_option', 'Only "Train the classifier" takes a cutter.')
@@ -1554,7 +1592,7 @@ class Panel:
         elif resumed is not None:
             raise PanelError(400, 'bad_option', 'Only "Resume the training" takes a run.')
         start = (options or {}).get('start')
-        if start is not None and action != 'train_classifier':
+        if start is not None and action != 'train_classifier' and action not in NETWORK_STARTS:
             if action != 'train':
                 raise PanelError(400, 'bad_option', 'Only a training has a starting point.')
             choice = next((item for item in self.training_starts() if item['key'] == start), None)

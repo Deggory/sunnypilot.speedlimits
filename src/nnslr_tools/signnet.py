@@ -381,13 +381,36 @@ def signnet_not_trainable(plan: dict[str, Any]) -> str:
             f"(families {plan.get('families')!r})")
 
 
+def signnet_start(path: Path, *, widths, stride: int, fuse_kernel: int, band_width: int) -> tuple[dict, dict]:
+    """The weights of a finished SignNet to start from (nnslr train-signnet --init-from) and what result.json records
+    of it: its file and sha256, its run, the epoch, split and families it learnt. The heat says "a sign is here" whatever
+    the families, so a start of any families fits; its widths, grid, fuse convolution and band must be this network's
+    (every layer is copied as it is)."""
+    torch, _ = _torch()
+    from nnslr_tools.exporting import sha256_file
+    path = Path(path)
+    saved = checkpoint_data(torch.load(path, map_location='cpu', weights_only=True), path)
+    if saved.get('task') != 'signnet' or not isinstance(saved.get('state_dict'), dict):
+        raise ValueError(f'the start is not a SignNet: {path}')
+    wanted = {'widths': list(widths), 'stride': stride, 'fuse kernel': fuse_kernel, 'band': list(band_size(band_width))}
+    found = {'widths': saved.get('widths'), 'stride': saved.get('stride'), 'fuse kernel': saved.get('fuse_kernel', 3),
+             'band': saved.get('band')}
+    different = [f'{key} {found[key]} (this run {wanted[key]})' for key in wanted if found[key] != wanted[key]]
+    if different:
+        raise ValueError(f'the start is another network: {", ".join(different)}: {path}')
+    return saved['state_dict'], {'path': str(path), 'sha256': sha256_file(path), 'run': path.parent.name,
+                                 'epoch': saved.get('epoch'), 'split_sha256': saved.get('split_sha256'),
+                                 'dataset_sha256': saved.get('dataset_sha256'), 'families': saved.get('families')}
+
+
 def train_signnet(plan: dict[str, Any], data_root: Path, run_dir: Path, *, widths=CAR_WIDTHS,
                   stride: int = CAR_STRIDE, epochs: int = 40, batch: int = 16, learning_rate: float = 3e-3,
                   workers: int = 8, seed: int = 1, band_width: int = CAR_BAND[0], fuse_kernel: int = CAR_FUSE_KERNEL,
-                  log=None) -> dict[str, Any]:
+                  init_from: Path | None = None, log=None) -> dict[str, Any]:
     """Train on the plan's train frames, keep the epoch with the best validation recall at 5 boxes a frame, then
     measure it on validation and test. Writes signnet-best.pt and result.json in run_dir. The defaults are the car's
-    SignNet (CAR_*). Every epoch logs one line (the panel reads it): ``signnet epoch E/N train_loss L val_recall R
+    SignNet (CAR_*). init_from: a finished SignNet whose weights it goes on from (signnet_start), else random weights.
+    Every epoch logs one line (the panel reads it): ``signnet epoch E/N train_loss L val_recall R
     val_false_per_frame F Ss``, with the validation at 5 boxes a frame. ``log`` defaults to a print that flushes:
     the script tees it into a file, and the panel follows the epochs as they come."""
     if not plan.get('trainable'):
@@ -406,7 +429,15 @@ def train_signnet(plan: dict[str, Any], data_root: Path, run_dir: Path, *, width
     for frame in plan['frames']:
         by_split.setdefault(frame['split'], []).append(frame)
     train_frames, validation, test = by_split.get('train', []), by_split.get('validation', []), by_split.get('test', [])
-    model = build_signnet(widths, stride, fuse_kernel).to(device)
+    model = build_signnet(widths, stride, fuse_kernel)
+    start = None
+    if init_from is not None:
+        weights, start = signnet_start(init_from, widths=widths, stride=stride, fuse_kernel=fuse_kernel,
+                                       band_width=band_width)
+        model.load_state_dict(weights, strict=True)
+        log(f"signnet starts from {start['run']}: every layer of its epoch {start['epoch']}"
+            + ('' if start['split_sha256'] == plan.get('split_sha256') else ', learnt on another split'))
+    model = model.to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-4)
     loader = DataLoader(_dataset(train_frames, data_root, stride, train=True, seed=seed, band_width=band_width),
                         batch_size=batch, shuffle=True, num_workers=workers, drop_last=True,
@@ -448,7 +479,7 @@ def train_signnet(plan: dict[str, Any], data_root: Path, run_dir: Path, *, width
         'band': list(band_size(band_width)),
         'parameters': sum(p.numel() for p in model.parameters()), 'epochs': epochs, 'best_epoch': best_epoch,
         'dataset_sha256': plan.get('dataset_sha256'), 'split_sha256': plan.get('split_sha256'),
-        'families': plan.get('families'), 'counts_by_split': plan.get('counts_by_split'),
+        'families': plan.get('families'), 'start': start, 'counts_by_split': plan.get('counts_by_split'),
         'boxes_by_split': plan.get('boxes_by_split'), 'ignore_boxes_by_split': plan.get('ignore_boxes_by_split'),
         'history': history,
         'validation': measure(model, validation, data_root, stride, device, workers=workers, band_width=band_width),

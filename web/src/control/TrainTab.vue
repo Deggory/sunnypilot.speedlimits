@@ -19,6 +19,8 @@ import JobProgress from './JobProgress.vue';
 import {CHARTED_ACTIONS, JOB_STATE, jobOf, PIPELINE_ACTIONS, startedWhen, terminalActivities} from './jobs';
 import {pct} from './evaluate';
 import {sizeText, useModels} from './models';
+import {useNetworkStart} from './network-start';
+import NetworkStartPicker from './NetworkStartPicker.vue';
 import PipelineSection from './PipelineSection.vue';
 import Segmented from './Segmented.vue';
 import TerminalActivity from './TerminalActivity.vue';
@@ -143,23 +145,31 @@ const cutterFamilies = computed({
   get: (): CutterFamilies => pickedFamilies.value ?? props.status?.cutter_options?.family ?? 'all',
   set: (value: CutterFamilies) => { pickedFamilies.value = value; },
 });
+/** Where the cutter's, applicability's and the scene network's next trainings start (network-start.ts), the same in
+ * their sections and in the pipeline. */
+const versionsOf = (role: ModelRole) => roleOf(role)?.versions;
+const starts = {cutter: useNetworkStart('cutter', toRef(props, 'status'), versionsOf),
+  decider: useNetworkStart('decider', toRef(props, 'status'), versionsOf),
+  road_type: useNetworkStart('road_type', toRef(props, 'status'), versionsOf)};
 const CUTTER_ACTIONS = computed((): [ActionName, string][] => [
   ['train_cutter', 'A new SignNet, the cutter the comma runs, for ' + (cutterFamilies.value === 'all' ? 'every sign'
-    : 'speed signs only') + ': it looks at the ' + cutterBand.value + ' band at the top of the frame. About 80 minutes on the GPU.'],
+    : 'speed signs only') + starts.cutter.words + ': it looks at the ' + cutterBand.value + ' band at the top of the frame. '
+    + 'About 80 minutes on the GPU.'],
 ]);
 /** The classifier's training, in its card. */
 /** The decider's training, in its card: experiment B, its three variants. */
-const DECIDER_ACTIONS: [ActionName, string][] = [
-  ['train_decider', 'Three versions of applicability (is this sign for our road?): the crop alone, with position and speed, with the scene. About 15 minutes on the GPU.'],
-];
+const DECIDER_ACTIONS = computed((): [ActionName, string][] => [
+  ['train_decider', 'Three versions of applicability (is this sign for our road?): the crop alone, with position and speed, with '
+    + 'the scene' + starts.decider.words + '. About 15 minutes on the GPU.'],
+]);
 /** The road type's training, in its card: with memory and without, compared, the one with memory exported. */
-const ROAD_ACTIONS: [ActionName, string][] = [
+const ROAD_ACTIONS = computed((): [ActionName, string][] => [
   ['train_road_type', 'Trains with memory and the motorway sign (where each entry ramp of the map starts), without the sign '
-    + 'and without memory, compared by when the ramp’s limit ends; the first is exported for the car. '
-    + 'About 20 minutes, 40 the first time.'],
-];
+    + 'and without memory, compared by when the ramp’s limit ends; the first is exported for the car'
+    + starts.road_type.words + '. About 20 minutes, 40 the first time.'],
+]);
 /** The classifier's choices (classifier-choices.ts), the same in its section and in the pipeline. */
-const choices = useClassifierChoices(toRef(props, 'status'), (role) => roleOf(role)?.versions);
+const choices = useClassifierChoices(toRef(props, 'status'), versionsOf);
 const CLASSIFIER_ACTIONS = computed((): [ActionName, string][] => [
   ['train_classifier', 'A new classifier, taught on the signs and on the cutter’s mistakes' + choices.words
     + '. Takes a few hours on the GPU.'],
@@ -239,8 +249,9 @@ const numbers = computed(() => {
         <div class="seg-row">
           <Segmented v-model="cutterFamilies" :options="FAMILY_OPTIONS" label="Signs the cutter finds"/>
         </div>
+        <NetworkStartPicker :start="starts.cutter" id="train-cutter-start"/>
         <ActionList :items="CUTTER_ACTIONS" :actions="status?.actions ?? null"
-                    @run="(name, state) => emit('run', name, state, undefined, {families: cutterFamilies})"/>
+                    @run="(name, state) => emit('run', name, state, undefined, {families: cutterFamilies, ...starts.cutter.option})"/>
       </template>
       <template v-else-if="section === 'classifier'">
         <ClassifierChoices :choices="choices" :status="status"
@@ -267,14 +278,18 @@ const numbers = computed(() => {
           photos failed · <button type="button" class="link-button" @click="choices.locateJob && emit('details', choices.locateJob)">Details</button></p>
       </template>
       <template v-else-if="section === 'decider'">
-        <ActionList :items="DECIDER_ACTIONS" :actions="status?.actions ?? null" @run="(name, state) => emit('run', name, state)"/>
+        <NetworkStartPicker :start="starts.decider" id="train-decider-start"/>
+        <ActionList :items="DECIDER_ACTIONS" :actions="status?.actions ?? null"
+                    @run="(name, state) => emit('run', name, state, undefined, starts.decider.option)"/>
         <p class="latest-none" id="train-decider-note">The one in use (Models) sets OURS or another on the speed signs Our networks propose.</p>
       </template>
       <template v-else-if="section === 'road'">
-        <ActionList :items="ROAD_ACTIONS" :actions="status?.actions ?? null" @run="(name, state) => emit('run', name, state)"/>
+        <NetworkStartPicker :start="starts.road_type" id="train-road-start"/>
+        <ActionList :items="ROAD_ACTIONS" :actions="status?.actions ?? null"
+                    @run="(name, state) => emit('run', name, state, undefined, starts.road_type.option)"/>
         <p class="latest-none" id="train-road-note">It learns from the road types of Data › Roads. The one in use (Models) goes to the comma with Publish.</p>
       </template>
-      <PipelineSection v-else v-model:families="cutterFamilies" :status="status" :choices="choices" :fresh="numbers?.fresh ?? 0"
+      <PipelineSection v-else v-model:families="cutterFamilies" :status="status" :choices="choices" :starts="starts" :fresh="numbers?.fresh ?? 0"
                        :family-options="FAMILY_OPTIONS" @pipeline="(steps, text) => emit('pipeline', steps, text)"
                        @stop-pipeline="emit('stopPipeline')" @stop="emit('stop', $event)" @details="emit('details', $event)"
                        @run="(name, state, start) => emit('run', name, state, start)"/>
