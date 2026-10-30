@@ -1672,7 +1672,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_road_signs.add_argument("--sunnypilot", help="the sunnypilot clone (default: NNSLR_SUNNYPILOT_CLONE or "
                                                    "/root/sunnypilot); read only")
     p_road_signs.add_argument("--num-workers", "--workers", dest="workers", type=int, default=0,
-                              help="processes (default: the cores but two)")
+                              help="processes (default: a quarter of the cores)")
     p_road_signs.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_road_signs.set_defaults(func=_cmd_road_type_signs)
     p_motion = sub.add_parser("car-motion", help="the car's own motion of every second of the drives with GPS "
@@ -1683,7 +1683,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_motion.add_argument("--all", action="store_true", help="every drive with GPS positions or road types")
     p_motion.add_argument("--again", action="store_true", help="read the logs again even when cached")
     p_motion.add_argument("--num-workers", "--workers", dest="workers", type=int, default=0,
-                          help="log readers at a time (default: the cores but two)")
+                          help="log readers at a time (default: a quarter of the cores)")
     p_motion.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_motion.set_defaults(func=_cmd_car_motion)
     p_road_rel = sub.add_parser("release-road-type", help="the comma's rule with a road-type checkpoint: for every "

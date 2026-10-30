@@ -45,7 +45,7 @@ set -euo pipefail
 #
 # Environment: NNSLR_GPU_INDEX (default 0), NNSLR_GPU_VENV (.venv-gpu), NNSLR_ROAD_TYPE_EPOCHS (60),
 # NNSLR_ROAD_TYPE_PATIENCE (15), NNSLR_ROAD_TYPE_BATCH (12 sequences), NNSLR_NUM_WORKERS (half the cores, 4 to 16),
-# NNSLR_SIGN_WORKERS (processes reading the signs: the cores but two), NNSLR_SUNNYPILOT_CLONE (/root/sunnypilot),
+# NNSLR_SIGN_WORKERS (processes reading the signs and the car's motion: a quarter of the cores, each with its ffmpeg), NNSLR_SUNNYPILOT_CLONE (/root/sunnypilot),
 # NNSLR_ROAD_TYPE_BASELINE (earlier road-type-best.pt to compare with, separated by ":"), NNSLR_ROAD_TYPE_INIT_FROM (the
 # road-type folder of an earlier run: each network goes on from its own there, one it lacks from ImageNet; Train ›
 # Scene › Start from), NNSLR_ALLOW_BUSY_GPU=1 to share a GPU that already has compute processes.
@@ -61,7 +61,7 @@ BATCH="${NNSLR_ROAD_TYPE_BATCH:-12}"
 CORES="$(nproc 2>/dev/null || echo 8)"
 WORKERS_DEFAULT=$(( CORES / 2 < 4 ? 4 : (CORES / 2 > 16 ? 16 : CORES / 2) ))
 NUM_WORKERS="${NNSLR_NUM_WORKERS:-$WORKERS_DEFAULT}"
-SIGN_WORKERS="${NNSLR_SIGN_WORKERS:-$(( CORES > 3 ? CORES - 2 : 1 ))}"
+SIGN_WORKERS="${NNSLR_SIGN_WORKERS:-$(( CORES / 4 > 1 ? CORES / 4 : 1 ))}"
 BASELINE="${NNSLR_ROAD_TYPE_BASELINE:-}"
 JUNCTIONS="${NNSLR_ROAD_TYPE_JUNCTIONS:-1}"
 START="${NNSLR_ROAD_TYPE_INIT_FROM:-}"

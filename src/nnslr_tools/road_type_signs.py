@@ -227,7 +227,7 @@ def build_signs(root: Path, routes: list[str], *, package: Path | None = None, w
             continue
         tasks += [(route, segment, str(path)) for segment, path in videos.items()]
     if tasks:
-        workers = workers or max(1, min(len(tasks), (os.cpu_count() or 2) - 2))
+        workers = workers or max(1, min(len(tasks), (os.cpu_count() or 4) // 4))
         log(f'road-type signs: reading {len(tasks)} segments of {len({t[0] for t in tasks})} drives with the car\'s '
             f'SignNet and classifier, 5 frames a second, {workers} processes')
         results: dict[str, list] = {}

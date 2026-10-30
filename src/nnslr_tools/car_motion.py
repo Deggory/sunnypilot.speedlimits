@@ -253,7 +253,7 @@ def build_motion(root: Path, routes: list[str], *, workers: int | None = None, p
             todo[route] = logs
     paths = [path for logs in todo.values() for path in logs.values()]
     if paths:
-        workers = workers or max(1, min(len(paths), (os.cpu_count() or 2) - 2))
+        workers = workers or max(1, min(len(paths), (os.cpu_count() or 4) // 4))
         log(f'car motion: reading {len(paths)} segment logs of {len(todo)} drives, {workers} at a time')
         groups = [[path] for path in paths]
         read, done = {}, 0
