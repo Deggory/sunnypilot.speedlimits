@@ -16,6 +16,8 @@ old Detector.
 families and split) and measures it on validation and test with the old Detector's scoring (evaluation.score_frame,
 detector_size_metrics), so the two compare one to one. The plan's ignore boxes (switched-off variable displays) are
 neither signs nor background: the loss does not judge their cells, and a box found on one is dropped before scoring.
+In training, a quarter of the speed signs of a frame are drawn as an end of limit, their box kept (synthetic_signs:
+Switzerland has too few real ones to learn them), besides the flip and the light of the band.
 Needs the GPU environment (.venv-gpu).
 
 SignNet is the one cutter: the car runs it (sunnypilot's speed_limits/vision.py, mirrored by the CAR_* constants), and
@@ -34,6 +36,8 @@ import random
 import time
 from pathlib import Path
 from typing import Any
+
+from nnslr_tools import synthetic_signs
 
 BAND_WIDTH = 1344
 BAND_HEIGHT = 416
@@ -220,11 +224,14 @@ def _band_of(image, band_width: int = BAND_WIDTH):
     return torch.from_numpy(array.copy()).permute(2, 0, 1)
 
 
-def _band_image(path: Path, band_width: int = BAND_WIDTH):
-    """The frame's top band as a uint8 tensor (3, band height, band_width), and the frame's width."""
+def _band_image(path: Path, band_width: int = BAND_WIDTH, paint=None):
+    """The frame's top band as a uint8 tensor (3, band height, band_width), and the frame's width. paint: a function
+    of the frame (PIL, RGB) that returns it drawn over (training only: synthetic_signs.paint_frame)."""
     from PIL import Image
     with Image.open(path) as image:
         image = image.convert('RGB')
+        if paint is not None:
+            image = paint(image)
         return _band_of(image, band_width), image.size[0]
 
 
@@ -248,7 +255,14 @@ def _dataset(frames: list[dict], data_root: Path, stride: int, *, train: bool, s
 
         def __getitem__(self, index):
             frame = frames[index]
-            image, width = _band_image(data_root / frame['image_path'], band_width)
+            paint = None
+            if train:
+                # Some speed signs drawn as an end of limit, the box kept (synthetic_signs): the few real ones are
+                # not enough to learn them. Python's random is seeded apart in every DataLoader worker.
+                def paint(image):
+                    return synthetic_signs.paint_frame(image, frame['boxes'], frame.get('box_families') or [],
+                                                       random)[0]
+            image, width = _band_image(data_root / frame['image_path'], band_width, paint)
             boxes = band_boxes(frame['boxes'], width, band_width)
             ignore = band_boxes(frame.get('ignore_boxes') or [], width, band_width)
             image = image.float() / 255.0
@@ -481,6 +495,9 @@ def train_signnet(plan: dict[str, Any], data_root: Path, run_dir: Path, *, width
         'dataset_sha256': plan.get('dataset_sha256'), 'split_sha256': plan.get('split_sha256'),
         'families': plan.get('families'), 'start': start, 'counts_by_split': plan.get('counts_by_split'),
         'boxes_by_split': plan.get('boxes_by_split'), 'ignore_boxes_by_split': plan.get('ignore_boxes_by_split'),
+        'synthetic_end_of_limit': {**synthetic_signs.summary(), 'paintable_train_boxes': sum(
+            synthetic_signs.paintable(box, family) for frame in train_frames
+            for box, family in zip(frame['boxes'], frame.get('box_families') or []))},
         'history': history,
         'validation': measure(model, validation, data_root, stride, device, workers=workers, band_width=band_width),
         'test': measure(model, test, data_root, stride, device, workers=workers, band_width=band_width),

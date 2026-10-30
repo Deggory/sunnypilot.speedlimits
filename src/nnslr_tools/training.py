@@ -36,7 +36,7 @@ import re
 import time
 from typing import Any
 
-from nnslr_tools import tracking
+from nnslr_tools import synthetic_signs, tracking
 from nnslr_tools.checkpoints import (DEFAULT_DETECTOR_ANCHOR_MIN_RATIO, DEFAULT_DETECTOR_INPUT_SIZE,
                                      DETECTOR_ANCHOR_MAX_RATIO, MAX_DETECTOR_INPUT_SIDE, atomic_torch_save,
                                      build_detector, detector_is_wide, model_weights, stable_weights, torch_load)
@@ -2030,7 +2030,9 @@ def train_reader(
 
     The plan's class scheme decides what is trained. v1: the reader, its best epoch the highest validation
     accuracy. v2: the classifier with not_a_sign (prepare_reader_training), its log lines "classifier epoch ...",
-    its training crops darker and lower in contrast and their boxes jittered (config.augment), the not_a_sign
+    its training crops darker and lower in contrast and their boxes jittered (config.augment), with an end-of-limit
+    sign drawn over a quarter of its speed signs, labelled cancellation (synthetic_signs, with the augmentation and the
+    class cancellation in the plan), the not_a_sign
     crops weighing in the loss as much as all the sign crops together when they are more, and its best epoch
     the highest validation balanced accuracy: the mean of the right answers on the sign crops and the share of
     the not_a_sign crops it rejects, so that neither the signs nor the junk boxes of the cutter decide alone.
@@ -2076,6 +2078,8 @@ def train_reader(
     augment = classifier and config.augment
     classes = list(plan["classes"])
     class_to_index = {label: idx for idx, label in enumerate(classes)}
+    # End-of-limit signs drawn over speed signs (synthetic_signs): with the augmentation, when the plan has the class.
+    synthetic = augment and synthetic_signs.CANCELLATION in class_to_index
     negative_index = class_to_index.get(NOT_A_SIGN) if classifier else None
     root = Path(data_root).resolve()
 
@@ -2119,9 +2123,21 @@ def train_reader(
             epoch, index = divmod(int(key), len(self.records))
             row = self.records[index]
             box = row["bbox_xyxy"]
+            label = row["label"]
+            paint = None
+            if self.training and synthetic and synthetic_signs.paintable(box, label):
+                # A speed sign drawn as an end of limit now and then (synthetic_signs): the crop is a cancellation.
+                draw = random.Random(_sample_seed("cancellation", config.seed, epoch, index))
+                if draw.random() < synthetic_signs.SHARE:
+                    style, value = synthetic_signs.style_of(label), synthetic_signs.value_of(label)
+
+                    def paint(window, to_window):
+                        return synthetic_signs.paint_end_of_limit(window, to_window(row["bbox_xyxy"]), style, draw,
+                                                                  value)
+                    label = synthetic_signs.CANCELLATION
             if self.training and augment:
                 box = jitter_box(box, random.Random(_sample_seed("box", config.seed, epoch, index)))
-            crop = self.geometry(cache.crop(self.first + index, box))
+            crop = self.geometry(cache.crop(self.first + index, box, paint))
             if self.training and augment:
                 # The colour comes from the photometric augmentation; the box jitter moves and resizes; a rotation
                 # of up to 4 degrees as RandomAffine(degrees=4) draws it, from the crop's own seed.
@@ -2135,7 +2151,7 @@ def train_reader(
             if self.training and augment:
                 generator = torch.Generator().manual_seed(_sample_seed("photometric", config.seed, epoch, index))
                 draws = photometric_draws(torch, generator, CLASSIFIER_AUGMENTATION)
-            return pixels, torch.tensor(draws, dtype=torch.float32), class_to_index[row["label"]]
+            return pixels, torch.tensor(draws, dtype=torch.float32), class_to_index[label]
 
     class EpochSampler(torch.utils.data.Sampler):
         """The train crops of an epoch in the order of seed + epoch, as keys of CropDataset."""
@@ -2357,7 +2373,10 @@ def train_reader(
                                         for key, value in CLASSIFIER_AUGMENTATION.items()},
                         "box_jitter": {key: list(value) if isinstance(value, tuple) else value
                                        for key, value in CLASSIFIER_BOX_JITTER.items()},
-                        "rotation_degrees": 4}
+                        "rotation_degrees": 4,
+                        "synthetic_end_of_limit": {**synthetic_signs.summary(), "paintable_train_crops": sum(
+                            synthetic_signs.paintable(r["bbox_xyxy"], r["label"]) for r in train_records)}
+                        if synthetic else None}
     if classifier:
         counts = Counter(record["label"] == NOT_A_SIGN for record in train_records)
         print(f"classifier crops: {counts[False]} signs and {counts[True]} not_a_sign in train, "
@@ -2365,6 +2384,10 @@ def train_reader(
               f"{sum(1 for r in val_records if r['label'] == NOT_A_SIGN)} in validation; {len(classes)} classes; "
               f"not_a_sign loss weight {loss_weights[NOT_A_SIGN]:.3f}; augmentation {'on' if augment else 'off'}; "
               f"best epoch by validation balanced accuracy (signs read right, not_a_sign rejected)", flush=True)
+    if synthetic:
+        print(f"classifier draws an end of limit over {synthetic_signs.SHARE:.0%} of the "
+              f"{augmentation['synthetic_end_of_limit']['paintable_train_crops']} speed signs of train each epoch "
+              f"(cancellation)", flush=True)
     try:
         stopped_early = None
         for epoch in range(start_epoch, config.epochs):

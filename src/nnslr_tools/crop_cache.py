@@ -158,9 +158,11 @@ class CropCache:
         offset, height, width = (int(value) for value in self.index[index, :3])
         return np.asarray(self._pixels[offset:offset + height * width * 3]).reshape(height, width, 3)
 
-    def crop(self, index: int, box: list[float] | None = None):
+    def crop(self, index: int, box: list[float] | None = None, paint=None):
         """The crop of record ``index``: the stored one, or for a window the crop of ``box`` (the record's box,
-        jittered) cut as crop_rectangle cuts it from the frame."""
+        jittered) cut as crop_rectangle cuts it from the frame. paint (a window only): a function of the window (PIL)
+        and of a function that turns a box of the frame into one of the window's pixels, that returns the window
+        drawn over (synthetic_signs) before the crop is cut."""
         from PIL import Image
 
         row = self.index[index]
@@ -169,6 +171,10 @@ class CropCache:
             return image
         left, top, right, bottom = (int(value) for value in row[3:7])
         frame_width, frame_height = int(row[7]), int(row[8])
+        if paint is not None:
+            to_x, to_y = image.width / (right - left), image.height / (bottom - top)
+            image = paint(image, lambda frame_box: [(frame_box[0] - left) * to_x, (frame_box[1] - top) * to_y,
+                                                    (frame_box[2] - left) * to_x, (frame_box[3] - top) * to_y])
         x1, y1, x2, y2 = crop_rectangle(box, frame_width, frame_height)
         # Inside the window (always, by construction: the clamp only guards against rounding).
         x1, x2 = max(left, min(x1, right - 1)), max(left + 1, min(x2, right))

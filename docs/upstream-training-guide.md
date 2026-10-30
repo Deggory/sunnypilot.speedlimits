@@ -639,6 +639,21 @@ joins the strides with 1 x 1 convolutions. It takes the detector's plan
 `--dataset-kind`); a switched-off variable display is an ignore box, neither
 learnt nor counted.
 
+Switzerland has few end-of-limit signs: on 30 October 2026 the dataset had 154
+train crops of them, from a handful of physical signs, and both networks learnt
+those by heart (of 24 in validation and buffer, SignNet boxed 9 for the car and
+the classifier read 5 sure enough). So both trainings draw end-of-limit signs
+over their own speed signs (`nnslr_tools.synthetic_signs`): each time a train
+frame is read, every speed sign of 9 pixels or more (`maximum_speed`, a lit
+`variable_display`) becomes an end of limit with probability 0.25, in its place,
+at its size, with the colours of its own face and digits and as blurred as it
+(a round sign the Swiss sign with thin stripes, 15% of them the end of all
+restrictions; a lit display the white LED ring, number and slash on its black
+panel, or a round sign when its box has no dark panel). SignNet keeps the box;
+the classifier labels the crop `cancellation` (see below). The flip and the
+light of the band come after. `result.json` records it under
+`synthetic_end_of_limit` (with `paintable_train_boxes`).
+
 The defaults are the car's setup, the one **Train the cutter**
 (`scripts/run_signnet.sh NAME`, about 80 minutes on the server's GPU) runs:
 `--band-width 896 --stride 8 --fuse-kernel 1 --widths 16,24,32,48`, 40 epochs,
@@ -738,8 +753,14 @@ band.
 The `v2` training crops are cut with a jittered box (each side scaled 0.85–1.2,
 the centre moved up to 10% of the box, `CLASSIFIER_BOX_JITTER`: the cutter's
 boxes are never exact) and photometrically augmented like the detector's
-frames (`CLASSIFIER_AUGMENTATION`); `--no-augment`
-trains without both. The `not_a_sign` crops together weigh at most as much as
+frames (`CLASSIFIER_AUGMENTATION`); a quarter of the speed-sign crops, drawn
+again every epoch, carry an end-of-limit sign drawn over the sign and are
+labelled `cancellation` (`synthetic_signs`, see SignNet above: drawn on the
+crop cache's window before the crop is cut, when the plan has the class
+`cancellation`; the log says `classifier draws an end of limit over 25% of the
+N speed signs of train each epoch`, and `result.json` records it under
+`augmentation.synthetic_end_of_limit`); `--no-augment`
+trains without all three. The `not_a_sign` crops together weigh at most as much as
 all the sign crops in the loss (`loss_weights`). The best epoch is the one with
 the highest validation balanced accuracy: the mean of the sign crops read right
 and the `not_a_sign` crops rejected. Its epoch lines read
