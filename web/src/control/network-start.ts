@@ -1,7 +1,8 @@
 // Where the next training of the cutter, of applicability or of the scene network starts, kept once for its section and
-// for its step of Train › Pipeline (the same choice in both): its usual start (random weights for SignNet, ImageNet for
-// the others), or a finished version of its role in Models, whose weights it goes on from. An applicability run and a
-// scene run are one choice each: each of their networks goes on from its own of that run.
+// for its step of Train › Pipeline (the same choice in both): a finished version of its role in Models, whose weights it
+// goes on from (the one in use, until another is chosen), or its usual start (random weights for SignNet, ImageNet for
+// the others; the choice while none is in use). An applicability run and a scene run are one choice each: each of their
+// networks goes on from its own of that run.
 import {computed, reactive, ref, type Ref} from 'vue';
 import {isoWhen, plural} from '../common/format';
 import type {ActionOptions, ModelRole, ModelVersion, PanelStatus} from '../common/panel-types';
@@ -11,7 +12,7 @@ export type StartRole = 'cutter' | 'decider' | 'road_type';
 type Split = 'same' | 'another' | 'unknown';
 const SPLIT_WORDS: Record<Split, string> = {same: 'learnt on today’s split', another: 'learnt on another split',
   unknown: 'its split not recorded'};
-/** The usual start of each, the first choice: its test stays fair. */
+/** The usual start of each, first in the list: its test stays fair. */
 const FRESH: Record<StartRole, string> = {cutter: 'Random weights', decider: 'ImageNet', road_type: 'ImageNet'};
 const NAME: Record<StartRole, string> = {cutter: 'SignNet', decider: 'Applicability', road_type: 'Scene'};
 export const FRESH_START = 'fresh';
@@ -43,16 +44,18 @@ export function useNetworkStart(role: StartRole, status: Ref<PanelStatus | null>
     return !version.split_sha256 || !currentSplit.value ? 'unknown' : version.split_sha256 === currentSplit.value ? 'same' : 'another';
   };
   const options = computed((): PickerOption[] => [
-    {key: FRESH_START, title: FRESH[role], sub: 'the usual start: a fair test'},
+    {key: FRESH_START, title: FRESH[role], sub: 'a fresh start: always a fair test'},
     ...starts.value.map(({version, count, inUse}) => {
       const split = splitOf(version);
       return {key: version.id, title: titleOf(version), short: titleOf(version), badge: inUse ? 'In use' : undefined,
         sub: [split ? SPLIT_WORDS[split] : '', role === 'cutter' ? '' : plural(count, 'network')].filter(Boolean).join(' · ')};
     }),
   ]);
-  const picked = ref(FRESH_START);
+  /** The choice made here (null: none yet, the one in use). */
+  const picked = ref<string | null>(null);
   const key = computed({
-    get: (): string => starts.value.some((item) => item.version.id === picked.value) ? picked.value : FRESH_START,
+    get: (): string => picked.value === FRESH_START || starts.value.some((item) => item.version.id === picked.value)
+      ? picked.value! : starts.value.find((item) => item.inUse)?.version.id ?? FRESH_START,
     set: (value: string) => { picked.value = value; },
   });
   const version = computed(() => starts.value.find((item) => item.version.id === key.value)?.version ?? null);

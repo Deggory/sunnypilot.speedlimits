@@ -40,9 +40,10 @@ export function useClassifierChoices(status: Ref<PanelStatus | null>,
   const mapillaryOptions = computed((): ActionOptions => withMapillary.value
     ? {mapillary: mapillary.value, region: region.value.length ? region.value.join(',') : 'all', share: String(share.value ?? shareText.value)}
     : {mapillary: 'off'});
-  /** Where the classifier starts: ImageNet (the default: its test stays fair), or a finished classifier of Models with
-   * “not a sign”, whose weights it goes on learning from (the one in use first). Not with “Mapillary, then ours”, which
-   * starts from its own Mapillary stage. A start that learnt another split may have seen some of today's test signs. */
+  /** Where the classifier starts: a finished classifier of Models with “not a sign”, whose weights it goes on learning
+   * from (the one in use first, and the choice until another is made), or ImageNet (its test stays fair; the choice
+   * while none is in use). Not with “Mapillary, then ours”, which starts from its own Mapillary stage. A start that
+   * learnt another split may have seen some of today's test signs. */
   const startVersions = computed((): ClassifierModel[] => ((versionsOf('classifier') ?? []) as ClassifierModel[])
     .filter((version) => version.role === 'classifier' && version.part === 'classifier'
       && version.class_scheme !== undefined && version.finished)
@@ -51,14 +52,16 @@ export function useClassifierChoices(status: Ref<PanelStatus | null>,
   const startSplit = (version: ClassifierModel): Split => !version.split_sha256 || !currentSplit.value
     ? 'unknown' : version.split_sha256 === currentSplit.value ? 'same' : 'another';
   const startOptions = computed((): PickerOption[] => [
-    {key: 'imagenet', title: 'ImageNet', sub: 'the usual start: a fair test'},
+    {key: 'imagenet', title: 'ImageNet', sub: 'a fresh start: always a fair test'},
     ...startVersions.value.map((version) => ({key: version.id, title: version.label + ' ' + isoWhen(version.trained_at),
       short: version.label + ' ' + isoWhen(version.trained_at), badge: version.in_use ? 'In use' : undefined,
       sub: SPLIT_WORDS[startSplit(version)]})),
   ]);
-  const pickedStart = ref('imagenet');
+  /** The start chosen here (null: none yet, the one in use). */
+  const pickedStart = ref<string | null>(null);
   const startKey = computed({
-    get: (): string => startVersions.value.some((version) => version.id === pickedStart.value) ? pickedStart.value : 'imagenet',
+    get: (): string => pickedStart.value === 'imagenet' || startVersions.value.some((version) => version.id === pickedStart.value)
+      ? pickedStart.value! : startVersions.value.find((version) => version.in_use)?.id ?? 'imagenet',
     set: (value: string) => { pickedStart.value = value; },
   });
   const startVersion = computed(() => mapillary.value === 'pretrain' ? null
