@@ -1239,6 +1239,12 @@ font-variant-numeric:tabular-nums}
 :root[data-theme="light"]{--rt-garage:#d02cd0}
 @media (prefers-color-scheme:light){:root[data-theme="auto"]{--rt-garage:#d02cd0}}
 .rt-garage{background:var(--rt-garage)}.rt-track .rt-garage{fill:var(--rt-garage)}
+/* The acceleration lane after an entry ramp: no ninth hue (the palette is full) but the two it joins, the ramp's cyan
+   over the motorway's blue, a two-tone key no other type has; on the strip a gradient of hard stops (RoadDrive.vue), as
+   the SVG is stretched. */
+.rt-merge{background:linear-gradient(to bottom,var(--rt-ramp) 0 40%,var(--c-train) 40%)}
+.rt-track .rt-merge{fill:url(#rt-merge-fill)}
+.rt-merge-top{stop-color:var(--rt-ramp)}.rt-merge-bottom{stop-color:var(--c-train)}
 .rt-view-main{grid-template-rows:auto 1fr}
 .rt-fix-head{flex-direction:row;flex-wrap:wrap;align-items:baseline;gap:2px 8px}
 .rt-pick button:last-child{grid-column:auto}
@@ -1289,11 +1295,11 @@ font-variant-numeric:tabular-nums}
 .rt-pick .rt-type[aria-pressed="true"]{box-shadow:0 0 0 2px var(--fg) inset}
 .rt-pick button.rt-map{outline:1.5px dashed var(--muted);outline-offset:-5px}
 .rt-fix-head strong{font-size:15px}
-/* Eight types in two rows of four, each button its dot over its word, and Can't tell across a row under them; in the one
-   column of a tablet, wide enough, each dot beside its word. */
+/* Nine types in rows of four, each button its dot over its word, and Can't tell across the rest of the last row; in the
+   one column of a tablet, wide enough, each dot beside its word. */
 .rt-pick{grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
 .rt-pick .rt-type,.rt-pick .rt-type:last-child{flex-direction:column;gap:4px;padding:6px 0;font-size:12px}
-.rt-pick .rt-type:last-child{grid-column:1/-1;flex-direction:row;gap:7px}
+.rt-pick .rt-type:last-child{grid-column:span 3;flex-direction:row;gap:7px}
 @media (max-width:860px) and (min-width:521px) and (min-height:501px){
   .rt-pick{gap:8px}.rt-pick .rt-type,.rt-pick .rt-type:last-child{flex-direction:row;gap:7px;padding:8px 6px;font-size:14.5px}}
 /* The cut of a stretch (RoadDrive.vue): a short title over Whole / Before / After, and the cut drawn on the strip. */

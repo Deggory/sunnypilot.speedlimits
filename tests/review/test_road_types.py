@@ -3,7 +3,7 @@ import json
 
 from nnslr_tools.cli import main
 from nnslr_tools.map_context import RoadMap
-from nnslr_tools.road_types import build_road_types, load_road_types, smooth, stretches, way_type
+from nnslr_tools.road_types import build_road_types, load_road_types, merge_lanes, smooth, stretches, way_type
 
 ROUTE = '0000002a--0123456789'
 
@@ -118,7 +118,7 @@ def test_summary_names_each_drive_with_its_types_and_the_drives_left(tmp_path):
     drive = result['routes'][0]
     assert (drive['route'], drive['frames']) == (ROUTE, 4)
     assert drive['types'] == {'town': 0, 'rural': 0, 'expressway': 0, 'motorway': 3, 'ramp': 0, 'parking': 0, 'zone30': 0,
-                             'garage': 0, 'unknown': 1}
+                             'garage': 0, 'merge': 0, 'unknown': 1}
     assert drive['stretches'] == [{'type': 'motorway', 'from': '0/0', 'to': '0/2', 'frames': 3},
                                   {'type': None, 'from': '0/3', 'to': '0/3', 'frames': 1}]
     # Read again when the file changes.
@@ -138,6 +138,56 @@ def test_weak_reasons_are_not_sure(tmp_path):
     build_road_types(tmp_path, ROUTE, positions, RoadMap.load(tmp_path))
     lines = load_road_types(tmp_path, ROUTE)
     assert [(line['road_type'], line['sure']) for line in lines] == [('rural', False), ('ramp', False)]
+
+
+
+def _seconds(count, speed, start=0):
+    return [{'segment_index': (start + index) // 60, 'output_index': (start + index) % 60, 'speed_mps': speed}
+            for index in range(count)]
+
+
+def test_the_acceleration_lane_of_an_entry():
+    # 10 s of ramp at 20 m/s, then 20 s of motorway: the last 50 m of the ramp (2 s) and the first 200 m of the
+    # carriageway (11 s: 0 to 200 m) are the lane.
+    types = ['town'] * 3 + ['ramp'] * 10 + ['motorway'] * 20
+    lane = merge_lanes(types, _seconds(len(types), 20.0))
+    assert [i for i, merge in enumerate(lane) if merge] == list(range(11, 24))
+    # Onto an expressway too; never onto anything else, never at an exit.
+    assert any(merge_lanes(['ramp'] * 5 + ['expressway'] * 5, _seconds(10, 20.0)))
+    assert not any(merge_lanes(['ramp'] * 5 + ['rural'] * 5, _seconds(10, 20.0)))
+    assert not any(merge_lanes(['motorway'] * 5 + ['ramp'] * 5, _seconds(10, 20.0)))
+    # A missing second between the ramp and the carriageway: not a merge seen.
+    positions = _seconds(5, 20.0) + _seconds(5, 20.0, start=30)
+    assert not any(merge_lanes(['ramp'] * 5 + ['motorway'] * 5, positions))
+    # Without the GPS speed the speed of the second before counts; slow traffic makes a lane of more seconds.
+    slow = _seconds(30, 5.0)
+    slow[14]['speed_mps'] = None
+    assert sum(merge_lanes(['ramp'] * 10 + ['motorway'] * 20, slow)) == 10 + 20
+
+
+def test_build_labels_the_lane_after_an_entry_ramp(tmp_path):
+    from nnslr_tools import road_type_data as data
+    # A ramp north to (47.002, 8), then the motorway on: 20 m/s, a frame a second (0.00018 degrees of latitude).
+    ways = [{'id': 1, 'highway': 'motorway_link', 'oneway': 'yes', 'nodes': [[47.0, 8.0], [47.002, 8.0]]},
+            {'id': 2, 'highway': 'motorway', 'oneway': 'yes', 'nodes': [[47.002, 8.0], [47.02, 8.0]]}]
+    path = tmp_path / 'derived' / 'osm' / 'roads.jsonl'
+    path.parent.mkdir(parents=True)
+    path.write_text(''.join(json.dumps(way) + '\n' for way in ways))
+    positions = [{'frame_key': f'0/{index}', 'segment_index': 0, 'output_index': index,
+                  'latitude': 47.0001 + index * 0.00018, 'longitude': 8.0, 'bearing_deg': 0.0, 'speed_mps': 20.0}
+                 for index in range(30)]
+    build_road_types(tmp_path, ROUTE, positions, RoadMap.load(tmp_path))
+    lines = load_road_types(tmp_path, ROUTE)
+    kinds = [line['road_type'] for line in lines]
+    assert kinds[0] == 'ramp' and kinds[-1] == 'motorway' and 'merge' in kinds
+    first, last = kinds.index('merge'), len(kinds) - 1 - kinds[::-1].index('merge')
+    assert set(kinds[first:last + 1]) == {'merge'} and 12 <= last - first + 1 <= 14
+    # The ramp's metres weigh as the ramp, the carriageway's as the motorway.
+    on_ramp, on_road = lines[first], lines[last]
+    assert on_ramp['basis'] == 'acceleration lane (highway motorway_link)' and not on_ramp['sure']
+    assert on_road['basis'] == 'acceleration lane (highway motorway)' and on_road['sure']
+    assert data.frame_label(on_ramp) == (data.CLASS_INDEX['merge'], data.RAMP_WEIGHT)
+    assert data.frame_label(on_road) == (data.CLASS_INDEX['merge'], 1.0)
 
 
 # -- a person's corrections (Data › Roads, a drive opened) -----------------------------------------------------------
@@ -171,7 +221,7 @@ def test_corrections_over_the_map_the_last_wins_and_a_new_map_keeps_them(tmp_pat
     drive = summary(tmp_path)['routes'][0]
     assert drive['reviewed'] == 3 and drive['types'] == {'town': 2, 'rural': 0, 'expressway': 0, 'motorway': 3,
                                                          'ramp': 0, 'parking': 0, 'zone30': 0, 'garage': 0,
-                                                         'unknown': 1}
+                                                         'merge': 0, 'unknown': 1}
 
     # Find again: the map is written anew, the corrections are not touched and still win.
     build_road_types(tmp_path, ROUTE, positions, road_map)
@@ -441,7 +491,7 @@ def test_a_correction_to_parking(tmp_path):
     assert (lines[0]['basis'], lines[0]['sure'], lines[0]['reviewed']) == ('reviewed', True, True)
     assert summary(tmp_path)['routes'][0]['types'] == {'town': 0, 'rural': 0, 'expressway': 0, 'motorway': 2,
                                                        'ramp': 0, 'parking': 2, 'zone30': 0, 'garage': 0,
-                                                       'unknown': 2}
+                                                       'merge': 0, 'unknown': 2}
 
 
 def test_a_broken_corrections_line_is_skipped(tmp_path):

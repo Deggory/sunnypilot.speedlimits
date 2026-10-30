@@ -23,6 +23,11 @@ names its type:
 - expressway: ``highway=trunk`` (the Swiss Autostrasse), unless the map puts it in a town;
 - ramp: a ramp of a motorway or an expressway (``highway=motorway_link``, ``trunk_link`` out of town), the road
   where the limit of a ramp holds until the carriageway (the road-type network learns the merge from it);
+- merge, the acceleration lane of an entry: where a ramp joins a motorway or an expressway, from MERGE_LEAD_M before
+  the node of the map to MERGE_LANE_M after it (merge_lanes, after the smoothing below). The limit of the ramp ends
+  there: the car gives the carriageway's limit as the lane starts, to speed up beside the traffic, not seconds later
+  on the carriageway. The map joins a Swiss ramp to the motorway where the gore ends, the start of the lane; the lead
+  takes the last metres of the ramp, the lane in sight. Added last on 30 Oct 2026, after garage;
 - zone30, a 30 zone (the Swiss Tempo-30-Zone, its gate signs easy to see): ``CH:zone30``, sure; a road of the map
   at 30 without its kind, not sure (a 30 street outside a zone is tagged the same way);
 - town or rural, for every other road: the kind of limit when the map says it (``CH:urban``, another zone such as
@@ -34,10 +39,11 @@ road of the map without a limit), and a stretch shorter than MIN_RUN frames betw
 takes theirs (the GPS jumping to a side road, a bridge or a car park beside the road for a second).
 
 Writes ``derived/road_types/<route>.jsonl``: one line per frame, ``{"frame_key", "segment_index", "output_index",
-"road_type" (town, rural, expressway, motorway, ramp, parking, zone30, garage or null), "map_type" (before the drive
-was looked at), "basis" (why: "maxspeed 50", "highway motorway", "parking aisle", "car park on the map", "garage on
-the map", "slow without gps", "filled", "smoothed", "no road", "no gps"...), "sure" (false where the map is often
-wrong: WEAK_BASES, a car park of one signal, a garage without GPS, filled, smoothed),
+"road_type" (town, rural, expressway, motorway, ramp, parking, zone30, garage, merge or null), "map_type" (before
+the drive was looked at), "basis" (why: "maxspeed 50", "highway motorway", "parking aisle", "car park on the map",
+"garage on the map", "slow without gps", "filled", "smoothed", "acceleration lane (highway motorway)", "no road", "no
+gps"...), "sure" (false where the map is often wrong: WEAK_BASES, a car park of one signal, a garage without GPS,
+filled, smoothed; the acceleration lane as its road: the ramp's metres are not sure, the carriageway's are),
 "way_id", "highway", "maxspeed"}`` (the road found, also in a car park).
 
 Measured on 27 Oct 2026, 240 frames of 11 drives looked at without the map: where the eye was sure, the map agreed on
@@ -66,9 +72,16 @@ ROAD_TYPES_RELATIVE = Path('derived') / 'road_types'
 CORRECTIONS_RELATIVE = Path('annotations') / 'road_types'
 PARKING_RELATIVE = Path('derived') / 'osm' / 'parking.jsonl'
 # The classes of the road-type network in this order: a new one goes at the end, so a checkpoint trained before it
-# keeps its indices (zone30 and garage, 30 Oct 2026).
-ROAD_TYPES = ('town', 'rural', 'expressway', 'motorway', 'ramp', 'parking', 'zone30', 'garage')
+# keeps its indices (zone30, garage and merge, 30 Oct 2026).
+ROAD_TYPES = ('town', 'rural', 'expressway', 'motorway', 'ramp', 'parking', 'zone30', 'garage', 'merge')
 CAR_PARKS = ('parking', 'garage')
+# The acceleration lane (merge): from MERGE_LEAD_M of the ramp before the node where it joins the carriageway to
+# MERGE_LANE_M after it, along the drive (the GPS speed of each second). A Swiss acceleration lane is about 250 m with
+# its taper; a car in traffic is often on the carriageway before its end.
+CARRIAGEWAYS = ('motorway', 'expressway')
+MERGE_LEAD_M = 50.0
+MERGE_LANE_M = 200.0
+MERGE_BASIS = 'acceleration lane'
 # The car parks of the map (their "parking" tag) that are a garage: underground or indoors, 10 km/h on the car.
 GARAGE_PARKING = ('underground', 'multi-storey')
 # Slower than this (m/s) inside a car park outline: parking, even with a street of the map within OUR_ROAD_M.
@@ -272,6 +285,36 @@ def smooth(types: list[str | None]) -> list[tuple[str | None, str | None]]:
     return result
 
 
+def merge_lanes(types: list[str | None], positions: list[dict]) -> list[bool]:
+    """Per frame (the road types after smooth, the positions in the same order): whether it is on the acceleration
+    lane of an entry, a stretch of ramp followed by one of motorway or expressway. The distance is the GPS speed of
+    each second (the one before when it is missing); a missing frame between the two ends the ramp there."""
+    seconds = [(position.get('segment_index') or 0) * 60 + (position.get('output_index') or 0)
+               for position in positions]
+    metres, total, speed = [], 0.0, 0.0
+    for at, position in enumerate(positions):
+        if at:
+            total += speed * min(max(seconds[at] - seconds[at - 1], 0), 2)
+        value = position.get('speed_mps')
+        speed = float(value) if type(value) in (int, float) else speed
+        metres.append(total)
+    merge = [False] * len(types)
+    runs = _runs(types)
+    for (old, _, end), (new, start, stop) in zip(runs, runs[1:]):
+        if old != 'ramp' or new not in CARRIAGEWAYS or seconds[start] - seconds[end - 1] > 1:
+            continue
+        node = metres[start]
+        for index in range(end - 1, -1, -1):
+            if types[index] != 'ramp' or node - metres[index] > MERGE_LEAD_M:
+                break
+            merge[index] = True
+        for index in range(start, stop):
+            if metres[index] - node > MERGE_LANE_M:
+                break
+            merge[index] = True
+    return merge
+
+
 def frame_types(road_map: RoadMap, positions: list[dict], parking: ParkingMap | None = None,
                 speeds: list | None = None) -> list[dict]:
     """One line per position (in the order of the drive) with its road type. speeds: the car's own speed of each
@@ -312,6 +355,9 @@ def frame_types(road_map: RoadMap, positions: list[dict], parking: ParkingMap | 
         line['sure'] = kind is not None and how is None and not doubtful
         if how is not None:
             line['basis'] = how + ' (' + line['basis'] + ')'
+    for line, merge in zip(lines, merge_lanes([line['road_type'] for line in lines], positions)):
+        if merge:
+            line.update(road_type='merge', basis=MERGE_BASIS + ' (' + line['basis'] + ')')
     return lines
 
 
@@ -436,7 +482,8 @@ def stretches(lines: list[dict]) -> list[dict]:
 
 
 def type_counts(lines: list[dict]) -> dict[str, int]:
-    """The frames of each type: {town, rural, expressway, motorway, ramp, parking, zone30, garage, unknown: frames}."""
+    """The frames of each type: {town, rural, expressway, motorway, ramp, parking, zone30, garage, merge, unknown:
+    frames}."""
     types = {key: 0 for key in (*ROAD_TYPES, 'unknown')}
     for line in lines:
         key = line.get('road_type') if line.get('road_type') in ROAD_TYPES else 'unknown'

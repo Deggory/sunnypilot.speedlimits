@@ -9,15 +9,17 @@ Labels: the kind of road of each frame from the map (nnslr road-types, data/deri
 corrections over it (Data › Roads, road_types.load_road_types). The classes are road_types.ROAD_TYPES, in the order
 of the network's output and with the same names the car's SpeedLimitMemory takes: town, rural, expressway, motorway,
 ramp (an OSM link of a motorway or an expressway, highway motorway_link or trunk_link out of town), parking (a car
-park in the open), zone30 (a 30 zone) and garage (a car park underground or indoors); zone30 and garage were added
-last on 30 Oct 2026: the car learns them with its next road-type network.
+park in the open), zone30 (a 30 zone), garage (a car park underground or indoors) and merge (the acceleration lane of
+an entry, where the ramp's limit ends: road_types.merge_lanes); zone30, garage and merge were added last on 30 Oct
+2026: the car learns them with its next road-type network.
 
 Loss weight of a frame (FRAME_WEIGHTS):
 
 * no road type (no GPS, no road on the map, a person said "not sure"): 0, out of the loss, still fed to the memory;
 * sure: 1;
 * a ramp from its OSM link: RAMP_WEIGHT. road_types flags every ramp "check it" (WEAK_BASES) because the LIMIT of a
-  ramp is unclear (60, 80, none), not because the road is: an OSM link is the ramp. Masking them would erase the class;
+  ramp is unclear (60, 80, none), not because the road is: an OSM link is the ramp. Masking them would erase the class.
+  The same for the metres of the acceleration lane on the ramp's link;
 * every other unsure frame (a 60 or 70 road taken as rural, a stretch filled across a gap of the map or of the GPS, a
   frame smoothed into its neighbours): UNSURE_WEIGHT. Masking them would erase most frames at the transitions, where
   the memory matters; they count less because the map may be wrong there. The measure reads weight-1 frames only.
@@ -52,7 +54,7 @@ from pathlib import Path
 import numpy as np
 
 from nnslr_tools.junctions import labelled_junctions
-from nnslr_tools.road_types import ROAD_TYPES, ROAD_TYPES_RELATIVE, load_road_types
+from nnslr_tools.road_types import MERGE_BASIS, ROAD_TYPES, ROAD_TYPES_RELATIVE, load_road_types
 from nnslr_tools.splits import PLACE_CELL
 
 CLASSES = ROAD_TYPES
@@ -89,7 +91,10 @@ def frame_label(line: dict) -> tuple[int, float]:
         return -1, 0.0
     if line.get('sure'):
         return CLASS_INDEX[road_type], 1.0
-    if road_type == 'ramp' and line.get('basis') in RAMP_BASES:
+    basis = str(line.get('basis'))
+    if road_type == 'merge':
+        basis = basis.removeprefix(MERGE_BASIS + ' (').removesuffix(')')
+    if road_type in ('ramp', 'merge') and basis in RAMP_BASES:
         return CLASS_INDEX[road_type], RAMP_WEIGHT
     return CLASS_INDEX[road_type], UNSURE_WEIGHT
 

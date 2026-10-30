@@ -1457,8 +1457,8 @@ export interface CommaTrial {
 
 /** The type of road of a frame, from the map (nnslr_tools.road_types); null: the map does not say. Parking: a car park in
  * the open, garage: one underground or indoors; no general limit there (sunnypilot gets 0), kinds of place the network
- * learns. */
-export type RoadType = 'town' | 'zone30' | 'rural' | 'expressway' | 'motorway' | 'ramp' | 'parking' | 'garage';
+ * learns. Merge: the acceleration lane after an entry ramp, where the car takes the carriageway's limit. */
+export type RoadType = 'town' | 'zone30' | 'rural' | 'expressway' | 'motorway' | 'ramp' | 'parking' | 'garage' | 'merge';
 /** A stretch of a drive on one type of road, from and to frame keys. */
 export interface RoadStretch {
   type: RoadType | null;

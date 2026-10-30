@@ -34,8 +34,8 @@ const MARKS = {
 } as const;
 /** The choices of a correction, null: the person cannot tell. */
 const CHOICES: [key: RoadType | null, label: string][] = [['town', 'Town'], ['zone30', 'Zone 30'], ['rural', 'Rural'],
-  ['expressway', 'Expressway'], ['motorway', 'Motorway'], ['ramp', 'Ramp'], ['parking', 'Parking'], ['garage', 'Garage'],
-  [null, 'Can\'t tell']];
+  ['expressway', 'Expressway'], ['motorway', 'Motorway'], ['ramp', 'Ramp'], ['merge', 'Merge lane'], ['parking', 'Parking'],
+  ['garage', 'Garage'], [null, 'Can\'t tell']];
 /** Longer than this (pictures, one a second), a correction asks first: one tap must not overwrite minutes of a drive. */
 const ASK_ABOVE = 60;
 
@@ -485,6 +485,9 @@ async function undo(what: '/undo' | '/junction/undo' = '/undo'): Promise<void> {
              @pointermove="stripMove" @pointerup="stripUp" @pointercancel="stripUp">
           <div class="rt-bar">
             <svg class="rt-track" :viewBox="'0 0 ' + frames.length + ' 20'" preserveAspectRatio="none" aria-hidden="true">
+              <!-- The acceleration lane: the ramp's cyan over the motorway's blue, for both strips (control.html .rt-merge). -->
+              <defs><linearGradient id="rt-merge-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0.4" class="rt-merge-top"/>
+                <stop offset="0.4" class="rt-merge-bottom"/></linearGradient></defs>
               <rect v-for="run in runs" :key="run.first" :x="run.first" y="3" :width="run.count" height="11" :class="'rt-' + run.kind"/>
               <template v-for="run in runs" :key="'r' + run.first">
                 <rect v-if="run.reviewed" :x="run.first" y="16" :width="run.count" height="3" class="rt-done"/>

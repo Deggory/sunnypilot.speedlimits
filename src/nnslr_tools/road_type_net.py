@@ -34,7 +34,7 @@ least TURN_DEGREES on a radius of at most TURN_RADIUS_M, the radius from the pat
 
 The ONNX export (export_road_type_onnx) is one STEP (step_input_names, step_output_names): image (1, 3, 144, 256)
 float RGB 0..1, speed (1, 2), sign (1, 2) with signs, motion (1, MOTION_INPUTS) with motion, hidden (1, 128) and
-junction_hidden (1, 128) with a junction GRU of its own in; probabilities (1, 6) and hidden_out (1, 128) out, then
+junction_hidden (1, 128) with a junction GRU of its own in; probabilities (1, classes) and hidden_out (1, 128) out, then
 junction (1, 2) with the junction head and junction_hidden_out. The car keeps the hidden states and gives them back
 the next second (zeros at the start). The GRU is written out with matrix products, sigmoid and tanh (no ONNX GRU node), the
 ImageNet normalisation is inside. The contract beside it says how to make the inputs from the NV12 road frame, the
@@ -113,7 +113,7 @@ JUNCTION_BRANCHES = ('shared', 'separate')
 MIN_DRIVE = 30
 # One letter a second for the answers around a merge in the result (release_evaluation).
 ANSWER_LETTERS = {'town': 'T', 'rural': 'R', 'expressway': 'E', 'motorway': 'M', 'ramp': '/', 'parking': 'P',
-                  'zone30': 'Z', 'garage': 'G'}
+                  'zone30': 'Z', 'garage': 'G', 'merge': 'A'}
 BATCH = 12
 EPOCHS = 60
 PATIENCE = 15
@@ -1593,8 +1593,8 @@ def compare_road_type(run_root: Path) -> str:
                 if release and release.get(partition):
                     lines.append(f'{partition:<10} {label:{width}} {release_text(release[partition])}')
     lines += ['', 'Per merge (test and validation): release seconds after the merge, how it was held, the debounced '
-              'answer from the ramp on (/ ramp, M motorway, E expressway, R rural, T town, P parking, Z 30 zone, '
-              'G garage)']
+              'answer from the ramp on (/ ramp, A acceleration lane, M motorway, E expressway, R rural, T town, '
+              'P parking, Z 30 zone, G garage)']
     for scenario, title in _SCENARIOS:
         for label, _, _, releases in rows:
             release = releases.get(scenario)
@@ -1831,10 +1831,11 @@ def car_input_spec(width: int = data.FRAME_WIDTH, height: int = data.FRAME_HEIGH
         'rate': 'one step a second (the training frames are 1 s apart; 2 Hz would make its memory twice as fast: '
                 'keep 1 Hz)',
         'decode': 'road_type = classes[argmax(probabilities)], classes exactly the contract\'s classes (road_types.ROAD_TYPES '
-                  'when trained: town, rural, expressway, motorway, ramp, parking, zone30, garage); feed '
+                  'when trained: town, rural, expressway, motorway, ramp, parking, zone30, garage, merge); feed '
                   'SpeedLimitMemory.update(road_type=...) only after the same class 3 steps in a row (the measure\'s '
-                  'debounce). "ramp" is an on- or off-ramp: ramp then motorway or expressway is the merge, where the '
-                  'ramp\'s limit ends without a sign',
+                  'debounce). "ramp" is an on- or off-ramp; "merge" the acceleration lane after an on-ramp, where the '
+                  'ramp\'s limit ends without a sign (ramp then motorway or expressway too, for a network without '
+                  'it)',
         **({'junction_decode': junction_decode(junctions)} if junctions else {}),
     }
 

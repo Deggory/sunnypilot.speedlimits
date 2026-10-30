@@ -1550,7 +1550,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_gps.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_gps.set_defaults(func=_cmd_gps)
     p_road = sub.add_parser("road-types", help="the type of road of every frame (town, rural, expressway, motorway, "
-                                               "parking, garage...) from its GPS position and the OpenStreetMap roads, "
+                                               "merge lane, parking, garage...) from its GPS position and the OpenStreetMap roads, "
                                                "derived/road_types/<route>.jsonl: the labels of the road-type head")
     p_road.add_argument("--route", action="append", help="route id; repeat for more")
     p_road.add_argument("--all", action="store_true", help="every route with GPS positions (nnslr gps)")

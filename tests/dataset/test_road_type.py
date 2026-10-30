@@ -75,7 +75,8 @@ def root(tmp_path):
 
 def test_labels_and_weights_follow_the_road_types():
     from nnslr_tools import road_type_data as data
-    assert data.CLASSES == ('town', 'rural', 'expressway', 'motorway', 'ramp', 'parking', 'zone30', 'garage')
+    assert data.CLASSES == ('town', 'rural', 'expressway', 'motorway', 'ramp', 'parking', 'zone30', 'garage',
+                            'merge')
     assert data.frame_label({'road_type': 'town', 'sure': True}) == (TOWN, 1.0)
     # A ramp from its OSM link is unsure only for its limit: it keeps the full weight.
     assert data.frame_label({'road_type': 'ramp', 'sure': False, 'basis': 'highway motorway_link'}) == (RAMP, 1.0)
@@ -340,6 +341,42 @@ def test_comma_release_on_time_on_the_ramp_late_and_not_held():
     assert summary['merges'] == 4 and summary['held'] == 3 and summary['held_by_sign'] == 2
     assert (summary['in_time'], summary['late'], summary['not_held'], summary['on_ramp']) == (2, 1, 1, 0)
     assert summary['median_release'] == 8.0 and summary['releases'] == [8, None, 8, None]
+
+
+
+def test_the_acceleration_lane_ends_the_ramps_limit_and_is_the_carriageway_for_the_road_measures():
+    import numpy as np
+
+    from nnslr_tools import road_type_metrics as metrics
+    lane = ROAD_TYPES.index('merge')
+    labels = _entry_drive()
+    labels[78:91] = lane
+    # The merge is the first second of the lane; the ramp before it is still an entry.
+    entry = {'ramp': 60, 'merge': 78, 'before': 'town'}
+    assert metrics.ramp_entries(labels, ROAD_TYPES) == [entry]
+    no_sign = np.full(180, np.inf)
+    # The answer says merge from second 81: released there, not 8 s of motorway later.
+    held = _entry_drive()
+    held[81:88] = lane
+    assert metrics.comma_release(held, no_sign, entry, ROAD_TYPES) == {
+        'number_at': -16, 'held_by': 'ramp', 'release': 3, 'outcome': 'in_time'}
+    # A network without the class (an older one) is held to the 8 s of motorway.
+    assert metrics.comma_release(_entry_drive(), no_sign, entry, ROAD_TYPES)['release'] == 10
+    # The road measures: the lane is the motorway after it, in the labels and the answers.
+    folded, answer = metrics.fold_merge(labels, held, ROAD_TYPES)
+    assert (folded[78:91] == MOTORWAY).all() and (answer[81:88] == MOTORWAY).all()
+    found = metrics.sequence_metrics([{'labels': labels, 'weights': np.ones(180), 'predicted': held}], ROAD_TYPES)
+    assert found['transitions']['ramp_to_motorway']['count'] == 1
+    assert found['transitions']['other']['count'] == 0 and found['after_merge']['merges'] == 1
+    # The F1 keeps it apart: three of its seconds said, of thirteen.
+    assert found['weight_1']['classes']['merge']['support'] == 13
+    assert found['weight_1']['classes']['merge']['predicted'] == 7
+    # An expressway's lane folds into the expressway; a lane at the end of a sequence into the motorway.
+    road = _entry_drive()
+    road[78:] = ROAD_TYPES.index('expressway')
+    road[78:85] = lane
+    assert (metrics.fold_labels(road, ROAD_TYPES)[78:85] == ROAD_TYPES.index('expressway')).all()
+    assert (metrics.fold_labels(np.array([RAMP] * 5 + [lane] * 3), ROAD_TYPES)[5:] == MOTORWAY).all()
 
 
 def test_confusion_counts_the_masked_frames_by_truth_and_answer():

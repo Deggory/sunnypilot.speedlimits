@@ -236,7 +236,7 @@ const numbers = computed(() => {
     <p v-else-if="section === 'classifier'" class="role-what">Says what each box of the cutter is: a speed value, end of limit, another sign and its kind, or not a sign.</p>
     <p v-else-if="section === 'decider'" class="role-what">Says whom each sign applies to: our road, another road, or abstain.</p>
     <p v-else-if="section === 'road'" class="role-what">Says from the camera what road the car is on, once a second: town, zone 30,
-      rural, expressway, motorway, ramp, a car park or a garage. It remembers the seconds before, so the motorway after a ramp is seen without a sign.</p>
+      rural, expressway, motorway, ramp, the merge lane after it, a car park or a garage. It remembers the seconds before, so the motorway after a ramp is seen without a sign.</p>
     <p v-else class="role-what">Our networks one after the other, each with the choices of its own section: the next one starts
       when one ends well. The classifier after a new cutter learns that cutter’s mistakes.</p>
 

@@ -43,9 +43,9 @@ export const ROLE_TEXT: Record<ModelRole, {what: string; today: string; empty: s
   },
   road_type: {
     what: 'Says from the camera what road the car is on, once a second: town, zone 30, rural, expressway, motorway, ramp, '
-      + 'a car park or a garage. '
+      + 'the merge lane after it, a car park or a garage. '
       + 'With memory it remembers the seconds before, and how long ago a motorway sign was read, so the 60 of a ramp ends '
-      + 'on the motorway without a sign.',
+      + 'where the merge lane starts, without a sign.',
     today: 'Today: prototypes, with memory and the sign, without the sign and without memory, judged on the test drives.',
     empty: 'No scene network trained yet.',
     emptyMore: '“Train the scene network” on the Train tab; its two networks appear here.',

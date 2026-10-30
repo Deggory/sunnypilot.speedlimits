@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# The type of road of every frame of the prepared drives (town, 30 zone, rural, expressway, motorway, ramp, parking,
-# garage), from the GPS and the speed of the comma and the OpenStreetMap roads and car parks, read offline: the labels of
+# The type of road of every frame of the prepared drives (town, 30 zone, rural, expressway, motorway, ramp, merge lane,
+# parking, garage), from the GPS and the speed of the comma and the OpenStreetMap roads and car parks, read offline: the labels of
 # the road-type head, prepared without a person (nnslr road-types; the button "Find the road types" of Data › Roads
 # starts this). A person corrects them later in the road-type review; nothing here touches the reviews of the signs.
 #

@@ -4,8 +4,8 @@ import type {RoadFrame, RoadType} from '../common/panel-types';
 
 /** The kinds of road in the order of the legend, each with its colour (control.html .rt-town ...). */
 export const ROAD_TYPES: [key: RoadType | 'unknown', label: string][] = [['town', 'Town'], ['zone30', 'Zone 30'],
-  ['rural', 'Rural'], ['expressway', 'Expressway'], ['motorway', 'Motorway'], ['ramp', 'Ramp'], ['parking', 'Parking'],
-  ['garage', 'Garage'], ['unknown', 'Unknown']];
+  ['rural', 'Rural'], ['expressway', 'Expressway'], ['motorway', 'Motorway'], ['ramp', 'Ramp'], ['merge', 'Merge lane'],
+  ['parking', 'Parking'], ['garage', 'Garage'], ['unknown', 'Unknown']];
 export const ROAD_LABEL = Object.fromEntries(ROAD_TYPES) as Record<RoadType | 'unknown', string>;
 
 /** A run of frames of one kind, the map's or a person's: what the strip draws. */
@@ -82,6 +82,7 @@ const HIGHWAY_WORDS: Record<string, string> = {
 export function reasonOf(frame: RoadFrame): string {
   if (frame.reviewed) return frame.road_type === null ? 'Set by you: can\'t tell' : 'Set by you';
   const basis = frame.basis ?? '';
+  if (basis.startsWith('acceleration lane')) return 'The acceleration lane after an entry ramp: the carriageway\'s limit from here';
   if (basis.startsWith('filled')) return 'Between two stretches of the same kind (a tunnel or a gap)';
   if (basis.startsWith('smoothed')) return 'A short jump of the GPS';
   if (basis === 'no gps') return 'No GPS here (garage, tunnel or the start of the drive)';

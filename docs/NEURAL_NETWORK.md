@@ -199,7 +199,7 @@ It added two points, both taken: "Unclear" is taught as abstain rather than drop
 - one step a second: the whole road frame, resized to 256 × 144, and the car's speed;
 - encoder: torchvision's MobileNetV3-small with ImageNet weights, pooled, then 128 numbers (Linear, Hardswish, Dropout);
 - the speed as two numbers, `min(max(v, 0), 60) / 30` and 1 when known (GPS speed in training, `carState.vEgo` on the car);
-- memory: a GRU of 128; output: the probability of each of `road_types.ROAD_TYPES` (town, rural, expressway, motorway, ramp, parking, zone30, garage), in that order and with those names (zone30, a 30 zone, and garage, a car park underground or indoors, added last on 30 Oct 2026: a checkpoint trained before them keeps its six or seven, and on the car its parking gives the garage's 10 km/h);
+- memory: a GRU of 128; output: the probability of each of `road_types.ROAD_TYPES` (town, rural, expressway, motorway, ramp, parking, zone30, garage, merge), in that order and with those names (zone30, a 30 zone, garage, a car park underground or indoors, and merge, the acceleration lane after an entry ramp, added last on 30 Oct 2026: a checkpoint trained before them keeps its six to eight, on the car its parking gives the garage's 10 km/h and its ramp's limit ends by the older rule);
 - the version without memory, to compare: the same encoder and speed with a small head per frame (`--memory none`), also measured with a causal 5-second majority vote over its answers, the cheapest memory;
 - size: 1,101,478 parameters (1,018,406 without memory), about 84 MFLOPs a step, 3.9 ms a step on the V100 at batch 1. At 1 Hz that is a small fraction of Chestnut, next to the driving model. Measured on the comma 4 (30 Oct 2026): the resize of the road frame to 256 × 144 on the CPU 263 ms, the network on the GPU 26 ms, once a second; the resize is the part to make faster.
 
@@ -509,3 +509,15 @@ Its own selection fixed what the junction head had spoilt in v3: after a merge 9
 - **Look at the false "passed"**: 33 of v4 on test at its operating point, and the 9 of the turn rule.
 - **The ramp's limit**: 7 merges in test, 1 in validation; more motorway entries are needed to choose between v2, v3 and v4 on the comma's rule.
 - **More intersections in validation** (28), **Poland**, and **the car** (as in the third version).
+
+### The acceleration lane (30 October 2026)
+
+**Why.** On the comma the 60 of an entry ramp gave way to the motorway's 120 a median 13 s after the merge: 8 s of "motorway" in a row (`MERGE_SECONDS`), the 3 steps of the debounce and the network's own lag. The driver needs the 120 earlier, where the acceleration lane starts, to speed up and join the traffic; the map gives it only at the end of the ramp.
+
+**The class `merge`.** A ninth road type, added last so older checkpoints keep their indices (`--init-from` maps the head by name). Its labels come from the map, offline (`road_types.merge_lanes`): on a ramp that runs straight into a motorway or an expressway (`motorway_link` or `trunk_link`, then the carriageway with no gap), the last `MERGE_LEAD_M` = 50 m of the ramp and the first `MERGE_LANE_M` = 200 m of the carriageway, measured with the car's GPS speed. In Switzerland the map's merge node is at the end of the gore, where the lane starts (checked by eye on 0000012d). The reason is "acceleration lane (…)" with the reason of the frame under it; the frames stay as sure as before, and those on the ramp weigh like the ramp. An exit is not a merge. On the 12 drives of 30 Oct: 382 frames in 31 lanes.
+
+**The measures.** For the measures of the road (changes, after a merge, switches) a merge is folded into the carriageway that follows it (`road_type_metrics.fold_labels`, `fold_merge`), so the old versions stay comparable; the F1 of each class stays raw. `comma_release` releases the ramp's limit at the first debounced "merge" of a network that has the class, else by the 8 s rule.
+
+**On the car** (`vision.SpeedLimitMemory`, sunnypilot branch `speed-limits`). With the ramp's limit held and the network saying merge, the general limit of the carriageway comes back at once, as a sign's, when the carriageway is known from its sign (a motorway or expressway sign confirmed within `RAMP_SECONDS` before the ramp's number). Without such a sign the lane only counts towards `MERGE_SECONDS`, and the carriageway the network names after it gives the limit. A merge without a ramp's limit held changes nothing. The map is still never read on the car.
+
+**Still to do.** Train with the class and measure the release on the comma's rule; check the lanes of the map by eye in Data › Roads.

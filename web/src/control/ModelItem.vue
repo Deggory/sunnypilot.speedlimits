@@ -97,7 +97,7 @@ const noOtherOnTest = computed(() => decider.value?.test?.other_road_support ===
 
 /** The road types and the changes between them, in plain words (nnslr_tools.road_type_metrics). */
 const ROAD_NAMES: Record<string, string> = {town: 'Town', zone30: 'Zone 30', rural: 'Rural', expressway: 'Expressway',
-  motorway: 'Motorway', ramp: 'Ramp', parking: 'Parking', garage: 'Garage'};
+  motorway: 'Motorway', ramp: 'Ramp', parking: 'Parking', garage: 'Garage', merge: 'Merge lane'};
 const CHANGE_ROWS: {key: string; label: string}[] = [
   {key: 'ramp_to_motorway', label: 'Ramp → motorway'}, {key: 'motorway_to_ramp', label: 'Motorway → ramp'},
   {key: 'town_entry', label: 'Into a town'}, {key: 'town_exit', label: 'Out of a town'}, {key: 'other', label: 'Other changes'}];
