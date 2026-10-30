@@ -1,7 +1,7 @@
 // The Models tab: the three networks of the pipeline (cutter, classifier, decider) and the road type (docs/NEURAL_NETWORK.md), every
-// version trained on this server (GET /api/panel/models every 10 s while the tab is open), the one in use for each
+// version trained on this server (GET /api/panel/models 10 s after each answer while the tab is open), the one in use for each
 // role (POST /api/panel/models/active, asked first in the confirm dialog), and the words the tab shows.
-import {onBeforeUnmount, onMounted, ref, shallowRef} from 'vue';
+import {ref, shallowRef} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import {isoWhen, thousands} from '../common/format';
 import type {ActionState, ActiveChosen, ActiveModel, ModelRole, ModelVersion, ModelsPayload} from '../common/panel-types';
@@ -9,6 +9,7 @@ import {askConfirm, type ConfirmOptions} from '../composables/confirm';
 import {toast} from '../composables/toast';
 import {chooseRun, pct} from './evaluate';
 import {goTo} from './tabs';
+import {usePoll} from '../composables/poll';
 
 const INTERVAL_MS = 10000;
 
@@ -52,12 +53,11 @@ export const ROLE_TEXT: Record<ModelRole, {what: string; today: string; empty: s
   },
 };
 
-/** The models, asked every 10 s while the tab is shown. */
+/** The models, asked 10 s after each answer while the tab is shown. */
 export function useModels() {
   const payload = shallowRef<ModelsPayload | null>(null);
   const error = ref('');
-  let timer: number | undefined;
-  async function refresh(): Promise<void> {
+  async function ask(): Promise<void> {
     try {
       payload.value = await api<ModelsPayload>('/api/panel/models');
       error.value = '';
@@ -65,12 +65,7 @@ export function useModels() {
       error.value = messageOf(problem);
     }
   }
-  onMounted(() => {
-    void refresh();
-    timer = window.setInterval(() => void refresh(), INTERVAL_MS);
-  });
-  onBeforeUnmount(() => window.clearInterval(timer));
-  return {payload, error, refresh};
+  return {payload, error, refresh: usePoll(ask, INTERVAL_MS)};
 }
 
 /** "2026-10-24_1452 · Detector 320 × 320": a version in one line. */

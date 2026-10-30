@@ -7,9 +7,9 @@
 // comma runs), the validation signs found in its 5 best boxes of each frame at any score (the car also drops the boxes
 // below 0.3: those numbers come once it is measured, on the run's SignNet card), its false boxes per frame among those
 // 5, and its train loss; for each network of the road type, its road score on validation (which chooses its best epoch),
-// macro F1 and accuracy, and its train loss; for each variant of applicability (experiment B), the mean of its reading
-// accuracy and ownership macro F1 (which chooses its best epoch) with the two, and its loss. Data: progress.curves of the
-// job, one point per finished epoch.
+// macro F1 and accuracy, and its train loss; for applicability (experiment B), its variants in the same two charts, one
+// line each: the mean of its reading accuracy and ownership macro F1 (which chooses its best epoch), and its validation
+// loss. Data: progress.curves of the job, one point per finished epoch.
 import {computed} from 'vue';
 import type {CurveNet, DeciderNet, EpochPoint, JobProgress, RoadNet, TrainingCurve} from '../common/panel-types';
 import LineChart, {type ChartSeries} from './charts/LineChart.vue';
@@ -39,6 +39,9 @@ const TRAIN = 'var(--c-train)';
 const VAL = 'var(--c-val)';
 const REJECT = 'var(--split-3)';
 const BALANCED = 'var(--split-4)';
+/** Applicability's variants share its charts: slots 1 to 3 of the categorical palette, in their order. */
+const VARIANT_COLOR: Record<DeciderNet, string> = {experiment_b_crop: 'var(--c-train)', experiment_b_crop_geom: 'var(--c-val)',
+  experiment_b_full: 'var(--split-3)'};
 
 const running = computed(() => props.running);
 const curves = computed(() => props.progress.curves ?? {});
@@ -165,11 +168,7 @@ const deciderCards = computed((): NetCard[] => nets.value.filter(isDecider).map(
   const curve = curves.value[net];
   if (!hasPoints(curve)) return {net, curve: null, best: null, lowest: null, validation: [], scored: false};
   return {net, curve, scored: true, best: best(curve, (point) => point.val_selection_score, true),
-    lowest: best(curve, (point) => point.val_loss, false),
-    validation: [
-      {key: 'val', label: 'chosen measure', color: BALANCED, values: column(curve, (point) => point.val_selection_score, 100)},
-      {key: 'read', label: 'read right', color: VAL, values: column(curve, (point) => point.val_accuracy, 100)},
-      {key: 'own', label: 'whose sign, macro F1', color: REJECT, values: column(curve, (point) => point.val_ownership_macro_f1, 100)}]};
+    lowest: best(curve, (point) => point.val_loss, false), validation: []};
 }));
 /** A tile per network with a best epoch. */
 const bestCards = computed(() => [...roadCards.value, ...deciderCards.value]
@@ -207,6 +206,24 @@ const beforeText = computed(() => shows('reader')
   : shows('detector') || shows('signnet') ? 'First it checks the frames of the training and of the evaluation, and the GPU: a few minutes.'
     : 'First it checks the dataset, the split and the cutter in use, then runs the cutter on every frame to mine its false boxes.');
 const isRunning = (net: Net): boolean => running.value && current.value === net;
+
+/** Applicability's charts: a line per variant with points, and the one training now before its first epoch. */
+const deciderLines = computed(() => deciderCards.value.filter((card) => card.curve !== null || isRunning(card.net)));
+const deciderSpan = computed(() => Math.max(1, ...deciderLines.value.map((card) => card.curve === null ? 1 : span(card.curve))));
+const deciderSeries = (pick: (point: EpochPoint) => number | undefined, scale = 1): ChartSeries[] => deciderLines.value
+  .map((card) => ({key: card.net, label: NET_NAME[card.net], color: VARIANT_COLOR[card.net as DeciderNet],
+    values: card.curve === null ? [] : column(card.curve, pick, scale)}));
+/** The best variant's best epoch, marked on its line. */
+function deciderMark(pick: (card: NetCard) => Best, highest: boolean, label: string): {series: string; epoch: number; label: string} | null {
+  let found: {net: Net; point: EpochPoint & {value: number}} | null = null;
+  for (const card of deciderCards.value) {
+    const point = pick(card);
+    if (point !== null && (found === null || (highest ? point.value > found.point.value : point.value < found.point.value))) found = {net: card.net, point};
+  }
+  return found === null ? null : {series: found.net, epoch: found.point.epoch, label};
+}
+/** The variant training now: its line alone pulses, the band follows its last epoch. */
+const deciderRunning = computed(() => deciderCards.value.find((card) => isRunning(card.net))?.net ?? false);
 /** Every value, for the table under the charts. */
 const tables = computed(() => nets.value.flatMap((net) => {
   const curve = curves.value[net];
@@ -393,21 +410,22 @@ const tables = computed(() => nets.value.flatMap((net) => {
         plus a little for the minute after a ramp said right, less the false switches. Each network keeps the weights of its best
         epoch, and stops early after as many epochs without a better one as its Patience (Settings).</p>
 
-      <div v-for="(card, index) in deciderCards" :key="card.net" class="net" :id="card.net + '-curves'">
-        <h3>{{ NET_NAME[card.net] }}<span>applicability: is this sign for our road? · on validation, higher is better, and loss</span></h3>
-        <div v-if="card.curve" class="net-charts">
-          <LineChart :title="NET_NAME[card.net] + ' on validation'" :top="100" :format="percentAxis" :epochs="span(card.curve)"
-                     :series="card.validation" :best="card.best ? {series: 'val', epoch: card.best.epoch, label: 'best'} : null"
-                     :running="isRunning(card.net)"/>
-          <LineChart :title="NET_NAME[card.net] + ' loss'" :format="lossAxis" :epochs="span(card.curve)" :series="lossSeries(card.curve)"
-                     :best="card.lowest ? {series: 'val', epoch: card.lowest.epoch, label: 'lowest'} : null"
-                     :running="isRunning(card.net)"/>
+      <div v-if="deciderCards.length" class="net" id="decider-curves">
+        <h3>Applicability<span>is this sign for our road? · a line per variant, on validation: the chosen measure, higher is
+          better, and the loss</span></h3>
+        <div v-if="deciderCards.some((card) => card.curve)" class="net-charts">
+          <LineChart title="Chosen measure on validation" :top="100" :format="percentAxis" :epochs="deciderSpan"
+                     :series="deciderSeries((point) => point.val_selection_score, 100)"
+                     :best="deciderMark((card) => card.best, true, 'best')" :running="deciderRunning"/>
+          <LineChart title="Validation loss" :format="lossAxis" :epochs="deciderSpan" :series="deciderSeries((point) => point.val_loss)"
+                     :best="deciderMark((card) => card.lowest, false, 'lowest')" :running="deciderRunning"/>
         </div>
-        <p v-else class="net-wait">{{ running ? (index === 0 ? 'Its curves appear at the end of its first epoch.'
-          : 'It trains after the one above: its curves appear at the end of its first epoch.') : 'It did not reach its first epoch.' }}</p>
+        <p v-else class="net-wait">{{ running ? 'The curves appear at the end of the first variant’s first epoch.'
+          : 'No variant reached its first epoch.' }}</p>
+        <p class="note" id="decider-score-note">Chosen measure: the mean of the signs read right and the macro F1 of whose sign it
+          is (our road, another road, abstain); it chooses the epoch whose weights each variant keeps. The two apart are in the
+          tiles above and in the values per epoch.</p>
       </div>
-      <p v-if="deciderCards.length" class="note" id="decider-score-note">Chosen measure: the mean of the signs read right and the
-        macro F1 of whose sign it is (our road, another road, abstain); it chooses the epoch whose weights are kept.</p>
 
       <details class="chart-table">
         <summary>Values per epoch</summary>

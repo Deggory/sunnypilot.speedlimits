@@ -9,7 +9,7 @@
 // The proposers of Prepare (the Vietnamese YOLO, our networks, Qwen3-VL) are judged the same way, each measured on the
 // reviewed test frames with its Measure button (helpers/measure_proposer.sh); so are the AI reviewers of Settings, each
 // asked about the same frames a person reviewed (helpers/measure_ai_reviewer.sh).
-import {computed, onBeforeUnmount, onMounted, ref, shallowRef, watch} from 'vue';
+import {computed, ref, shallowRef, watch} from 'vue';
 import type {AiProvider, AiReviewerReport, AiReviewersPayload} from '../common/ai-types';
 import {api, messageOf} from '../common/api';
 import {isoWhen, thousands} from '../common/format';
@@ -26,6 +26,7 @@ import Segmented from './Segmented.vue';
 import WatchSection from './WatchSection.vue';
 import SectionHead from './SectionHead.vue';
 import DriveView from './DriveView.vue';
+import {usePoll} from '../composables/poll';
 
 const props = defineProps<{status: PanelStatus | null}>();
 const emit = defineEmits<{run: [name: ActionName, state: ActionState, start?: undefined, options?: ActionOptions]; stop: [job: Job];
@@ -101,7 +102,6 @@ const proposersError = ref('');
 /** The AI reviewers and their measures (helpers/measure_ai_reviewer.sh), every 15 s while their view is shown. */
 const aiReviewers = shallowRef<AiReviewersPayload | null>(null);
 const aiError = ref('');
-let timer: number | undefined;
 async function askProposers(): Promise<void> {
   try {
     proposers.value = await api<ProposersPayload>('/api/panel/proposers');
@@ -118,12 +118,7 @@ async function askAiReviewers(): Promise<void> {
     aiError.value = messageOf(problem);
   }
 }
-function poll(): void {
-  void askProposers();
-  if (view.value === 'ai') void askAiReviewers();
-}
-onMounted(() => { poll(); timer = window.setInterval(poll, 15000); });
-onBeforeUnmount(() => window.clearInterval(timer));
+usePoll(() => Promise.all([askProposers(), view.value === 'ai' ? askAiReviewers() : null]).then(() => undefined), 15000);
 watch(view, (value) => { if (value === 'ai') void askAiReviewers(); });
 const picked = ref<string | null>(null);
 const {payload: models, error: modelsError} = useModels();

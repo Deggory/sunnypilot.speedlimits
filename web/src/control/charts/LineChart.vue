@@ -26,7 +26,8 @@ const props = defineProps<{
   top?: number | undefined;
   /** The best epoch of a series, marked on its line. */
   best?: {series: string; epoch: number; label: string} | null | undefined;
-  running?: boolean | undefined;
+  /** The training runs: true for every line, or the key of the one line training now (the others are done). */
+  running?: boolean | string | undefined;
 }>();
 
 const HEIGHT = 210;
@@ -109,9 +110,11 @@ const bestPoint = computed(() => {
   const line = props.series.find((item) => item.key === best.series);
   return {cx: x(best.epoch), cy: y(value), color: line?.color ?? 'currentColor', label: best.label};
 });
-/** The epoch being trained now: from the last finished epoch to the next. */
-const inProgress = computed(() => props.running && last.value < epochs.value
-  ? {x: x(Math.max(1, last.value)), w: x(last.value + 1) - x(Math.max(1, last.value)), epoch: last.value + 1} : null);
+/** The epoch being trained now: from the last finished epoch (of the line training, when one is named) to the next. */
+const liveLast = computed(() => typeof props.running === 'string'
+  ? lines.value.find((line) => line.key === props.running)?.end?.epoch ?? 0 : last.value);
+const inProgress = computed(() => props.running && liveLast.value < epochs.value
+  ? {x: x(Math.max(1, liveLast.value)), w: x(liveLast.value + 1) - x(Math.max(1, liveLast.value)), epoch: liveLast.value + 1} : null);
 
 // -- the epoch under the pointer, the finger or the keyboard --------------------------------------------
 const hovered = ref<number | null>(null);
@@ -186,7 +189,7 @@ const tipText = computed(() => tip.value === null ? '' : 'Epoch ' + tip.value.ep
           <text :x="bestPoint.cx - 11" :y="bestPoint.cy + 4" text-anchor="end">{{ bestPoint.label }}</text>
         </g>
         <template v-for="line in lines" :key="'e' + line.key">
-          <circle v-if="line.end" class="chart-dot" :class="{live: running}" :cx="x(line.end.epoch)" :cy="y(line.end.value)" r="4"
+          <circle v-if="line.end" class="chart-dot" :class="{live: running === true || running === line.key}" :cx="x(line.end.epoch)" :cy="y(line.end.value)" r="4"
                   :style="{fill: line.color}"/>
         </template>
         <text v-for="label in endLabels" :key="'t' + label.key" class="chart-end" :x="label.cx + 8" :y="label.cy + 4">{{ label.text }}</text>

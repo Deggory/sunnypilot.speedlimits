@@ -1,11 +1,12 @@
-// The Evaluate tab: the runs (GET /api/panel/runs every 10 s while the tab is open), the run chosen (kept in
+// The Evaluate tab: the runs (GET /api/panel/runs 10 s after each answer while the tab is open), the run chosen (kept in
 // ?run= of the address, so a link opens it), its detail (GET /api/panel/runs/<run>, asked again only when the
 // run changes), and the words and numbers the tab shows.
-import {onBeforeUnmount, onMounted, ref, shallowRef, watch, type Ref} from 'vue';
+import {ref, shallowRef, watch, type Ref} from 'vue';
 import {api, messageOf} from '../common/api';
 import {isoWhen, thousands} from '../common/format';
 import type {RunDetail, RunState, RunSummary, RunsPayload} from '../common/panel-types';
 import {elapsedText} from './jobs';
+import {usePoll} from '../composables/poll';
 
 const INTERVAL_MS = 10000;
 
@@ -28,12 +29,11 @@ export function chooseRun(name: string, model: string | null = null): void {
     + (model === null ? '' : '&model=' + encodeURIComponent(model)));
 }
 
-/** The runs, asked every 10 s while the tab is shown. */
+/** The runs, asked 10 s after each answer while the tab is shown. */
 export function useRuns() {
   const payload = shallowRef<RunsPayload | null>(null);
   const error = ref('');
-  let timer: number | undefined;
-  async function refresh(): Promise<void> {
+  async function ask(): Promise<void> {
     try {
       payload.value = await api<RunsPayload>('/api/panel/runs');
       error.value = '';
@@ -41,12 +41,7 @@ export function useRuns() {
       error.value = messageOf(problem);
     }
   }
-  onMounted(() => {
-    void refresh();
-    timer = window.setInterval(() => void refresh(), INTERVAL_MS);
-  });
-  onBeforeUnmount(() => window.clearInterval(timer));
-  return {payload, error, refresh};
+  return {payload, error, refresh: usePoll(ask, INTERVAL_MS)};
 }
 
 /** The detail of a run, asked when the run shown or its version changes. */

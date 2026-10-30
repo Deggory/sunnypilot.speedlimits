@@ -53,6 +53,8 @@ JOB_ID = re.compile(r'[0-9]{8}-[0-9]{6}-[a-z_]+')
 FINISHED = re.compile(r'== (?:finished with code|finito con codice) (\d+)\s*$')
 # Runs the helper and appends its exit code as the last line of the log.
 WRAPPER = '"$@"; code=$?; echo; echo "== finished with code $code"; exit $code'
+# The niceness of the jobs: the site (nice 0) gets the CPU first when a job keeps every core busy.
+JOB_NICE = 10
 # The wrapper of the actions started before the footer was in English: still running ones are still ours (_group).
 OLD_WRAPPERS = ('"$@"; code=$?; echo; echo "== finito con codice $code"; exit $code',)
 # A training run's name, as helpers/3_train.sh writes it: "== d. training <run> (<mode>) -> ...".
@@ -442,6 +444,10 @@ class Panel:
         # (time of the last check, published?): None until the first answer.
         self._stable: tuple[float, bool | None] = (-float('inf'), None)
         self._stable_checking = False
+        # One reading of the status at a time, and when it began: the polls of the pages that waited for it share the
+        # next one (status()).
+        self._status_lock = threading.Lock()
+        self._status_last: tuple[float, dict] = (-float('inf'), {})
         # The training runs of <root>/runs, for the Evaluate tab (nnslr_tools.runs).
         self.runs_index = RunsIndex(root)
         # The same runs by role (cutter, classifier, decider) and the model in use, for the Models tab.
@@ -708,6 +714,20 @@ class Panel:
 
     # -- everything for the page ---------------------------------------------------------------
     def status(self) -> dict:
+        """Everything for the page, one reading at a time: a call waiting for another takes the next reading begun after
+        it was made, so the polls of the pages share it. On a busy machine a reading can take longer than the pages
+        wait between polls; read side by side they would pile up, each slowing the others."""
+        asked = time.monotonic()
+        with self._status_lock:
+            began, payload = self._status_last
+            if began > asked:
+                return payload
+            began = time.monotonic()
+            payload = self._read_status()
+            self._status_last = (began, payload)
+            return payload
+
+    def _read_status(self) -> dict:
         activities = self.activities()
         system = self.system()
         payload = {'available': self.available(), 'actions_enabled': self.actions_enabled and self.available(),
@@ -1704,9 +1724,10 @@ class Panel:
             with path.open('wb') as log:
                 log.write(('== ' + ' '.join(command) + '\n').encode())
                 log.flush()
-                # A new session: the action outlives this server and can be stopped as a group.
-                process = subprocess.Popen(['bash', '-c', WRAPPER, 'panel', *command], cwd=self.repo,
-                                           stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+                # A new session: the action outlives this server and can be stopped as a group. At a lower CPU
+                # priority (nice runs bash in its place, same pid): a job on every core leaves this site answering.
+                process = subprocess.Popen(['nice', '-n', str(JOB_NICE), 'bash', '-c', WRAPPER, 'panel', *command],
+                                           cwd=self.repo, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
                                            env=environment, start_new_session=True)
             self._processes[job_id] = process
             # The process group of the action (a new session: its pid), so Ferma works also after a
