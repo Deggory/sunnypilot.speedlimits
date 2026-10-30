@@ -81,7 +81,7 @@ ROAD_TYPE_STEPS = (
 PREPARE_STEPS = (('link', 'Link the videos', 5), ('frames', 'Extract the frames and propose the signs', 95))
 # scripts/publish_networks.sh: "== 1/4 Export the cutter" ... (prepare), "== 1/3 Check the package" ... (upload).
 NETWORKS_PREPARE_STEPS = (('cutter', 'Export the cutter', 40), ('classifier', 'Export the classifier', 20),
-                          ('decider', 'Export the decider', 30), ('package', 'Model card and checks', 10))
+                          ('decider', 'Export applicability', 30), ('package', 'Model card and checks', 10))
 NETWORKS_PUBLISH_STEPS = (('check', 'Check the package', 10), ('catalog', 'Read the catalog', 10),
                           ('upload', 'Upload to Hugging Face', 80))
 # scripts/send_to_car.sh: "== 1/5 Export ..." to "== 5/5 Build ..."; the build of the testing branch takes the minutes.

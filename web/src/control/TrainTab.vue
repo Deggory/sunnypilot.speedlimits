@@ -31,11 +31,11 @@ const props = defineProps<{status: PanelStatus | null}>();
 const emit = defineEmits<{run: [name: ActionName, state: ActionState, start?: TrainingStart, options?: ActionOptions]; stop: [job: Job];
   details: [job: Job]}>();
 
-/** The page as an app: one line of data, then one network at a time (Cutter, Classifier, Decider, Road type, the whole
+/** The page as an app: one line of data, then one network at a time (Cutter, Classifier, Applicability, Road type, the whole
  * Pipeline), whose Train button becomes its progress, in the same place, while it trains. */
 type Section = 'cutter' | 'classifier' | 'decider' | 'road' | 'pipeline';
 const SECTIONS: {key: Section; label: string}[] = [{key: 'cutter', label: 'Cutter'}, {key: 'classifier', label: 'Classifier'},
-  {key: 'decider', label: 'Decider'}, {key: 'road', label: 'Road type'}, {key: 'pipeline', label: 'Pipeline'}];
+  {key: 'decider', label: 'Applicability'}, {key: 'road', label: 'Road type'}, {key: 'pipeline', label: 'Pipeline'}];
 function sectionOf(action: ActionName): Section | null {
   if (action === 'train_cutter') return 'cutter';
   if (action === 'train_classifier') return 'classifier';
@@ -140,7 +140,7 @@ const CUTTER_ACTIONS = computed((): [ActionName, string][] => [
 /** The classifier's training, in its card. */
 /** The decider's training, in its card: experiment B, its three variants. */
 const DECIDER_ACTIONS: [ActionName, string][] = [
-  ['train_decider', 'Three deciders: the crop alone, with position and speed, with the scene. About 15 minutes on the GPU.'],
+  ['train_decider', 'Three versions of applicability (is this sign for our road?): the crop alone, with position and speed, with the scene. About 15 minutes on the GPU.'],
 ];
 /** The road type's training, in its card: with memory and without, compared, the one with memory exported. */
 const ROAD_ACTIONS: [ActionName, string][] = [

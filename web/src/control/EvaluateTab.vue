@@ -48,7 +48,7 @@ watch(mode, (value) => localStorage.setItem('nnslr-results-mode', value));
 type View = 'proposers' | 'chain' | 'cutter' | 'classifier' | 'decider' | 'ai';
 const VIEWS: {key: View; label: string}[] = [
   {key: 'proposers', label: 'Proposers'}, {key: 'chain', label: 'Chain'}, {key: 'cutter', label: 'Cutter'},
-  {key: 'classifier', label: 'Classifier'}, {key: 'decider', label: 'Decider'}, {key: 'ai', label: 'AI reviewers'},
+  {key: 'classifier', label: 'Classifier'}, {key: 'decider', label: 'Applicability'}, {key: 'ai', label: 'AI reviewers'},
 ];
 /** What each network must do, and the number that judges it. */
 const GOAL: Record<View, string> = {
@@ -357,7 +357,7 @@ const watchRun = computed(() => shown.value?.watchRun ?? shown.value?.run ?? '')
 const watchVersion = computed(() => runsPayload.value?.runs.find((run) => run.name === watchRun.value)?.version ?? null);
 /** Why there is nothing to play. */
 const nothingToPlay = computed((): string => {
-  if (view.value === 'decider') return 'Nothing to play: the decider is judged on its table.';
+  if (view.value === 'decider') return 'Nothing to play: applicability is judged on its table.';
   if (shown.value?.watch === null) return 'Nothing to play yet: this reader is played in the chain of a classifier run, and none has measured it.';
   return 'No frames to play for this version: its run kept none.';
 });

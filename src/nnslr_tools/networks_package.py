@@ -207,7 +207,7 @@ def model_card(manifest: dict) -> str:
         cutter_row,
         f'| Classifier | MobileNetV3-Small on each box: what it is (a speed limit and its number, end of limit, '
         f'variable display, other signs, not a sign) | `classifier.onnx` | `{networks["classifier"]["id"]}` |',
-        f'| Decider | MobileNetV3-Small with the box position, the car speed and the scene: whom a speed sign '
+        f'| Applicability | MobileNetV3-Small with the box position, the car speed and the scene: whom a speed sign '
         f'applies to (our road, another road, or it abstains) | `decider.onnx` | `{networks["decider"]["id"]}` |',
         '', '## How to run them', '',
     ]
@@ -237,7 +237,7 @@ def model_card(manifest: dict) -> str:
                      f'found and read right; {_number(chain.get("false_boxes_per_frame"))} false boxes left per frame'
                      + ('' if chain.get('with_this_cutter') else ' (measured with another cutter)') + '.')
     if decider:
-        lines.append(f'- Decider: "another road" precision {_number(decider.get("another_road_precision"))} and recall '
+        lines.append(f'- Applicability: "another road" precision {_number(decider.get("another_road_precision"))} and recall '
                      f'{_number(decider.get("another_road_recall"))} on {_count(decider.get("another_road_boxes"))} such '
                      'boxes; '
                      f'ownership macro-F1 {_number(decider.get("macro_f1"))}.')

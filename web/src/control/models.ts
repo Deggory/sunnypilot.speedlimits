@@ -34,11 +34,11 @@ export const ROLE_TEXT: Record<ModelRole, {what: string; today: string; empty: s
     uses: 'Prepare’s “Our networks” reads the signs with it.',
   },
   decider: {
-    what: 'Says whom each sign applies to: our road, another road, or abstain.',
+    what: 'Applicability: is this sign for our road? Our road, another road, or it abstains.',
     today: 'Today: only the prototypes of experiment B.',
-    empty: 'No decider trained yet: experiment B is the first prototype.',
+    empty: 'No applicability network trained yet: experiment B is the first prototype.',
     emptyMore: 'Its variants appear here once scripts/run_experiment_b.sh has trained them.',
-    uses: 'Nothing uses the decider yet: the choice is only noted for later.',
+    uses: 'Nothing uses the applicability network yet: the choice is only noted for later.',
   },
   road_type: {
     what: 'Says from the camera what road the car is on, once a second: town, rural, expressway, motorway, ramp or parking. '

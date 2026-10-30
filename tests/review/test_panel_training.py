@@ -337,7 +337,7 @@ def test_the_decider_is_trained_from_the_train_tab_on_a_new_run(root, checkout, 
     from nnslr_tools.panel import _run_of
     panel = Panel(root, repo=checkout)
     assert panel._action_states(ready_payload(), [])['train_decider'] == {
-        'label': 'Train the decider', 'allowed': False, 'reason': 'scripts/run_experiment_b.sh is missing in this installation'}
+        'label': 'Train applicability', 'allowed': False, 'reason': 'scripts/run_experiment_b.sh is missing in this installation'}
     script = checkout / 'scripts' / 'run_experiment_b.sh'
     script.parent.mkdir(parents=True, exist_ok=True)
     script.write_text('#!/usr/bin/env bash\necho "== Experiment B =="\necho "run:          $1"\necho "== 3/5 Train variant crop =="\n'
@@ -349,7 +349,7 @@ def test_the_decider_is_trained_from_the_train_tab_on_a_new_run(root, checkout, 
     done = finished(panel, job['id'])
     first = full_log(panel, job['id']).splitlines()[0].split()
     assert first[:2] == ['==', 'scripts/run_experiment_b.sh'] and re.fullmatch(r'\d{4}-\d{2}-\d{2}_\d{4}-decider', first[2])
-    assert (done['state'], done['run'], done['label']) == ('ok', first[2], 'Train the decider')
+    assert (done['state'], done['run'], done['label']) == ('ok', first[2], 'Train applicability')
     assert _run_of(panel.logs / (job['id'] + '.log'), 'train_decider') == first[2]
 
 

@@ -1,4 +1,4 @@
-"""The settings of the trainings of Train (Cutter, Classifier, Decider, Road type): the epochs, the patience, the batch,
+"""The settings of the trainings of Train (Cutter, Classifier, Applicability, Road type): the epochs, the patience, the batch,
 the learning rate, the processes reading the frames and the classifier's false boxes. Each one is an environment
 variable its script already reads (scripts/run_signnet.sh, run_classifier.sh, run_experiment_b.sh, run_road_type.sh)
 with the same default: the panel sets the ones changed here when it starts the next training of that kind
@@ -76,9 +76,9 @@ TRAININGS = {
          'help': 'At most this many times the sign crops of each partition.', 'default': 3.0, 'min': 0.5,
          'max': 20.0, 'step': 0.5, 'unit': '× signs'},
     ), 'fixed': ()},
-    'train_decider': {'label': 'Decider', 'script': 'scripts/run_experiment_b.sh', 'settings': (
+    'train_decider': {'label': 'Applicability', 'script': 'scripts/run_experiment_b.sh', 'settings': (
         {'key': 'epochs', 'env': 'NNSLR_EXPERIMENT_EPOCHS', 'label': 'Epochs',
-         'help': 'Passes over the training signs, for each of the three deciders.', 'default': 20, 'min': 1,
+         'help': 'Passes over the training signs, for each of the three versions.', 'default': 20, 'min': 1,
          'max': 200, 'step': 1, 'unit': 'epochs'},
     ), 'fixed': ()},
     'train_road_type': {'label': 'Road type', 'script': 'scripts/run_road_type.sh', 'settings': (

@@ -29,7 +29,7 @@ const PROPOSERS: {key: Proposer; label: string}[] = [{key: 'vietnam', label: 'Vi
 /** What each one is; its measure follows (measureText). */
 const PROPOSER_TEXT: Record<Proposer, string> = {
   vietnam: 'A ready-made model trained on Vietnamese signs: it boxes and reads them by itself.',
-  ours: 'Our cutter draws the boxes, our classifier reads them and our decider says which road each is for, all trained on your reviews.',
+  ours: 'Our cutter draws the boxes, our classifier reads them and our applicability network says which road each is for, all trained on your reviews.',
   qwen: 'A model that looks at the whole picture, boxes every sign and reads it in one go.',
 };
 /** The proposers as measured and the choice kept on the server (GET /api/panel/proposers, once per visit). */

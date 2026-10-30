@@ -14,7 +14,7 @@ const emit = defineEmits<{run: [name: ActionName, state: ActionState, start?: un
   stop: [job: Job]; details: [job: Job]}>();
 
 const PREPARE: [ActionName, string][] = [['networks_prepare',
-  'Exports the cutter, classifier and decider in use to ONNX, checks each against PyTorch and writes the model card. '
+  'Exports the cutter, classifier and applicability network in use to ONNX, checks each against PyTorch and writes the model card. '
   + 'Nothing is uploaded.']];
 const ROLES = ['cutter', 'classifier', 'decider'] as const;
 

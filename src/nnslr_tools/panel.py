@@ -293,7 +293,7 @@ ACTIONS = {
     # The cutter: a SignNet with the car's setup (896 x 288, stride 8), trained and measured on validation and test, on
     # a run of its own (start() adds <time>-cutter; {'families'}).
     'train_cutter': {'label': 'Train the cutter', 'group': 'train', 'command': [CUTTER_SCRIPT]},
-    'train_decider': {'label': 'Train the decider', 'group': 'train', 'command': [DECIDER_SCRIPT]},
+    'train_decider': {'label': 'Train applicability', 'group': 'train', 'command': [DECIDER_SCRIPT]},
     'train_road_type': {'label': 'Train the road type', 'group': 'train', 'command': [ROAD_TYPE_SCRIPT]},
     # The cutter, classifier and decider in use exported as one package (start() names it); nothing is uploaded.
     'networks_prepare': {'label': 'Prepare the package', 'group': 'publish', 'command': [NETWORKS_SCRIPT]},

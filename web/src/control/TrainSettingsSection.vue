@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// The settings of a training of Train (Cutter, Classifier, Decider, Road type): its epochs, patience, batch, learning
+// The settings of a training of Train (Cutter, Classifier, Applicability, Road type): its epochs, patience, batch, learning
 // rate, the processes reading the frames, the classifier's false boxes; GET/POST /api/panel/train-settings
 // (nnslr_tools.train_settings). Saved here, the next training of that kind uses them (Panel.start sets the variables
 // of its script); the one running keeps its own, and the job's chips say what each one used. What the car needs (the

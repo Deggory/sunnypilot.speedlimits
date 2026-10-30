@@ -41,8 +41,8 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
         + 'with memory for the car: about 15 minutes. Its run is a new one, named by the time it starts.'};
   }
   if (name === 'train_decider') {
-    return {title: 'Train the decider?', action: 'Start training',
-      text: 'Trains three deciders on the GPU (the crop alone; with position and speed; with the scene) and compares them: '
+    return {title: 'Train applicability?', action: 'Start training',
+      text: 'Trains three applicability networks on the GPU (the crop alone; with position and speed; with the scene) and compares them: '
         + 'about 15 minutes. Its run is a new one, named by the time it starts.'};
   }
   if (name === 'train_classifier') {
@@ -60,7 +60,7 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
   }
   if (name === 'networks_publish') {
     return {title: 'Publish ' + (options?.package ?? 'the package') + ' on Hugging Face?', action: 'Publish', danger: true,
-      text: 'Uploads the cutter, the classifier and the decider of this package, their model card and the catalog to '
+      text: 'Uploads the cutter, the classifier and the applicability network of this package, their model card and the catalog to '
         + 'Hugging Face, public: anyone can download them, and a copy may stay even if you delete it later. No frame '
         + 'or dataset is uploaded.'};
   }
@@ -123,7 +123,7 @@ const STOP_TEXT: Partial<Record<ActionName, string>> = {
   train_resume: 'The steps already done stay: Resume runs the missing ones on the same run.',
   train_classifier: 'This training is lost: training again starts a new run from the beginning.',
   train_cutter: 'This training is lost: training again starts a new run from the beginning.',
-  train_decider: 'The deciders already trained stay; training again starts a new run.',
+  train_decider: 'The applicability networks already trained stay; training again starts a new run.',
   train_road_type: 'A network already trained stays; training again starts a new run.',
   ai_review: 'The frames already saved stay saved; the others are left to review.',
   networks_prepare: 'Nothing is kept: preparing again starts over.',

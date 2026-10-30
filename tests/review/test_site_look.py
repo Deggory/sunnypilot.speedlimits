@@ -92,7 +92,7 @@ def test_control_page_reads_the_panel_status(served):
     # The classifier with "not a sign": its action on Train, its sections on Evaluate.
     assert 'train_classifier' in script and 'chain-eval' in script and 'classifier-eval' in script
     # The Train tab by role, one at a time: the cutter (its sizes and signs), the classifier, the decider, the pipeline.
-    for marker in ('train_cutter', 'train-sections', 'train-decider-note', 'Decider', 'Pipeline', 'cutter-eval'):
+    for marker in ('train_cutter', 'train-sections', 'train-decider-note', 'Applicability', 'Pipeline', 'cutter-eval'):
         assert marker in script, marker
 
 
