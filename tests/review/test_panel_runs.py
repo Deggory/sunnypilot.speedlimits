@@ -568,6 +568,15 @@ def make_classifier_run(root: Path, name: str = '2026-10-24_1730-classifier', *,
     return run
 
 
+def test_a_classifier_that_went_on_from_another_does_not_break_the_list(root, index):
+    run = make_classifier_run(root)
+    result = json.loads((run / 'classifier/result.json').read_text())
+    write(run / 'classifier/result.json', {**result, 'initialization': 'checkpoint', 'start': {
+        'path': str(root / 'runs/older_1/classifier/reader-best.pt'), 'epoch': 9, 'mapillary_only': False}})
+    runs = {item['name']: item for item in index.summaries()['runs']}
+    assert runs['2026-10-24_1730-classifier']['start']['kind'] == 'weights'
+
+
 def test_names_of_the_labels_of_the_classifier():
     assert runs_module.label_name('other_sign:give_way') == 'Other sign: give way'
     assert runs_module.label_name('other_sign') == 'Other sign'

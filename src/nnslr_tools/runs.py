@@ -1876,8 +1876,10 @@ class RunsIndex:
             results = [self._load(path, experiment_digest) for _, path in gathered['variants'] if path is not None]
         initialization = next((digest['initialization'] for digest in results
                                if isinstance(digest, dict) and digest.get('initialization')), None)
-        # A SignNet or an applicability variant that went on from an earlier run (--init-from).
-        went_on = next((digest['start'] for digest in results if isinstance(digest, dict) and digest.get('start')), None)
+        # A SignNet or an applicability variant that went on from an earlier run (--init-from); a classifier's start has
+        # no source (_start_digest) and is told by its initialization below.
+        went_on = next((digest['start'] for digest in results if isinstance(digest, dict) and digest.get('start')),
+                       None) if gathered['kind'] in ('cutter', 'experiment') else None
         if weights:
             from_run = FROM_RUN.search(weights)
             if from_run:
