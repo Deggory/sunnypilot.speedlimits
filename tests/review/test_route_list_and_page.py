@@ -76,6 +76,21 @@ def test_route_list_offers_review_with_ai_on_each_drive_left_once_a_reviewer_is_
     assert 'Set up AI review' not in page
 
 
+def test_route_list_shows_the_latest_drive_first():
+    def summary(route, start):
+        return {'route_id': route, 'run_id': RUN_ID, 'frame_count': 4, 'frames_with_proposals': 0,
+                'confirmed_count': 0, 'confirmed_by_ai': 0, 'suspicious_count': 0, 'hint_frames': 0,
+                'url': '/route/' + route + '/', 'drive': {'title': None, 'when': None, 'minutes': None, 'start': start},
+                'proposer': 'ours'}
+    page = render_index([summary('0000011a--16ed4c88ac', '2026-10-27T08:00+00:00'),
+                         summary('00000154--fa7e8f49aa', '2026-10-30T16:20+00:00'),
+                         summary('00000150--a7e71fb876', None),
+                         summary('00000153--44d221e479', '2026-10-30T13:30+00:00')], Path('review.sqlite'))
+    order = list(dict.fromkeys(re.findall(r'href="/route/([^/"]+)/"', page)))
+    # A drive whose start is unknown goes last.
+    assert order == ['00000154--fa7e8f49aa', '00000153--44d221e479', '0000011a--16ed4c88ac', '00000150--a7e71fb876']
+
+
 def payload_of(page: str) -> dict:
     found = re.search(r'<script type="application/json" id="payload">(.*?)</script>', page, re.S)
     assert found

@@ -382,6 +382,9 @@ def render_index(summaries: list[dict], database: Path, nonce: str = '', *, ai_r
         main.append('<div class="card state-box"><h2>No drives to review yet</h2><p>Download the drives from the '
                     'comma (the comma button at the top), then prepare them in <a href="/prepare">Data › Drives</a>'
                     '. They show up here when they are ready.</p></div>')
+    # The latest drive first, in every group: by its start (UTC), then by the route's counter; a drive whose start
+    # is unknown goes last.
+    summaries = sorted(summaries, key=lambda s: ((s.get('drive') or {}).get('start') or '', s['route_id']), reverse=True)
     grouped: dict[str, list[dict]] = {key: [] for key, _ in ROUTE_GROUPS}
     for summary in summaries:
         grouped[route_state(summary['confirmed_count'], summary['frame_count'])].append(summary)
