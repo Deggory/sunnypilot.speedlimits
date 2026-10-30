@@ -1,229 +1,289 @@
 # sunnypilot.speedlimits
 
-**Reading speed-limit signs with the comma's road camera, for sunnypilot's Speed Limit Assist.**
+**A camera speed limit for sunnypilot**, an openpilot fork for driver assistance, on a comma 4. Small neural networks read the Swiss speed signs in the comma's road camera. This repository holds the website where drives are reviewed, and the tools that train those networks and send them to the car.
 
-This project teaches small neural networks to find the speed-limit signs in the road camera of a comma device, read them, and work out whether they apply to the road the car is on. The goal is a third source for sunnypilot's Speed Limit Assist, next to the map and the car. The repository also contains a web portal where drives are prepared, signs are reviewed by people and by AI assistants, and networks are trained, measured and chosen.
+<img src="docs/images/readme-review.png" alt="The review page: a country road with a round 50 km/h sign in a yellow box. On the right, the sign is confirmed as Speed limit 50 km/h, for our road. A timeline of the drive is below the picture." width="100%">
 
-> **Status: research.** A SignNet and the classifier run on Cristian's own comma 4 in a research build of sunnypilot (`speedvisiond`, see [what runs on the comma now](docs/NN_VISION_SPEED_LIMIT_REMAINING_WORK.md#60-what-runs-on-the-comma-now-28-oct-2026)): the limit they read is shown on the driving screen, and Speed Limit Assist uses it only when sunnylink's Speed Limit Source is Map Data + Vision. No trained weights are published.
+<sub>The review page. You check the box around each sign, and what the sign says.</sub>
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/review-dark.jpg">
-  <source media="(prefers-color-scheme: light)" srcset="docs/images/review-light.jpg">
-  <img src="docs/images/review-light.jpg" alt="Review page of the portal: a dashcam frame of a Swiss motorway bridge with two variable 80 km/h signs and a danger sign boxed, and a side panel where the selected box is confirmed as a variable display at 80 km/h that applies to our road.">
-</picture>
+> **Status: research.** A research build of sunnypilot runs these networks on Cristian's comma 4. The limit they read shows on the driving screen when sunnylink's **Show Vision Speed Limit** is on. Speed Limit Assist uses it only when the **Speed Limit Source** is **Map Data + Vision**: then the vision limit comes first, and the map fills in when vision has none. Details: [what runs on the comma now](docs/NN_VISION_SPEED_LIMIT_REMAINING_WORK.md#60-what-runs-on-the-comma-now-28-oct-2026).
 
-<sub>The review page (see [Review a route](#review-a-route)): two variable 80 km/h displays and a danger sign on a Swiss motorway bridge, boxed and labelled. Number plates are blurred.</sub>
-
-[Why](#why) · [How it works](#how-it-works) · [The portal](#the-portal) · [Results so far](#results-so-far) · [How you can help](#how-you-can-help) · [Getting started](#getting-started)
+[Why](#why) · [How it works](#how-it-works) · [Daily use](#daily-use) · [Install](#install) · [More](#more) · [Details](#details)
 
 ## Why
 
-sunnypilot's Speed Limit Assist takes the current limit from the car, when the car reports it on CAN, and from the map (OpenStreetMap). Many cars report no limit on CAN. The author's Peugeot 3008 is one of them, so there the map is the only source.
+sunnypilot's Speed Limit Assist takes the limit from the car (when the car sends it on CAN) or from the map (OpenStreetMap). Many cars send nothing on CAN. Cristian's Peugeot 3008 is one of them, so the map is all it has.
 
-Maps lag behind the road. Roadworks, variable motorway displays, temporary limits and recently changed signs are often missing from the map, or wrong there. The sign at the roadside is what the driver has to follow. A camera source would let sunnypilot see the same sign, and notice when the map is out of date.
+Maps lag behind the road. Roadworks, variable motorway displays and new signs are often missing or wrong on the map. The sign at the roadside is what the driver must follow. A camera can see it.
 
 ## How it works
 
-The job is split into small steps. Each network is trained, measured and replaced on its own, so it is always clear which part fails.
+Three networks: the **sign finder** (SignNet, also called the *cutter*) puts a box around each sign, the **sign reader** (the *classifier*) reads each box, and the **road type** network says what kind of road the car is on.
 
-![The planned pipeline: the cutter finds boxes, the classifier says what each box is, the decider says whom each sign applies to, tracks follow signs over time, and rules keep the current limit for Speed Limit Assist.](docs/neural-network.png)
+From a drive to the car, in six steps:
 
-<sub>The pipeline as planned on 24 October 2026. The cutter box still shows the very first detector, which found 6% of the signs. Since 30 October 2026 the cutter is SignNet, the network the comma runs: the one on the car passes on 40% of the test signs at its score floor of 0.3 (see [Results so far](#results-so-far)).</sub>
-
-1. **Cut.** The cutter, SignNet, looks at the band at the top of each frame of the main road camera (the top 432 of 760 rows of the comma four's 1344 × 760 pixels, scaled to 896 × 288; the top 416 rows alone hold 97% of the reviewed signs) and draws a box around anything that could be a sign; the car keeps the best 5 boxes of a frame that score 0.3 or more. It must miss nothing. False boxes are fine, because the next step drops them. Signs are tiny: in these drives the median sign is 17 pixels wide. A sign below the band (a road marking, a low sign close by) is not found.
-2. **Classify.** The classifier gets each box, cut from the full-resolution frame, and says what it is: a speed limit and its value, end of limit, zone, variable display, a limit too blurred to read, another kind of sign (town entry, give way, direction and so on), or not a sign at all.
-3. **Decide.** The decider says whom each sign is for: our road, another road (an exit ramp, a parallel road, the other carriageway), or "not sure", in which case it abstains. It looks at the recognised signs, where they are in the image, and the car's speed.
-4. **Follow over time.** The same sign is followed from frame to frame as the car gets closer, so the reading steadies and the system knows when the sign has been passed. In the car only past frames exist, so this step never looks ahead.
-5. **The limit now.** The current limit is kept by plain rules, not by a network, so the reason for every limit stays visible: which sign set it, and how sure that reading was. The country, from the GPS, decides how a sign is interpreted, because a town-entry sign implies a different limit in different countries.
-
-### One frame, step by step
-
-Three separate networks, joined by a little code ([`chain.py`](src/nnslr_tools/chain.py) on the server). Each network is called **once per frame**: the classifier gets all the boxes of the frame together, as one batch, not one call per box.
-
-```
-frame [3, 760, 1344]
-  │
-  ▼  top 432 rows, scaled to 896 × 288
-band [3, 288, 896]
-  │
-  ▼  cutter (SignNet, a heat map of sign centres) 1 call
-boxes [N, 4] + scores                             the best N ≤ 5, score ≥ 0.3, false ones included
-  │
-  ▼  cut each box from the full-resolution frame, resize to 160 × 160
-crops [N, 3, 160, 160]                            stacked into one tensor
-  │
-  ▼  classifier (MobileNetV3-Small)               1 call for all N
-classes [N]                                       50, end of 80, give way, …, not a sign
-  │
-  ▼  drop "not a sign"; the rest with position and size, the car's speed and steering
-  ▼  decider (MobileNetV3-Small, a prototype)    1 call for all the signs of the frame
-road [M]                                          ours / another / abstain
-  │
-  ▼  rules over time, with the country from the GPS
-the limit now
+```mermaid
+flowchart TD
+  A["Drives<br/>from the comma"] --> B["Prepare<br/>pictures + proposed boxes"]
+  B --> C["Review on the site<br/>a person confirms the boxes"]
+  C --> D["Import reviews<br/>→ training dataset"]
+  D --> E["Train<br/>sign finder, sign reader, road type"]
+  E --> F["Send to the car<br/>speed-limits-models"]
+  F -.->|new drives| A
 ```
 
-Why one call for all the boxes: a network is mostly matrix multiplications. N crops stacked as N rows go through every layer in the same single pass, the weights are read once, and the GPU fills its cores. 40 crops take about as long as 1; 40 calls would take 40 times longer. On the server the cutting is still a Python loop on the CPU; in the car it becomes one GPU operation (`torchvision.ops.roi_align`), so frame → cutter → crops → classifier never leaves the GPU and can be exported as a single model.
+- **Prepare** takes one picture a second from each drive. A model proposes a box around each sign it sees.
+- **Review** is the only step done by hand. Every label the networks learn from is confirmed here.
+- **Import reviews** copies the confirmed labels (the boxes and what each sign says) into the training dataset ([what it does](#4-import-the-reviews)).
+- **Train** teaches the networks on a GPU on the server. The car never trains anything.
+- **Send to the car** puts the networks into sunnypilot. The comma gets them with its next software update.
 
-All training happens on a server with one GPU (a Tesla V100). The networks trained there are the ones for the car (see [Chestnut](#where-it-would-run-chestnut)) and the ones that propose the signs of new drives (Prepare, "Our networks"). On the server a drive can also be looked at with its later frames, its GPS and the map, which the car cannot do: that is the "teacher" step, meant to make better proposals and help training.
+### What runs on the car
 
-| Step | Where it stands (24 October 2026) |
-|---|---|
-| Cutter | SignNet, the network the comma runs, is the one cutter (30 October 2026). The one in use (Models) gives the boxes of the server too. The SignNets so far were trained on the split of 26 October: a new one is needed before one is put in use. |
-| Classifier | A first version with "not a sign" is trained and measured. None is chosen yet. |
-| Decider | Prototypes (experiment B). The one chosen sets the road of Our networks' proposals. |
-| Road type | A prototype with memory (29 October 2026): the kind of road from the camera, one frame a second, and the merge after a ramp. Measured on a held-out drive; nothing uses it yet. |
-| Following over time | Computed on the reviewed frames, not yet on the networks' output. |
-| Limit state and country rules | Planned. A small core with no dependencies ([`src/speed_vision_core`](src/speed_vision_core)) already has the types, the validation and the temporal checks. |
-| sunnypilot | No working integration. [`integrations/sunnypilot`](integrations/sunnypilot/README.md) keeps an old, frozen advisory snapshot that only ever reports "unavailable". |
+```mermaid
+flowchart TD
+  cam["Road camera<br/>5 pictures a second"] --> sn["SignNet<br/>boxes the signs"]
+  sn --> cl["Classifier<br/>reads each box"]
+  cl --> lim["Vision limit"]
+  cam --> rt["Road type<br/>town, rural, motorway…"]
+  sig["Car signals<br/>speed, gyro, steering, blinkers"] --> rt
+  rt -->|"general limit where<br/>no sign holds"| lim
+  lim --> res["sunnypilot resolver<br/>Map Data + Vision"]
+  osm["Map<br/>OpenStreetMap"] --> res
+```
 
-The plan for sunnypilot is a Vision option next to Car and Map in Speed Limit Assist's source setting. At first it would only show the limit on screen. It would use only fresh, confident signs that apply to our road, and ignore stale or uncertain ones.
+- **SignNet** looks only at a band at the top of the picture, where signs stand (896 × 288 pixels, a grid of 8 pixels). It keeps up to 5 boxes per picture.
+- The **classifier** reads each box: a speed and its value, end of limit, another kind of sign, or "not a sign". A number counts once it is read in 2 pictures within 1.5 s.
+- The **road type** network says what kind of road it is: town, 30 zone, rural, expressway, motorway, ramp or car park. Where no sign holds, that gives the country's general limit. In Switzerland: 50 in town, 80 rural, 100 expressway, 120 motorway, 10 in a car park.
+- Everything runs inside the comma 4, on its own GPU, next to the driving model.
+- **The vision side never reads the map.** It uses only the camera and the car's own signals. Map and vision meet only in sunnypilot's resolver, when the Speed Limit Source is **Map Data + Vision**.
 
-### Where it would run: Chestnut
+## Daily use
 
-The networks are sized for Chestnut, comma's external GPU, and not for the comma four's own chip. To fit that chip, the frame would have to shrink so much that distant signs, already under 20 pixels wide, disappear: the old Detector found 38% of the test speed signs at 320 × 320, and 81% at full resolution. The cutter, SignNet, is the exception: it was made for the comma's own GPU, and reads only the 896 × 288 band where the signs stand (12 ms of the Adreno's GPU). Chestnut has far more compute. It also runs openpilot's driving model, though, and the driving model always comes first. How much room is left next to it, and how a second model can share it, still has to be measured. Nothing has run on Chestnut, or in a car, yet.
+Everything runs on the server. Most steps are a button on the site and also a script in `helpers/` or `scripts/`. Get the drives, Prepare and Import skip work that is already done; a training started again is a new run.
 
-## The portal
+<img src="docs/images/overview.png" alt="Overview page: a cutter training running at 28%, the next step Review the signs with a Resume review button, three cards (Drives all prepared, Review 40% confirmed, Training dataset 21,414 objects) and the recent activity." width="100%">
 
-Daily work happens in a web portal served by this repository, by default on port 8765. Its six tabs follow the order of the work: Overview, Prepare, Review, Train, Evaluate and Models. Jobs started from the portal run on the server, show their progress live and can be stopped. The portal has a light and a dark theme, and the pictures below follow your GitHub theme. On a home network it asks for a name and a password. It is not meant to be reachable from the internet.
+<sub>The Overview page: what is running, the next step, and how far each stage has got.</sub>
 
-### Overview
+**At any time**, `helpers/status.sh` shows each drive, what is running, the GPU, the disk and the next command. It only reads.
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/overview-dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="docs/images/overview-light.png">
-  <img src="docs/images/overview-light.png" alt="Overview tab: the next step is to review signs, 46% of 19,140 frames are confirmed, and a classifier training is 85% done, evaluating the whole chain.">
-</picture>
+### 1. Get the drives
 
-Where things stand and what to do next. A banner names the next step. Three cards show how far preparing, reviewing and training have got: here, 46% of 19,140 frames are confirmed. Every running job lists its steps with live progress; a finished one is a row of the latest jobs. On every page, a pill at the top right says how busy the server is ("Server idle", "GPU 85%"); tap it for the GPU, its memory and temperature, the CPU, the memory and the free disk.
+On the site: the **comma** pill at the top right, then **Download new drives**. In a terminal: `helpers/fetch_comma_segments.sh`.
 
-### Prepare
+It copies new drives from the comma over SSH. It drops trips shorter than five minutes, the first and last two minutes of each trip, and any minute in reverse gear.
 
-This tab turns drives on the comma into frames ready for review, automatically, with two buttons. **Download from the comma** copies new drives over SSH. It leaves out trips shorter than five minutes, the first and last two minutes of every trip, and any minute in reverse gear. **Prepare new drives** extracts one frame per second, lets pre-annotation models propose sign boxes, and reads the GPS position and country of every frame. A table shows the state of each route.
+### 2. Prepare
 
-### Review a route
+On the site: **Data › Drives**, then **Prepare new drives**. In a terminal: `helpers/1_prepare.sh`.
 
-The review page is the picture at the top of this page. This is the one step done by hand, and the heart of the project: every label the networks learn from is confirmed here.
+It takes one picture a second, lets a model propose sign boxes, and reads the GPS position and country of each picture. **It takes a while and uses many CPU cores and the GPU.** You choose the model that proposes the boxes under **Found by**: Vietnamese YOLO (the default), Our networks, or Qwen3-VL (about 17 GB of GPU memory).
 
-- **Boxes.** The models' proposals are drawn on the frame. You move, add or delete boxes, and the selected box opens as a sharp, full-resolution crop. The model's own guess is shown, but only as a hint: in that picture it took an 80 km/h display for a height limit.
-- **What each box is.** For each box you set the kind of sign: speed limit, variable display, end of limit, zone, road marking, unreadable limit, not a sign, or another sign with its kind (town entry, give way, roundabout, directions and more). You also set the value in km/h, and whom the sign is for: **Ours**, **Another** road, or **Unclear**.
-- **Country from the GPS.** The frame's country is proposed from its GPS position, and you confirm or correct it.
-- **Fit box** (key C) fits the selected box, or every box of the frame, to the sign under it: on the server's CPU, in well under a second, with no AI. When it finds no better box (no sign there, or the box already right) it keeps the box. **Fit with AI** (Shift+C) asks the AI reviewer instead.
-- **Apply previous** (key A) carries the confirmed boxes of the frame before onto this one. A sign it cannot find gets a box marked "check", and the frame cannot be confirmed until you have looked at each one.
-- **Timeline and filters.** A timeline colours every frame of the drive by its state. Filters jump to the frames still to review, to those flagged as suspicious (for example where a second model sees a sign the first one missed), or to those an AI reviewed. On some frames a second model offers its own reading, which you should use only if you see it too.
+For the road type network, **Data › Roads › Find the road types** (`helpers/road_types.sh`) reads the kind of each road from OpenStreetMap, offline. These are training labels only: the car never sees the map.
 
-**AI reviewers.** A review can also be done by an AI that sees images. Under **Settings → AI reviewer** you connect any OpenAI-compatible server, a hosted provider or your own llama.cpp server with a vision model, and choose the one that reviews. On the review page, **Ask AI** (key I) shows its suggestion for the frame. The suggestion saves nothing: **Apply** turns it into edits that you check, and your **Confirm** saves them. On the route list, **Review with AI** has the AI go through every frame still open, either as a trial or saving its reviews. AI assistants such as Claude Code or Codex can also review without a browser, through a REST API (`/api/v1`) or an MCP server: the assistant runs on its own computer, looks at each image, and saves through the same checks as the page. Every save records who made it (a person, or an AI as `ai/<name>`) and through which channel. An AI cannot change a frame a person confirmed without an explicit override. A confirmation by an assistant through the REST API or MCP needs no second approval by a person, and stays marked as an AI review in the dataset. What the site's own AI reviewer saves (**Review with AI**, a server of Settings) waits for you instead: the review page shows those frames as **AI · to confirm**, the route list counts them, and they go into training only once you confirm them. Details are in [docs/API_MCP.md](docs/API_MCP.md) (in Italian).
+### 3. Review
 
-### Train, network by network
+`helpers/2_review.sh` starts the site on port 8765 and prints its link. On the server it usually runs as the `speedlimits-web` service, always on.
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/train-networks-dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="docs/images/train-networks-light.png">
-  <img src="docs/images/train-networks-light.png" alt="Train tab: three cards for the cutter, which finds sign-like boxes, the classifier, which says what each box is, and the decider, which says which road a sign applies to, each with its latest trained version and test numbers.">
-</picture>
+<img src="docs/images/routes.png" alt="Data, Review page: 40% of the frames confirmed (12,575 of 31,680 in 25 drives), with tiles for In progress, To start and Done, and a list of drives each with Resume and Review with AI buttons. Place names are blurred." width="100%">
 
-The Train tab has one card per network:
+<sub>Data › Review: how much is confirmed, and the drives to work on.</sub>
 
-- **Cutter.** **Train the cutter** trains a SignNet with the car's setup (the 896 × 288 band, stride 8), in about 80 minutes on the GPU. Its one option is whether it learns every sign or only speed signs. It writes `data/runs/<name>/signnet-best.pt`, `result.json` and `signnet.log`; **Use this one** on the Models tab then puts it in use.
-- **Classifier.** **Train the classifier** collects the cutter's false boxes, trains the classifier with "not a sign", and measures it on its own and together with the cutter. Once `helpers/mapillary.sh` has cut the signs of the Mapillary Traffic Sign Dataset, a switch adds them to its training crops (**With Mapillary**); the measures stay on our drives. **Mapillary, then ours** trains in two stages instead: first on the Mapillary signs alone, then on ours from those weights. **Where** keeps the signs of some continents or countries (Europe, or only Switzerland, Germany and Italy), once **Locate the photos** has found where each photo was taken; **Share** takes a fixed random part of them (5 %, say).
-- **Decider.** **Train the decider** trains experiment B's three variants (the crop alone, with position and speed, with the scene) in about 15 minutes, and compares them. It is a prototype; the one in use (Models) sets OURS or another on the speed signs Our networks propose.
-- **Road type.** **Train the road type** trains the network that tells town, 30 zone, rural, expressway, motorway, ramp and parking from the camera, with memory and the motorway sign, without the sign and without memory, in about 20 minutes (40 the first time, when it reads the signs as the car does), compares them by when a ramp's limit ends and exports the first as an ONNX step for the car. It learns from the road types of Data › Roads, and needs no reviewed sign. It is a prototype: nothing uses it yet ([docs/NEURAL_NETWORK.md](docs/NEURAL_NETWORK.md#the-road-type-with-memory-29-october-2026)).
+On each picture you:
 
-Two more buttons cover the dataset and the older pipeline. **Import reviews** turns the confirmed frames into the dataset. **Whole pipeline** runs the older detector-and-reader baseline, from the import to a packaged model; its detector is kept to compare and cannot be the cutter in use.
+- move, add or delete boxes;
+- say what each sign is, and its speed;
+- say whom it is for: **Ours**, **Another** road, or **Unclear**;
+- press **Confirm**.
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/train-charts-dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="docs/images/train-charts-light.png">
-  <img src="docs/images/train-charts-light.png" alt="Training charts of the sign classifier: validation accuracy per epoch for signs read right, 'not a sign' rejected and their balance, with the best epoch marked, next to the train and validation loss curves.">
-</picture>
+**Apply previous** (key A) copies the boxes of the picture before. **Fit box** (key C) snaps a rough box onto its sign, on the server in a fraction of a second, with no AI. It also works on a phone:
 
-While a network trains, charts follow it epoch by epoch on the validation set and mark the epoch whose weights are kept.
+<img src="docs/images/readme-review-phone.png" alt="The review page on a phone: the picture with the boxed 50 sign at the top, navigation and filters below, and a Next frame button at the bottom." width="260">
 
-### Evaluate
+An AI that sees images can help. **Ask AI** (key I) suggests boxes and saves nothing. **Review with AI** goes through a whole drive; you still confirm its work before it counts. AI assistants such as Claude Code can also review through a REST API or MCP: see [review_instructions.md](review_instructions.md).
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/evaluate-dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="docs/images/evaluate-light.png">
-  <img src="docs/images/evaluate-light.png" alt="Evaluate tab: a table of training runs and the detail of the classifier run, which reads 46.3% of test signs right, rejects 98.2% of non-signs, and gets 61.3% of speed signs right end to end with 0.26 false boxes per frame.">
-</picture>
+### 4. Import the reviews
 
-This tab lists every training run with its numbers on the test set, which is made of places the networks never saw while learning. Open a run to see what it was trained on, how the classifier does on its own, and how the whole chain does. Runs can be compared side by side.
+On the site: **Data › Training dataset**, then **Import reviews**. In a terminal: `helpers/3_train.sh --dataset-only`.
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/evaluate-chain-dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="docs/images/evaluate-chain-light.png">
-  <img src="docs/images/evaluate-chain-light.png" alt="End-to-end results: 61.3% of the speed signs in the test set are found and read right, false boxes drop from 41.5 to 0.26 per frame after the classifier, and signs under 12 pixels are the hardest.">
-</picture>
+<img src="docs/images/panel-data.png" alt="Data, Training dataset page: Dataset is up to date, 12,575 frames and 21,414 objects, objects by sign family, who confirmed them (people and AI reviewers), and the train, validation and test split." width="100%">
 
-The chain card answers the question that matters: how many of the test's speed signs are found **and** read right. It also shows how many false boxes survive per frame, and how both change with the size of the sign and the cutter's threshold.
+<sub>Data › Training dataset: what the networks learn from, who confirmed it, and the split.</sub>
 
-### Models
+What it does:
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/models-dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="docs/images/models-light.png">
-  <img src="docs/images/models-light.png" alt="Models tab: the cutter, the classifier and the decider in use with their numbers; below, the versions of one of them as a table to compare (speed signs, every sign, the chain), each row opening its card with Use this one.">
-</picture>
+1. It reads every **confirmed** picture in the review database. Model proposals and pictures nobody confirmed stay out. Pictures saved by the site's own AI reviewer (**Review with AI**) wait for a person, and stay out until confirmed. Reviews saved by an assistant through the REST API or MCP are final, and go in as AI reviews (`ai/<name>`).
+2. It writes their labels into the training dataset (`data/annotations/objects.jsonl`). It follows the latest review: a picture reviewed again replaces its old rows, and a withdrawn one is removed. Old rows are archived in `data/annotations/replaced/`, not lost.
+3. Boxes that reviewers deleted are kept as rejected proposals. The classifier learns from them as "not a sign".
+4. It checks the dataset and splits it into **train**, **validation** and **test**. The test is a set of places kept apart, with a buffer of neighbouring places left out of both, so the networks are measured on roads they never learned.
 
-For each network (cutter, classifier and decider), this tab lists every version trained here, each with its main test number and the rest under **Details**, and the one in use. **Use this one** records the choice, with who made it and when. Other steps then use that version: for example, the classifier training learns from the false boxes of the cutter in use, the boxes the car sees. Only a SignNet that fits the car (896 × 288, stride 8) can be the cutter in use; the old Detectors stay in the list to compare. Choosing copies, exports or installs nothing.
+It is quick and uses no GPU. **It trains nothing**: training is the next, separate step. Confirming a picture does not import it either.
 
-**Publish**, under the three columns, shares the three networks in use with other people, together, on Hugging Face:
+### 5. Train
 
-- **Prepare the package** exports them to ONNX, checks each against PyTorch, and writes a model card with their test numbers. It runs here and uploads nothing.
-- **Publish on Hugging Face** uploads the latest package to `cristianku/sunnypilot-speedlimits-models`, public, after a question, and adds it to the catalog `speed_networks.json` that a car can download from. No frame or dataset leaves the server.
-- The Hugging Face account is connected in **Settings → Hugging Face**: a wizard creates a token with Write access, checks it and keeps it on the server ([docs/INSTALL.md](docs/INSTALL.md#publishing-a-model-on-hugging-face)).
+On the site: **Training**. There is one tab and one button per network. **They all use the GPU**, and only one training runs at a time.
 
-The commands are in [docs/COMMANDS.md](docs/COMMANDS.md#publishing-when-there-is-something-to-publish).
+- **Train the cutter** (SignNet): about 80 minutes.
+- **Train the classifier**: a few hours. It learns from the false boxes of the cutter in use, so choose a cutter first.
+- **Train the road type**: about 15 minutes (longer the first time). It needs **Find the road types** (step 2) to have run once. It needs no reviewed sign.
+- **Train applicability** (is this sign for our road?): about 15 minutes. A prototype.
 
-## Results so far
+<img src="docs/images/panel-train.png" alt="Training page, Cutter tab: a SignNet 896 by 288 training running at epoch 11 of 40, with its steps and charts of validation recall and loss." width="100%">
 
-These are the first measurements, taken on 24 October 2026 (SignNet's on 28 October). The dataset is small and comes from one country. Most of it was labelled by AI reviewers, and everything is measured on a single test area. Read the numbers as a direction, not a promise.
+<sub>A cutter training, followed epoch by epoch.</sub>
 
-### The data
+Each training writes its results in `data/runs/<name>/`. Nothing is put in use by itself.
+
+### 6. Choose and send to the car
+
+On the site: **Models › Versions**. Every version has its test numbers. **Use this one** picks the version that the other steps use.
+
+<img src="docs/images/readme-models.png" alt="Models, Versions page: four In use cards for Cutter (SignNet 896 by 288, 67.6% of the speed signs as the car reads them), Classifier, Applicability and Road type, each with its main test numbers and whether it is also on the car." width="100%">
+
+<sub>The networks in use, each with its main test numbers.</sub>
+
+On the card of a SignNet:
+
+- **Send to the car** publishes that SignNet, the classifier and the road type in use into the [`speed-limits-models`](https://github.com/cristianku/speed-limits-models) repository. That is a submodule of sunnypilot's `speed-limits` branch. It then rebuilds Cristian's sunnypilot test branch (`psa-torque-sunny-testing`), in a few minutes. On the comma: **Settings › Software › Check for updates**, then install.
+- **Try on the comma now** copies that SignNet and the classifier in use straight onto a parked comma over SSH, after checking them with the comma's own code. The road type stays the build's. They last until the comma's next update. **Back to the build's networks** undoes it.
+
+The **On the car** card holds the comma's settings: how sure a sign must be, in how many pictures, how long a road type must be seen. They travel with the next send.
+
+<img src="docs/images/panel-car.png" alt="The On the car card: settings for signs (classifier 70% sure, seen in 2 pictures within 1.5 s) and for the road type (counts after 3 answers, new limit after 10 s, 30 zone at 90%, car park after 5 s, car park 10 km/h, ramp 45 s, merged after 8 s)." width="100%">
+
+<sub>Models › On the car: the comma's own settings, sent with the networks.</sub>
+
+### Keep the site up to date
+
+`helpers/update.sh` (or **Update the site** in the server pill at the top right) pulls the code, updates the Python environment when needed and restarts the site. Running trainings keep going.
+
+## Install
+
+You need Python 3.11 or newer. The core has no dependencies.
+
+```sh
+git clone https://github.com/cristianku/sunnypilot.speedlimits.git
+cd sunnypilot.speedlimits
+python3 -m venv .venv && .venv/bin/pip install -e . pytest
+.venv/bin/nnslr selftest   # quick check, CPU only
+.venv/bin/nnslr review     # the site, on this computer only
+```
+
+Without drives of your own the site is empty. [docs/INSTALL.md](docs/INSTALL.md) covers the system packages, the GPU environment, the comma's SSH access and the always-on service.
+
+## Helpers, commands and scripts
+
+Day-to-day work happens on the site, whose buttons run a few helper scripts and the `nnslr` command-line tool. [docs/COMMANDS.md](docs/COMMANDS.md) lists them all: what each one does, what it writes, and which ones use the GPU, install packages or publish anything.
+
+- `helpers/1_prepare.sh`, `helpers/2_review.sh`, `helpers/3_train.sh`, `helpers/update.sh`: the daily steps above. `helpers/status.sh` only reads.
+- `scripts/run_signnet.sh`, `scripts/run_classifier.sh`, `scripts/run_road_type.sh`, `scripts/run_experiment_b.sh`: the trainings of the Training page (GPU).
+- `scripts/send_to_car.sh` and `scripts/try_on_comma.sh`: Send to the car and Try on the comma now.
+- `helpers/ai_review.sh` and `helpers/measure_ai_reviewer.sh`: the AI reviewer. Its providers and keys stay on the server.
+- `scripts/train_box_fit.sh`: trains the review page's **Fit box** on the boxes people drew, on the CPU in about 15 minutes.
+
+## More
+
+- [docs/GUIDE.md](docs/GUIDE.md): the daily guide, page by page, with sign-in, the token and common problems.
+- [docs/COMMANDS.md](docs/COMMANDS.md): every helper, script and `nnslr` command, and what each one writes.
+- [docs/INSTALL.md](docs/INSTALL.md): installing everything from scratch.
+- [docs/NEURAL_NETWORK.md](docs/NEURAL_NETWORK.md): the networks, how they are measured, and the results.
+- [docs/upstream-training-guide.md](docs/upstream-training-guide.md): the `nnslr` training commands, step by step.
+- [review_instructions.md](review_instructions.md) and [docs/API_MCP.md](docs/API_MCP.md): for AI reviewers (REST API and MCP).
+- [docs/DATASET.md](docs/DATASET.md): the dataset format and its rules.
+
+## Details
+
+### Where each part stands (30 October 2026)
+
+- **Sign finder (cutter).** SignNet is the one cutter, on the car since 28 October. The one in use, trained on 30 October, finds 68% of the speed signs as the car reads them (IoU 0.5).
+- **Classifier.** A version with "not a sign" is trained, measured, and on the car.
+- **Road type.** A network with memory: the kind of road from the camera and the car's own motion, one answer a second, and the merge after a ramp. On the car ([details](docs/NEURAL_NETWORK.md#the-road-type-with-memory-29-october-2026)).
+- **Applicability** (is this sign for our road, or for another one?). A prototype. Not on the car, so a side road's sign can be taken for ours.
+- **Country rules.** The general limits (town, rural, expressway, motorway) of 22 countries are on the car, from [`docs/road-rules/`](docs/road-rules/README.md). The country is the one chosen in sunnypilot's settings (Switzerland by default). A small core with no dependencies ([`src/speed_vision_core`](src/speed_vision_core)) has the types and checks.
+- [`integrations/sunnypilot`](integrations/sunnypilot/README.md) keeps an old, frozen advisory snapshot. It is not the runtime on the comma.
+
+### One picture, step by step
+
+Three separate networks, joined by a little code ([`chain.py`](src/nnslr_tools/chain.py)):
+
+```
+picture       3 × 760 × 1344
+ → top band   3 × 288 × 896   (top 432 rows, scaled)
+ → SignNet    best 5 boxes, score ≥ 0.3
+ → crops      3 × 160 × 160 each, cut from the full picture
+ → classifier one answer per box (50, end of 80, give way, not a sign…)
+ → applicability  ours / another / not sure  (prototype, server only)
+ → rules over time → the limit now
+```
+
+Signs are tiny: the median sign is 17 pixels wide. The top 416 rows of the picture hold 97% of the reviewed signs, so a sign lower down (a road marking, a low sign close by) is not found.
+
+On the server the classifier gets all the boxes of a picture in one call. On the car each box is cut on the CPU and read on its own, at about 5 ms a box.
+
+### Where it runs
+
+Everything runs inside the comma 4, on its own GPU (tinygrad), in `speedvisiond`, at 5 pictures a second next to the driving model: SignNet takes about 12 ms a picture. Chestnut, comma's external GPU, was tried on 27 October and left to the driving model.
+
+<details>
+<summary><b>Results so far</b></summary>
+
+First numbers: one country, one camera, a small test. Read them as a direction, not a promise. More in [NEURAL_NETWORK.md](docs/NEURAL_NETWORK.md#first-results-24-october-2026) and the [SignNet notes](docs/NN_VISION_SPEED_LIMIT_REMAINING_WORK.md#signnet-a-sign-finder-made-for-the-adreno-28-oct-2026).
+
+**The data.** Now 25 drives and 31,680 pictures, 40% of them confirmed. The numbers below were measured on the data of 24 October: 11 drives in Switzerland, about 5.3 hours and 290 km, from a comma 4 (1344 × 760 road camera); about 8,900 pictures reviewed, most by AI reviewers; 1,818 sign boxes. 60% of the speed signs are narrower than 20 pixels.
+
+**A fair test.** The drives keep returning to the same roads: 92 to 100% of each drive is covered by another one. So the test is split by place, not by drive: areas of about 300 m, with a ring of neighbouring areas kept out of both training and test.
+
+**SignNet on the car** (28 October, test of 26 October: 381 signs, 208 of them speed signs):
+
+- at the car's score of 0.3: 40% of all signs and 58% of speed signs found, 0.22 false boxes a picture;
+- in its best 5 boxes at any score: 55% and 62%, with about 4.8 false boxes a picture.
+
+**The old Detector** (SSDlite, whole picture, kept to compare): 6% of the speed signs at first, 79% at 960 × 544 and 81% at full size, after smaller default boxes and more pixels.
+
+**An earlier classifier on its own** (24 October): 77.5% of speed signs read right, 98.2% of non-signs rejected, but 0 of 54 other signs recognised (all taken for "not a sign").
+
+**The whole chain** (old 960 × 544 Detector + classifier, not yet measured with SignNet): 61% of the speed signs found **and** read right. False boxes drop from 41.5 to 0.26 a picture after the classifier.
+
+**Applicability** (validation, only 17 "another road" signs): with the sign, its position and the car's speed it finds 77% of them and is right 65% of the time. Adding the whole scene made it worse: it memorised the places.
+
+**What is weak:**
+
+- Small signs: under 12 pixels, only 6 of 18 speed signs found and read right.
+- Other signs: too few examples to learn them (34 boxes in training on 24 October).
+- False signs: 0.26 a picture before the car's rule over time (2 pictures within 1.5 s); not yet measured after it.
+- A small test, with mostly AI labels (about 95% of the reviewed pictures on 24 October), from one country and one camera. The comma 3X has another camera, so these networks would not work there as they are.
+- Values are few: 60, 80, 100 and 50 km/h make nine in ten of the speed signs.
+
+</details>
+
+<details>
+<summary><b>Full result tables (24–28 October)</b></summary>
+
+**The data of 24 October**
 
 | | |
 |---|---|
-| Drives | 11 drives in Switzerland, about 5.3 hours and 290 km, recorded by a comma four (main road camera, 1344 × 760) |
-| Frames | 19,140, one per second |
-| Reviewed | About 8,900 frames (46%), between 21 and 24 October 2026: about 8,500 by AI reviewers (Claude Code, Codex, ChatGPT), and just over 400 by a person |
-| Signs | 1,818 boxes on 1,209 frames. Another 7,665 reviewed frames have no sign at all. |
 | Kinds | 1,016 speed limits, 480 variable displays, 143 end of limit, 100 other signs, 38 unreadable, 28 zones, 13 road markings |
-| Size | The median sign is 17 pixels wide, and 60% of the speed signs are narrower than 20 pixels. |
 | Whom for | 1,594 for our road, 147 for another road, 79 unclear |
+| Reviewed | About 8,500 pictures by AI reviewers (Claude Code, Codex, ChatGPT), just over 400 by a person; 1,818 boxes on 1,209 pictures |
+| Test | 604 pictures (232 confirmed by a person), 134 signs: 80 speed signs, 54 other. "Found" means a box overlaps the reviewed one well (IoU ≥ 0.5) |
 
-<sub>The sign counts come from the dataset imported on 24 October, which covers 8,872 frames.</sub>
+**SignNet at the car's score of 0.3** (test of 26 October)
 
-**A test the networks never saw.** The drives keep returning to the same roads. Each drive is cut into stretches of about 300 m, and for every drive, 92 to 100% of its stretches are covered by another drive too. A test made of whole drives would therefore check the networks on signs they had already learned. So the split is by place instead. Frames are grouped in areas of about 300 m, and the test takes the areas of one drive. A ring of neighbouring areas is kept out of both training and testing. The test has 604 frames (232 of them confirmed by a person), with 134 signs: 80 speed signs and 54 other signs. Below, "found" means that a box overlaps the reviewed box well (IoU ≥ 0.5).
-
-### Finding the signs (cutter)
-
-**One cutter: SignNet (30 October 2026).** The cutter is SignNet, the network the comma runs: plain convolutions on the band at the top of the frame, a heat map of sign centres with each sign's size, no NMS. The car passes on the best 5 boxes of a frame that score 0.3 or more. On the server, the SignNet in use gives the car's best 5 boxes a frame, from score 0.1 (the car keeps those of 0.3 or more), to Prepare's Our networks and to the classifier's false boxes; the chain is judged at 0.3, as the car reads it. Why one: the classifier learns the false boxes of the cutter, so they must be those of the cutter the car runs; and there is one network to train and measure.
-
-SignNets trained on 28 October 2026, measured on the test of the split of 26 October (1,133 frames with 381 signs, 208 of them speed signs; a newer split than the one above). What the car reads: the boxes that score 0.3 or more, at most 5 a frame (at most about 0.35 a frame here, so the cap of 5 almost never bites):
-
-| Band | Stride | Parameters | All signs found (of 381) | Speed signs found (of 208) | Under 12 px (of 65) | False boxes per frame |
-|---|---|---|---|---|---|---|
-| 1344 × 416 | 4 | 81 k | 110 (29%) | 108 (52%) | 13 (20%) | 0.05 |
-| 1344 × 416 | 8 | 163 k | 148 (39%) | 125 (60%) | 17 (26%) | 0.11 |
-| **896 × 288 (on the car)** | 8, fuse 1 × 1 | 63 k | **152 (40%)** | **120 (58%)** | 13 (20%) | 0.22 |
-| 896 × 288 | 4 | 81 k | 107 (28%) | 101 (49%) | 9 (14%) | 0.06 |
-| 672 × 208 | 4 | 156 k | 111 (29%) | 103 (50%) | 10 (15%) | 0.08 |
-
-The best 5 boxes of each frame at any score, what the same networks can give with no score floor:
-
-| Band | Stride | Parameters | All signs found (of 381) | Speed signs found (of 208) | Under 12 px (of 65) |
+| Band | Stride | All signs (of 381) | Speed signs (of 208) | Under 12 px (of 65) | False boxes a picture |
 |---|---|---|---|---|---|
-| 1344 × 416 | 4 | 81 k | 226 (59%) | 138 (66%) | 29 (45%) |
-| 1344 × 416 | 8 | 163 k | 221 (58%) | 139 (67%) | 26 (40%) |
-| **896 × 288 (on the car)** | 8, fuse 1 × 1 | 63 k | **209 (55%)** | **130 (62%)** | 17 (26%) |
-| 896 × 288 | 4 | 81 k | 207 (54%) | 133 (64%) | 22 (34%) |
-| 672 × 208 | 4 | 156 k | 186 (49%) | 123 (59%) | 14 (22%) |
+| 1344 × 416 | 4 | 110 (29%) | 108 (52%) | 13 (20%) | 0.05 |
+| 1344 × 416 | 8 | 148 (39%) | 125 (60%) | 17 (26%) | 0.11 |
+| **896 × 288 (car)** | 8 | **152 (40%)** | **120 (58%)** | 13 (20%) | 0.22 |
+| 896 × 288 | 4 | 107 (28%) | 101 (49%) | 9 (14%) | 0.06 |
+| 672 × 208 | 4 | 111 (29%) | 103 (50%) | 10 (15%) | 0.08 |
 
-The best 5 boxes at any score mean about 4.8 false ones a frame, which the classifier would have to drop; at the car's floor of 0.3 the one on the car keeps 0.22. Only a SignNet at 896 × 288 and stride 8 runs on the car, so only such a one can be put in use. All of them were trained on the split of 26 October: a new **Train the cutter** on the current split is needed before one is put in use.
+Only a SignNet at 896 × 288 and stride 8 runs on the car.
 
-**The old Detector (24 October 2026).** Until 30 October the cutter was an SSDlite detector (MobileNetV3-Large) on the whole frame. Its versions are kept to compare, and can no longer be put in use. This table shows how many test signs each one finds, at a cutter score of 0.1:
+**The old Detector** (score 0.1, test of 24 October)
 
-| Detector input | Learns to box | Speed signs found (of 80) | All signs found (of 134) | Boxes passed on per frame | Time per frame on a V100 |
+| Input | Boxes | Speed signs (of 80) | All signs (of 134) | Boxes a picture | V100 time |
 |---|---|---|---|---|---|
 | 320 × 320 | speed signs | 30 (38%) | – | 80 | 11.1 ms |
 | 640 × 360 | speed signs | 50 (62%) | – | 238 | 11.3 ms |
@@ -231,122 +291,62 @@ The best 5 boxes at any score mean about 4.8 false ones a frame, which the class
 | 960 × 544 | every sign | 62 (78%) | 90 (67%) | 118 | 16.9 ms |
 | 1344 × 760 | every sign | 65 (81%) | 90 (67%) | 210 | 47.6 ms |
 
-The very first detector, at 320 × 320 with its default settings, found 5 of the 80 speed signs (6%). Smaller default boxes and more pixels did the rest. The 1344 × 760 detector reads the full frame and boxes every kind of sign, so that the classifier also learns the other signs. By sign width, it finds 11 of 18 signs under 12 px, 30 of 45 at 12 to 20 px, 27 of 35 at 20 to 40 px, and 22 of 36 at 40 px and wider. The times are for the network alone on a server GPU, and say little about the car.
+The 1344 × 760 Detector by sign width: 11 of 18 under 12 px, 30 of 45 at 12–20 px, 27 of 35 at 20–40 px, 22 of 36 at 40 px and wider.
 
-### Reading the signs (classifier) and the whole chain
+**The whole chain** (960 × 544 Detector + classifier): found by the cutter 63 of 80 (79%); read right once found 78%; found and read right 49 of 80 (61%), and 16 of 23 (70%) on pictures a person confirmed. By sign width: under 12 px 6 of 18, 12–20 px 16 of 31, 20–40 px 18 of 19, 40 px and wider 9 of 12.
 
-This is the classifier on its own, on the reviewed boxes of the test:
+**Applicability** (validation, 17 "another road" signs)
 
-| | Test |
-|---|---|
-| Speed signs read right | 62 of 80 (77.5%). The older reader, without "not a sign": 64 of 80 (80%) |
-| Boxes that are not a sign, rejected | 436 of 444 (98.2%) |
-| Other signs (town entry, directions and so on) | 0 of 54: all taken for "not a sign" |
-
-The next table shows the whole chain on the test frames, the cutter followed by the classifier, at a cutter score of 0.1. This chain was measured with the old 960 × 544 Detector that boxes speed signs only. It has not been measured with SignNet yet.
-
-| Detector score 0.1 | Test |
-|---|---|
-| Speed signs found **and** read right | **49 of 80 (61%)** |
-| Found by the cutter | 63 of 80 (79%) |
-| Read right, once found | 78% |
-| Found and read right, on frames a person confirmed | 16 of 23 (70%) |
-| False boxes per frame | 41.5 from the cutter, **0.26** after the classifier (99.4% rejected) |
-| Found and read right, by sign width | under 12 px: 6 of 18 · 12 to 20 px: 16 of 31 · 20 to 40 px: 18 of 19 · 40 px and wider: 9 of 12 |
-
-### Whom a sign is for (decider prototype)
-
-Experiment B trained three small variants on the reviewed boxes. The test has no sign for another road yet, so this is measured on the validation set, which has only 17 of them:
-
-| What the network sees | "Another road" signs found (of 17) | Right when it says "another road" |
+| What it sees | Found (of 17) | Right when it says "another road" |
 |---|---|---|
 | The sign alone | 10 (59%) | 50% |
-| The sign, the position and size of its box, and the car's speed | 13 (77%) | 65% |
-| All of the above, plus the whole scene | 10 (59%) | 31% |
+| + box position and size, car speed | 13 (77%) | 65% |
+| + the whole scene | 10 (59%) | 31% |
 
-Position and speed help. The whole scene hurt: that variant reached 99.7% on the training data, because it memorised the places.
+</details>
 
-### What is weak
+### How you can help
 
-- **Small signs.** Under 12 pixels, only 6 of 18 speed signs are found and read right.
-- **Other signs.** The classifier calls every one of them "not a sign". Training had only 34 boxes of other signs.
-- **False signs.** 0.26 per frame is still about one false sign every four frames. Following signs over time and keeping a limit state are meant to filter these out, but neither has been built or measured on the networks' output yet.
-- **A small test.** There is one test area with 80 speed signs, so a single sign moves a result by more than a point.
-- **Mostly AI labels.** About 95% of the reviewed frames were confirmed by AI reviewers. The test leans on human reviews (232 of its 604 frames), but not only on them.
-- **Narrow data.** All drives come from one country and one camera, and they cover the same roads again and again. Values are few: 60, 80, 100 and 50 km/h make up nine in ten of the readable speed limits. The comma 3X has a different camera (1928 × 1208, another lens), so these networks would not work there as they are.
-- **Whom a sign is for.** There are 147 "another road" boxes in total: 17 on validation and none on the test.
-- **No device numbers.** Nothing has been measured on Chestnut yet.
-
-## How you can help
-
-This is a small research project, and anyone is welcome to try it or improve it. There are no promises about timelines.
-
-- **Drives.** The most useful recordings are on new roads, in other countries, at dusk, at night and in rain, and also drives from a comma 3X. Recordings are private by nature, so please [open an issue](https://github.com/cristianku/sunnypilot.speedlimits/issues) first, and we can agree on how to share them.
-- **Reviewing.** Confirmations by a person are the most valuable labels, especially for the test. If you would like to review, open an issue.
-- **Chestnut.** If you have one, measuring how much room it leaves next to the driving model would settle the biggest open question.
-- **Country rules.** Tell us how signs are interpreted where you drive (town entries, motorway defaults, zones), for the rules that keep the current limit.
-- **Code and ideas.** Issues and pull requests are welcome, and so is feedback on the approach in the sunnypilot community.
-
-## Getting started
-
-You need Python 3.11 or newer. The core has no dependencies. Optional extras add pre-annotation, comma log reading and GPU training.
-
-```sh
-git clone https://github.com/cristianku/sunnypilot.speedlimits.git
-cd sunnypilot.speedlimits
-python3 -m venv .venv && .venv/bin/pip install -e . pytest
-.venv/bin/nnslr selftest     # quick check on synthetic data, CPU only
-.venv/bin/nnslr review       # the portal on http://127.0.0.1:8765, this computer only
-```
-
-Without drives of your own, the portal is empty. [docs/INSTALL.md](docs/INSTALL.md) covers the system packages, the optional extras, the GPU environment and running the portal as a service. [docs/COMMANDS.md](docs/COMMANDS.md) covers everything else.
-
-## Helpers, commands and scripts
-
-Day-to-day work happens in the portal, whose buttons run a few helper scripts and the `nnslr` command-line tool. [docs/COMMANDS.md](docs/COMMANDS.md) lists them all, with what each one does, what it writes, and which ones use the GPU, install packages or publish anything.
-
-Two helpers belong to the AI reviewer. `helpers/ai_review.sh` (**Review with AI**) reviews a route with the provider chosen in Settings. `helpers/measure_ai_reviewer.sh` (**Measure** in Evaluate → AI reviewers) measures a provider on the same frames people reviewed. Neither takes a key as an argument: the providers and their keys stay on the server, in `data/web/private/llm-providers.json`. An AI review saved by **Review and save** waits for a person: the import leaves it out until you confirm the frame. Providers can also be added from a terminal with `nnslr llm-provider add` ([docs/INSTALL.md](docs/INSTALL.md)).
-
-One script trains the review page's **Fit box**. `scripts/train_box_fit.sh` (`nnslr train-box-fit`) measures it on routes left out, then trains its colour trees and edge networks on every box people drew, on the CPU in about 15 minutes, and writes them over `src/nnslr_tools/box_fit/colour.npz` and `edges.npz`; the site uses them after its next restart.
-
-Two helpers prepare the Mapillary signs of the classifier. `helpers/mapillary.sh` cuts the signs of ours out of the Mapillary Traffic Sign Dataset. `helpers/mapillary_locations.sh` (**Locate the photos** in Train › Classifier) asks Mapillary where each photo was taken, so that **Where** can choose a continent or a country; it needs a Mapillary client token in `.env` (`MAPILLARY_TOKEN`) and resumes where it stopped.
-
-One script trains the cutter. `scripts/run_signnet.sh NAME` (**Train the cutter** in Train › Cutter) checks the training population on the CPU (`nnslr train-signnet --dry-run`, which fails, and so stops the script, when the plan has nothing to train or validate on), runs a CUDA smoke test and trains a SignNet with the car's setup (`nnslr train-signnet`, band 896 × 288, stride 8, about 80 minutes on the GPU), then measures its best epoch on validation and test. It writes only `data/runs/NAME/signnet-best.pt`, `result.json` and `signnet.log`, and puts nothing in use. A NAME stopped half way is trained again from scratch, and the old `signnet.log` is moved aside first, so its epochs do not mix with the new ones. `scripts/run_detector_sizes.sh` still trains the old Detector, only to compare.
-
-One script trains the road type. `scripts/run_road_type.sh NAME` (**Train the road type** in Train › Road type) checks the pipeline on the CPU, reads the motorway signs as the car does (`nnslr road-type-signs`), trains the network with memory and the sign, the one without the sign and the one without memory on the GPU, compares them in `comparison.txt` and exports the first as an ONNX step with its contract (`nnslr train-road-type`, `release-road-type`, `compare-road-type`, `export-road-type`). It writes only under `data/runs/NAME/` and the frame cache, and publishes nothing.
-
-Two scripts take a SignNet to the comma, from its card on Models › Versions. `scripts/send_to_car.sh` (**Send to the car**) publishes it with the classifier in use and the road type in use in `speed-limits-models`, moves the sunnypilot `speed-limits` branch and builds `psa-torque-sunny-testing`; the comma then installs the update. `scripts/try_on_comma.sh` (**Try on the comma now**) copies them straight onto the comma over ssh after checking them with the comma's own code, until its next software update; `--restore` (**Back to the build's networks**) undoes it. Both carry the settings of Models › On the car (how sure and how long, `data/models/car-settings.json`) in `speed_limits.json`. Both refuse, before starting, a SignNet that does not fit the car (another band or stride than 896 × 288 and 8) or that has not finished.
-
-## Data, privacy, licences and credits
+- **Drives** on new roads, in other countries, at dusk, at night, in rain, or from a comma 3X. Recordings are private, so please [open an issue](https://github.com/cristianku/sunnypilot.speedlimits/issues) first.
+- **Reviewing.** Confirmations by a person are the most valuable labels.
+- **The load on the comma 4.** Measuring how much room the networks leave next to the driving model.
+- **Country rules.** How signs are read where you drive (town entries, motorway defaults, zones).
+- **Code and ideas.** Issues and pull requests are welcome.
 
 ### Data and privacy
 
-- Drive recordings, frames, the review database, datasets and checkpoints are private and stay out of git. There is no public dataset, and no trained weights are published.
-- Everything runs on one server. GPS positions are read from the comma's own logs, and OpenStreetMap from a local extract, offline: no position from the drives is sent anywhere.
-- When drives are downloaded, the first and last two minutes of every trip are dropped.
-- In the screenshots here, number plates, lettering on vehicles and reviewer names are blurred.
-- The portal's access token lives in a `.env` file that git ignores. Keep the portal on a home network or behind an SSH tunnel.
+- Drives, pictures, the review database, datasets and checkpoints stay out of git. There is no public dataset.
+- Everything runs on one server. GPS comes from the comma's own logs, OpenStreetMap from a local extract, offline. No drive position is sent anywhere.
+- The first and last two minutes of every trip are dropped at download.
+- Place names, shop signs and reviewer names in the screenshots are blurred.
+- The site's access token lives in `.env`, which git ignores. Keep the site on a home network or behind an SSH tunnel.
 
-### Licences
+<details>
+<summary><b>Licences</b></summary>
 
-- This repository is under the MIT licence ([LICENSE](LICENSE)). Its tooling was imported from [openpilot-nnslr-tools](https://github.com/cristianku/openpilot-nnslr-tools) (MIT, same author). See [NOTICE.md](NOTICE.md) and [provenance/import.json](provenance/import.json).
-- The frozen sunnypilot runtime snapshot in [`integrations/sunnypilot/snapshot/`](integrations/sunnypilot/snapshot/) keeps its original notices: comma.ai's MIT licence and the sunnypilot custom licence, both in [LICENSES/](LICENSES/).
+- This repository is MIT ([LICENSE](LICENSE)). Its tooling came from [openpilot-nnslr-tools](https://github.com/cristianku/openpilot-nnslr-tools) (MIT, same author): see [NOTICE.md](NOTICE.md) and [provenance/import.json](provenance/import.json).
+- The frozen sunnypilot snapshot in [`integrations/sunnypilot/snapshot/`](integrations/sunnypilot/snapshot/) keeps its notices: comma.ai's MIT licence and the sunnypilot custom licence, in [LICENSES/](LICENSES/).
 
   This project uses software from Haibin Wen and SUNNYPILOT LLC and is licensed under a custom license requiring permission for use.
 
-- No trained weights are published. Before any are, their terms must be checked, for three reasons. They start from ImageNet-pretrained weights, and the ImageNet dataset is licensed for non-commercial research. The drives they learn from are private. And some of the boxes were first proposed by models with restrictive licences (listed below).
+- The networks are in the public [`speed-limits-models`](https://github.com/cristianku/speed-limits-models) repository for testing, with no licence for general use yet. Before that, their terms must be checked: the classifier starts from ImageNet weights (non-commercial research), the drives are private, and some boxes were first proposed by models with restrictive licences (below).
 
-### Credits
+</details>
 
-- [comma.ai](https://comma.ai) and [openpilot](https://github.com/commaai/openpilot) (MIT), for the device that records the drives and the log formats read here.
-- [sunnypilot](https://github.com/sunnypilot/sunnypilot) and its Speed Limit Assist, which this work is meant to feed.
-- [PyTorch and torchvision](https://pytorch.org) (BSD-3-Clause), for the MobileNetV3 networks, the old SSDLite Detector and the ImageNet-pretrained weights they start from. SignNet is plain convolutions of our own, trained from scratch.
-- The pre-annotation models, which only propose boxes for review. They are downloaded at run time with a SHA-256 check, never committed, and not part of the trained models:
-  - the traffic-sign detector [`star092304/traffic-sign-detection-vietnam-yolo`](https://huggingface.co/star092304/traffic-sign-detection-vietnam-yolo) (YOLO, 82 classes of Vietnamese signs). Its model card says Apache-2.0, but the model file's own metadata says AGPL-3.0. This has not been resolved.
-  - the road segmentation [`Xenova/segformer-b0-finetuned-cityscapes-1024-1024`](https://huggingface.co/Xenova/segformer-b0-finetuned-cityscapes-1024-1024), an ONNX conversion of NVIDIA SegFormer. [NVIDIA's licence](https://github.com/NVlabs/SegFormer/blob/master/LICENSE) allows non-commercial research and evaluation only, and the Cityscapes dataset has terms of its own.
-  - [RapidOCR](https://github.com/RapidAI/RapidOCR) 3.4.0 with the PaddleOCR PP-OCRv4 models (Apache-2.0), for numbers painted on the road.
-- The [Mapillary Traffic Sign Dataset](https://www.mapillary.com/dataset/trafficsign) (CC BY-NC-SA 4.0), whose street photos can add sign crops to the classifier's training (`helpers/mapillary.sh`, off by default). It is never committed, and a classifier trained with it carries its non-commercial terms.
-- Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), under the ODbL, read offline to find the roads near the drives.
-- Country borders from [Natural Earth](https://www.naturalearthdata.com) (public domain), 1:10m for Europe and 1:50m for the rest of the world (where the Mapillary photos were taken).
-- The table of the Mapillary Traffic Sign Dataset's old image keys and their current ids, [viajerus/mapillary_keys_ids](https://github.com/viajerus/mapillary_keys_ids), shared on the [Mapillary forum](https://forum.mapillary.com/t/mapillary-traffic-sign-dataset-keys/10282); downloaded at run time, never committed. The positions come from the [Mapillary API](https://www.mapillary.com/developer/api-documentation).
-- The portal is built with [Vue 3](https://vuejs.org) (MIT, bundled into the built pages), Vite and TypeScript.
+<details>
+<summary><b>Credits</b></summary>
+
+- [comma.ai](https://comma.ai) and [openpilot](https://github.com/commaai/openpilot) (MIT): the device that records the drives, and its log formats.
+- [sunnypilot](https://github.com/sunnypilot/sunnypilot) and its Speed Limit Assist, which this work feeds.
+- [PyTorch and torchvision](https://pytorch.org) (BSD-3-Clause): MobileNetV3, the old SSDLite Detector and the ImageNet weights. SignNet is our own, trained from scratch. [tinygrad](https://github.com/tinygrad/tinygrad) (MIT) runs the networks on the comma.
+- Pre-annotation models, which only propose boxes for review. They are downloaded at run time with a SHA-256 check, never committed:
+  - [`star092304/traffic-sign-detection-vietnam-yolo`](https://huggingface.co/star092304/traffic-sign-detection-vietnam-yolo) (YOLO, 82 classes of Vietnamese signs). Its model card says Apache-2.0, but the model file says AGPL-3.0. Not resolved.
+  - [`Xenova/segformer-b0-finetuned-cityscapes-1024-1024`](https://huggingface.co/Xenova/segformer-b0-finetuned-cityscapes-1024-1024), from NVIDIA SegFormer. [NVIDIA's licence](https://github.com/NVlabs/SegFormer/blob/master/LICENSE) allows non-commercial research only; Cityscapes has its own terms.
+  - [RapidOCR](https://github.com/RapidAI/RapidOCR) 3.4.0 with PaddleOCR PP-OCRv4 (Apache-2.0), for numbers painted on the road.
+- The [Mapillary Traffic Sign Dataset](https://www.mapillary.com/dataset/trafficsign) (CC BY-NC-SA 4.0): optional extra sign crops for the classifier (`helpers/mapillary.sh`, off by default). Never committed; a classifier trained with it carries its non-commercial terms.
+- The table of Mapillary's old image keys and current ids, [viajerus/mapillary_keys_ids](https://github.com/viajerus/mapillary_keys_ids), shared on the [Mapillary forum](https://forum.mapillary.com/t/mapillary-traffic-sign-dataset-keys/10282); positions from the [Mapillary API](https://www.mapillary.com/developer/api-documentation).
+- Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), ODbL, read offline.
+- Country borders from [Natural Earth](https://www.naturalearthdata.com) (public domain).
+- The site is built with [Vue 3](https://vuejs.org) (MIT), Vite and TypeScript.
+
+</details>
