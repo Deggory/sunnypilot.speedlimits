@@ -398,6 +398,8 @@ export interface PanelStatus {
   /** Review with AI at work, or null. */
   ai_live?: AiLive | null;
   dataset: DatasetSummary | null;
+  /** The networks of the car at a glance (Panel.car_summary), for the Overview's Car row. */
+  car?: CarSummary;
   training_starts: TrainingStart[];
   /** The last pipeline of Train › Pipeline, or null before the first. */
   pipeline?: Pipeline | null;
@@ -423,6 +425,15 @@ export interface PanelStatus {
   networks?: {packages: NetworkPackage[]; repo: string;
     /** The Hugging Face account publishing uses (nnslr_tools.hf_account.public_state; never the token). */
     account?: {connected: boolean; source: 'portal' | 'server' | null; user: string | null; can_write: boolean | null}};
+}
+
+/** The networks the car runs: in use here (models/active.json) and in the comma's software (models/on-car.json, null
+ * before the first Publish), by role and id; why one of the files cannot be read; a build of the testing branch owed. */
+export interface CarSummary {
+  in_use: Record<'cutter' | 'classifier' | 'road_type', string | null>;
+  on_car: Record<'cutter' | 'classifier' | 'road_type', string | null> | null;
+  problem: string | null;
+  build_pending: boolean;
 }
 
 /** A package of our three networks (scripts/publish_networks.sh). */

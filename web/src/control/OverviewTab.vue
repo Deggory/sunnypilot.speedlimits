@@ -1,28 +1,22 @@
 <script setup lang="ts">
 // Overview, the home page, in the order you look at it: what is running now, one row each with Stop (a tap opens its
-// sheet with the log), or the last job when it failed; the next step, with its one button; three summaries, links to the
-// drives, the review and the dataset; the last jobs that ended (three, the others on a click). The server, its gauges
-// and what is on the GPU are in the server's panel of the top bar (TopMachine.vue), with Update the site.
+// sheet with the log), or the last job when it failed; the loop of the work (LoopRows.vue: Drives, Review, Train, Car,
+// each with how much waits and its one button); the last jobs that ended (three, the others on a click). The server,
+// its gauges and what is on the GPU are in the server's panel of the top bar (TopMachine.vue), with Update the site.
 import {computed, ref} from 'vue';
 import type {ActionName, ActionState, Job, PanelStatus} from '../common/panel-types';
-import FlowTiles from './FlowTiles.vue';
 import JobItem from './JobItem.vue';
 import {terminalActivities} from './jobs';
-import NextStepCard from './NextStepCard.vue';
-import {nextStep, WAITING} from './next-step';
-import {reviewSummary} from './review-routes';
+import LoopRows from './LoopRows.vue';
 import RunRow from './RunRow.vue';
 import SectionHead from './SectionHead.vue';
-import type {ControlTab} from './tabs';
 
-const props = defineProps<{status: PanelStatus | null; busy: ReadonlySet<ControlTab>}>();
+const props = defineProps<{status: PanelStatus | null}>();
 defineEmits<{run: [name: ActionName, state: ActionState]; stop: [job: Job]; details: [job: Job]}>();
 
 /** Jobs that ended shown before "Show all" (the server sends the latest 12 only, panel.HISTORY). */
 const FEW = 3;
 const showAll = ref(false);
-const next = computed(() => props.status ? nextStep(props.status) : WAITING);
-const reviewHref = computed(() => reviewSummary(props.status).resume?.href ?? '/routes');
 const jobs = computed(() => props.status?.jobs ?? []);
 const running = computed(() => jobs.value.filter((job) => job.state === 'running'));
 const activities = computed(() => terminalActivities(props.status));
@@ -43,9 +37,7 @@ const shown = computed(() => showAll.value ? ended.value : ended.value.slice(0, 
     <RunRow v-if="failed" :job="failed" @open="$emit('details', $event)"/>
   </section>
 
-  <NextStepCard :next="next" :actions="status?.actions ?? null" :review-href="reviewHref" :proposers="status?.proposers ?? null"
-                @run="(name, state) => $emit('run', name, state)"/>
-  <FlowTiles :status="status" :attention="next.attention" :busy="busy"/>
+  <LoopRows :status="status" @run="(name, state) => $emit('run', name, state)"/>
 
   <section class="card recent" aria-labelledby="recent-title">
     <h2 id="recent-title">Recent activity</h2>

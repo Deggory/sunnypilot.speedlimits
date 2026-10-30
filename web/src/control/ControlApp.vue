@@ -17,7 +17,7 @@ import OverviewTab from './OverviewTab.vue';
 import PrepareTab from './PrepareTab.vue';
 import PublishTab from './PublishTab.vue';
 import RoadsTab from './RoadsTab.vue';
-import {currentTab, tabOf, useTabRouting, type ControlTab} from './tabs';
+import {currentTab, useTabRouting} from './tabs';
 import TrainTab from './TrainTab.vue';
 import {RESUME_JOB, RETRY_ACTIONS, RETRY_JOB, usePanelActions} from './use-actions';
 
@@ -46,15 +46,14 @@ function details(job: Job): void {
 /** The tabs with work running, by address: a job lights the tab that shows it (jobs.ts ACTION_TAB: a measure is
  * Evaluate's even if it uses the GPU as a training does); work started from a terminal is known by its group. */
 const busyPaths = computed((): ReadonlySet<string> => status.value ? busyTabs(status.value.jobs, status.value.activities) : new Set());
-/** The same as tabs: a dot on their link in the top bar and the phone menu (markBusy), and on the tiles of the Overview. */
-const busy = computed((): ReadonlySet<ControlTab> => new Set([...busyPaths.value].map(tabOf).filter((tab) => tab !== null)));
+/** A dot on their link in the top bar and the phone menu (markBusy). */
 watch(busyPaths, markBusy);
 </script>
 
 <template>
   <main class="page" :data-tab="currentTab">
     <div v-if="status && !status.actions_enabled" class="banner" id="readonly">Read-only: the buttons are turned off on this server.</div>
-    <OverviewTab v-if="currentTab === 'overview'" :status="status" :busy="busy" @run="run" @stop="stop" @details="details"/>
+    <OverviewTab v-if="currentTab === 'overview'" :status="status" @run="run" @stop="stop" @details="details"/>
     <PrepareTab v-else-if="currentTab === 'prepare'" :status="status" @run="run" @stop="stop" @details="details"/>
     <TrainTab v-else-if="currentTab === 'train'" :status="status" @run="run" @stop="stop" @details="details"
               @pipeline="startPipeline" @stop-pipeline="stopPipeline"/>

@@ -26,8 +26,8 @@ letter-spacing:0;display:inline-grid;place-items:center;font-variant-numeric:tab
 .jp-list{display:flex;flex-direction:column;gap:12px}
 .side{display:flex;flex-direction:column;gap:14px;min-width:0}
 /* Disabled buttons stay legible (flat, muted text): the reason next to them explains why. */
-.hero .btn:disabled,.side .btn:disabled{opacity:1;background:transparent;border-color:var(--line);color:var(--muted)}
-.hero .btn.primary:disabled{background:var(--accent-soft);border-color:var(--tab-on-ring);color:var(--tab-on-fg)}
+.loop-row .btn:disabled,.side .btn:disabled{opacity:1;background:transparent;border-color:var(--line);color:var(--muted)}
+.loop-row .btn.primary:disabled{background:var(--accent-soft);border-color:var(--tab-on-ring);color:var(--tab-on-fg)}
 .reason{margin:0}
 
 /* Colour of a phase: blue review (an action), amber prepare (machine work waiting), green train / done. */
@@ -58,34 +58,31 @@ button.run-row:active{background:var(--surface-3)}
 @media (max-width:520px){.run-item:has(.run-stop) .run-chev{display:none}.run-item:has(.run-stop) .run-row{padding-right:4px}}
 @media (prefers-reduced-motion:reduce){.run-bar span{transition:none}.run-bar.indeterminate span{animation:none}}
 
-/* Next step: a soft wash in the phase's colour and a coloured eyebrow. */
-.hero{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px 28px;align-items:center;padding:24px 26px}
-.hero .kicker{display:inline-flex;align-items:center;gap:7px;margin:0 0 4px;font-size:13.5px;font-weight:600;letter-spacing:0;color:var(--k,var(--muted))}
-.hero .kicker::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
-.hero .title{font-size:24px;line-height:1.2;font-weight:600;letter-spacing:-.022em}
-.hero .text{margin-top:4px;color:var(--muted);max-width:70ch}
-.hero .text:empty{display:none}
-.hero .actions{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
-.hero .actions:empty{display:none}
-
-/* The three phases at a glance (Overview): Prepare and Train link to their tab, the review is a card. */
-.flow{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
-.flow-tile{display:flex;flex-direction:column;gap:6px;min-width:0;padding:18px 20px;border-radius:18px;color:inherit;text-decoration:none;
-background:var(--surface);box-shadow:var(--shadow);transition:transform .2s,box-shadow .2s}
-a.flow-tile:hover{transform:translateY(-1px)}
-.flow-tile.attention{box-shadow:0 0 0 2px var(--k),var(--shadow)}
-.flow-head{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600;letter-spacing:-.01em;color:var(--muted)}
-.flow-head::after{content:"›";margin-left:auto;letter-spacing:0;font-size:20px;line-height:1;opacity:.5;transition:transform .2s}
-.flow-tile:hover .flow-head::after{transform:translateX(3px);opacity:1}
-.flow-num{width:22px;height:22px;border-radius:50%;flex:none;display:grid;place-items:center;background:var(--surface-3);
+/* The loop of the work (Overview, LoopRows.vue): four numbered rows in their order, each with how much waits and its one
+   button; a row with work waiting has its number in its phase's colour, the first of them a ring. */
+.loop{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+.loop-row{display:flex;flex-direction:column;gap:6px;min-width:0;padding:18px 20px;border-radius:18px;background:var(--surface);
+box-shadow:var(--shadow)}
+.loop-row.primary{box-shadow:0 0 0 2px var(--k),var(--shadow)}
+.loop-head{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600;letter-spacing:-.01em;color:var(--muted);
+text-decoration:none}
+.loop-head::after{content:"›";margin-left:auto;letter-spacing:0;font-size:20px;line-height:1;opacity:.5;transition:transform .2s}
+.loop-head:hover{color:var(--fg)}
+.loop-head:hover::after{transform:translateX(3px);opacity:1}
+.loop-num{width:22px;height:22px;border-radius:50%;flex:none;display:grid;place-items:center;background:var(--surface-3);
 color:var(--muted);font-size:12px;font-weight:600;letter-spacing:0}
-.flow-tile.attention .flow-num{background:var(--k);color:#fff}
-.flow-busy{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:999px;background:var(--rev-soft);color:var(--rev);
-font-size:12px;letter-spacing:0;text-transform:none}
-.flow-busy::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor;animation:pulse 1.2s infinite}
-.flow-big{font-size:26px;line-height:1.15;font-weight:600;letter-spacing:-.025em;font-variant-numeric:tabular-nums}
-.flow-note{font-size:13px;color:var(--muted)}
-.flow-tile .bar{margin:2px 0}
+.loop-row.waiting .loop-num{background:var(--k);color:#fff}
+.loop-big{font-size:22px;line-height:1.2;font-weight:600;letter-spacing:-.022em;font-variant-numeric:tabular-nums}
+.loop-note{margin:0;font-size:13px;color:var(--muted);overflow-wrap:anywhere}
+.loop-note.warn-text{color:var(--warn)}
+.loop-act{margin-top:auto;padding-top:8px;display:flex;flex-direction:column;align-items:stretch;gap:6px}
+.loop-act:empty{display:none}
+.loop-act .btn{justify-content:center}
+.loop-running{display:inline-flex;align-items:center;gap:7px;max-width:100%;padding:5px 11px;border-radius:12px;
+background:var(--rev-soft);color:var(--rev);font-size:13px;font-weight:500;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.loop-running::before{content:"";width:7px;height:7px;flex:none;border-radius:50%;background:currentColor;animation:pulse 1.2s infinite}
+.loop-ok{align-self:flex-start;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:var(--ok-soft);color:var(--ok);
+font-weight:700}
 
 /* Nothing running: a calm card. */
 .idle{display:flex;align-items:center;gap:14px}
@@ -1005,17 +1002,13 @@ border-top:1px solid var(--line)}
   .ds-grid{grid-template-columns:minmax(0,1fr)}
 }
 @media (max-width:800px){.numbers{grid-template-columns:1fr}}
-@media (max-width:720px){
-  .hero{grid-template-columns:minmax(0,1fr)}
-  .hero .actions{align-items:stretch}
-  .flow{grid-template-columns:minmax(0,1fr);gap:10px}
-  .flow-tile{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:12px;padding:14px 16px}
-  .flow-head,.flow-tile .bar,.flow-note{grid-column:1/-1}
-  .flow-big{font-size:19px}
-  .flow-actions,.flow-review .flow-note{grid-column:1/-1}
+@media (max-width:1099px){.loop{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:640px){
+  .loop{grid-template-columns:minmax(0,1fr);gap:10px}
+  .loop-row{padding:14px 16px}
+  .loop-big{font-size:19px}
 }
 @media (max-width:640px){
-  .hero .title{font-size:20px}
   .jp{padding:16px;border-radius:18px}
   .jp-big{font-size:40px}
   .jp-big-word{font-size:24px}
@@ -1089,8 +1082,8 @@ border-top:1px solid var(--line)}
 @media (prefers-reduced-motion:reduce){
   .page>*{animation:none}
   .act-card,.act-go,.start,.start-check{transition:none}
-  .goal span,.bar span,.jp-bar span,.flow-tile,.flow-head::after{transition:none}
-  .jp-bar span,.jp-bar span::after,.spinner,.jp-running::before,.jp-steps li.current .jp-mark,.flow-busy::before,
+  .goal span,.bar span,.jp-bar span,.loop-head::after{transition:none}
+  .jp-bar span,.jp-bar span::after,.spinner,.jp-running::before,.jp-steps li.current .jp-mark,.loop-running::before,
   .tabs a[data-busy="true"]::after{animation:none!important}
   .jp-bar.indeterminate span{left:0;width:100%;opacity:.45}
 }

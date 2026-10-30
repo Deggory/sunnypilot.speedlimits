@@ -1,9 +1,10 @@
 // Who proposes the signs of a preparation, in words, wherever a preparation starts or shows (Prepare, the Overview's
-// next step): the proposer's name and, for Our networks, the cutter, classifier and decider it runs, by their run.
+// Drives card), and the networks in use (its Car card): the proposer's name and, for Our networks, the cutter,
+// classifier and decider it runs, by their run.
 import type {Proposer} from '../common/panel-types';
 
 export const PROPOSER_LABELS: Record<Proposer, string> = {vietnam: 'Vietnamese YOLO', ours: 'Our networks', qwen: 'Qwen3-VL'};
-const PART_NAMES: Record<string, string> = {cutter: 'cutter', classifier: 'classifier', decider: 'applicability'};
+const PART_NAMES: Record<string, string> = {cutter: 'cutter', classifier: 'classifier', decider: 'applicability', road_type: 'scene'};
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 /** One network in use by its id ("cutter:2026-10-30_1046-cutter/signnet"): "cutter SignNet, 30 Oct 10:46". The time

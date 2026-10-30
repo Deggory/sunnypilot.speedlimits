@@ -692,6 +692,21 @@ def test_what_runs_on_the_car_is_marked_from_on_car_json(root, models):
     assert (index['on_car'], index['on_car_problem']) == (None, 'models/on-car.json cannot be read')
 
 
+def test_the_overview_has_the_car_at_a_glance(root):
+    # Nothing published, nothing in use yet.
+    root.mkdir(parents=True)
+    panel = Panel(root)
+    assert panel.car_summary() == {'in_use': {'cutter': None, 'classifier': None, 'road_type': None}, 'on_car': None,
+                                   'problem': None, 'build_pending': False}
+    write(root / 'models/active.json', {'cutter': {'id': 'cutter:s2/signnet'}, 'classifier': {'id': 'classifier:k2/classifier'}})
+    write(root / 'models/on-car.json', {'cutter': {'id': 'cutter:s1/signnet'}, 'classifier': {'id': 'classifier:k2/classifier'}})
+    car = panel.status()['car']
+    assert car['in_use'] == {'cutter': 'cutter:s2/signnet', 'classifier': 'classifier:k2/classifier', 'road_type': None}
+    assert car['on_car'] == {'cutter': 'cutter:s1/signnet', 'classifier': 'classifier:k2/classifier', 'road_type': None}
+    write(root / 'models/on-car.json', '{"cutter": ')
+    assert panel.car_summary()['problem'] == 'models/on-car.json cannot be read'
+
+
 def _git(folder: Path, *args: str) -> None:
     import subprocess
     subprocess.run(['git', '-C', str(folder), '-c', 'user.name=test', '-c', 'user.email=test@example.com', *args],

@@ -32,7 +32,7 @@ from pathlib import Path
 from nnslr_tools.car_release import CAR_SCRIPT, build_pending, car_missing
 from nnslr_tools.comma_trial import TRY_SCRIPT, CommaProbe, read_trial, trial_missing
 from nnslr_tools.job_progress import last_line, progress, with_step_progress
-from nnslr_tools.model_roles import NOT_SELECTABLE, SIGNNET_PART, ModelChoiceError, ModelIndex
+from nnslr_tools.model_roles import CAR_NETWORKS, NOT_SELECTABLE, SIGNNET_PART, ModelChoiceError, ModelIndex
 from nnslr_tools.runs import RunsIndex, WatchError
 
 REPO = Path(__file__).resolve().parents[2]
@@ -753,6 +753,8 @@ class Panel:
                                          'mapillary_regions': regions_state(self.root, self.repo),
                                          'split_sha256': current_split(self.root)}
         payload['dataset'] = self.dataset_summary()
+        # The Car row of the Overview: what the car should run and what its software has, without the Models index.
+        payload['car'] = self.car_summary()
         payload['training_starts'] = self.training_starts()
         payload['pipeline'] = self.pipeline_view()
         payload['next_step_text'], payload['all_ready'] = _next_step_text(payload)
@@ -1185,6 +1187,17 @@ class Panel:
         whether a build of the testing branch is still owed after a Publish to the car (publishing again builds it)."""
         return {**self.models_index.index(), 'car_build_pending': build_pending(self.root),
                 'comma_trial': read_trial(self.root)}
+
+    def car_summary(self) -> dict:
+        """The networks of the car at a glance, from two small files: the ones in use (models/active.json) and the ones
+        the comma's software has (models/on-car.json; None before the first Publish), by id, the reason one of them
+        cannot be read, and whether a build of the testing branch is still owed."""
+        active, problem = self.models_index.read_active()
+        on_car, car_problem = self.models_index.read_on_car()
+        roles = tuple(CAR_NETWORKS.values())
+        return {'in_use': {role: (active.get(role) or {}).get('id') for role in roles},
+                'on_car': None if on_car is None else {role: on_car['ids'].get(role) for role in roles},
+                'problem': problem or car_problem, 'build_pending': build_pending(self.root)}
 
     def set_active_model(self, body, *, who: str | None, via: str) -> dict:
         """The model in use for a role ({"role", "id"}), written to <root>/models/active.json. A read-only panel

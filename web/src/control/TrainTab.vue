@@ -61,7 +61,8 @@ const pipelineRunning = computed(() => props.status?.pipeline?.state === 'runnin
 const runningSections = computed(() => SECTIONS.map((item) => item.key)
   .filter((key) => jobFor(key)?.state === 'running' || activitiesFor(key).length > 0 || (key === 'pipeline' && pipelineRunning.value))
   .sort((a, b) => Number(b === 'pipeline' && pipelineRunning.value) - Number(a === 'pipeline' && pipelineRunning.value)));
-const picked = ref<Section | null>(null);
+/** #pipeline in the address (Train all of the Overview) opens the pipeline. */
+const picked = ref<Section | null>(location.hash === '#pipeline' ? 'pipeline' : null);
 /** The section shown: the one picked, else the one training (the pipeline first), else the cutter. */
 const section = computed({
   get: (): Section => picked.value ?? runningSections.value[0] ?? 'cutter',
