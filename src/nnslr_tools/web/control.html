@@ -605,6 +605,26 @@ animation:seg-pulse 1.6s ease-in-out infinite}
 .train-slot .jp{padding:0;box-shadow:none;background:none;border-radius:0;overflow:visible}
 .train-slot .jp-running::before{display:none}
 .train-slot .last-line{margin:0}
+/* Train › Pipeline (PipelineSection.vue): the trainings to chain, one row each with its switch and, when on, the
+   choices of its section; while it runs, the queue with the state of each. */
+.pl-steps,.pl-queue{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;border-radius:12px;background:var(--surface-2)}
+.pl-step+.pl-step,.pl-row+.pl-row{border-top:.5px solid var(--line-strong)}
+.pl-head{display:flex;align-items:center;gap:12px;padding:10px 14px;cursor:pointer;min-width:0}
+.pl-head input{flex:none;width:22px;height:22px;margin:0;accent-color:var(--accent);cursor:pointer}
+.pl-what{display:flex;flex-direction:column;gap:1px;min-width:0;flex:1}
+.pl-label{font-size:15px;font-weight:600}
+.pl-sub{font-size:12.5px;color:var(--muted);overflow-wrap:anywhere}
+.pl-step.off .pl-label{color:var(--muted)}
+.pl-choices{display:flex;flex-direction:column;gap:10px;padding:0 14px 12px 48px;min-width:0}
+.pl-choices .picker{background:var(--surface)}
+@media (max-width:520px){.pl-choices{padding-left:14px}}
+.pl-row{display:flex;align-items:center;gap:12px;padding:10px 14px;min-width:0}
+.pl-row .job-mark.warn{font-size:12px}
+.pl-go{display:flex;flex-direction:column;align-items:flex-start;gap:6px}
+.pl-go .act-reason{margin:0}
+@media (max-width:520px){.pl-go .btn{width:100%}}
+.pl-old{margin-top:4px}
+.pl-old-body{padding:0 14px 14px}
 /* The Mapillary signs of the classifier (TrainTab.vue): where their photos were taken (RegionPicker.vue, a menu that
    opens downwards over the card) and the share, side by side; one under the other on a narrow phone. */
 .mly-choice{display:flex;flex-wrap:wrap;gap:10px 12px;align-items:stretch;max-width:640px}

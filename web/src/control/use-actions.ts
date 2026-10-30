@@ -1,7 +1,7 @@
 // Starting an action of the control pages (a job in the background) and stopping a running job, each asked
 // first in the confirm dialog when it is long, remote or disruptive.
 import {messageOf, post} from '../common/api';
-import type {ActionName, ActionOptions, ActionState, Job, StartedJob, TrainingStart} from '../common/panel-types';
+import type {ActionName, ActionOptions, ActionState, Job, PipelineAction, StartedJob, TrainingStart} from '../common/panel-types';
 import {askConfirm, type ConfirmOptions} from '../composables/confirm';
 import {toast} from '../composables/toast';
 import {regionWords} from './mapillary';
@@ -189,5 +189,34 @@ export function usePanelActions(refresh: () => Promise<void>) {
     await run(job.action, state, null, job.proposer ? {proposer: job.proposer} : null);
   }
 
-  return {run, stop, resume, retry};
+  /** Train › Pipeline: the trainings chosen, one after the other, asked first. */
+  async function startPipeline(steps: {action: PipelineAction; options: ActionOptions}[], text: string): Promise<void> {
+    const ok = await askConfirm({title: 'Train ' + (steps.length === 1 ? 'this network' : 'these ' + steps.length + ' in a row') + '?',
+      action: 'Start training', text});
+    if (!ok) return;
+    try {
+      await post('/api/panel/pipeline', {steps});
+      toast('Started: the pipeline');
+      await refresh();
+    } catch (error) {
+      toast(messageOf(error), true);
+      void refresh();
+    }
+  }
+
+  /** "Stop after this one": the training at work goes on, the next ones do not start. */
+  async function stopPipeline(): Promise<void> {
+    const ok = await askConfirm({title: 'Stop the pipeline after this training?', action: 'Stop after this one', danger: true,
+      text: 'The training at work goes on to its end; the next ones of the pipeline do not start. To stop it too, use its Stop.'});
+    if (!ok) return;
+    try {
+      await post('/api/panel/pipeline/stop');
+      toast('The pipeline stops after this training');
+    } catch (error) {
+      toast(messageOf(error), true);
+    }
+    void refresh();
+  }
+
+  return {run, stop, resume, retry, startPipeline, stopPipeline};
 }

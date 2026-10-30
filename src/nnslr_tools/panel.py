@@ -97,6 +97,16 @@ RUN_LINES = {
     'send_to_car': (re.compile(r'^== Send to the car: SignNet ([^\s,]+)', re.MULTILINE),),
     'try_on_comma': (re.compile(r'^== Try on the comma: SignNet ([^\s,]+)', re.MULTILINE),),
 }
+# Train › Pipeline: our networks trained one after the other, in this order, each a job of its own with the choices of
+# its own button (start()); the next one starts when one ends well (advance_pipeline), the classifier on the SignNet the
+# pipeline has just trained. The plan and how far it is: PIPELINE_FILE in the panel's logs.
+PIPELINE_ORDER = ('dataset', 'train_cutter', 'train_classifier', 'train_decider', 'train_road_type')
+PIPELINE_FILE = 'pipeline.json'
+# How often the pipeline looks whether its training ended, besides the moment its process ends (also after a restart
+# of this server, which loses that process).
+PIPELINE_WATCH_SECONDS = 20
+# The classifier's cutter while a pipeline is only checked: the SignNet it trains before, unknown until then.
+PIPELINE_CUTTER = 'pipeline'
 # The actions that take a SignNet of the Models tab ({'signnet': run}).
 SIGNNET_ACTIONS = ('send_to_car', 'try_on_comma')
 # The cutter's training (scripts/run_signnet.sh NAME): the car's band, always, and the boxes it learns to find
@@ -107,7 +117,7 @@ CUTTER_FAMILY = 'all'
 # The options an action takes, besides a training's start and the run to resume (checked by Panel.start).
 # The GPU memory Qwen3-VL-8B takes in float16 (scripts/setup_vlm.sh: 17.5 GB), with a margin for one frame.
 QWEN_GPU_MB = 18 * 1024
-ACTION_OPTIONS = {'train_cutter': ('families',), 'train_classifier': ('mapillary', 'region', 'share', 'start'),
+ACTION_OPTIONS = {'train_cutter': ('families',), 'train_classifier': ('mapillary', 'region', 'share', 'start', 'cutter'),
                   'prepare': ('proposer',), 'prepare_again': ('proposer',),
                   'measure_proposer': ('proposer',), 'networks_publish': ('package',), 'send_to_car': ('signnet',),
                   'try_on_comma': ('signnet',),
@@ -426,6 +436,11 @@ class Panel:
         self.models_index = ModelIndex(self.runs_index)
         # Whether the comma answers, for "Try on the comma now" (a TCP probe in a thread, at most once a minute).
         self.comma_probe = CommaProbe()
+        # The thread that starts the next training of a pipeline (_watch_pipeline): again after a restart of this server.
+        self._pipeline_watch: threading.Thread | None = None
+        plan = _read_json(self.logs / PIPELINE_FILE)
+        if self.actions_enabled and plan is not None and plan.get('state') == 'running':
+            self._watch_pipeline()
 
     # -- helpers of the checkout -------------------------------------------------------------
     def available(self) -> bool:
@@ -725,6 +740,7 @@ class Panel:
                                          'split_sha256': current_split(self.root)}
         payload['dataset'] = self.dataset_summary()
         payload['training_starts'] = self.training_starts()
+        payload['pipeline'] = self.pipeline_view()
         payload['next_step_text'], payload['all_ready'] = _next_step_text(payload)
         for job in payload['jobs']:
             job['progress'] = self.job_progress(job, payload['preparation'])
@@ -1361,6 +1377,18 @@ class Panel:
             env['NNSLR_CLASSIFIER_MAPILLARY_SHARE'] = f'{share:g}'
         return env
 
+    def _classifier_cutter(self, cutter: object) -> str:
+        """NNSLR_CUTTER of "Train the classifier": a finished SignNet by its id ('cutter:<run>/signnet', the one a
+        pipeline has just trained), its weights and its result in its run."""
+        from nnslr_tools.chain import SIGNNET_FILE, SIGNNET_REFERENCE
+        match = SIGNNET_REFERENCE.fullmatch(cutter) if isinstance(cutter, str) else None
+        if match is None:
+            raise PanelError(400, 'bad_option', 'The cutter is a SignNet of Models, by its id.')
+        run = self.root / 'runs' / match.group(1)
+        if not (run / SIGNNET_FILE).is_file() or not (run / 'result.json').is_file():
+            raise PanelError(409, 'not_available', 'That SignNet has not finished its training on this server.')
+        return cutter
+
     def _classifier_start(self, start: object, mapillary: object) -> dict:
         """The environment of where "Train the classifier" starts: nothing for ImageNet (the default), or
         NNSLR_CLASSIFIER_INIT_FROM, the reader-best.pt of a finished classifier with "not a sign" of the Models tab
@@ -1388,13 +1416,14 @@ class Panel:
             raise PanelError(400, 'bad_option', 'The weights of that classifier are missing on this server.') from None
         return {'NNSLR_CLASSIFIER_INIT_FROM': str(weights)}
 
-    def start(self, action: str, options: dict | None = None) -> dict:
-        """Starts an action. The only options are the starting point of a training ({'start': key} of
+    def start(self, action: str, options: dict | None = None, *, check_only: bool = False) -> dict | None:
+        """Starts an action (check_only: only checks it and its options, for a pipeline, and returns None). The only options are the starting point of a training ({'start': key} of
         training_starts()), turned into a flag or the environment of helpers/3_train.sh, the run to resume, and the
         cutter's families (one of CUTTER_FAMILIES), the route, provider, save and limit of an AI
         action (_ai_arguments), whether the classifier adds the Mapillary signs ('on', 'off', or 'pretrain': first
         on them alone, then on ours from those weights) and where it starts ({'start': 'imagenet' or a classifier's
-        id}, _classifier_start): never a command.
+        id}, _classifier_start) and the cutter it learns the false boxes of ({'cutter': a SignNet's id}, else the one
+        in use): never a command.
         The classifier's and the cutter's trainings run on a new run named here (new_run_name)."""
         if action not in ACTIONS:
             raise PanelError(404, 'unknown_action', 'Unknown action.')
@@ -1464,6 +1493,11 @@ class Panel:
         start_env.update(self._mapillary_choice(action, options or {}, mapillary in ('on', 'pretrain')))
         if action == 'train_classifier':
             start_env.update(self._classifier_start((options or {}).get('start'), mapillary))
+        cutter_choice = (options or {}).get('cutter')
+        if cutter_choice is not None and action != 'train_classifier':
+            raise PanelError(400, 'bad_option', 'Only "Train the classifier" takes a cutter.')
+        if cutter_choice is not None and not (check_only and cutter_choice == PIPELINE_CUTTER):
+            start_env['NNSLR_CUTTER'] = self._classifier_cutter(cutter_choice)
         # The settings of the training changed in Train (nnslr_tools.train_settings): the variables its script reads.
         from nnslr_tools import train_settings
         start_env.update(train_settings.environment(self.root, action))
@@ -1569,8 +1603,10 @@ class Panel:
             if not (self.repo / CLASSIFIER_SCRIPT).is_file():
                 raise PanelError(403, 'actions_disabled', CLASSIFIER_SCRIPT + ' is missing in this installation.')
             cutter, why = self.models_index.in_use('cutter')
-            if cutter is None:
+            if cutter is None and cutter_choice is None:
                 raise PanelError(409, 'no_cutter', why[0].upper() + why[1:] + '.')
+        if check_only:
+            return None
         with self._lock:
             activities = self.activities()
             conflict = _conflicting_group(group, self._running_groups(activities))
@@ -1616,8 +1652,8 @@ class Panel:
             # The process group of the action (a new session: its pid), so Ferma works also after a
             # restart of this server, which forgets self._processes.
             path.with_suffix('.pid').write_text(str(process.pid) + '\n')
-        # Reaps the process as soon as it ends, so it never stays a zombie.
-        threading.Thread(target=process.wait, daemon=True).start()
+        # Reaps the process as soon as it ends, so it never stays a zombie, and starts the next training of a pipeline.
+        threading.Thread(target=self._reap, args=(process,), daemon=True).start()
         return {'id': job_id, 'action': action, 'label': ACTIONS[action]['label']}
 
     def train_settings(self) -> dict:
@@ -1639,6 +1675,172 @@ class Panel:
         print(f'Panel: {train_settings.TRAININGS[body["training"]]["label"].lower()} training settings '
               f'{record["values"] or "all default"} ({who!r})', flush=True)
         return self.train_settings()
+
+    # -- Train › Pipeline -----------------------------------------------------------------------
+    def start_pipeline(self, body, who: str | None) -> dict:
+        """Train › Pipeline: {"steps": [{"action", "options"}]}, some of PIPELINE_ORDER in that order, each with the
+        options of its own button; all are checked now, the first starts now, the others one after the other
+        (advance_pipeline). Refused while another pipeline runs."""
+        if not self.actions_enabled or not self.available():
+            raise PanelError(403, 'actions_disabled', 'The panel is read-only on this server.')
+        steps = body.get('steps') if isinstance(body, dict) else None
+        if not isinstance(steps, list) or not steps:
+            raise PanelError(400, 'bad_option', 'Choose at least one training.')
+        chosen = []
+        for step in steps:
+            action = step.get('action') if isinstance(step, dict) else None
+            if action not in PIPELINE_ORDER:
+                raise PanelError(400, 'bad_option', 'Unknown training in the pipeline.')
+            options = step.get('options') or {}
+            if not isinstance(options, dict) or not all(isinstance(value, str) for value in options.values()):
+                raise PanelError(400, 'bad_option', 'The options of a training are strings.')
+            unknown = set(options) - set(ACTION_OPTIONS.get(action, ())) | ({'cutter'} & set(options))
+            if unknown:
+                raise PanelError(400, 'bad_option', '"' + ACTIONS[action]['label'] + '" in a pipeline does not take '
+                                 + ', '.join(sorted(unknown)) + '.')
+            chosen.append({'action': action, 'options': options, 'job': None})
+        actions = [step['action'] for step in chosen]
+        if len(set(actions)) != len(actions) or actions != sorted(actions, key=PIPELINE_ORDER.index):
+            raise PanelError(400, 'bad_option', 'Each training at most once, in the order of the pipeline.')
+        for step in chosen:
+            options = dict(step['options'])
+            if step['action'] == 'train_classifier' and 'train_cutter' in actions:
+                options['cutter'] = PIPELINE_CUTTER
+            # Now, not hours later: a Mapillary not prepared, a start that is gone...
+            self.start(step['action'], options, check_only=True)
+        with self._lock:
+            plan = _read_json(self.logs / PIPELINE_FILE)
+            if plan is not None and plan.get('state') == 'running':
+                raise PanelError(409, 'busy', 'A pipeline is running: wait for it to finish or stop it.')
+            job = self.start(chosen[0]['action'], chosen[0]['options'] or None)
+            chosen[0]['job'] = job['id']
+            self._write_pipeline({'state': 'running', 'started_at': _now(), 'ended_at': None, 'by': who,
+                                  'reason': '', 'steps': chosen})
+        print(f'Panel: pipeline started, {", ".join(actions)} ({who!r})', flush=True)
+        self._watch_pipeline()
+        return self.pipeline_view()
+
+    def stop_pipeline(self) -> dict:
+        """Train › Pipeline, Stop after this one: the training at work goes on to its end (its own Stop stops it), the
+        next ones do not start."""
+        if not self.actions_enabled or not self.available():
+            raise PanelError(403, 'actions_disabled', 'The panel is read-only on this server.')
+        with self._lock:
+            plan = _read_json(self.logs / PIPELINE_FILE)
+            if plan is None or plan.get('state') != 'running':
+                raise PanelError(409, 'not_running', 'No pipeline is running.')
+            plan.update(state='stopped', ended_at=_now(), reason='Stopped by hand: the next trainings did not start.')
+            self._write_pipeline(plan)
+        return self.pipeline_view()
+
+    def advance_pipeline(self) -> None:
+        """Starts the next training of the running pipeline when the one at work ended well; a training that failed
+        or was stopped ends the pipeline. While the train group or the GPU is busy with something else it waits (the
+        reason says so) and tries again later."""
+        with self._lock:
+            plan = _read_json(self.logs / PIPELINE_FILE)
+            if plan is None or plan.get('state') != 'running':
+                return
+            steps = plan['steps']
+            started = [step for step in steps if step.get('job')]
+            if started:
+                last = started[-1]
+                state = self._job_state(last['job'])
+                if state == 'running':
+                    return
+                if state != 'ok':
+                    plan.update(state='failed' if state == 'failed' else 'stopped', ended_at=_now(),
+                                reason=ACTIONS[last['action']]['label'] + (' failed.' if state == 'failed' else ' was stopped.'))
+                    self._write_pipeline(plan)
+                    return
+            following = next((step for step in steps if not step.get('job')), None)
+            if following is None:
+                plan.update(state='done', ended_at=_now(), reason='')
+                self._write_pipeline(plan)
+                return
+            options = dict(following['options'])
+            cutter = next((step for step in steps if step['action'] == 'train_cutter'), None)
+            if following['action'] == 'train_classifier' and cutter is not None:
+                run = _run_of(self.logs / (cutter['job'] + '.log'), 'train_cutter')
+                options['cutter'] = f'cutter:{run}/{SIGNNET_PART}' if run else ''
+            gpu = self.system().get('gpu') if following['action'] != 'dataset' else None
+            try:
+                if gpu is not None and gpu.get('processes'):
+                    raise PanelError(409, 'busy', 'The GPU is busy with another process')
+                job = self.start(following['action'], options or None)
+            except PanelError as error:
+                if error.reason == 'busy':
+                    plan['reason'] = 'Waiting: ' + error.message.rstrip('.').split(': wait')[0] + '.'
+                else:
+                    plan.update(state='failed', ended_at=_now(),
+                                reason=ACTIONS[following['action']]['label'] + ' could not start: ' + error.message)
+                self._write_pipeline(plan)
+                return
+            following['job'] = job['id']
+            plan['reason'] = ''
+            self._write_pipeline(plan)
+
+    def pipeline_view(self) -> dict | None:
+        """The last pipeline for the page: {'state': running|done|failed|stopped, 'started_at', 'ended_at', 'by',
+        'reason', 'steps': [{'action', 'label', 'options', 'job', 'run', 'state': the job's state, or todo (still to
+        start), skipped (never started)}]}; None before the first."""
+        plan = _read_json(self.logs / PIPELINE_FILE)
+        if plan is None or not isinstance(plan.get('steps'), list):
+            return None
+        rows = []
+        for step in plan['steps']:
+            action, job = step.get('action'), step.get('job')
+            if action not in ACTIONS:
+                continue
+            state = self._job_state(job) if job else 'todo' if plan.get('state') == 'running' else 'skipped'
+            rows.append({'action': action, 'label': ACTIONS[action]['label'], 'options': step.get('options') or {},
+                         'job': job, 'run': _run_of(self.logs / (job + '.log'), action) if job else None, 'state': state})
+        return {key: plan.get(key) for key in ('state', 'started_at', 'ended_at', 'by', 'reason')} | {'steps': rows}
+
+    def _job_state(self, job_id: str) -> str:
+        """running, ok, failed or interrupted, as jobs() says it."""
+        with self._lock:
+            process = self._processes.get(job_id)
+        if process is not None and process.poll() is None:
+            return 'running'
+        code = _exit_code(self.logs / (job_id + '.log'))
+        if code is not None:
+            return 'ok' if code == 0 else 'failed'
+        if process is None and self._group(job_id) is not None:
+            return 'running'
+        return 'interrupted'
+
+    def _write_pipeline(self, plan: dict) -> None:
+        self.logs.mkdir(parents=True, exist_ok=True)
+        temporary = self.logs / (PIPELINE_FILE + '.tmp')
+        temporary.write_text(json.dumps(plan, indent=1) + '\n', encoding='utf-8')
+        temporary.replace(self.logs / PIPELINE_FILE)
+
+    def _reap(self, process: subprocess.Popen) -> None:
+        process.wait()
+        try:
+            self.advance_pipeline()
+        except Exception as error:  # a thread of its own: said in the journal, the watch tries again
+            print(f'Panel: the pipeline could not go on: {error}', flush=True)
+
+    def _watch_pipeline(self) -> None:
+        """A thread that calls advance_pipeline every PIPELINE_WATCH_SECONDS while a pipeline runs."""
+        with self._lock:
+            if self._pipeline_watch is not None and self._pipeline_watch.is_alive():
+                return
+            self._pipeline_watch = threading.Thread(target=self._pipeline_loop, daemon=True, name='nnslr-pipeline')
+            self._pipeline_watch.start()
+
+    def _pipeline_loop(self) -> None:
+        while True:
+            time.sleep(PIPELINE_WATCH_SECONDS)
+            try:
+                self.advance_pipeline()
+            except Exception as error:
+                print(f'Panel: the pipeline could not go on: {error}', flush=True)
+            plan = _read_json(self.logs / PIPELINE_FILE)
+            if plan is None or plan.get('state') != 'running':
+                return
 
     def new_run_name(self, kind: str) -> str:
         """The run of a new classifier or cutter training: the time it starts and what it is,
@@ -1870,6 +2072,11 @@ def _read_json(path: Path) -> dict | None:
     except (OSError, ValueError):
         return None
     return value if isinstance(value, dict) else None
+
+
+def _now() -> str:
+    """This moment, as the jobs' times are written (local time with its offset)."""
+    return datetime.now().astimezone().isoformat(timespec='seconds')
 
 
 def _mtime(path: Path) -> str | None:

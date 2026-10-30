@@ -3,33 +3,32 @@
 // frames, drives; the reviews not imported yet), a link to Data › Training dataset, where they are imported. Then one network at a time, chosen
 // in a switcher with a dot on the one training: the cutter (scripts/run_signnet.sh: SignNet, the cutter the comma runs,
 // at the car's band; the signs it finds), the classifier with "not a sign" (scripts/run_classifier.sh), the decider (in preparation:
-// experiment B), the road type with memory (scripts/run_road_type.sh), the whole pipeline (helpers/3_train.sh, with
-// where it starts). Each has the same place for its work:
+// experiment B), the road type with memory (scripts/run_road_type.sh), the pipeline (PipelineSection: those trainings one
+// after the other; the first one, helpers/3_train.sh, folded under it). Each has the same place for its work:
 // the Train button, or its training running (or failed) with its steps, its Settings for the next training
 // (TrainSettingsSection), then its curves and its latest version
 // (GET /api/panel/models, a link to its versions in Models). The page does not move while work runs.
-import {computed, ref} from 'vue';
+import {computed, ref, toRef} from 'vue';
 import {isoWhen, plural, thousands} from '../common/format';
-import type {ActionName, ActionOptions, ActionState, Activity, ClassifierModel, CutterFamilies, Job, JobProgress as Progress,
-  ModelRole, ModelVersion, PanelStatus, TrainingStart, TrainSettingsAction} from '../common/panel-types';
+import type {ActionName, ActionOptions, ActionState, Activity, CutterFamilies, Job, JobProgress as Progress,
+  ModelRole, ModelVersion, PanelStatus, PipelineAction, TrainingStart, TrainSettingsAction} from '../common/panel-types';
 import ActionList from './ActionList.vue';
+import {useClassifierChoices} from './classifier-choices';
+import ClassifierChoices from './ClassifierChoices.vue';
 import JobProgress from './JobProgress.vue';
 import {CHARTED_ACTIONS, JOB_STATE, jobOf, PIPELINE_ACTIONS, startedWhen, terminalActivities} from './jobs';
 import {pct} from './evaluate';
-import {regionCrops, shareOf} from './mapillary';
 import {sizeText, useModels} from './models';
-import PickerSheet, {type PickerOption} from '../components/PickerSheet.vue';
-import RegionPicker from './RegionPicker.vue';
+import PipelineSection from './PipelineSection.vue';
 import Segmented from './Segmented.vue';
 import TerminalActivity from './TerminalActivity.vue';
 import TrainingCharts from './TrainingCharts.vue';
-import TrainStart from './TrainStart.vue';
 import TrainSettingsSection from './TrainSettingsSection.vue';
 import SectionHead from './SectionHead.vue';
 
 const props = defineProps<{status: PanelStatus | null}>();
 const emit = defineEmits<{run: [name: ActionName, state: ActionState, start?: TrainingStart, options?: ActionOptions]; stop: [job: Job];
-  details: [job: Job]}>();
+  details: [job: Job]; pipeline: [steps: {action: PipelineAction; options: ActionOptions}[], text: string]; stopPipeline: []}>();
 
 /** The page as an app: one line of data, then one network at a time (Cutter, Classifier, Applicability, Road type, the whole
  * Pipeline), whose Train button becomes its progress, in the same place, while it trains. */
@@ -55,10 +54,13 @@ function activitiesFor(section: Section): Activity[] {
     return named === section;
   });
 }
+/** The pipeline of our networks at work (status.pipeline): its section is marked and shown first. */
+const pipelineRunning = computed(() => props.status?.pipeline?.state === 'running');
 const runningSections = computed(() => SECTIONS.map((item) => item.key)
-  .filter((key) => jobFor(key)?.state === 'running' || activitiesFor(key).length > 0));
+  .filter((key) => jobFor(key)?.state === 'running' || activitiesFor(key).length > 0 || (key === 'pipeline' && pipelineRunning.value))
+  .sort((a, b) => Number(b === 'pipeline' && pipelineRunning.value) - Number(a === 'pipeline' && pipelineRunning.value)));
 const picked = ref<Section | null>(null);
-/** The section shown: the one picked, else the one training, else the cutter. */
+/** The section shown: the one picked, else the one training (the pipeline first), else the cutter. */
 const section = computed({
   get: (): Section => picked.value ?? runningSections.value[0] ?? 'cutter',
   set: (value: Section) => { picked.value = value; },
@@ -68,8 +70,10 @@ const job = computed(() => jobFor(section.value));
 const SETTINGS_OF: Partial<Record<Section, TrainSettingsAction>> = {cutter: 'train_cutter', classifier: 'train_classifier',
   decider: 'train_decider', road: 'train_road_type'};
 const settingsAction = computed(() => SETTINGS_OF[section.value] ?? null);
-/** The job of the section in its slot: running or failed; one done or stopped by hand is a line. */
-const bigJob = computed(() => job.value && (job.value.state === 'running' || job.value.state === 'failed') ? job.value : null);
+/** The job of the section in its slot: running or failed; one done or stopped by hand is a line. In the pipeline: only a
+ * first pipeline (detector and reader) at work; the last line is PipelineSection's. */
+const bigJob = computed(() => job.value && (job.value.state === 'running' || (job.value.state === 'failed' && section.value !== 'pipeline'))
+  ? job.value : null);
 /** Importing the reviews (Data › Training dataset): said in the line of data. */
 const importing = computed(() => jobOf(props.status, ['dataset'])?.state === 'running');
 
@@ -154,73 +158,17 @@ const ROAD_ACTIONS: [ActionName, string][] = [
     + 'and without memory, compared by when the ramp’s limit ends; the first is exported for the car. '
     + 'About 20 minutes, 40 the first time.'],
 ];
-/** The classifier: our signs only, with the signs of the Mapillary dataset in train, or in two stages: first on the
- * Mapillary signs alone, then on ours from those weights (status.classifier_options). */
-type MapillaryChoice = 'off' | 'on' | 'pretrain';
-const mapillaryState = computed(() => props.status?.classifier_options?.mapillary ?? null);
-const MAPILLARY_OPTIONS: {key: MapillaryChoice; label: string}[] = [{key: 'off', label: 'Our signs'},
-  {key: 'on', label: 'With Mapillary'}, {key: 'pretrain', label: 'Mapillary, then ours'}];
-const pickedMapillary = ref<MapillaryChoice | null>(null);
-const mapillary = computed({
-  get: (): MapillaryChoice => mapillaryState.value?.available ? pickedMapillary.value ?? 'off' : 'off',
-  set: (value: MapillaryChoice) => { pickedMapillary.value = value; },
-});
-const withMapillary = computed(() => mapillary.value !== 'off');
-/** Which Mapillary signs: the places their photos were taken (none chosen: all the world) and a share of them, in percent
- * (status.classifier_options.mapillary_regions; with Mapillary in train the server then keeps at most 300 of each kind,
- * its pretraining takes every one). */
-const mapillaryRegions = computed(() => props.status?.classifier_options?.mapillary_regions ?? null);
-const region = ref<string[]>([]);
-const shareText = ref('100');
-const share = computed(() => shareOf(shareText.value));
-const locateJob = computed(() => jobOf(props.status, ['mapillary_locations']));
-const locating = computed(() => locateJob.value?.state === 'running'
-  || terminalActivities(props.status, ['mapillary']).length > 0);
-/** About how many Mapillary signs join: those of the places chosen, times the share. */
-const mapillarySigns = computed(() => Math.round(regionCrops(mapillaryRegions.value, region.value) * (share.value ?? 0) / 100));
-const mapillaryOptions = computed((): ActionOptions => withMapillary.value
-  ? {mapillary: mapillary.value, region: region.value.length ? region.value.join(',') : 'all', share: String(share.value ?? shareText.value)}
-  : {mapillary: 'off'});
-/** Where the classifier starts: ImageNet (the default: its test stays fair), or a finished classifier of Models with
- * “not a sign”, whose weights it goes on learning from (the one in use first). Not with “Mapillary, then ours”, which
- * starts from its own Mapillary stage. A start that learnt another split may have seen some of today's test signs. */
-const startVersions = computed((): ClassifierModel[] => (roleOf('classifier')?.versions ?? [])
-  .filter((version): version is ClassifierModel => version.role === 'classifier' && version.part === 'classifier'
-    && version.class_scheme !== undefined && version.finished)
-  .sort((a, b) => Number(b.in_use) - Number(a.in_use)));
-const currentSplit = computed(() => props.status?.classifier_options?.split_sha256 ?? null);
-const startSplit = (version: ClassifierModel): 'same' | 'another' | 'unknown' => !version.split_sha256 || !currentSplit.value
-  ? 'unknown' : version.split_sha256 === currentSplit.value ? 'same' : 'another';
-const SPLIT_WORDS = {same: 'learnt on today’s split', another: 'learnt on another split', unknown: 'its split not recorded'};
-const startOptions = computed((): PickerOption[] => [
-  {key: 'imagenet', title: 'ImageNet', sub: 'the usual start: a fair test'},
-  ...startVersions.value.map((version) => ({key: version.id, title: version.label + ' ' + isoWhen(version.trained_at),
-    short: version.label + ' ' + isoWhen(version.trained_at), badge: version.in_use ? 'In use' : undefined,
-    sub: SPLIT_WORDS[startSplit(version)]})),
-]);
-const pickedStart = ref('imagenet');
-const startKey = computed({
-  get: (): string => startVersions.value.some((version) => version.id === pickedStart.value) ? pickedStart.value : 'imagenet',
-  set: (value: string) => { pickedStart.value = value; },
-});
-const startVersion = computed(() => mapillary.value === 'pretrain' ? null
-  : startVersions.value.find((version) => version.id === startKey.value) ?? null);
-const classifierOptions = computed((): ActionOptions => mapillary.value === 'pretrain' ? mapillaryOptions.value
-  : {...mapillaryOptions.value, start: startVersion.value?.id ?? 'imagenet'});
+/** The classifier's choices (classifier-choices.ts), the same in its section and in the pipeline. */
+const choices = useClassifierChoices(toRef(props, 'status'), (role) => roleOf(role)?.versions);
 const CLASSIFIER_ACTIONS = computed((): [ActionName, string][] => [
-  ['train_classifier', 'A new classifier, taught on the signs and on the cutter’s mistakes'
-    + (mapillary.value === 'on' ? ', with about ' + thousands(mapillarySigns.value) + ' signs of Mapillary' : '')
-    + (mapillary.value === 'pretrain' ? ', first on about ' + thousands(mapillarySigns.value) + ' signs of Mapillary alone, '
-      + 'then on ours from there' : '')
-    + (startVersion.value ? ', starting from ' + startVersion.value.label + ' (' + isoWhen(startVersion.value.trained_at) + ')' : '')
+  ['train_classifier', 'A new classifier, taught on the signs and on the cutter’s mistakes' + choices.words
     + '. Takes a few hours on the GPU.'],
 ]);
 /** The classifier's button: also not with a share that is not a percentage. */
 const classifierActions = computed(() => {
   const actions = props.status?.actions ?? null;
-  if (actions === null || !withMapillary.value || share.value !== null) return actions;
-  return {...actions, train_classifier: {...actions.train_classifier, allowed: false,
-    reason: 'the share of Mapillary is a percentage, more than 0 and at most 100'}};
+  if (actions === null || !choices.invalid) return actions;
+  return {...actions, train_classifier: {...actions.train_classifier, allowed: false, reason: choices.invalid}};
 });
 const activities = computed(() => terminalActivities(props.status, ['train']));
 const sectionActivities = computed(() => activitiesFor(section.value));
@@ -278,7 +226,8 @@ const numbers = computed(() => {
     <p v-else-if="section === 'decider'" class="role-what">Says whom each sign applies to: our road, another road, or abstain.</p>
     <p v-else-if="section === 'road'" class="role-what">Says from the camera what road the car is on, once a second: town, rural,
       expressway, motorway, ramp or parking. It remembers the seconds before, so the motorway after a ramp is seen without a sign.</p>
-    <p v-else class="role-what">The detector and the reader together, from the reviews to a package: the way every model was trained so far.</p>
+    <p v-else class="role-what">Our networks one after the other, each with the choices of its own section: the next one starts
+      when one ends well. The classifier after a new cutter learns that cutter’s mistakes.</p>
 
     <!-- The slot of the work: the training running (or failed) in place of its button, first: what runs and what to start come before the versions. -->
     <div class="train-slot">
@@ -294,33 +243,10 @@ const numbers = computed(() => {
                     @run="(name, state) => emit('run', name, state, undefined, {families: cutterFamilies})"/>
       </template>
       <template v-else-if="section === 'classifier'">
-        <div v-if="mapillaryState?.available" class="seg-row">
-          <Segmented v-model="mapillary" class="mly-seg" :options="MAPILLARY_OPTIONS" label="Signs the classifier learns from"/>
-        </div>
-        <div v-if="mapillaryState?.available && withMapillary" class="mly-choice" id="train-mapillary-choice">
-          <RegionPicker v-model="region" :regions="mapillaryRegions" :locate="status?.actions.mapillary_locations ?? null"
-                        :locating="locating"
-                        @locate="status && emit('run', 'mapillary_locations', status.actions.mapillary_locations)"/>
-          <label class="picker mly-share" :class="{bad: share === null}">
-            <span class="picker-label">Share</span>
-            <span class="mly-share-field"><input v-model="shareText" id="mapillary-share" type="text" inputmode="decimal"
-                   maxlength="6" autocomplete="off" aria-describedby="train-mapillary-note">%</span>
-            <span class="picker-sub">{{ share === null ? 'from 0.1 to 100' : 'about ' + thousands(mapillarySigns) + ' signs' }}</span>
-          </label>
-        </div>
-        <div v-if="mapillary !== 'pretrain'" class="cls-start">
-          <PickerSheet v-model="startKey" :options="startOptions" label="Start from" id="train-classifier-start"/>
-        </div>
-        <p v-if="mapillary === 'pretrain'" class="latest-none" id="train-start-note">Start: ImageNet, then its own Mapillary
-          stage; another classifier cannot be the start of “Mapillary, then ours”.</p>
-        <p v-else-if="startVersion && startSplit(startVersion) === 'another'" class="latest-none warn-text" id="train-start-note">Trained
-          on another split: it may have seen some of today's test signs, so the test of the new one is not fair.</p>
-        <p v-else-if="startVersion && startSplit(startVersion) === 'unknown'" class="latest-none warn-text" id="train-start-note">Its
-          split is not recorded: it may have seen some of today's test signs, so the test of the new one may not be fair.</p>
-        <p v-else-if="startVersion" class="latest-none" id="train-start-note">It goes on from that classifier's weights, learnt on
-          today's split: the test stays fair.</p>
+        <ClassifierChoices :choices="choices" :status="status"
+                           @locate="status && emit('run', 'mapillary_locations', status.actions.mapillary_locations)"/>
         <ActionList :items="CLASSIFIER_ACTIONS" :actions="classifierActions"
-                    @run="(name, state) => emit('run', name, state, undefined, classifierOptions)"/>
+                    @run="(name, state) => emit('run', name, state, undefined, choices.options)"/>
         <p class="latest-none" id="train-classifier-cutter"><template v-if="cutterInUse">Cutter: the one in use,
           <strong>{{ cutterInUse.label }}</strong> · {{ cutterInUse.trained_at ? isoWhen(cutterInUse.trained_at) : cutterInUse.run }}.<template
           v-if="cutterInUseCar"> On the {{ cutterInUsePartition }}, as the car reads it: it finds <strong>{{ pct(cutterInUseCar.recall) }}</strong>
@@ -330,15 +256,15 @@ const numbers = computed(() => {
           Strict count (IoU 0.5): {{ pct(cutterInUseStrict.recall) }} / {{ pct(cutterInUseStrict.precision) }}.</span></template>
           Its mistakes are the “not a sign” the classifier learns, and the chain is measured with it. Another one: Models › Use this one.</template><template
           v-else-if="models">No cutter in use: choose one in Models first.</template></p>
-        <p v-if="mapillaryState?.available" class="latest-none" id="train-mapillary-note">Mapillary: {{ thousands(mapillaryState.crops) }}
-          street-photo signs of {{ plural(mapillaryState.labels, 'kind') }}, added to train only: every measure stays on your drives.<template
-          v-if="mapillary === 'on'"> The same share always takes the same signs; then at most 300 of each kind.</template><template
-          v-if="mapillary === 'pretrain'"> The classifier first learns on them alone (the same share always takes the same
+        <p v-if="choices.mapillaryState?.available" class="latest-none" id="train-mapillary-note">Mapillary: {{ thousands(choices.mapillaryState.crops) }}
+          street-photo signs of {{ plural(choices.mapillaryState.labels, 'kind') }}, added to train only: every measure stays on your drives.<template
+          v-if="choices.mapillary === 'on'"> The same share always takes the same signs; then at most 300 of each kind.</template><template
+          v-if="choices.mapillary === 'pretrain'"> The classifier first learns on them alone (the same share always takes the same
           signs), then on your signs and the cutter’s mistakes, starting from there.</template></p>
-        <p v-else-if="mapillaryState" class="latest-none" id="train-mapillary-note">Mapillary signs: not prepared yet
+        <p v-else-if="choices.mapillaryState" class="latest-none" id="train-mapillary-note">Mapillary signs: not prepared yet
           (helpers/mapillary.sh).</p>
-        <p v-if="mapillaryState?.available && locateJob?.state === 'failed'" class="latest-none warn-text" id="train-locate-failed">Locating the
-          photos failed · <button type="button" class="link-button" @click="emit('details', locateJob)">Details</button></p>
+        <p v-if="choices.mapillaryState?.available && choices.locateJob?.state === 'failed'" class="latest-none warn-text" id="train-locate-failed">Locating the
+          photos failed · <button type="button" class="link-button" @click="choices.locateJob && emit('details', choices.locateJob)">Details</button></p>
       </template>
       <template v-else-if="section === 'decider'">
         <ActionList :items="DECIDER_ACTIONS" :actions="status?.actions ?? null" @run="(name, state) => emit('run', name, state)"/>
@@ -348,9 +274,11 @@ const numbers = computed(() => {
         <ActionList :items="ROAD_ACTIONS" :actions="status?.actions ?? null" @run="(name, state) => emit('run', name, state)"/>
         <p class="latest-none" id="train-road-note">It learns from the road types of Data › Roads. Nothing on the car uses it yet.</p>
       </template>
-      <TrainStart v-else :starts="status ? status.training_starts ?? [] : null" :state="status?.actions.train ?? null"
-                  @start="(start) => status && emit('run', 'train', status.actions.train, start)"/>
-      <p v-if="job && !bigJob && !sectionActivities.length" class="last-line">Last: {{ job.label }}, {{ startedWhen(job) }} ·
+      <PipelineSection v-else v-model:families="cutterFamilies" :status="status" :choices="choices" :fresh="numbers?.fresh ?? 0"
+                       :family-options="FAMILY_OPTIONS" @pipeline="(steps, text) => emit('pipeline', steps, text)"
+                       @stop-pipeline="emit('stopPipeline')" @stop="emit('stop', $event)" @details="emit('details', $event)"
+                       @run="(name, state, start) => emit('run', name, state, start)"/>
+      <p v-if="job && !bigJob && !sectionActivities.length && section !== 'pipeline'" class="last-line">Last: {{ job.label }}, {{ startedWhen(job) }} ·
         {{ job.state === 'interrupted' ? 'stopped' : JOB_STATE[job.state][0] }} ·
         <button type="button" class="link-button" @click="emit('details', job)">Details</button></p>
     </div>

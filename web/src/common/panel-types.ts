@@ -67,6 +67,28 @@ export interface ActionOptions {
    * (classifier:<run>/classifier), whose weights it starts from. */
   start?: string;
 }
+/** Train › Pipeline: our networks trained one after the other (POST /api/panel/pipeline), each a job of its own. */
+export type PipelineAction = 'dataset' | 'train_cutter' | 'train_classifier' | 'train_decider' | 'train_road_type';
+export interface PipelineStep {
+  action: PipelineAction;
+  label: string;
+  /** The options of its own button (a classifier after a cutter of the pipeline mines that cutter). */
+  options: ActionOptions;
+  /** Its job, once started, and its run. */
+  job: string | null;
+  run: string | null;
+  /** The job's state; todo: still to start; skipped: the pipeline ended before it. */
+  state: JobState | 'todo' | 'skipped';
+}
+export interface Pipeline {
+  state: 'running' | 'done' | 'failed' | 'stopped';
+  started_at: string | null;
+  ended_at: string | null;
+  by: string | null;
+  /** Why it waits (running) or why it ended (failed, stopped); '' otherwise. */
+  reason: string;
+  steps: PipelineStep[];
+}
 /** Where the Mapillary photos were taken (nnslr_tools.mapillary.regions_state), for the region of “Train the
  * classifier”: whether the positions were fetched, how many signs have one, and the signs of each place. */
 export interface MapillaryRegions {
@@ -373,6 +395,8 @@ export interface PanelStatus {
   ai_live?: AiLive | null;
   dataset: DatasetSummary | null;
   training_starts: TrainingStart[];
+  /** The last pipeline of Train › Pipeline, or null before the first. */
+  pipeline?: Pipeline | null;
   /** The choices of “Train the cutter”: what it finds and the default, and the car's band it is trained at ("896x288"). */
   cutter_options?: {families: CutterFamilies[]; family: CutterFamilies; band: string};
   /** The Mapillary switch of “Train the classifier”: whether its crops are prepared (helpers/mapillary.sh), how many

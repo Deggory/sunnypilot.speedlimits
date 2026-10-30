@@ -1180,7 +1180,10 @@ def make_handler(app: ReviewApp):
             settings = path == '/api/panel/car-settings'
             # The settings of a training of Train ({"training": action, "values": {setting: number or null}}).
             trainings = path == '/api/panel/train-settings'
-            if run or stop or active or chosen or road or settings or trainings:
+            # Train › Pipeline: our networks one after the other ({"steps": [{"action", "options"}]}), or /stop: the
+            # next ones do not start.
+            pipeline = re.fullmatch(r'/api/panel/pipeline(/stop)?', path)
+            if run or stop or active or chosen or road or settings or trainings or pipeline:
                 # Same protections as saving a frame: same origin, JSON only (no form can send it).
                 if not self._same_origin():
                     self._problem(403, 'cross_origin', 'Request from another origin refused.', True)
@@ -1201,7 +1204,7 @@ def make_handler(app: ReviewApp):
                     # the classifier's Mapillary signs ({"mapillary": "on", "region": "europe", "share": "5"}), the
                     # route, provider, save and limit of an AI action, all checked by Panel.start.
                     options = {key: body[key] for key in ('start', 'run', 'size', 'families', 'proposer', 'package',
-                                                          'signnet', 'mapillary', 'region', 'share')
+                                                          'signnet', 'mapillary', 'region', 'share', 'cutter')
                                if isinstance(body, dict) and isinstance(body.get(key), str)}
                     # [ai-reviewer] - START
                     # Passed as they are, also when not strings: Panel.start refuses them, never drops them (a limit
@@ -1227,6 +1230,11 @@ def make_handler(app: ReviewApp):
                 elif trainings:
                     who, via = self._who()
                     self._json(200, {'ok': True, **app.panel.save_train_settings(body, who or via)})
+                elif pipeline and pipeline.group(1):
+                    self._json(200, {'ok': True, 'pipeline': app.panel.stop_pipeline()})
+                elif pipeline:
+                    who, via = self._who()
+                    self._json(200, {'ok': True, 'pipeline': app.panel.start_pipeline(body, who or via)})
                 elif road and road.group(2):
                     self._junction_post(road.group(1), road.group(3) is not None, body)
                 elif road:

@@ -23,7 +23,7 @@ import {RESUME_JOB, RETRY_ACTIONS, RETRY_JOB, usePanelActions} from './use-actio
 
 useTabRouting();
 const {status, refresh} = usePanelStatus((value) => recordMachine(value.system));
-const {run, stop, resume, retry} = usePanelActions(refresh);
+const {run, stop, resume, retry, startPipeline, stopPipeline} = usePanelActions(refresh);
 // "Resume" on the card of a stopped training, wherever the card is shown.
 provide(RESUME_JOB, resume);
 // "Try again" on the card of a failed job that needs no choice but its proposer, when its action can start now.
@@ -56,7 +56,8 @@ watch(busyPaths, markBusy);
     <div v-if="status && !status.actions_enabled" class="banner" id="readonly">Read-only: the buttons are turned off on this server.</div>
     <OverviewTab v-if="currentTab === 'overview'" :status="status" :busy="busy" @run="run" @stop="stop" @details="details"/>
     <PrepareTab v-else-if="currentTab === 'prepare'" :status="status" @run="run" @stop="stop" @details="details"/>
-    <TrainTab v-else-if="currentTab === 'train'" :status="status" @run="run" @stop="stop" @details="details"/>
+    <TrainTab v-else-if="currentTab === 'train'" :status="status" @run="run" @stop="stop" @details="details"
+              @pipeline="startPipeline" @stop-pipeline="stopPipeline"/>
     <EvaluateTab v-else-if="currentTab === 'evaluate'" :status="status" @run="run" @stop="stop" @details="details"/>
     <DatasetTab v-else-if="currentTab === 'dataset'" :status="status" @run="run" @stop="stop" @details="details"/>
     <RoadsTab v-else-if="currentTab === 'roads'" :status="status" @run="run" @stop="stop" @details="details"/>
