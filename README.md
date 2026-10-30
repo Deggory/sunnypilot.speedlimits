@@ -129,7 +129,7 @@ On the site: **Training**. There is one tab and one button per network. **They a
 - **Train the scene network**: about 15 minutes (longer the first time). It needs **Find the road types** (step 2) to have run once. It needs no reviewed sign.
 - **Train applicability** (is this sign for our road?): about 15 minutes. A prototype.
 
-<img src="docs/images/panel-train.png" alt="Training page, Cutter tab: a SignNet 896 by 288 training running at epoch 11 of 40, with its steps and charts of validation recall and loss." width="100%">
+<img src="docs/images/panel-train.png" alt="Training page, Cutter tab: the Train the cutter button, the latest SignNet 896 by 288 (in use, 74.9% of the speed signs) and the curves of its last training, validation recall and loss over 40 epochs." width="100%">
 
 <sub>A cutter training, followed epoch by epoch.</sub>
 
