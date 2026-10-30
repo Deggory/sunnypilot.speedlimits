@@ -194,7 +194,7 @@ It added two points, both taken: "Unclear" is taught as abstain rather than drop
 - one step a second: the whole road frame, resized to 256 × 144, and the car's speed;
 - encoder: torchvision's MobileNetV3-small with ImageNet weights, pooled, then 128 numbers (Linear, Hardswish, Dropout);
 - the speed as two numbers, `min(max(v, 0), 60) / 30` and 1 when known (GPS speed in training, `carState.vEgo` on the car);
-- memory: a GRU of 128; output: the probability of each of `road_types.ROAD_TYPES` (town, rural, expressway, motorway, ramp, parking), in that order and with those names;
+- memory: a GRU of 128; output: the probability of each of `road_types.ROAD_TYPES` (town, rural, expressway, motorway, ramp, parking, zone30), in that order and with those names (zone30, a 30 zone, added last on 30 Oct 2026: a checkpoint trained before it keeps its six);
 - the version without memory, to compare: the same encoder and speed with a small head per frame (`--memory none`), also measured with a causal 5-second majority vote over its answers, the cheapest memory;
 - size: 1,101,478 parameters (1,018,406 without memory), about 84 MFLOPs a step, 3.9 ms a step on the V100 at batch 1. At 1 Hz that is a small fraction of Chestnut, next to the driving model; it is still to be measured there.
 

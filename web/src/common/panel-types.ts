@@ -1287,7 +1287,7 @@ export interface CommaTrial {
 
 /** The type of road of a frame, from the map (nnslr_tools.road_types); null: the map does not say. Parking: a car park,
  * no general limit there (sunnypilot gets 0), a kind of place the network learns. */
-export type RoadType = 'town' | 'rural' | 'expressway' | 'motorway' | 'ramp' | 'parking';
+export type RoadType = 'town' | 'zone30' | 'rural' | 'expressway' | 'motorway' | 'ramp' | 'parking';
 /** A stretch of a drive on one type of road, from and to frame keys. */
 export interface RoadStretch {
   type: RoadType | null;

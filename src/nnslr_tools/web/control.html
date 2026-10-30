@@ -1153,6 +1153,11 @@ font-variant-numeric:tabular-nums}
 /* A ramp: cyan, the light side of the motorway's blue, so the strip shows where a motorway is entered and left. */
 .rt-parking{background:var(--rt-parking)}.rt-unknown{background:var(--rt-unknown);opacity:1}.rt-ramp{background:var(--rt-ramp)}
 .rt-track .rt-parking{fill:var(--rt-parking)}.rt-track .rt-ramp{fill:var(--rt-ramp)}.rt-track .rt-unknown{fill:var(--rt-unknown)}.rt-track .rt-tocheck{fill:var(--bad)}
+/* A 30 zone: one khaki for both themes, an earth tone beside the town's amber. Against every other type it passes the
+   same validator in both themes (normal ΔE ≥ 18, colour-blind ≥ 10.5 under the three kinds) and clears 3:1 on both
+   cards. */
+:root{--rt-zone30:#99905c}
+.rt-zone30{background:var(--rt-zone30)}.rt-track .rt-zone30{fill:var(--rt-zone30)}
 .rt-view-main{grid-template-rows:auto 1fr}
 .rt-fix-head{flex-direction:row;flex-wrap:wrap;align-items:baseline;gap:2px 8px}
 .rt-pick button:last-child{grid-column:auto}
@@ -1203,9 +1208,12 @@ font-variant-numeric:tabular-nums}
 .rt-pick .rt-type[aria-pressed="true"]{box-shadow:0 0 0 2px var(--fg) inset}
 .rt-pick button.rt-map{outline:1.5px dashed var(--muted);outline-offset:-5px}
 .rt-fix-head strong{font-size:15px}
-@media (max-width:860px){.rt-pick{grid-template-columns:repeat(3,minmax(0,1fr))}.rt-pick .rt-type{padding:8px 6px}}
-/* Six types and Can't tell: the last one across the row under them. */
-.rt-pick .rt-type:last-child{grid-column:1/-1}
+/* Seven types and Can't tell: two rows of four, each button its dot over its word; in the one column of a tablet, wide
+   enough, its dot beside its word. */
+.rt-pick{grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.rt-pick .rt-type,.rt-pick .rt-type:last-child{flex-direction:column;gap:4px;padding:6px 0;font-size:12px}
+@media (max-width:860px) and (min-width:521px) and (min-height:501px){
+  .rt-pick{gap:8px}.rt-pick .rt-type,.rt-pick .rt-type:last-child{flex-direction:row;gap:7px;padding:8px 6px;font-size:14.5px}}
 /* The cut of a stretch (RoadDrive.vue): a short title over Whole / Before / After, and the cut drawn on the strip. */
 .rt-cut-head{margin:0 0 6px;font-size:13px;color:var(--muted);line-height:1.35}
 .rt-cut-head strong{color:var(--fg);font-size:14.5px;margin-right:4px}

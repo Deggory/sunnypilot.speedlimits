@@ -19,7 +19,11 @@ def test_way_type_from_kind_limit_and_highway():
     # The kind of limit wins over the number: a rural road signed 50 stays rural.
     assert way_type({'highway': 'secondary', 'maxspeed': '50', 'maxspeed_type': 'CH:rural'})[0] == 'rural'
     assert way_type({'highway': 'tertiary', 'maxspeed_type': 'CH:urban'})[0] == 'town'
-    assert way_type({'highway': 'residential', 'maxspeed_type': 'CH:zone30'})[0] == 'town'
+    # A 30 zone is a type of its own: sure from its kind, a guess from a bare 30; another zone is town.
+    assert way_type({'highway': 'residential', 'maxspeed_type': 'CH:zone30'}) == ('zone30', 'limit CH:zone30')
+    assert way_type({'highway': 'residential', 'maxspeed': '30'}) == ('zone30', 'maxspeed 30')
+    assert way_type({'highway': 'residential', 'maxspeed': '20', 'maxspeed_type': 'CH:zone20'})[0] == 'town'
+    assert way_type({'highway': 'residential', 'maxspeed': '30', 'maxspeed_type': 'CH:urban'})[0] == 'town'
     assert way_type({'highway': 'primary', 'maxspeed': 'CH:rural'})[0] == 'rural'
     assert way_type({'highway': 'primary', 'maxspeed': '50'}) == ('town', 'maxspeed 50')
     assert way_type({'highway': 'primary', 'maxspeed': '60'})[0] == 'rural'
@@ -113,7 +117,8 @@ def test_summary_names_each_drive_with_its_types_and_the_drives_left(tmp_path):
     assert result['drives_without'] == 0 and result['made_at'] is not None
     drive = result['routes'][0]
     assert (drive['route'], drive['frames']) == (ROUTE, 4)
-    assert drive['types'] == {'town': 0, 'rural': 0, 'expressway': 0, 'motorway': 3, 'ramp': 0, 'parking': 0, 'unknown': 1}
+    assert drive['types'] == {'town': 0, 'rural': 0, 'expressway': 0, 'motorway': 3, 'ramp': 0, 'parking': 0, 'zone30': 0,
+                             'unknown': 1}
     assert drive['stretches'] == [{'type': 'motorway', 'from': '0/0', 'to': '0/2', 'frames': 3},
                                   {'type': None, 'from': '0/3', 'to': '0/3', 'frames': 1}]
     # Read again when the file changes.
@@ -165,7 +170,7 @@ def test_corrections_over_the_map_the_last_wins_and_a_new_map_keeps_them(tmp_pat
     assert all(line['reviewer'] == 'admin' and line['at'] for line in kept)
     drive = summary(tmp_path)['routes'][0]
     assert drive['reviewed'] == 3 and drive['types'] == {'town': 2, 'rural': 0, 'expressway': 0, 'motorway': 3,
-                                                         'ramp': 0, 'parking': 0, 'unknown': 1}
+                                                         'ramp': 0, 'parking': 0, 'zone30': 0, 'unknown': 1}
 
     # Find again: the map is written anew, the corrections are not touched and still win.
     build_road_types(tmp_path, ROUTE, positions, road_map)
@@ -378,7 +383,7 @@ def test_a_correction_to_parking(tmp_path):
     assert [line['road_type'] for line in lines] == ['parking'] * 2 + ['motorway'] * 2 + [None] * 2
     assert (lines[0]['basis'], lines[0]['sure'], lines[0]['reviewed']) == ('reviewed', True, True)
     assert summary(tmp_path)['routes'][0]['types'] == {'town': 0, 'rural': 0, 'expressway': 0, 'motorway': 2,
-                                                       'ramp': 0, 'parking': 2, 'unknown': 2}
+                                                       'ramp': 0, 'parking': 2, 'zone30': 0, 'unknown': 2}
 
 
 def test_a_broken_corrections_line_is_skipped(tmp_path):

@@ -112,7 +112,8 @@ JUNCTION_STAGE_SHARE = 0.5
 JUNCTION_BRANCHES = ('shared', 'separate')
 MIN_DRIVE = 30
 # One letter a second for the answers around a merge in the result (release_evaluation).
-ANSWER_LETTERS = {'town': 'T', 'rural': 'R', 'expressway': 'E', 'motorway': 'M', 'ramp': '/', 'parking': 'P'}
+ANSWER_LETTERS = {'town': 'T', 'rural': 'R', 'expressway': 'E', 'motorway': 'M', 'ramp': '/', 'parking': 'P',
+                  'zone30': 'Z'}
 BATCH = 12
 EPOCHS = 60
 PATIENCE = 15
@@ -143,14 +144,15 @@ def _print(text: str) -> None:
 
 def build_road_type_net(memory: str = 'gru', pretrained: bool = True, features: int = FEATURES, hidden: int = HIDDEN,
                         signs: bool = False, junctions: bool = False, motion: bool = False,
-                        junction_branch: str = 'shared'):
+                        junction_branch: str = 'shared', classes: int | None = None):
     """The network (torch.nn.Module): forward(images (B, T, 3, H, W) float 0..1, speed (B, T, 2), hidden (B, hidden)
     or None, sign (B, T, 2) or None, motion (B, T, MOTION_INPUTS) or None, junction_hidden (B, hidden) or None) ->
     (logits (B, T, classes), hidden (B, hidden), junction logits (B, T, 2) or None, junction hidden (B, hidden) or
     None). With signs, the input of the memory has the sign input too (road_type_signs.sign_features; None: no sign
     seen); with motion, the car's own motion (car_motion.motion_features; None: unknown); with junctions, a junction
     head (in_junction, passed: JUNCTION_OUTPUTS) on the same memory (junction_branch 'shared') or on a junction GRU of
-    its own over the same input ('separate', with memory only: its own hidden state)."""
+    its own over the same input ('separate', with memory only: its own hidden state). classes: the road types it
+    answers, len(CLASSES) when None (a checkpoint trained before zone30 has six)."""
     torch = _torch()
     from torch import nn
     from torchvision.models import MobileNet_V3_Small_Weights, mobilenet_v3_small
@@ -160,6 +162,7 @@ def build_road_type_net(memory: str = 'gru', pretrained: bool = True, features: 
     if junction_branch not in JUNCTION_BRANCHES or (junction_branch == 'separate' and (memory != 'gru' or not junctions)):
         raise ValueError(f'junction_branch {junction_branch!r}: shared, or separate with memory and the junction head')
     extra = 2 + (SIGN_INPUTS if signs else 0) + (MOTION_INPUTS if motion else 0)
+    classes = len(data.CLASSES) if classes is None else classes
 
     class RoadTypeNet(nn.Module):
         def __init__(self):
@@ -173,13 +176,13 @@ def build_road_type_net(memory: str = 'gru', pretrained: bool = True, features: 
             self.project = nn.Sequential(nn.Linear(576, features), nn.Hardswish(), nn.Dropout(0.2))
             if memory == 'gru':
                 self.gru = nn.GRU(features + extra, hidden, batch_first=True)
-                self.head = nn.Linear(hidden, len(data.CLASSES))
+                self.head = nn.Linear(hidden, classes)
                 if junctions:
                     self.junction_head = nn.Linear(hidden, len(JUNCTION_OUTPUTS))
                 if junction_branch == 'separate':
                     self.junction_gru = nn.GRU(features + extra, hidden, batch_first=True)
             else:
-                self.head = nn.Sequential(nn.Linear(features + extra, hidden), nn.ReLU(), nn.Linear(hidden, len(data.CLASSES)))
+                self.head = nn.Sequential(nn.Linear(features + extra, hidden), nn.ReLU(), nn.Linear(hidden, classes))
                 if junctions:
                     self.junction_head = nn.Sequential(nn.Linear(features + extra, hidden), nn.ReLU(),
                                                        nn.Linear(hidden, len(JUNCTION_OUTPUTS)))
@@ -1383,7 +1386,8 @@ def load_road_type(checkpoint: Path, device: str = 'cpu'):
         raise ValueError(f'{checkpoint} is not a road-type checkpoint')
     model = build_road_type_net(saved['memory'], pretrained=False, signs=bool(saved.get('signs', False)),
                                 junctions=bool(saved.get('junctions', False)), motion=bool(saved.get('motion', False)),
-                                junction_branch=saved.get('junction_branch') or 'shared')
+                                junction_branch=saved.get('junction_branch') or 'shared',
+                                classes=len(saved.get('classes') or data.CLASSES))
     model.load_state_dict(saved['state_dict'])
     return model.to(device).eval(), saved
 
@@ -1775,8 +1779,8 @@ def car_input_spec(width: int = data.FRAME_WIDTH, height: int = data.FRAME_HEIGH
         ],
         'rate': 'one step a second (the training frames are 1 s apart; 2 Hz would make its memory twice as fast: '
                 'keep 1 Hz)',
-        'decode': 'road_type = classes[argmax(probabilities)], classes exactly road_types.ROAD_TYPES (town, rural, '
-                  'expressway, motorway, ramp, parking); feed SpeedLimitMemory.update(road_type=...) only after the '
+        'decode': 'road_type = classes[argmax(probabilities)], classes exactly the contract\'s classes (road_types.ROAD_TYPES '
+                  'when trained: town, rural, expressway, motorway, ramp, parking, zone30); feed SpeedLimitMemory.update(road_type=...) only after the '
                   'same class 3 steps in a row (the measure\'s debounce). "ramp" is an on- or off-ramp: ramp then '
                   'motorway or expressway is the merge, where the ramp\'s limit ends without a sign',
         **({'junction_decode': junction_decode(junctions)} if junctions else {}),
@@ -1894,7 +1898,8 @@ def export_road_type_onnx(checkpoint: Path, output: Path, *, verify: bool = True
         'hidden': 'the memory: zeros at the start, then the previous step\'s hidden_out',
         'junction_hidden': 'the junction head\'s own memory: zeros at the start, then the previous step\'s '
                            'junction_hidden_out'}
-    out_shapes = {'probabilities': [1, len(data.CLASSES)], 'hidden_out': [1, hidden_size],
+    classes = list(saved.get('classes') or data.CLASSES)
+    out_shapes = {'probabilities': [1, len(classes)], 'hidden_out': [1, hidden_size],
                   'junction': [1, len(JUNCTION_OUTPUTS)], 'junction_hidden_out': [1, hidden_size]}
     out_meanings = {
         'hidden_out': 'give it back as hidden at the next step',
@@ -1923,7 +1928,7 @@ def export_road_type_onnx(checkpoint: Path, output: Path, *, verify: bool = True
         'inputs': [{'name': name, 'shape': shapes[name], 'dtype': 'float32',
                     **({'meaning': meanings[name]} if name in meanings else {}),
                     **({'names': list(motion_data.MOTION_FIELDS)} if name == 'motion' else {})} for name in names_in],
-        'output': {'name': 'probabilities', 'shape': [1, len(data.CLASSES)], 'classes': list(data.CLASSES),
+        'output': {'name': 'probabilities', 'shape': [1, len(classes)], 'classes': classes,
                    'decode': 'softmax probabilities; the class is the argmax'},
         'outputs': outputs,
         'step': {'rate_hz': 1.0, 'memory': saved['memory'], 'signs': signs, 'motion': motion,

@@ -73,15 +73,19 @@ def _runs(labels: np.ndarray) -> list[tuple[int, int, int]]:
     return runs
 
 
+# A 30 zone is in a town: from town into it is no town entry.
+TOWNS = ('town', 'zone30')
+
+
 def transition_kind(old: int, new: int, classes: tuple[str, ...]) -> str:
     a, b = classes[old], classes[new]
     if a == 'ramp' and b in ('motorway', 'expressway'):
         return 'ramp_to_motorway'
     if a in ('motorway', 'expressway') and b == 'ramp':
         return 'motorway_to_ramp'
-    if b == 'town' and a != 'parking':
+    if b in TOWNS and a not in (*TOWNS, 'parking'):
         return 'town_entry'
-    if a == 'town' and b != 'parking':
+    if a in TOWNS and b not in (*TOWNS, 'parking'):
         return 'town_exit'
     return 'other'
 
@@ -353,9 +357,10 @@ def _ratio(a: float, b: float, digits: int = 4) -> float | None:
     return round(a / b, digits) if b else None
 
 
-def junction_area(label: int, predicted: int, town: int) -> str:
-    """town or outside, by the road type of the frame (the network's answer where the map has none)."""
-    return 'town' if (label if label >= 0 else predicted) == town else 'outside'
+def junction_area(label: int, predicted: int, town: set[int]) -> str:
+    """town or outside, by the road type of the frame (the network's answer where the map has none); town: the
+    indices of TOWNS."""
+    return 'town' if (label if label >= 0 else predicted) in town else 'outside'
 
 
 def junction_metrics(sequences: list[dict], classes: tuple[str, ...], *,
@@ -367,7 +372,7 @@ def junction_metrics(sequences: list[dict], classes: tuple[str, ...], *,
     events (matched to no "passed" within 4 s; an event on a frame without junction labels or just after a passage
     whose exit was not seen is not judged) per hour and per 10 km, in town and outside. Plus the in-junction frames
     (precision, recall, F1 at 0.5)."""
-    town = classes.index('town')
+    town = {classes.index(name) for name in TOWNS if name in classes}
     areas = {'town': {'seconds': 0.0, 'metres': 0.0}, 'outside': {'seconds': 0.0, 'metres': 0.0}}
     truth_count, tp, fp, fn = 0, 0, 0, 0
     prepared = []

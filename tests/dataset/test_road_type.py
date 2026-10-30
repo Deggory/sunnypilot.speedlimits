@@ -75,7 +75,7 @@ def root(tmp_path):
 
 def test_labels_and_weights_follow_the_road_types():
     from nnslr_tools import road_type_data as data
-    assert data.CLASSES == ('town', 'rural', 'expressway', 'motorway', 'ramp', 'parking')
+    assert data.CLASSES == ('town', 'rural', 'expressway', 'motorway', 'ramp', 'parking', 'zone30')
     assert data.frame_label({'road_type': 'town', 'sure': True}) == (TOWN, 1.0)
     # A ramp from its OSM link is unsure only for its limit: it keeps the full weight.
     assert data.frame_label({'road_type': 'ramp', 'sure': False, 'basis': 'highway motorway_link'}) == (RAMP, 1.0)
@@ -623,3 +623,16 @@ def test_the_test_with_the_motion_unknown_reads_side_by_side():
     assert 'macro F1 0.664 -> 0.661' in text
     assert 'junctions (passed >= 0.5) recall 2 s 0.229 -> 0.217' in text and '(town 47.000 -> 45.000)' in text
     assert net.motion_unknown_text({'test': result['test']}) == ''
+
+
+def test_a_30_zone_is_in_town():
+    from nnslr_tools import road_type_data as data
+    from nnslr_tools.road_type_metrics import junction_area, transition_kind
+    classes = data.CLASSES
+    town, zone, rural = (classes.index(name) for name in ('town', 'zone30', 'rural'))
+    # Into a 30 zone from the town is no town entry; out of it into the country is the town's exit.
+    assert transition_kind(town, zone, classes) == 'other'
+    assert transition_kind(rural, zone, classes) == 'town_entry'
+    assert transition_kind(zone, rural, classes) == 'town_exit'
+    assert junction_area(zone, -1, {town, zone}) == 'town'
+    assert junction_area(-1, rural, {town, zone}) == 'outside'

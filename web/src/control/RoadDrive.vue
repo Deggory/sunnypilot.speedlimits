@@ -30,8 +30,8 @@ const MARKS = {
   forward: 'M9.5 5.5 16 12l-6.5 6.5',
 } as const;
 /** The choices of a correction, null: the person cannot tell. */
-const CHOICES: [key: RoadType | null, label: string][] = [['town', 'Town'], ['rural', 'Rural'], ['expressway', 'Expressway'],
-  ['motorway', 'Motorway'], ['ramp', 'Ramp'], ['parking', 'Parking'], [null, 'Can\'t tell']];
+const CHOICES: [key: RoadType | null, label: string][] = [['town', 'Town'], ['zone30', 'Zone 30'], ['rural', 'Rural'],
+  ['expressway', 'Expressway'], ['motorway', 'Motorway'], ['ramp', 'Ramp'], ['parking', 'Parking'], [null, 'Can\'t tell']];
 /** Longer than this (pictures, one a second), a correction asks first: one tap must not overwrite minutes of a drive. */
 const ASK_ABOVE = 60;
 

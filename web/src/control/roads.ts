@@ -3,8 +3,8 @@
 import type {RoadFrame, RoadType} from '../common/panel-types';
 
 /** The kinds of road in the order of the legend, each with its colour (control.html .rt-town ...). */
-export const ROAD_TYPES: [key: RoadType | 'unknown', label: string][] = [['town', 'Town'], ['rural', 'Rural'],
-  ['expressway', 'Expressway'], ['motorway', 'Motorway'], ['ramp', 'Ramp'], ['parking', 'Parking'], ['unknown', 'Unknown']];
+export const ROAD_TYPES: [key: RoadType | 'unknown', label: string][] = [['town', 'Town'], ['zone30', 'Zone 30'],
+  ['rural', 'Rural'], ['expressway', 'Expressway'], ['motorway', 'Motorway'], ['ramp', 'Ramp'], ['parking', 'Parking'], ['unknown', 'Unknown']];
 export const ROAD_LABEL = Object.fromEntries(ROAD_TYPES) as Record<RoadType | 'unknown', string>;
 
 /** A run of frames of one kind, the map's or a person's: what the strip draws. */
@@ -87,6 +87,7 @@ export function reasonOf(frame: RoadFrame): string {
   if (basis === 'no road') return 'No road on the map here';
   if (basis === 'parking aisle' || basis.includes('car park')) return 'A car park on the map';
   const limit = /^maxspeed (\d+)$/.exec(basis)?.[1];
+  if (limit === '30') return 'The map says 30 km/h: a 30 zone or a 30 street, check it';
   if (limit) return 'The map says ' + limit + ' km/h' + (frame.sure ? ' here' : ': often a town edge, check it');
   const zone = /^limit \S*zone ?(\d+)/i.exec(basis)?.[1];
   if (zone) return 'A ' + zone + ' zone on the map';

@@ -16,16 +16,18 @@ names its type:
 - expressway: ``highway=trunk`` (the Swiss Autostrasse), unless the map puts it in a town;
 - ramp: a ramp of a motorway or an expressway (``highway=motorway_link``, ``trunk_link`` out of town), the road
   where the limit of a ramp holds until the carriageway (the road-type network learns the merge from it);
-- town or rural, for every other road: the kind of limit when the map says it (``CH:urban``, ``CH:zone30`` → town,
-  ``CH:rural`` → rural), else its limit (50 or less → town, 60 and more → rural), else its kind (a residential
-  street, a living street → town). A road that says none of these stays unknown.
+- zone30, a 30 zone (the Swiss Tempo-30-Zone, its gate signs easy to see): ``CH:zone30``, sure; a road of the map
+  at 30 without its kind, not sure (a 30 street outside a zone is tagged the same way);
+- town or rural, for every other road: the kind of limit when the map says it (``CH:urban``, another zone such as
+  ``CH:zone20`` → town, ``CH:rural`` → rural), else its limit (50 or less → town, 60 and more → rural), else its kind
+  (a residential street, a living street → town). A road that says none of these stays unknown.
 
 Then along the drive: a gap of unknown frames between two stretches of the same type takes that type (a tunnel, a
 road of the map without a limit), and a stretch shorter than MIN_RUN frames between two stretches of the same type
 takes theirs (the GPS jumping to a side road, a bridge or a car park beside the road for a second).
 
 Writes ``derived/road_types/<route>.jsonl``: one line per frame, ``{"frame_key", "segment_index", "output_index",
-"road_type" (town, rural, expressway, motorway, ramp, parking or null), "map_type" (before the drive was looked at), "basis"
+"road_type" (town, rural, expressway, motorway, ramp, parking, zone30 or null), "map_type" (before the drive was looked at), "basis"
 (why: "maxspeed 50", "highway motorway", "parking aisle", "car park on the map", "filled", "smoothed", "no road", "no
 gps"...), "sure" (false where the map is often wrong: WEAK_BASES, a car park of one signal, filled, smoothed),
 "way_id", "highway", "maxspeed"}`` (the road found, also in a car park).
@@ -54,7 +56,9 @@ from nnslr_tools.map_context import CELL_DEGREES, OUR_ROAD_M, RoadMap, our_road
 ROAD_TYPES_RELATIVE = Path('derived') / 'road_types'
 CORRECTIONS_RELATIVE = Path('annotations') / 'road_types'
 PARKING_RELATIVE = Path('derived') / 'osm' / 'parking.jsonl'
-ROAD_TYPES = ('town', 'rural', 'expressway', 'motorway', 'ramp', 'parking')
+# The classes of the road-type network in this order: a new one goes at the end, so a checkpoint trained before it
+# keeps its indices (zone30, 30 Oct 2026).
+ROAD_TYPES = ('town', 'rural', 'expressway', 'motorway', 'ramp', 'parking', 'zone30')
 # Slower than this (m/s) inside a car park outline: parking, even with a street of the map within OUR_ROAD_M.
 PARKING_SPEED = 3.0
 # Faster than this (36 km/h) an aisle or a service road found is the GPS slipping onto a car park beside the road (a
@@ -64,11 +68,12 @@ PARKING_MAX_SPEED = 10.0
 MAX_GAP = 60
 # A stretch shorter than this between two stretches of one type is a slip of the GPS, not a change of road.
 MIN_RUN = 4
-TOWN_KINDS = ('urban', 'zone')
+TOWN_KINDS = ('urban', 'zone', 'zone30')
 # The reasons the map is often wrong about, measured on 27 Oct 2026 against 240 frames looked at without the map:
 # a road at 60 was in a town one time in three, a ramp is between two kinds of road, a filled gap is mostly a tunnel.
-# Their frames are not "sure": the review shows them first, and a training can leave them out until reviewed.
-WEAK_BASES = ('maxspeed 60', 'maxspeed 70', 'highway motorway_link', 'highway trunk_link')
+# Their frames are not "sure": the review shows them first, and a training can leave them out until reviewed. A road
+# at 30 without its kind is a 30 zone or a 30 street.
+WEAK_BASES = ('maxspeed 30', 'maxspeed 60', 'maxspeed 70', 'highway motorway_link', 'highway trunk_link')
 TOWN_HIGHWAYS = ('residential', 'living_street')
 # The picture of a frame in its pre-annotation report (preview_path), served at /route/<route>/images/<8 digits>.jpg.
 PREVIEW = re.compile(r'images/[0-9]{8}\.jpg')
@@ -93,12 +98,13 @@ def _limit(value) -> int | None:
 
 
 def _kind(way: dict) -> str | None:
-    """'urban', 'rural', 'zone' or 'motorway' from maxspeed_type, or a maxspeed written as "CH:rural"."""
+    """'urban', 'rural', 'zone30', another 'zone' or 'motorway' from maxspeed_type, or a maxspeed written as
+    "CH:rural"."""
     for value in (way.get('maxspeed_type'), way.get('maxspeed')):
         if isinstance(value, str) and ':' in value:
             kind = value.split(':', 1)[1].strip().lower()
             if kind.startswith('zone'):
-                return 'zone'
+                return 'zone30' if kind.replace(' ', '') == 'zone30' else 'zone'
             if kind in ('urban', 'rural', 'motorway', 'trunk'):
                 return kind
     return None
@@ -117,10 +123,14 @@ def way_type(way: dict) -> tuple[str | None, str]:
         if kind in TOWN_KINDS or (limit is not None and limit <= 50):
             return 'town', 'highway ' + highway + ' in town'
         return ('ramp' if highway == 'trunk_link' else 'expressway'), 'highway ' + highway
+    if kind == 'zone30':
+        return 'zone30', 'limit ' + str(way.get('maxspeed_type') or way.get('maxspeed'))
     if kind in TOWN_KINDS:
         return 'town', 'limit ' + str(way.get('maxspeed_type') or way.get('maxspeed'))
     if kind == 'rural':
         return 'rural', 'limit ' + str(way.get('maxspeed_type') or way.get('maxspeed'))
+    if limit == 30:
+        return 'zone30', 'maxspeed 30'
     if limit is not None:
         return ('town' if limit <= 50 else 'rural'), 'maxspeed ' + str(limit)
     if highway in TOWN_HIGHWAYS:
