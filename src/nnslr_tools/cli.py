@@ -1566,6 +1566,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_signnet.add_argument("--dry-run", action="store_true",
                            help="build the plan only (no torch): one JSON line with its frames and boxes by split")
     p_signnet.set_defaults(func=_cmd_train_signnet)
+    p_remeasure = sub.add_parser("remeasure-signnet", help="add the lenient car measure (a box's centre inside the "
+                                                           "sign's, 0.5x to 2x its size) to a finished SignNet run's "
+                                                           "result.json, without training; needs torch (.venv-gpu)")
+    p_remeasure.add_argument("--run-dir", required=True, help="the run, e.g. data/runs/<time>-cutter")
+    p_remeasure.add_argument("--dataset", default=None, help="default: <data root>/annotations/objects.jsonl")
+    p_remeasure.add_argument("--split", default=None,
+                             help="default: <data root>/splits/<the run's split_sha256>.json, else splits/latest.json")
+    p_remeasure.add_argument("--dataset-kind", choices=("gold", "training-candidate"), default="gold")
+    p_remeasure.add_argument("--batch", type=int, default=16)
+    p_remeasure.add_argument("--workers", type=int, default=8)
+    p_remeasure.add_argument("--device", choices=("cpu", "cuda"), default=None, help="default: cuda when there is one")
+    p_remeasure.add_argument("--dry-run", action="store_true", help="measure and print, write nothing")
+    p_remeasure.add_argument("--data-root", default=None)
+    p_remeasure.set_defaults(func=_cmd_remeasure_signnet)
     p_box_fit = sub.add_parser("train-box-fit", help="train the review page's local box fit (Fit box, key C) on the "
                                                      "boxes people drew: the colour trees and the edge MLPs (CPU). "
                                                      "Measures it first on routes left out (--folds), then writes "
@@ -2434,6 +2448,24 @@ def _cmd_train_signnet(args: argparse.Namespace) -> int:
            for split in ("validation", "test")}
     print(json.dumps({"run_dir": args.run_dir, "best_epoch": result["best_epoch"], "parameters": result["parameters"],
                       "by_box_budget": summary, "car": car}, sort_keys=True), flush=True)
+    return 0
+
+
+def _cmd_remeasure_signnet(args: argparse.Namespace) -> int:
+    from nnslr_tools.preannotate import resolve_data_root
+    from nnslr_tools.signnet import remeasure_car_centre
+    from nnslr_tools.training import prepare_detector_training
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    run_dir = Path(args.run_dir)
+    result = json.loads((run_dir / "result.json").read_text(encoding="utf-8"))
+    split = Path(args.split) if args.split else root / "splits" / f"{result.get('split_sha256')}.json"
+    if not args.split and not split.is_file():
+        split = root / "splits" / "latest.json"
+    plan = prepare_detector_training(Path(args.dataset or root / "annotations" / "objects.jsonl"), split, root,
+                                     dataset_kind=args.dataset_kind, families=result.get("families") or "all")
+    summary = remeasure_car_centre(plan, root, run_dir, device=args.device, batch=args.batch, workers=args.workers,
+                                   dry_run=args.dry_run)
+    print(json.dumps(summary, sort_keys=True), flush=True)
     return 0
 
 
