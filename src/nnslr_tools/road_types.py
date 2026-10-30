@@ -6,12 +6,19 @@
 extracts). For each frame it finds the road we drive on (the closest one along our heading, map_context.our_road) and
 names its type:
 
-- parking, a car park: our road is a parking aisle (``highway=service``, ``service=parking_aisle``: "parking aisle",
-  sure), or the position is inside a car park outline (``amenity=parking``: "car park on the map") and our road is a
-  service road, or no road is found, or the car is slower than PARKING_SPEED (the GPS finds the street next to the car
-  park). Faster than PARKING_MAX_SPEED an aisle or a service road found is the GPS slipping, not a car park. Sure only when the outline and a service road agree. An underground car park lies under the streets: slow
-  on a street over it is not parking. Its limit to sunnypilot is always 10 km/h (a sign read there counts only when lower), and seeing it drops
-  the limit remembered from the road before;
+- parking, a car park in the open: our road is a parking aisle (``highway=service``, ``service=parking_aisle``:
+  "parking aisle", sure), or the position is inside a car park outline (``amenity=parking``: "car park on the map")
+  and our road is a service road, or no road is found, or the car is slower than PARKING_SPEED (the GPS finds the
+  street next to the car park). Faster than PARKING_MAX_SPEED an aisle or a service road found is the GPS slipping,
+  not a car park. Sure only when the outline and a service road agree. Its limit on the car is 20 km/h (a sign read
+  there counts only when lower), and seeing it drops the limit remembered from the road before;
+- garage, a car park underground or indoors (GARAGE_PARKING: ``parking=underground``, ``multi-storey``), by the same
+  rules inside its outline ("garage on the map"); an underground one lies under the streets, so slow on a street over
+  it is not a garage. Its GPS is lost inside: a stretch without GPS at the start or the end of a drive, or right after
+  or before a frame of a garage, where the car's own speed (nnslr car-motion, derived/car_motion) stays slow
+  (GARAGE_SPEED, never PARKING_MAX_SPEED) is a garage too ("slow without gps", not sure: a cold GPS at the start of a
+  drive looks the same). Its limit on the car is 10 km/h. Added last on 30 Oct 2026, after zone30; a road-type network
+  trained before it says parking for both, and the car keeps 10 km/h for its parking;
 - motorway: ``highway=motorway``;
 - expressway: ``highway=trunk`` (the Swiss Autostrasse), unless the map puts it in a town;
 - ramp: a ramp of a motorway or an expressway (``highway=motorway_link``, ``trunk_link`` out of town), the road
@@ -27,9 +34,10 @@ road of the map without a limit), and a stretch shorter than MIN_RUN frames betw
 takes theirs (the GPS jumping to a side road, a bridge or a car park beside the road for a second).
 
 Writes ``derived/road_types/<route>.jsonl``: one line per frame, ``{"frame_key", "segment_index", "output_index",
-"road_type" (town, rural, expressway, motorway, ramp, parking, zone30 or null), "map_type" (before the drive was looked at), "basis"
-(why: "maxspeed 50", "highway motorway", "parking aisle", "car park on the map", "filled", "smoothed", "no road", "no
-gps"...), "sure" (false where the map is often wrong: WEAK_BASES, a car park of one signal, filled, smoothed),
+"road_type" (town, rural, expressway, motorway, ramp, parking, zone30, garage or null), "map_type" (before the drive
+was looked at), "basis" (why: "maxspeed 50", "highway motorway", "parking aisle", "car park on the map", "garage on
+the map", "slow without gps", "filled", "smoothed", "no road", "no gps"...), "sure" (false where the map is often
+wrong: WEAK_BASES, a car park of one signal, a garage without GPS, filled, smoothed),
 "way_id", "highway", "maxspeed"}`` (the road found, also in a car park).
 
 Measured on 27 Oct 2026, 240 frames of 11 drives looked at without the map: where the eye was sure, the map agreed on
@@ -50,6 +58,7 @@ from datetime import datetime
 from pathlib import Path
 
 from nnslr_tools.annotations import atomic_write, jsonl_bytes, load_jsonl, strict_json_loads
+from nnslr_tools.car_motion import frame_motion, load_motion
 from nnslr_tools.manifest import parse_route_id
 from nnslr_tools.map_context import CELL_DEGREES, OUR_ROAD_M, RoadMap, our_road
 
@@ -57,13 +66,19 @@ ROAD_TYPES_RELATIVE = Path('derived') / 'road_types'
 CORRECTIONS_RELATIVE = Path('annotations') / 'road_types'
 PARKING_RELATIVE = Path('derived') / 'osm' / 'parking.jsonl'
 # The classes of the road-type network in this order: a new one goes at the end, so a checkpoint trained before it
-# keeps its indices (zone30, 30 Oct 2026).
-ROAD_TYPES = ('town', 'rural', 'expressway', 'motorway', 'ramp', 'parking', 'zone30')
+# keeps its indices (zone30 and garage, 30 Oct 2026).
+ROAD_TYPES = ('town', 'rural', 'expressway', 'motorway', 'ramp', 'parking', 'zone30', 'garage')
+CAR_PARKS = ('parking', 'garage')
+# The car parks of the map (their "parking" tag) that are a garage: underground or indoors, 10 km/h on the car.
+GARAGE_PARKING = ('underground', 'multi-storey')
 # Slower than this (m/s) inside a car park outline: parking, even with a street of the map within OUR_ROAD_M.
 PARKING_SPEED = 3.0
 # Faster than this (36 km/h) an aisle or a service road found is the GPS slipping onto a car park beside the road (a
 # motorway ramp at Basel St. Jakob, 27 Oct 2026), never a car park: nobody drives through one that fast.
 PARKING_MAX_SPEED = 10.0
+# A stretch without GPS where the car's own speed has this median (m/s, 20 km/h), never PARKING_MAX_SPEED, known for at
+# least half its seconds: a garage, at the start or the end of a drive or beside a frame of a garage.
+GARAGE_SPEED = 20 / 3.6
 # The longest gap of unknown frames (one a second) filled from the same type on both sides: a long tunnel.
 MAX_GAP = 60
 # A stretch shorter than this between two stretches of one type is a slip of the GPS, not a change of road.
@@ -181,20 +196,45 @@ class ParkingMap:
         return None
 
 
-def parking_basis(way: dict | None, park: dict | None, speed) -> tuple[str, bool] | None:
-    """Why a frame is in a car park and whether that is sure, None when it is not: way is our road (None: no road
-    found), park the car park whose outline holds the position (None: outside every one), speed in m/s or None."""
+def parking_basis(way: dict | None, park: dict | None, speed) -> tuple[str, str, bool] | None:
+    """The kind of car park of a frame (parking or garage), why and whether that is sure, None when it is not in one:
+    way is our road (None: no road found), park the car park whose outline holds the position (None: outside every
+    one), speed in m/s or None. An aisle outside every outline is a car park in the open."""
+    garage = park is not None and park.get('parking') in GARAGE_PARKING
+    kind = 'garage' if garage else 'parking'
     service = way is not None and way.get('highway') == 'service'
     fast = isinstance(speed, (int, float)) and speed >= PARKING_MAX_SPEED
     if service and way.get('service') == 'parking_aisle' and not fast:
-        return 'parking aisle', True
+        return kind, 'parking aisle', True
     if park is None:
         return None
     slow = isinstance(speed, (int, float)) and speed < PARKING_SPEED and park.get('parking') != 'underground'
     if (service and not fast) or way is None or slow:
         # Both signals agree only when our road is a service road of the car park.
-        return 'car park on the map', service
+        return kind, 'garage on the map' if garage else 'car park on the map', service
     return None
+
+
+def garage_without_gps(lines: list[dict], speeds: list) -> list[bool]:
+    """Per line (in the order of the drive): a frame of a stretch without GPS taken as a garage. speeds: the car's own
+    speed of each line in m/s (None: not known)."""
+    garage = [False] * len(lines)
+    start = 0
+    while start < len(lines):
+        if lines[start]['basis'] != 'no gps':
+            start += 1
+            continue
+        end = start
+        while end < len(lines) and lines[end]['basis'] == 'no gps':
+            end += 1
+        known = sorted(speed for speed in speeds[start:end] if isinstance(speed, (int, float)))
+        beside = (start > 0 and lines[start - 1]['map_type'] == 'garage') or \
+            (end < len(lines) and lines[end]['map_type'] == 'garage')
+        if (start == 0 or end == len(lines) or beside) and 2 * len(known) >= end - start \
+                and known[len(known) // 2] < GARAGE_SPEED and known[-1] < PARKING_MAX_SPEED:
+            garage[start:end] = [True] * (end - start)
+        start = end
+    return garage
 
 
 def _runs(types: list[str | None]) -> list[list]:
@@ -232,8 +272,10 @@ def smooth(types: list[str | None]) -> list[tuple[str | None, str | None]]:
     return result
 
 
-def frame_types(road_map: RoadMap, positions: list[dict], parking: ParkingMap | None = None) -> list[dict]:
-    """One line per position (in the order of the drive) with its road type."""
+def frame_types(road_map: RoadMap, positions: list[dict], parking: ParkingMap | None = None,
+                speeds: list | None = None) -> list[dict]:
+    """One line per position (in the order of the drive) with its road type. speeds: the car's own speed of each
+    position in m/s (None: not known; the stretches without GPS need it)."""
     parking = ParkingMap([]) if parking is None else parking
     lines = []
     # Per line: whether the map is often wrong about its reason (not "sure" even when not filled or smoothed).
@@ -257,10 +299,14 @@ def frame_types(road_map: RoadMap, positions: list[dict], parking: ParkingMap | 
                 doubtful = basis in WEAK_BASES or basis.endswith(' in town')
             parked = parking_basis(way, parking.containing(lat, lon), position.get('speed_mps'))
             if parked is not None:
-                line.update(map_type='parking', basis=parked[0])
-                doubtful = not parked[1]
+                line.update(map_type=parked[0], basis=parked[1])
+                doubtful = not parked[2]
         lines.append(line)
         weak.append(doubtful)
+    for at, garage in enumerate(garage_without_gps(lines, speeds or [None] * len(lines))):
+        if garage:
+            lines[at].update(map_type='garage', basis='slow without gps')
+            weak[at] = True
     for line, doubtful, (kind, how) in zip(lines, weak, smooth([line['map_type'] for line in lines])):
         line['road_type'] = kind
         line['sure'] = kind is not None and how is None and not doubtful
@@ -279,7 +325,11 @@ def build_road_types(root: Path, route: str, positions: list[dict], road_map: Ro
     """Writes the road types of a route; returns how many frames of each type. parking: the car parks, read from the
     data root when not given."""
     ordered = sorted(positions, key=lambda item: (item.get('segment_index') or 0, item.get('output_index') or 0))
-    lines = frame_types(road_map, ordered, ParkingMap.load(root) if parking is None else parking)
+    # The car's own speed where nnslr car-motion read the drive: the stretches without GPS in a garage.
+    motion = load_motion(root, route)
+    speeds = [(frame_motion(motion, item.get('segment_index'), item.get('output_index')) or {}).get('v_ego')
+              for item in ordered]
+    lines = frame_types(road_map, ordered, ParkingMap.load(root) if parking is None else parking, speeds)
     target = road_types_path(root, route)
     atomic_write(target, jsonl_bytes(lines))
     counts: dict[str, int] = {}
@@ -386,7 +436,7 @@ def stretches(lines: list[dict]) -> list[dict]:
 
 
 def type_counts(lines: list[dict]) -> dict[str, int]:
-    """The frames of each type: {town, rural, expressway, motorway, ramp, parking, unknown: frames}."""
+    """The frames of each type: {town, rural, expressway, motorway, ramp, parking, zone30, garage, unknown: frames}."""
     types = {key: 0 for key in (*ROAD_TYPES, 'unknown')}
     for line in lines:
         key = line.get('road_type') if line.get('road_type') in ROAD_TYPES else 'unknown'
@@ -443,7 +493,7 @@ def _stamp(path: Path) -> tuple | None:
 
 def summary(root: Path) -> dict:
     """The road types of every drive, for Data › Roads (GET /api/panel/road-types): {'routes': [{'route', 'title',
-    'when', 'minutes', 'frames', 'types': {town, rural, expressway, motorway, ramp, parking, unknown: frames}, 'reviewed':
+    'when', 'minutes', 'frames', 'types': {town, rural, ..., garage, unknown: frames}, 'reviewed':
     frames a person set, 'stretches'}] newest drive first, 'made_at': when the newest file of the map was written (None
     before the first), 'drives_without': the prepared drives (with a pre-annotation report) that have no road types
     yet}."""

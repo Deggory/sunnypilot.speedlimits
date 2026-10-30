@@ -41,7 +41,8 @@ export const ROLE_TEXT: Record<ModelRole, {what: string; today: string; empty: s
     uses: 'Nothing uses the applicability network yet: the choice is only noted for later.',
   },
   road_type: {
-    what: 'Says from the camera what road the car is on, once a second: town, rural, expressway, motorway, ramp or parking. '
+    what: 'Says from the camera what road the car is on, once a second: town, zone 30, rural, expressway, motorway, ramp, '
+      + 'a car park or a garage. '
       + 'With memory it remembers the seconds before, and how long ago a motorway sign was read, so the 60 of a ramp ends '
       + 'on the motorway without a sign.',
     today: 'Today: prototypes, with memory and the sign, without the sign and without memory, judged on the test drives.',
@@ -120,7 +121,7 @@ export function publishQuestion(signnet: ModelVersion, classifier: ModelVersion 
     : 'the classifier in use';
   const scene = roadType
     ? ' and the scene network ' + roadType.label + ' of ' + roadType.run + ' to read the scene where no sign gives the limit '
-      + '(a car park 10, a town 50)'
+      + '(a garage 10, a car park 20, a town 50)'
     : '; no scene network is in use, so it reads the signs alone';
   return {
     title: 'Publish the networks in use to the car?', action: 'Publish',

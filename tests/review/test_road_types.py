@@ -118,7 +118,7 @@ def test_summary_names_each_drive_with_its_types_and_the_drives_left(tmp_path):
     drive = result['routes'][0]
     assert (drive['route'], drive['frames']) == (ROUTE, 4)
     assert drive['types'] == {'town': 0, 'rural': 0, 'expressway': 0, 'motorway': 3, 'ramp': 0, 'parking': 0, 'zone30': 0,
-                             'unknown': 1}
+                             'garage': 0, 'unknown': 1}
     assert drive['stretches'] == [{'type': 'motorway', 'from': '0/0', 'to': '0/2', 'frames': 3},
                                   {'type': None, 'from': '0/3', 'to': '0/3', 'frames': 1}]
     # Read again when the file changes.
@@ -170,7 +170,8 @@ def test_corrections_over_the_map_the_last_wins_and_a_new_map_keeps_them(tmp_pat
     assert all(line['reviewer'] == 'admin' and line['at'] for line in kept)
     drive = summary(tmp_path)['routes'][0]
     assert drive['reviewed'] == 3 and drive['types'] == {'town': 2, 'rural': 0, 'expressway': 0, 'motorway': 3,
-                                                         'ramp': 0, 'parking': 0, 'zone30': 0, 'unknown': 1}
+                                                         'ramp': 0, 'parking': 0, 'zone30': 0, 'garage': 0,
+                                                         'unknown': 1}
 
     # Find again: the map is written anew, the corrections are not touched and still win.
     build_road_types(tmp_path, ROUTE, positions, road_map)
@@ -294,7 +295,7 @@ def test_a_read_only_panel_refuses_a_correction(tmp_path):
         server.close()
 
 
-# -- car parks: the fifth type ---------------------------------------------------------------------------------------
+# -- car parks: parking in the open, garage underground or indoors ---------------------------------------------------------------------------------------
 def _parking_map(tmp_path, ways, parks):
     """The roads and car parks of the map in the data root, as scripts/osm_roads.py writes them."""
     folder = tmp_path / 'derived' / 'osm'
@@ -375,6 +376,62 @@ def test_not_parking_on_a_road_through_a_car_park_at_speed(tmp_path):
     assert _type(road_map, underground, 47.011, 8.0110, speed=1.0) == ('town', 'maxspeed 50', True)
 
 
+def test_a_garage_underground_or_indoors(tmp_path):
+    from nnslr_tools.road_types import ParkingMap
+    road_map = _parking_map(tmp_path, CROSSING, [{**CAR_PARK, 'parking': 'underground'}])
+    garage = ParkingMap.load(tmp_path)
+    # Its service road and outline agree: a garage, sure; no road found inside it: a garage of one signal.
+    assert _type(road_map, garage, 47.0104, 8.0125, heading=0.0) == ('garage', 'garage on the map', True)
+    assert _type(road_map, garage, 47.0118, 8.0105) == ('garage', 'garage on the map', False)
+    # A multi-storey one is a building: slow beside the street is inside it.
+    storeys = ParkingMap([{**CAR_PARK, 'parking': 'multi-storey'}])
+    assert _type(road_map, storeys, 47.011, 8.0110, speed=1.0) == ('garage', 'garage on the map', False)
+    # Its roof, and a car park the map does not describe: in the open.
+    for kind in ('rooftop', None):
+        assert _type(road_map, ParkingMap([{**CAR_PARK, 'parking': kind}]), 47.0118, 8.0105)[0] == 'parking'
+
+
+def _drive_without_gps(road_map, gps, speeds):
+    """A drive along the primary road of CROSSING: gps[i] False is a frame without a fix; the car's own speeds."""
+    from nnslr_tools.road_types import ParkingMap, frame_types
+    positions = [{'frame_key': f'0/{index}', 'segment_index': 0, 'output_index': index,
+                  **({'latitude': 47.011, 'longitude': 8.0095 + index * 0.0001, 'bearing_deg': 90.0, 'speed_mps': 4.0}
+                     if fix else {'latitude': None, 'longitude': None, 'bearing_deg': None, 'speed_mps': None})}
+                 for index, fix in enumerate(gps)]
+    lines = frame_types(road_map, positions, ParkingMap([]), speeds)
+    return [(line['road_type'], line['sure']) for line in lines]
+
+
+def test_a_garage_without_gps_at_the_start_or_the_end_of_a_drive_when_slow(tmp_path):
+    road_map = _parking_map(tmp_path, CROSSING, [])
+    town = ('town', True)
+    slow = [2.0, 3.0, None, 4.0, 1.0]
+    # The drive starts in a garage: no fix, the car slow, then the street.
+    assert _drive_without_gps(road_map, [False] * 5 + [True] * 6, slow + [8.0] * 6) == [('garage', False)] * 5 + [town] * 6
+    # And ends in one.
+    assert _drive_without_gps(road_map, [True] * 6 + [False] * 5, [8.0] * 6 + slow) == [town] * 6 + [('garage', False)] * 5
+    # Too fast once (a cold GPS on the road), the speed not known, or a tunnel in the middle of the drive: not a garage.
+    assert _drive_without_gps(road_map, [False] * 5 + [True] * 6, [2.0, 3.0, 11.0, 4.0, 1.0] + [8.0] * 6)[0] == (None, False)
+    assert _drive_without_gps(road_map, [False] * 5 + [True] * 6, [None] * 11)[0] == (None, False)
+    middle = _drive_without_gps(road_map, [True] * 6 + [False] * 5 + [True] * 6, [8.0] * 6 + slow + [8.0] * 6)
+    assert middle[6] == ('town', False)  # the gap filled from the town on both sides
+
+
+def test_a_garage_without_gps_beside_a_frame_of_a_garage(tmp_path):
+    from nnslr_tools.road_types import ParkingMap, frame_types
+    road_map = _parking_map(tmp_path, CROSSING, [{**CAR_PARK, 'parking': 'underground'}])
+    # The last fix inside the outline (no road there), then the GPS lost down the ramp, then out on the street.
+    inside = {'latitude': 47.0118, 'longitude': 8.0105, 'bearing_deg': 90.0, 'speed_mps': 2.0}
+    street = {'latitude': 47.011, 'longitude': 8.0095, 'bearing_deg': 90.0, 'speed_mps': 8.0}
+    lost = {'latitude': None, 'longitude': None, 'bearing_deg': None, 'speed_mps': None}
+    kinds = [street] * 6 + [inside] * 2 + [lost] * 6 + [street] * 6
+    positions = [{'frame_key': f'0/{index}', 'segment_index': 0, 'output_index': index, **kind}
+                 for index, kind in enumerate(kinds)]
+    lines = frame_types(road_map, positions, ParkingMap.load(tmp_path), [8.0] * 6 + [2.0] * 8 + [8.0] * 6)
+    assert [line['road_type'] for line in lines[6:14]] == ['garage'] * 8
+    assert [line['basis'] for line in lines[8:14]] == ['slow without gps'] * 6
+
+
 def test_a_correction_to_parking(tmp_path):
     from nnslr_tools.road_types import correct, summary
     _drive_of(tmp_path)
@@ -383,7 +440,8 @@ def test_a_correction_to_parking(tmp_path):
     assert [line['road_type'] for line in lines] == ['parking'] * 2 + ['motorway'] * 2 + [None] * 2
     assert (lines[0]['basis'], lines[0]['sure'], lines[0]['reviewed']) == ('reviewed', True, True)
     assert summary(tmp_path)['routes'][0]['types'] == {'town': 0, 'rural': 0, 'expressway': 0, 'motorway': 2,
-                                                       'ramp': 0, 'parking': 2, 'zone30': 0, 'unknown': 2}
+                                                       'ramp': 0, 'parking': 2, 'zone30': 0, 'garage': 0,
+                                                       'unknown': 2}
 
 
 def test_a_broken_corrections_line_is_skipped(tmp_path):

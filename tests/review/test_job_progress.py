@@ -79,6 +79,12 @@ def test_preparation_uses_its_own_count_and_fetch_counts_segments():
                        'r2--1: reverse gear found, segment left out\n')
     assert fetched['percent'] == round((1 + 2 / 3) * 100 / 4, 1)
     assert fetched['detail'] == '2 segments downloaded · drive 2 of 4 · r2'
+    # A new drive: its start, end and reverse gear come too, counted with the rest.
+    fetched = progress('fetch', 'running', 'Routes found on the comma: r1 r2\n'
+                       'r1 on the comma: 0 1 2 3 4 5. Skip: 0 1 4 5. Download: 2 3\n'
+                       'r1 on the comma: the start, the end and reverse gear too, their slow pictures only: 0 1 5. '
+                       'Download: 0 1 5 2 3\n== r1--0 -> /x\n== r1--1 -> /x\n')
+    assert fetched['percent'] == 20.0 and fetched['detail'] == '2 segments downloaded · drive 1 of 2 · r1'
 
 
 def test_the_progress_inside_the_current_step_comes_from_the_last_report():
@@ -379,15 +385,20 @@ def test_a_known_failure_is_one_plain_sentence():
 
 def test_the_road_types_have_their_steps_from_their_own_lines():
     log = ('== helpers/road_types.sh\n== a. GPS of the drives\n{"route_id": "x", "frames": 10}\n'
-           '== b. Map roads near the drives\nreading the map\n')
+           '== b. Speed of the drives\n== c. Map roads near the drives\nreading the map\n')
     running = progress('road_types', 'running', log)
-    assert states(running) == {'gps': 'done', 'map_roads': 'current', 'road_types': 'todo', 'junctions': 'todo'}
-    assert running['percent'] == 10.0 and running['last_line'] == 'reading the map'
-    failed = progress('road_types', 'failed', log + '== c. Road type of every frame\nno map\n')
+    assert states(running) == {'gps': 'done', 'speed': 'done', 'map_roads': 'current', 'road_types': 'todo',
+                               'junctions': 'todo'}
+    assert running['percent'] == 20.0 and running['last_line'] == 'reading the map'
+    failed = progress('road_types', 'failed', log + '== d. Road type of every frame\nno map\n')
     assert states(failed)['road_types'] == 'failed' and failed['percent'] == 75.0
     # The junctions last: the labels of the road-type network's junction head.
-    junctions = progress('road_types', 'running', log + '== c. Road type of every frame\n== d. Junctions of the drives\n')
+    junctions = progress('road_types', 'running', log + '== d. Road type of every frame\n== e. Junctions of the drives\n')
     assert states(junctions)['junctions'] == 'current' and junctions['percent'] == 93.0
+    # A log from before the speed: its letters one earlier, the speed never read.
+    old = progress('road_types', 'running', '== a. GPS of the drives\n== b. Map roads near the drives\n'
+                   '== c. Road type of every frame\n')
+    assert states(old)['road_types'] == 'current' and states(old)['map_roads'] == 'done'
     # The import's "== b. " is not one of its steps, nor its "== b. Map roads" one of the import's.
     assert states(progress('road_types', 'running', '== b. controllo il dataset\n'))['gps'] == 'current'
     assert states(progress('dataset', 'running', '== a. importo\n== b. Map roads\n'))['split'] == 'current'

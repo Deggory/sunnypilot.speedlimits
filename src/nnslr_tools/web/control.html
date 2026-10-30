@@ -1228,6 +1228,14 @@ font-variant-numeric:tabular-nums}
    cards. */
 :root{--rt-zone30:#99905c}
 .rt-zone30{background:var(--rt-zone30)}.rt-track .rt-zone30{fill:var(--rt-zone30)}
+/* A garage (a car park underground or indoors): magenta, stepped for each theme. Eight kinds fill the palette: against
+   every other type the normal ΔE is ≥ 17 in both themes and it clears 3:1 on both cards, but the colour-blind ΔE against
+   the motorway's blue is 7.0 (dark) and 6.9 (light), the floor band the validator allows only with a second cue: the
+   strip's gaps and tips, the shares and the chip in words. */
+:root{--rt-garage:#e830e8}
+:root[data-theme="light"]{--rt-garage:#d02cd0}
+@media (prefers-color-scheme:light){:root[data-theme="auto"]{--rt-garage:#d02cd0}}
+.rt-garage{background:var(--rt-garage)}.rt-track .rt-garage{fill:var(--rt-garage)}
 .rt-view-main{grid-template-rows:auto 1fr}
 .rt-fix-head{flex-direction:row;flex-wrap:wrap;align-items:baseline;gap:2px 8px}
 .rt-pick button:last-child{grid-column:auto}
@@ -1278,10 +1286,11 @@ font-variant-numeric:tabular-nums}
 .rt-pick .rt-type[aria-pressed="true"]{box-shadow:0 0 0 2px var(--fg) inset}
 .rt-pick button.rt-map{outline:1.5px dashed var(--muted);outline-offset:-5px}
 .rt-fix-head strong{font-size:15px}
-/* Seven types and Can't tell: two rows of four, each button its dot over its word; in the one column of a tablet, wide
-   enough, its dot beside its word. */
+/* Eight types in two rows of four, each button its dot over its word, and Can't tell across a row under them; in the one
+   column of a tablet, wide enough, each dot beside its word. */
 .rt-pick{grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
 .rt-pick .rt-type,.rt-pick .rt-type:last-child{flex-direction:column;gap:4px;padding:6px 0;font-size:12px}
+.rt-pick .rt-type:last-child{grid-column:1/-1;flex-direction:row;gap:7px}
 @media (max-width:860px) and (min-width:521px) and (min-height:501px){
   .rt-pick{gap:8px}.rt-pick .rt-type,.rt-pick .rt-type:last-child{flex-direction:row;gap:7px;padding:8px 6px;font-size:14.5px}}
 /* The cut of a stretch (RoadDrive.vue): a short title over Whole / Before / After, and the cut drawn on the strip. */

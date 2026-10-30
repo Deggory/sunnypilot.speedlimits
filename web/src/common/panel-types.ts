@@ -1455,9 +1455,10 @@ export interface CommaTrial {
   comma_build: string | null;
 }
 
-/** The type of road of a frame, from the map (nnslr_tools.road_types); null: the map does not say. Parking: a car park,
- * no general limit there (sunnypilot gets 0), a kind of place the network learns. */
-export type RoadType = 'town' | 'zone30' | 'rural' | 'expressway' | 'motorway' | 'ramp' | 'parking';
+/** The type of road of a frame, from the map (nnslr_tools.road_types); null: the map does not say. Parking: a car park in
+ * the open, garage: one underground or indoors; no general limit there (sunnypilot gets 0), kinds of place the network
+ * learns. */
+export type RoadType = 'town' | 'zone30' | 'rural' | 'expressway' | 'motorway' | 'ramp' | 'parking' | 'garage';
 /** A stretch of a drive on one type of road, from and to frame keys. */
 export interface RoadStretch {
   type: RoadType | null;
@@ -1474,7 +1475,7 @@ export interface RoadDrive {
   when: string | null;
   minutes: number | null;
   frames: number;
-  /** Frames of each type; a type missing: none (parking, from a server before it). */
+  /** Frames of each type; a type missing: none (parking or garage, from a server before them). */
   types: Partial<Record<RoadType | 'unknown', number>>;
   /** The frames whose type a person set (Data › Roads, the drive opened). */
   reviewed: number;

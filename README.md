@@ -54,7 +54,7 @@ flowchart TD
 
 - **SignNet** looks only at a band at the top of the picture, where signs stand (896 × 288 pixels, a grid of 8 pixels). It keeps up to 5 boxes per picture.
 - The **classifier** reads each box: a speed and its value, end of limit, another kind of sign, or "not a sign". A number counts once it is read in 2 pictures within 1.5 s.
-- The **scene** network says what kind of road it is: town, 30 zone, rural, expressway, motorway, ramp or car park. Where no sign holds, that gives the country's general limit. In Switzerland: 50 in town, 80 rural, 100 expressway, 120 motorway, 10 in a car park.
+- The **scene** network says what kind of road it is: town, 30 zone, rural, expressway, motorway, ramp, car park or garage. Where no sign holds, that gives the country's general limit. In Switzerland: 50 in town, 80 rural, 100 expressway, 120 motorway, 20 in a car park, 10 in a garage.
 - Everything runs inside the comma 4, on its own GPU, next to the driving model.
 - **The vision side never reads the map.** It uses only the camera and the car's own signals. Map and vision meet only in sunnypilot's resolver, when the Speed Limit Source is **Map Data + Vision**.
 
@@ -72,7 +72,7 @@ Everything runs on the server. Most steps are a button on the site and also a sc
 
 On the site: the **comma** pill at the top right, then **Download new drives**. In a terminal: `helpers/fetch_comma_segments.sh`.
 
-It copies new drives from the comma over SSH. It drops trips shorter than five minutes, the first and last two minutes of each trip, and any minute in reverse gear.
+It copies new drives from the comma over SSH. It drops trips shorter than five minutes, the first and last two minutes of each trip, and any minute in reverse gear; of a new trip those minutes come too, but only their pictures below 25 km/h are kept (a garage, a car park).
 
 ### 2. Prepare
 
@@ -317,7 +317,7 @@ The 1344 × 760 Detector by sign width: 11 of 18 under 12 px, 30 of 45 at 12–2
 
 - Drives, pictures, the review database, datasets and checkpoints stay out of git. There is no public dataset.
 - Everything runs on one server. GPS comes from the comma's own logs, OpenStreetMap from a local extract, offline. No drive position is sent anywhere.
-- The first and last two minutes of every trip are dropped at download.
+- The first and last two minutes of every trip are dropped at download, but for their pictures below 25 km/h.
 - Place names, shop signs and reviewer names in the screenshots are blurred.
 - The site's access token lives in `.env`, which git ignores. Keep the site on a home network or behind an SSH tunnel.
 

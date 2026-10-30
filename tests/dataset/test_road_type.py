@@ -75,7 +75,7 @@ def root(tmp_path):
 
 def test_labels_and_weights_follow_the_road_types():
     from nnslr_tools import road_type_data as data
-    assert data.CLASSES == ('town', 'rural', 'expressway', 'motorway', 'ramp', 'parking', 'zone30')
+    assert data.CLASSES == ('town', 'rural', 'expressway', 'motorway', 'ramp', 'parking', 'zone30', 'garage')
     assert data.frame_label({'road_type': 'town', 'sure': True}) == (TOWN, 1.0)
     # A ramp from its OSM link is unsure only for its limit: it keeps the full weight.
     assert data.frame_label({'road_type': 'ramp', 'sure': False, 'basis': 'highway motorway_link'}) == (RAMP, 1.0)

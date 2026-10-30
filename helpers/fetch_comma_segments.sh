@@ -43,6 +43,10 @@
 # to the very last qlog, INCLUDING the first/last two segments). Then discard
 # first two + last two segments and any remaining segment whose rlog contains
 # carState.gearShifter=reverse. Missing/unreadable logs are skipped, never assumed safe.
+# In speedlimits, a drive fetched for the first time also brings the segments left out
+# (the first two, the last two, reverse gear) with a "slow-only" mark: nnslr extract-frames
+# keeps only their pictures below 25 km/h (a garage, a car park, the stop at a gate), the
+# streets around the home are left out. A drive already in data/ never gets them later.
 # Explicit route/segment selection remains manual and does not apply these automatic filters.
 # The same script lives in openpilot.distill, but the two copies are not identical: that one
 # only takes the dashcam routes from its --since date on, and loads its helpers/common.sh.
@@ -153,6 +157,7 @@ usage() {
 route=""
 segments=""
 run_localizer=0
+slow_only=0
 skip=""
 skip_mode=0
 
@@ -296,10 +301,19 @@ download_segments() {
 
     for f in $FILES; do
       if ! ssh "$COMMA_HOST" "test -f $src/$f"; then
+        # The start or the end of a drive is a bonus: one without its files is left out, the fetch goes on.
+        if [ "$slow_only" -eq 1 ]; then
+          echo "$src/$f does not exist on the comma, segment left out"
+          continue 2
+        fi
         die "$src/$f does not exist on the comma"
       fi
     done
 
+    if [ "$slow_only" -eq 1 ] && { [ -L "$dst" ] || [ -L "$shared" ]; }; then
+      echo "$route--$s: its folder is a link, segment left out" >&2
+      continue
+    fi
     # A segment folder that is a link would make data/$name/<file> and the shared file the
     # same file (the localizer outputs would also end up in the shared folder): stop.
     if [ -L "$dst" ]; then
@@ -310,6 +324,11 @@ download_segments() {
     fi
 
     mkdir -p "$shared" "$dst"
+    # Marked before the files come: a fetch stopped halfway still knows the drive is new (see the loop below).
+    if [ "$slow_only" -eq 1 ]; then
+      echo "Start or end of the drive: nnslr extract-frames keeps only its pictures below 25 km/h" > "$shared/slow-only"
+      link_file "$shared/slow-only" "$dst/slow-only"
+    fi
     for f in $FILES; do
       move_old_file "$dst/$f" "$shared/$f"
       rsync -avP "$COMMA_HOST:$src/$f" "$shared/"
@@ -478,12 +497,40 @@ if [ "$auto_mode" -eq 1 ]; then
     route="$r"
     segments=""
     skip=""
-    add_skip_list "first,second,second_last,last"
-    if select_segments && route_is_long_enough && filter_reverse_segments; then
-      download_segments
-    else
-      echo "$route: no segment fit to download"
+    # A drive new to speedlimits (or one whose start and end were being fetched) brings them too.
+    new_route=0
+    if [ "$DATA_LAYOUT" = "speedlimits" ] \
+       && { [ ! -e "$DATA_DIR/$route" ] || compgen -G "$DATA_DIR/$route/*/slow-only" > /dev/null; }; then
+      new_route=1
     fi
+    add_skip_list "first,second,second_last,last"
+    if ! select_segments || ! route_is_long_enough; then
+      echo "$route: no segment fit to download"
+      continue
+    fi
+    filter_reverse_segments || true
+    edges=""
+    if [ "$new_route" -eq 1 ]; then
+      for s in $found; do
+        [[ " $segments " == *" $s "* ]] || edges="$edges $s"
+      done
+    fi
+    if [ -z "$segments" ] && [ -z "$edges" ]; then
+      echo "$route: no segment fit to download"
+      continue
+    fi
+    # The start and the end first, each marked as it begins: a fetch stopped halfway finishes them next time.
+    if [ -n "$edges" ]; then
+      # The line the panel counts the drive's segments from (job_progress.ON_COMMA), now with the start and the end.
+      echo "$route on the comma: the start, the end and reverse gear too, their slow pictures only:$edges. Download:$edges$segments"
+      inner="$segments"
+      segments="$edges"
+      slow_only=1
+      download_segments
+      slow_only=0
+      segments="$inner"
+    fi
+    download_segments
   done
 else
   # --skip / --strip-ends: read the segments on the comma, then drop the skipped ones.

@@ -374,3 +374,15 @@ def test_env_reports_videos_dir(capfd, monkeypatch, tmp_path):
         "configured": True, "path": str(tmp_path), "exists": True,
         "note": report["comma_videos_dir"]["note"],
     }
+
+
+def test_the_slow_only_mark_is_linked_with_the_files(tmp_path, capfd, monkeypatch):
+    videos = tmp_path / "comma-videos"
+    root = tmp_path / "data"
+    make_segment(videos, f"{ROUTE}--0", ("fcamera.hevc", "ecamera.hevc", "rlog.zst", "slow-only"))
+    monkeypatch.setenv("COMMA_VIDEOS_DIR", str(videos))
+    monkeypatch.setenv("NNSLR_DATA_ROOT", str(root))
+    code, out, err = run(capfd)
+    assert code == 0, err
+    mark = root / "raw/routes" / ROUTE / "0/slow-only"
+    assert mark.is_symlink() and os.readlink(mark) == str(videos / f"{ROUTE}--0/slow-only")

@@ -62,7 +62,8 @@ EXTRACT_WORKERS = 10
 # [route-extract] - END
 # [nnslr-sync] - START
 # [route-extract] - START
-from nnslr_tools.sync import DEFAULT_DATA_ROOT, DEFAULT_VIDEOS_DIR, link_videos, resolve_videos_dir, sync_route
+from nnslr_tools.sync import (DEFAULT_DATA_ROOT, DEFAULT_VIDEOS_DIR, SLOW_ONLY_MARK, link_videos, resolve_videos_dir,
+                              sync_route)
 # [route-extract] - END
 # [nnslr-sync] - END
 
@@ -436,7 +437,9 @@ def _cmd_extract_frames(args: argparse.Namespace) -> int:
 
 # [route-extract] - START
 def _cmd_extract_route(args: argparse.Namespace) -> int:
-    """Apply the existing video extraction to every locally available segment."""
+    """Apply the existing video extraction to every locally available segment (of a segment marked slow-only, the
+    pictures at a car park's speed only)."""
+    from nnslr_tools.car_motion import SLOW_ONLY_SPEED, segment_logs, slow_seconds
     parse_route_id(args.route)
     root = Path(args.data_root or os.environ.get("NNSLR_DATA_ROOT") or DEFAULT_DATA_ROOT).expanduser().resolve()
     route_rel = Path("raw/routes") / args.route
@@ -467,23 +470,44 @@ def _cmd_extract_route(args: argparse.Namespace) -> int:
         if args.alignment and not alignment_path.is_file():
             raise ValueError(f"alignment missing: {alignment_path}")
         plans.append((identity.segment_index, video, segment_output,
-                      alignment_path if alignment_path.is_file() else None))
+                      alignment_path if alignment_path.is_file() else None, directory))
         # [dataset-review] - END
 
     def extract_segment(plan):
-        index, video, segment_output, alignment_path = plan
+        index, video, segment_output, alignment_path, directory = plan
         print(f"Extracting segment {index}: {video}", file=sys.stderr, flush=True)
         frames = extract_frames(
             video, segment_output, fps=None if args.all_frames else args.fps,
             start_s=args.start, end_s=args.end, ffmpeg=args.ffmpeg, ffprobe=args.ffprobe, overwrite=args.overwrite,
             alignment=alignment_path, route_id=args.route, segment_index=index,
         )
+        summary = {}
+        if (directory / SLOW_ONLY_MARK).exists():
+            # The start or the end of a drive, or reverse gear: its pictures at a car park's speed only (a garage, a
+            # car park), the others removed; the frame numbers stay as they were.
+            log = segment_logs(root, args.route).get(index)
+            slow = slow_seconds(log) if log is not None else set()
+            origin = frames[0].media_time_s - (args.start or 0.0) if frames and frames[0].media_time_s is not None else None
+
+            def second(frame):
+                # The second of the segment the picture is in (at 1 a second, its number).
+                if origin is None or frame.media_time_s is None:
+                    return None
+                return int(frame.media_time_s - origin + 1e-6)
+            kept = [frame for frame in frames if second(frame) in slow]
+            for frame in frames:
+                if second(frame) not in slow:
+                    Path(frame.image_path).unlink()
+            summary["slow_only"] = {"kept": len(kept), "of": len(frames)}
+            print(f"Segment {index} (start or end of the drive): {len(kept)} of {len(frames)} pictures below "
+                  f"{SLOW_ONLY_SPEED * 3.6:.0f} km/h kept", file=sys.stderr, flush=True)
+            frames = kept
         rows = extracted_frame_rows(frames, route_id=args.route, segment_index=index,
                                     alignment=alignment_path)
         manifest = segment_output / "frames.jsonl"
         _write_jsonl(manifest, rows)
         return rows, {"segment_index": index, "frame_count": len(rows),
-                      "output": str(segment_output), "manifest": str(manifest)}
+                      "output": str(segment_output), "manifest": str(manifest), **summary}
 
     # Several segments at once: ffprobe reads a whole video on one core, so one segment at a time left most of the
     # server idle. The work is in ffmpeg/ffprobe processes, so threads are enough; the results keep the segments' order.
@@ -1525,8 +1549,8 @@ def build_parser() -> argparse.ArgumentParser:
                             "now (after scripts/make_country_borders.py --gisco); the logs are not read")
     p_gps.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_gps.set_defaults(func=_cmd_gps)
-    p_road = sub.add_parser("road-types", help="the type of road of every frame (town, rural, expressway, motorway, parking) "
-                                               "from its GPS position and the OpenStreetMap roads, "
+    p_road = sub.add_parser("road-types", help="the type of road of every frame (town, rural, expressway, motorway, "
+                                               "parking, garage...) from its GPS position and the OpenStreetMap roads, "
                                                "derived/road_types/<route>.jsonl: the labels of the road-type head")
     p_road.add_argument("--route", action="append", help="route id; repeat for more")
     p_road.add_argument("--all", action="store_true", help="every route with GPS positions (nnslr gps)")
@@ -1605,7 +1629,7 @@ def build_parser() -> argparse.ArgumentParser:
                            help="only count the boxes, cases and route groups: one JSON line, nothing written")
     p_box_fit.set_defaults(func=_cmd_train_box_fit)
     p_road_net = sub.add_parser("train-road-type", help="train the road-type network with memory (town, rural, "
-                                                        "expressway, motorway, ramp, parking from the camera, a GRU "
+                                                        "expressway, motorway, ramp, car parks from the camera, a GRU "
                                                         "over the seconds) on the road types of the drives, with the "
                                                         "junction head (inside an intersection, just passed it) when "
                                                         "nnslr junctions has run; writes road-type-best.pt and "
@@ -1651,12 +1675,12 @@ def build_parser() -> argparse.ArgumentParser:
                               help="processes (default: the cores but two)")
     p_road_signs.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_road_signs.set_defaults(func=_cmd_road_type_signs)
-    p_motion = sub.add_parser("car-motion", help="the car's own motion of every second of the drives with road types, "
-                                                 "from their rlogs (deviceMotion/livePose yaw rate, carState "
+    p_motion = sub.add_parser("car-motion", help="the car's own motion of every second of the drives with GPS "
+                                                 "positions or road types, from their rlogs (deviceMotion/livePose yaw rate, carState "
                                                  "steering angle, blinkers and vEgo): derived/car_motion/<route>.json, "
                                                  "the motion input of the road-type network (CPU; never the map)")
     p_motion.add_argument("--route", action="append", help="a drive (repeatable)")
-    p_motion.add_argument("--all", action="store_true", help="every drive with road types")
+    p_motion.add_argument("--all", action="store_true", help="every drive with GPS positions or road types")
     p_motion.add_argument("--again", action="store_true", help="read the logs again even when cached")
     p_motion.add_argument("--num-workers", "--workers", dest="workers", type=int, default=0,
                           help="log readers at a time (default: the cores but two)")
@@ -2549,12 +2573,15 @@ def _cmd_road_type_signs(args: argparse.Namespace) -> int:
 
 def _cmd_car_motion(args: argparse.Namespace) -> int:
     from nnslr_tools.car_motion import MotionError, build_motion, coverage_text
+    from nnslr_tools.gps import GPS_RELATIVE_DIR
     from nnslr_tools.preannotate import resolve_data_root
     from nnslr_tools.road_type_data import road_type_routes
     root = resolve_data_root(Path(args.data_root) if args.data_root else None)
-    routes = road_type_routes(root) if args.all else list(args.route or [])
+    # With GPS but no road types yet: nnslr road-types reads their speed (a garage without GPS is slow).
+    with_gps = {path.parent.name for path in (root / GPS_RELATIVE_DIR).glob('*/positions.jsonl')}
+    routes = sorted(with_gps | set(road_type_routes(root))) if args.all else list(args.route or [])
     if not routes:
-        print("nnslr car-motion: name a --route or use --all (drives with road types: nnslr road-types)",
+        print("nnslr car-motion: name a --route or use --all (drives with GPS positions: nnslr gps)",
               file=sys.stderr)
         return 2
     try:

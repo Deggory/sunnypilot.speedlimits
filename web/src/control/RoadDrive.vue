@@ -31,7 +31,8 @@ const MARKS = {
 } as const;
 /** The choices of a correction, null: the person cannot tell. */
 const CHOICES: [key: RoadType | null, label: string][] = [['town', 'Town'], ['zone30', 'Zone 30'], ['rural', 'Rural'],
-  ['expressway', 'Expressway'], ['motorway', 'Motorway'], ['ramp', 'Ramp'], ['parking', 'Parking'], [null, 'Can\'t tell']];
+  ['expressway', 'Expressway'], ['motorway', 'Motorway'], ['ramp', 'Ramp'], ['parking', 'Parking'], ['garage', 'Garage'],
+  [null, 'Can\'t tell']];
 /** Longer than this (pictures, one a second), a correction asks first: one tap must not overwrite minutes of a drive. */
 const ASK_ABOVE = 60;
 

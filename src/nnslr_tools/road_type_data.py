@@ -8,8 +8,9 @@ into a town and the exit from it are found from the change of the picture, not f
 Labels: the kind of road of each frame from the map (nnslr road-types, data/derived/road_types) with a person's
 corrections over it (Data › Roads, road_types.load_road_types). The classes are road_types.ROAD_TYPES, in the order
 of the network's output and with the same names the car's SpeedLimitMemory takes: town, rural, expressway, motorway,
-ramp (an OSM link of a motorway or an expressway, highway motorway_link or trunk_link out of town), parking,
-zone30 (a 30 zone; added last on 30 Oct 2026: the car learns it with its next road-type network).
+ramp (an OSM link of a motorway or an expressway, highway motorway_link or trunk_link out of town), parking (a car
+park in the open), zone30 (a 30 zone) and garage (a car park underground or indoors); zone30 and garage were added
+last on 30 Oct 2026: the car learns them with its next road-type network.
 
 Loss weight of a frame (FRAME_WEIGHTS):
 

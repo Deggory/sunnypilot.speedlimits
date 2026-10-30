@@ -4,7 +4,8 @@ import type {RoadFrame, RoadType} from '../common/panel-types';
 
 /** The kinds of road in the order of the legend, each with its colour (control.html .rt-town ...). */
 export const ROAD_TYPES: [key: RoadType | 'unknown', label: string][] = [['town', 'Town'], ['zone30', 'Zone 30'],
-  ['rural', 'Rural'], ['expressway', 'Expressway'], ['motorway', 'Motorway'], ['ramp', 'Ramp'], ['parking', 'Parking'], ['unknown', 'Unknown']];
+  ['rural', 'Rural'], ['expressway', 'Expressway'], ['motorway', 'Motorway'], ['ramp', 'Ramp'], ['parking', 'Parking'],
+  ['garage', 'Garage'], ['unknown', 'Unknown']];
 export const ROAD_LABEL = Object.fromEntries(ROAD_TYPES) as Record<RoadType | 'unknown', string>;
 
 /** A run of frames of one kind, the map's or a person's: what the strip draws. */
@@ -85,6 +86,8 @@ export function reasonOf(frame: RoadFrame): string {
   if (basis.startsWith('smoothed')) return 'A short jump of the GPS';
   if (basis === 'no gps') return 'No GPS here (garage, tunnel or the start of the drive)';
   if (basis === 'no road') return 'No road on the map here';
+  if (basis === 'garage on the map') return 'An underground or indoor car park on the map';
+  if (basis === 'slow without gps') return 'Slow, no GPS, by a garage or at the start or end of the drive: check it';
   if (basis === 'parking aisle' || basis.includes('car park')) return 'A car park on the map';
   const limit = /^maxspeed (\d+)$/.exec(basis)?.[1];
   if (limit === '30') return 'The map says 30 km/h: a 30 zone or a 30 street, check it';

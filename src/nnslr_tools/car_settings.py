@@ -41,9 +41,13 @@ SETTINGS = (
     {'key': 'parking_seconds', 'constant': 'PARKING_SECONDS', 'label': 'A car park after',
      'help': 'A car park gives its limit once the network has seen it this long, the car slow.', 'default': 5.0,
      'min': 1.0, 'max': 30.0, 'step': 1.0, 'unit': 's', 'group': 'road'},
-    {'key': 'parking_limit', 'constant': 'PARKING_LIMIT', 'label': 'Limit in a car park',
-     'help': 'The limit a car park gives (a sign there counts only when lower).', 'default': 10.0, 'min': 5.0,
-     'max': 30.0, 'step': 1.0, 'unit': 'km/h', 'group': 'road'},
+    {'key': 'parking_limit', 'constant': 'PARKING_LIMIT', 'label': 'Limit in a car park in the open',
+     'help': 'The limit a car park in the open gives (a sign there counts only when lower). A scene network trained '
+             'before the class garage cannot tell the two apart: its car parks take the garage\'s limit.',
+     'default': 20.0, 'min': 5.0, 'max': 30.0, 'step': 1.0, 'unit': 'km/h', 'group': 'road'},
+    {'key': 'garage_limit', 'constant': 'GARAGE_LIMIT', 'label': 'Limit in a garage',
+     'help': 'The limit an underground or indoor car park gives (a sign there counts only when lower).',
+     'default': 10.0, 'min': 5.0, 'max': 30.0, 'step': 1.0, 'unit': 'km/h', 'group': 'road'},
     {'key': 'ramp_seconds', 'constant': 'RAMP_SECONDS', 'label': 'A ramp\'s number within',
      'help': 'A number read this soon after a motorway or expressway sign is the ramp\'s: it ends where the ramp '
              'merges.', 'default': 45.0, 'min': 5.0, 'max': 120.0, 'step': 1.0, 'unit': 's', 'group': 'road'},

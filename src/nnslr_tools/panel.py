@@ -81,7 +81,7 @@ CUTTER_SCRIPT = 'scripts/run_signnet.sh'
 # The decider: experiment B, its three variants (the crop alone; with position and speed; with the scene), on a run of
 # its own (start() adds <time>-decider).
 DECIDER_SCRIPT = 'scripts/run_experiment_b.sh'
-# The road type with memory (town, rural, expressway, motorway, ramp, parking from the camera, a GRU over the seconds),
+# The road type with memory (town, rural, expressway, motorway, ramp, car parks from the camera, a GRU over seconds),
 # trained with and without memory and exported as one ONNX step, on a run of its own (start() adds <time>-road-type).
 ROAD_TYPE_SCRIPT = 'scripts/run_road_type.sh'
 # The road type of every frame from the map (Data › Roads): the GPS of the drives, the map roads near them, the types.

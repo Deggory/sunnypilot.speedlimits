@@ -235,8 +235,8 @@ const numbers = computed(() => {
     <p v-if="section === 'cutter'" class="role-what">SignNet, the same network the comma runs: it finds every box that could be a sign at the top of the frame. It must miss nothing: the classifier drops its false boxes.</p>
     <p v-else-if="section === 'classifier'" class="role-what">Says what each box of the cutter is: a speed value, end of limit, another sign and its kind, or not a sign.</p>
     <p v-else-if="section === 'decider'" class="role-what">Says whom each sign applies to: our road, another road, or abstain.</p>
-    <p v-else-if="section === 'road'" class="role-what">Says from the camera what road the car is on, once a second: town, rural,
-      expressway, motorway, ramp or parking. It remembers the seconds before, so the motorway after a ramp is seen without a sign.</p>
+    <p v-else-if="section === 'road'" class="role-what">Says from the camera what road the car is on, once a second: town, zone 30,
+      rural, expressway, motorway, ramp, a car park or a garage. It remembers the seconds before, so the motorway after a ramp is seen without a sign.</p>
     <p v-else class="role-what">Our networks one after the other, each with the choices of its own section: the next one starts
       when one ends well. The classifier after a new cutter learns that cutter’s mistakes.</p>
 

@@ -1,18 +1,21 @@
 #!/usr/bin/env bash
-# The type of road of every frame of the prepared drives (town, 30 zone, rural, expressway, motorway, ramp, parking), from the GPS
-# of the comma and the OpenStreetMap roads and car parks, read offline: the labels of the road-type head, prepared
-# without a person (nnslr road-types; the button "Find the road types" of Data › Roads starts this). A person corrects
-# them later in the road-type review; nothing here touches the reviews of the signs.
+# The type of road of every frame of the prepared drives (town, 30 zone, rural, expressway, motorway, ramp, parking,
+# garage), from the GPS and the speed of the comma and the OpenStreetMap roads and car parks, read offline: the labels of
+# the road-type head, prepared without a person (nnslr road-types; the button "Find the road types" of Data › Roads
+# starts this). A person corrects them later in the road-type review; nothing here touches the reviews of the signs.
 #
 #   a. the GPS position of the frames of the drives prepared without it            (nnslr gps --all --missing)
-#   b. the map roads and car parks near the drives, again when a drive or the map is newer (scripts/osm_roads.py,
+#   b. the car's speed of every second, from the drives' logs: a stretch without GPS at a drive's start or end, or by a
+#      garage of the map, is a garage when it is slow                                (nnslr car-motion --all, cached)
+#   c. the map roads and car parks near the drives, again when a drive or the map is newer (scripts/osm_roads.py,
 #      osmium from uv's cache for this run only: the environments of the site and of the training stay as they are)
-#   c. the road type of every frame                                                (nnslr road-types --all)
-#   d. the intersections every drive passed: the labels of the road-type network's junction head (nnslr junctions
+#   d. the road type of every frame                                                (nnslr road-types --all)
+#   e. the intersections every drive passed: the labels of the road-type network's junction head (nnslr junctions
 #      --all, data/derived/junctions; a person's corrections, annotations/junctions, are never touched)
 #
 # usage: helpers/road_types.sh [--again]   (--again: the map roads read again even when nothing is newer)
-# No network but uv's first download of osmium; about 2 minutes when the map is read, seconds otherwise.
+# No network but uv's first download of osmium; about 2 minutes when the map is read, seconds otherwise, plus about a
+# minute for the logs of each new drive.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DATA="${NNSLR_DATA_ROOT:-$ROOT/data}"
@@ -37,7 +40,12 @@ echo "== a. GPS of the drives"
 "$NN" gps --all --missing --data-root "$DATA" < /dev/null \
     || echo "GPS position not read for some drives: their frames stay without a road type"
 
-echo "== b. Map roads and car parks near the drives"
+echo "== b. Speed of the drives"
+# Without it the stretches without GPS stay unknown (or the map's car park); the rest is as before.
+"$NN" car-motion --all --data-root "$DATA" < /dev/null \
+    || echo "Speed not read for some drives: their stretches without GPS stay without a garage"
+
+echo "== c. Map roads and car parks near the drives"
 newer=no
 if [ "$again" = yes ] || [ ! -f "$ROADS" ]; then
     newer=yes
@@ -69,9 +77,9 @@ else
     echo "The map roads and car parks are up to date."
 fi
 
-echo "== c. Road type of every frame"
+echo "== d. Road type of every frame"
 "$NN" road-types --all --data-root "$DATA" < /dev/null
 
-echo "== d. Junctions of the drives"
+echo "== e. Junctions of the drives"
 "$NN" junctions --all --data-root "$DATA" < /dev/null
 echo "Done: the road types are in $DATA/derived/road_types/, the junctions in $DATA/derived/junctions/."

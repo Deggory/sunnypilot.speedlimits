@@ -75,6 +75,7 @@ def _runs(labels: np.ndarray) -> list[tuple[int, int, int]]:
 
 # A 30 zone is in a town: from town into it is no town entry.
 TOWNS = ('town', 'zone30')
+CAR_PARKS = ('parking', 'garage')
 
 
 def transition_kind(old: int, new: int, classes: tuple[str, ...]) -> str:
@@ -83,9 +84,9 @@ def transition_kind(old: int, new: int, classes: tuple[str, ...]) -> str:
         return 'ramp_to_motorway'
     if a in ('motorway', 'expressway') and b == 'ramp':
         return 'motorway_to_ramp'
-    if b in TOWNS and a not in (*TOWNS, 'parking'):
+    if b in TOWNS and a not in (*TOWNS, *CAR_PARKS):
         return 'town_entry'
-    if a in TOWNS and b not in (*TOWNS, 'parking'):
+    if a in TOWNS and b not in (*TOWNS, *CAR_PARKS):
         return 'town_exit'
     return 'other'
 

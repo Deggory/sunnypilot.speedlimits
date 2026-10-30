@@ -53,7 +53,8 @@ def test_on_the_car_and_sent(tmp_path):
     car_settings.save(tmp_path, {'values': {'parking_limit': 15}}, 'cristian')
     # The published manifest without settings: the comma's defaults.
     view = car_settings.view(tmp_path, {})
-    assert not view['sent'] and {item['key']: item['on_car'] for item in view['settings']}['parking_limit'] == 10.0
+    on_car = {item['key']: item['on_car'] for item in view['settings']}
+    assert not view['sent'] and on_car['parking_limit'] == 20.0 and on_car['garage_limit'] == 10.0
     assert car_settings.view(tmp_path, car_settings.values(tmp_path))['sent']
 
 
