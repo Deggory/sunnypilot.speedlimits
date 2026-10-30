@@ -279,3 +279,88 @@ def test_the_car_measure_keeps_the_best_5_boxes_of_0_3(tmp_path, monkeypatch):
     assert result['by_score_threshold'][str(CAR_MIN_SCORE)]['true_positives'] == 1
     assert result['by_score_threshold'][str(CAR_MIN_SCORE)]['false_positives'] == 6
     assert result['by_box_budget']['5']['true_positives'] == 0
+
+
+def test_the_car_measure_also_with_the_lenient_match(tmp_path, monkeypatch):
+    """measure()['car_centre']: the car's boxes matched leniently. A box 2 px tighter on each side of a far, 10 px sign
+    (IoU 0.36) is a miss and a false box at IoU 0.5, found with the lenient match; a huge box on the other sign is
+    false in both."""
+    from PIL import Image
+
+    from nnslr_tools import signnet
+    Image.new('RGB', (128, 96)).save(tmp_path / 'f.jpg')
+    truth = [[100.0, 50.0, 110.0, 60.0], [20.0, 20.0, 30.0, 30.0]]
+    found = [{'box': [102.0, 52.0, 108.0, 58.0], 'score': 0.9}, {'box': [0.0, 0.0, 50.0, 50.0], 'score': 0.8}]
+    monkeypatch.setattr(signnet, 'frame_boxes_of', lambda *a, **kw: [dict(p) for p in found])
+    frames = [{'image_path': 'f.jpg', 'split': 'test', 'width': 128, 'height': 96, 'boxes': truth,
+               'box_families': ['maximum_speed', 'other_sign']}]
+    result = signnet.measure(build_signnet((4, 4, 4, 4), 8, 1), frames, tmp_path, 8, 'cpu', workers=0, band_width=96)
+    car, lenient = result['car'], result['car_centre']
+    assert (car['true_positives'], car['false_positives'], car['recall_iou']) == (0, 2, 0.0)
+    assert (lenient['true_positives'], lenient['false_positives'], lenient['recall_iou']) == (1, 1, 0.5)
+    assert lenient['recall_by_family']['speed']['found'] == 1 and set(lenient) == set(car)
+    assert signnet.car_measure(result, match='centre') is lenient and signnet.car_measure(result) is car
+    assert signnet.car_measure({'car': car}, match='centre') is None  # a result.json written before it
+
+
+def _tiny_run(tmp_path):
+    """A tiny SignNet run on the CPU (untrained weights): its plan, and a result.json as one written before
+    car_centre (measure's output without it)."""
+    import json
+
+    from PIL import Image
+
+    from nnslr_tools import signnet
+    frames = []
+    for index, split in enumerate(['train', 'validation', 'validation', 'test']):
+        image = Image.new('RGB', (128, 96), (90, 90, 90))
+        image.paste((240, 20, 20), (40 + index, 6, 56 + index, 22))
+        image.save(tmp_path / f'f{index}.jpg')
+        frames.append({'image_path': f'f{index}.jpg', 'split': split, 'width': 128, 'height': 96,
+                       'boxes': [[40.0 + index, 6.0, 56.0 + index, 22.0]], 'box_families': ['speed_limit']})
+    plan = {'frames': frames, 'dataset_sha256': 'd' * 64, 'split_sha256': 's' * 64, 'families': 'all'}
+    torch.manual_seed(3)
+    model = build_signnet((4, 4, 4, 4), 8, 1).eval()
+    run = tmp_path / 'run'
+    run.mkdir()
+    torch.save(checkpoint_of(model, plan, widths=(4, 4, 4, 4), stride=8, fuse_kernel=1, band_width=96, epoch=1),
+               run / 'signnet-best.pt')
+    result = {'task': 'signnet', 'band': list(band_size(96)), 'stride': 8, 'best_epoch': 1,
+              **{key: plan[key] for key in DATA_KEYS}}
+    for split in ('validation', 'test'):
+        measured = signnet.measure(model, [f for f in frames if f['split'] == split], tmp_path, 8, 'cpu', workers=0,
+                                   band_width=96)
+        measured.pop('car_centre')
+        result[split] = measured
+    (run / 'result.json').write_text(json.dumps(result, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+    return plan, run, result
+
+
+def test_remeasure_adds_the_lenient_car_measure_without_training(tmp_path):
+    import json
+
+    from nnslr_tools import signnet
+    plan, run, before = _tiny_run(tmp_path)
+    dry = signnet.remeasure_car_centre(plan, tmp_path, run, device='cpu', workers=0, dry_run=True)
+    assert dry['dry_run'] and 'car_centre' not in json.loads((run / 'result.json').read_text())['test']
+    summary = signnet.remeasure_car_centre(plan, tmp_path, run, device='cpu', workers=0)
+    after = json.loads((run / 'result.json').read_text())
+    for split, frames in (('validation', 2), ('test', 1)):
+        assert summary[split]['frames'] == frames and summary[split]['car_unchanged'] is True
+        assert set(after[split]['car_centre']) == set(before[split]['car'])
+        assert after[split]['car_centre']['recall_iou'] == summary[split]['centre_recall']
+        # Nothing else changes, and the lenient match never finds fewer.
+        assert {key: value for key, value in after[split].items() if key != 'car_centre'} == before[split]
+        assert after[split]['car_centre']['true_positives'] >= after[split]['car']['true_positives']
+    assert {key: value for key, value in after.items() if key not in ('validation', 'test')} == {
+        key: value for key, value in before.items() if key not in ('validation', 'test')}
+    assert not (run / 'result.json.tmp').exists()
+
+
+def test_remeasure_refuses_another_plan(tmp_path):
+    from nnslr_tools import signnet
+    plan, run, _ = _tiny_run(tmp_path)
+    with pytest.raises(ValueError, match='remeasure_plan_mismatch: .*split_sha256'):
+        signnet.remeasure_car_centre({**plan, 'split_sha256': 'x' * 64}, tmp_path, run, device='cpu', workers=0)
+    with pytest.raises(ValueError, match='remeasure_not_a_finished_signnet'):
+        signnet.remeasure_car_centre(plan, tmp_path, tmp_path / 'nothing', device='cpu', workers=0)

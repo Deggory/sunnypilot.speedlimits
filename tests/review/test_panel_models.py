@@ -530,9 +530,10 @@ def signnet_metrics(speed: int, other: int, boxes: float) -> dict:
 
 
 def make_signnet(root: Path, name: str = 's1', *, finished: bool = True, share: float | None = None,
-                 band: list[int] | None = None, stride: int = 8, car: bool = True) -> Path:
+                 band: list[int] | None = None, stride: int = 8, car: bool = True, car_centre: bool = False) -> Path:
     """A run folder as ``nnslr train-signnet`` leaves it: by default the car's band (896 x 288) and stride (8), so
-    set_active('cutter', 'cutter:<name>/signnet') takes it; car False: a result.json written before measure's 'car'."""
+    set_active('cutter', 'cutter:<name>/signnet') takes it; car False: a result.json written before measure's 'car';
+    car_centre True: one with the lenient car measure too."""
     run = root / 'runs' / name
     write(run / 'signnet-best.pt', 'signnet weights')
     write(run / 'train.log', 'epoch 1\n')
@@ -544,10 +545,23 @@ def make_signnet(root: Path, name: str = 's1', *, finished: bool = True, share: 
                      'by_box_budget': {'3': signnet_metrics(3, 1, 3.0), '5': signnet_metrics(5, 2, 5.0)}}
         if car:
             partition['car'] = signnet_metrics(2, 1, 1.0)
+        if car_centre:
+            partition['car_centre'] = signnet_metrics(3, 2, 1.5)
         write(run / 'result.json', {'task': 'signnet', 'band': band or [896, 288], 'stride': stride, 'fuse_kernel': 1,
                                     'parameters': 62997, 'best_epoch': 27, 'epochs': 40, 'families': 'all',
                                     'history': [{'epoch': n} for n in range(1, 41)], 'test': partition})
     return run
+
+
+def test_signnet_with_the_lenient_car_measure(root, models):
+    """car_centre: what the car reads matched leniently (signnet.measure), beside car at IoU 0.5."""
+    pipeline(root)
+    make_signnet(root, 's1', car_centre=True)
+    test = {entry['id']: entry for entry in by_role(models.index())['cutter']['versions']}['cutter:s1/signnet']['test']
+    lenient = test['car_centre']
+    assert (lenient['found'], lenient['truth_boxes'], lenient['recall'], lenient['precision']) == (5, 10, 0.5, pytest.approx(5 / 6))
+    assert (lenient['score_threshold'], lenient['max_boxes'], lenient['by_family']['speed']['found']) == (0.3, 5, 3)
+    assert (test['car']['found'], test['car']['recall']) == (3, 0.3)
 
 
 def test_signnet_is_the_cutter_in_use_when_it_fits_the_car(root, models):
@@ -576,6 +590,7 @@ def test_signnet_is_the_cutter_in_use_when_it_fits_the_car(root, models):
     assert (car['found'], car['truth_boxes'], car['recall'], car['false_per_frame'], car['boxes_per_frame']) == (
         3, 10, 0.3, 0.25, 1.0)
     assert (car['score_threshold'], car['max_boxes'], car['by_family']['speed']['found']) == (0.3, 5, 2)
+    assert test['car_centre'] is None  # a result.json written before the lenient measure
     assert signnet['validation'] is None
     assert cutters['cutter:s2/signnet']['detail'] == 'the comma’s cutter · 25 % of the training drives'
     assert cutters['cutter:s2/signnet']['train_share'] == 0.25

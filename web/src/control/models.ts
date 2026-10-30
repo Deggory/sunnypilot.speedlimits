@@ -7,7 +7,7 @@ import {isoWhen, thousands} from '../common/format';
 import type {ActionState, ActiveChosen, ActiveModel, ModelRole, ModelVersion, ModelsPayload} from '../common/panel-types';
 import {askConfirm, type ConfirmOptions} from '../composables/confirm';
 import {toast} from '../composables/toast';
-import {chooseRun} from './evaluate';
+import {chooseRun, pct} from './evaluate';
 import {goTo} from './tabs';
 
 const INTERVAL_MS = 10000;
@@ -207,6 +207,8 @@ export interface Metric {
   value: number | null;
   count: string;
   detail: string;
+  /** A second, smaller line under detail (the cutter as the car reads it: the strict count at IoU 0.5). */
+  note?: string;
 }
 
 /** The numbers that judge a version, side by side (MetricTiles, the Models table): the cutter: a SignNet's speed signs
@@ -235,17 +237,23 @@ export function metricsOf(version: ModelVersion): Metric[] {
         count: of(kept.found, kept.truth), detail: of(kept.found, kept.truth) + ' in the ' + boxes + ' best boxes of each frame, whatever their score'}
       : {key: 'budget', label: budgetLabel, short: 'Best ' + boxes + ', any score', value: null,
         count: 'not measured', detail: 'Its report did not keep the boxes of each frame'};
-    // A SignNet as the car reads it: its best 5 boxes a frame of score 0.3 or more (missing from an older server).
+    // A SignNet as the car reads it: its best 5 boxes a frame of score 0.3 or more (missing from an older server). With
+    // the lenient count (car_centre: a box on the sign counts, even a pixel or two tight) as the main number when it was
+    // measured, the strict one (IoU 0.5) in small.
     const metrics: Metric[] = [];
     if (version.kind === 'signnet') {
-      const car = cut.car ?? null;
+      const strict = cut.car ?? null;
+      const car = cut.car_centre ?? strict;
       const rule = 'best ' + (car?.max_boxes ?? 5) + ' at ' + (car?.score_threshold ?? 0.3);
-      const read = car ? (version.families === 'all' ? car.by_family?.['speed'] ?? null
-        : {truth: car.truth_boxes ?? 0, found: car.found ?? 0, recall: car.recall}) : null;
+      const speedOf = (numbers: typeof strict) => numbers ? (version.families === 'all' ? numbers.by_family?.['speed'] ?? null
+        : {truth: numbers.truth_boxes ?? 0, found: numbers.found ?? 0, recall: numbers.recall}) : null;
+      const read = speedOf(car);
+      const strictRead = cut.car_centre ? speedOf(strict) : null;
       metrics.push(read
         ? {key: 'car', label: 'Speed signs as the car reads them (' + rule + ')', short: 'As the car reads', value: read.recall,
           count: of(read.found, read.truth), detail: of(read.found, read.truth) + ' found, '
-            + perFrame(car?.false_per_frame) + ' false boxes per frame'}
+            + perFrame(car?.false_per_frame) + ' false boxes per frame',
+          ...(strictRead ? {note: 'IoU 0.5: ' + pct(strictRead.recall) + ' found, ' + perFrame(strict?.false_per_frame) + ' false a frame'} : {})}
         : {key: 'car', label: 'Speed signs as the car reads them (' + rule + ')', short: 'As the car reads', value: null,
           count: 'not measured', detail: car === null && cut.car === undefined ? 'Not sent by this server' : 'Its report did not measure it'});
     }

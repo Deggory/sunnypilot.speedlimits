@@ -277,8 +277,11 @@ def measure(model, frames: list[dict], data_root: Path, stride: int, device, *, 
             workers: int = 8, band_width: int = BAND_WIDTH) -> dict[str, Any]:
     """The cutter's measures on ``frames``: per score threshold (detector_size_metrics, reviewed boxes of the whole
     frame, those below the band count as missed), per box budget (the best N boxes of each frame, at any score) and
-    ``car``: what the car reads, the best CAR_MAX_BOXES boxes of score CAR_MIN_SCORE or more. A box found on an
-    ignore box of the frame (a switched-off display) is dropped before any of them: neither found nor false."""
+    ``car``: what the car reads, the best CAR_MAX_BOXES boxes of score CAR_MIN_SCORE or more. All of them match a found
+    box to a reviewed one at IoU 0.5; ``car_centre`` is ``car`` with the lenient match (evaluation.centre_match: IoU 0.5,
+    or the found box's centre on the reviewed box and its size 0.5 to 2 times it), fairer to the far, small signs. A
+    box found on an ignore box of the frame (a switched-off display) is dropped before any of them: neither found nor
+    false."""
     torch, _ = _torch()
     from torch.utils.data import DataLoader
 
@@ -303,11 +306,14 @@ def measure(model, frames: list[dict], data_root: Path, stride: int, device, *, 
                     kept.append(p)
                 predictions[index] = kept
 
-    def scored(select) -> dict[str, Any]:
+    def car_boxes(found: list[dict]) -> list[dict]:
+        return [p for p in found if p['score'] >= CAR_MIN_SCORE][:CAR_MAX_BOXES]
+
+    def scored(select, match: str = 'iou') -> dict[str, Any]:
         items = []
         for index, frame in enumerate(frames):
             chosen = select(predictions.get(index, []))
-            item = score_frame(frame['boxes'], chosen, score_threshold=0.0, iou_threshold=0.5)
+            item = score_frame(frame['boxes'], chosen, score_threshold=0.0, iou_threshold=0.5, match=match)
             item['truth_families'] = list(frame.get('box_families') or [])
             item['label_basis'] = frame.get('label_basis')
             items.append(item)
@@ -317,18 +323,24 @@ def measure(model, frames: list[dict], data_root: Path, stride: int, device, *, 
         'by_score_threshold': {str(t): scored(lambda found, t=t: [p for p in found if p['score'] >= t])
                                for t in SCORE_THRESHOLDS},
         'by_box_budget': {str(n): scored(lambda found, n=n: found[:n]) for n in BOX_BUDGETS},
-        'car': scored(lambda found: [p for p in found if p['score'] >= CAR_MIN_SCORE][:CAR_MAX_BOXES]),
+        'car': scored(car_boxes),
+        'car_centre': scored(car_boxes, 'centre'),
         'ignore_boxes': sum(len(f.get('ignore_boxes') or []) for f in frames),
         'found_on_ignore_boxes': ignored,
     }
 
 
-def car_measure(measured: Any) -> dict[str, Any] | None:
+def car_measure(measured: Any, *, match: str = 'iou') -> dict[str, Any] | None:
     """What the car reads of one partition of a result.json (measure's output): its ``car`` entry, the best
     CAR_MAX_BOXES boxes of score CAR_MIN_SCORE or more; for a result written before it, by_score_threshold at
-    CAR_MIN_SCORE (the cap of 5 boxes almost never bites there: about 0.35 boxes a frame). None without either."""
+    CAR_MIN_SCORE (the cap of 5 boxes almost never bites there: about 0.35 boxes a frame). None without either.
+    With match 'centre': its ``car_centre`` entry, the same boxes with the lenient match; None in a result.json
+    written before it (remeasure_car_centre adds it)."""
     if not isinstance(measured, dict):
         return None
+    if match == 'centre':
+        found = measured.get('car_centre')
+        return found if isinstance(found, dict) else None
     for found in (measured.get('car'), (measured.get('by_score_threshold') or {}).get(str(CAR_MIN_SCORE))):
         if isinstance(found, dict):
             return found
@@ -445,6 +457,59 @@ def train_signnet(plan: dict[str, Any], data_root: Path, run_dir: Path, *, width
     (run_dir / 'result.json').write_text(json.dumps(result, indent=2, sort_keys=True) + '\n', encoding='utf-8')
     log(f"SignNet complete: {run_dir}")
     return result
+
+
+def remeasure_car_centre(plan: dict[str, Any], data_root: Path, run_dir: Path, *, device=None, batch: int = 16,
+                         workers: int = 8, dry_run: bool = False) -> dict[str, Any]:
+    """Add ``car_centre`` (measure's lenient car measure) to validation and test of a finished SignNet run's
+    result.json, without training: its signnet-best.pt measured again on the plan's validation and test frames. The
+    plan must be the run's (dataset_sha256, split_sha256 and families of its result.json), else the numbers would be
+    of other frames. Nothing else of result.json changes; the ``car`` measured again is compared with the one saved
+    (``car_unchanged``: False when the device rounds a box across the score 0.3 differently). With dry_run, measures
+    and reports but does not write. Returns the run, the device, and per partition the strict and lenient recall
+    and precision."""
+    run_dir, data_root = Path(run_dir), Path(data_root)
+    result_path = run_dir / 'result.json'
+    try:
+        result = json.loads(result_path.read_text(encoding='utf-8'))
+    except (OSError, ValueError) as exc:
+        raise ValueError(f'remeasure_not_a_finished_signnet: {result_path} unreadable') from exc
+    if not isinstance(result, dict) or result.get('task') != 'signnet':
+        raise ValueError(f'remeasure_not_a_finished_signnet: {result_path} is not a SignNet result')
+    different = [key for key in DATA_KEYS if plan.get(key) != result.get(key)]
+    if different:
+        old = data_root / 'annotations' / 'replaced' / f"{result.get('dataset_sha256')}.jsonl"
+        hint = f'; its dataset is kept at {old}' if 'dataset_sha256' in different and old.is_file() else ''
+        raise ValueError('remeasure_plan_mismatch: the plan differs from the run in '
+                         + ', '.join(f'{key} ({plan.get(key)!r} against {result.get(key)!r})' for key in different) + hint)
+    torch, _ = _torch()
+    device = torch.device(device or ('cuda' if torch.cuda.is_available() else 'cpu'))
+    model, checkpoint = load_signnet(run_dir / 'signnet-best.pt')
+    model = model.to(device)
+    band_width, stride = int(checkpoint['band'][0]), int(checkpoint['stride'])
+    summary: dict[str, Any] = {'run_dir': str(run_dir), 'device': str(device), 'dry_run': dry_run}
+    for partition in ('validation', 'test'):
+        frames = [frame for frame in plan['frames'] if frame.get('split') == partition]
+        if not isinstance(result.get(partition), dict):
+            summary[partition] = None
+            continue
+        measured = measure(model, frames, data_root, stride, device, batch=batch, workers=workers,
+                           band_width=band_width)
+        saved = result[partition].get('car')
+        result[partition]['car_centre'] = measured['car_centre']
+        counts = ('true_positives', 'false_positives', 'false_negatives')
+        summary[partition] = {
+            'frames': len(frames),
+            'car_unchanged': (None if not isinstance(saved, dict)
+                              else all(saved.get(key) == measured['car'][key] for key in counts)),
+            **{f'{name}_{key}': measured[entry][f'{key}_iou']
+               for name, entry in (('strict', 'car'), ('centre', 'car_centre')) for key in ('recall', 'precision')},
+        }
+    if not dry_run:
+        temporary = result_path.with_name(result_path.name + '.tmp')
+        temporary.write_text(json.dumps(result, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+        temporary.replace(result_path)
+    return summary
 
 
 def decode_output(out, stride: int, **kw) -> list[list[dict]]:

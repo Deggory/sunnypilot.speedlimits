@@ -315,7 +315,8 @@ def signnet_digest(result: Any) -> dict:
     is judged (cutter_digest of their by_score_threshold, the cutter's scoring on the cutter's frames), with the signs
     among its BOX_BUDGET best boxes a frame at any score (by_box_budget) and ``car``: what the car reads, those best
     boxes of score 0.3 or more (signnet.car_measure: found, reviewed, recall, boxes and false boxes per frame, by
-    family, at score_threshold with max_boxes)."""
+    family, at score_threshold with max_boxes), and ``car_centre``: the same with the lenient match (IoU 0.5, or the
+    found box's centre on the sign and its size 0.5 to 2 times it; None for a result.json written before it)."""
     if not isinstance(result, dict) or result.get('task') != 'signnet':
         raise ValueError('not a SignNet result')
     band = _size_label(result.get('band'))
@@ -333,10 +334,11 @@ def signnet_digest(result: Any) -> dict:
             counts = _box_counts(budget)
             digest['budget'] = _budget(counts['found'] or 0, counts['truth_boxes'] or 0,
                                        _by_family(budget.get('recall_by_family')))
-        car = car_measure(report)
-        digest['car'] = None if car is None else {
-            **_box_counts(car), 'by_family': _by_family(car.get('recall_by_family')),
-            'score_threshold': CAR_MIN_SCORE, 'max_boxes': CAR_MAX_BOXES}
+        for key, match in (('car', 'iou'), ('car_centre', 'centre')):
+            car = car_measure(report, match=match)
+            digest[key] = None if car is None else {
+                **_box_counts(car), 'by_family': _by_family(car.get('recall_by_family')),
+                'score_threshold': CAR_MIN_SCORE, 'max_boxes': CAR_MAX_BOXES}
         measured[partition] = digest
     history = result.get('history')
     return {

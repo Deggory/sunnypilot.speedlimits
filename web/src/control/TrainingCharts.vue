@@ -6,9 +6,12 @@
 // its pretraining on the Mapillary signs alone (accuracy on our validation signs, and loss); for SignNet (the cutter the
 // comma runs), the validation signs found in its 5 best boxes of each frame at any score (the car also drops the boxes
 // below 0.3: those numbers come once it is measured, on the run's SignNet card), its false boxes per frame among those
-// 5, and its train loss. Data: progress.curves of the job, one point per finished epoch.
+// 5, and its train loss; for each network of the road type, its road score on validation (which chooses its best epoch),
+// macro F1 and accuracy, and its train loss; for each variant of applicability (experiment B), the mean of its reading
+// accuracy and ownership macro F1 (which chooses its best epoch) with the two, and its loss. Data: progress.curves of the
+// job, one point per finished epoch.
 import {computed} from 'vue';
-import type {CurveNet, EpochPoint, JobProgress, TrainingCurve} from '../common/panel-types';
+import type {CurveNet, DeciderNet, EpochPoint, JobProgress, RoadNet, TrainingCurve} from '../common/panel-types';
 import LineChart, {type ChartSeries} from './charts/LineChart.vue';
 import {elapsedText, roughText} from './jobs';
 
@@ -16,12 +19,22 @@ import {elapsedText, roughText} from './jobs';
 // those of the job's steps, else those with curves, else the detector and the reader.
 const props = defineProps<{progress: JobProgress; running: boolean; title?: string; nets?: CurveNet[]}>();
 type Net = CurveNet;
-const ALL_NETS: Net[] = ['signnet', 'detector', 'reader', 'pretrain', 'classifier'];
+/** The road type's networks (scripts/run_road_type.sh) and applicability's variants (experiment B), in the order they train. */
+const ROAD_NETS: RoadNet[] = ['road_type_gru', 'road_type_gru_nosign', 'road_type_gru_nomotion', 'road_type_frame'];
+const DECIDER_NETS: DeciderNet[] = ['experiment_b_crop', 'experiment_b_crop_geom', 'experiment_b_full'];
+const ALL_NETS: Net[] = ['signnet', 'detector', 'reader', 'pretrain', 'classifier', ...ROAD_NETS, ...DECIDER_NETS];
 const NET_NAME: Record<Net, string> = {signnet: 'SignNet', detector: 'Detector', reader: 'Reader', pretrain: 'Pretraining on Mapillary',
-  classifier: 'Classifier'};
+  classifier: 'Classifier', road_type_gru: 'With memory, sign and motion', road_type_gru_nosign: 'With memory, no sign',
+  road_type_gru_nomotion: 'With memory, no motion', road_type_frame: 'Without memory', experiment_b_crop: 'The crop alone',
+  experiment_b_crop_geom: 'Crop, position and speed', experiment_b_full: 'Crop, position and the scene'};
 /** A network in a sentence ("the classifier ends in ..."). */
 const NET_WORD: Record<Net, string> = {signnet: 'SignNet', detector: 'detector', reader: 'reader', pretrain: 'pretraining',
-  classifier: 'classifier'};
+  classifier: 'classifier', road_type_gru: 'network with memory, sign and motion', road_type_gru_nosign: 'network with memory, no sign',
+  road_type_gru_nomotion: 'network with memory, no motion', road_type_frame: 'network without memory',
+  experiment_b_crop: 'variant with the crop alone', experiment_b_crop_geom: 'variant with crop, position and speed',
+  experiment_b_full: 'variant with crop, position and the scene'};
+const isRoad = (net: Net): net is RoadNet => (ROAD_NETS as Net[]).includes(net);
+const isDecider = (net: Net): net is DeciderNet => (DECIDER_NETS as Net[]).includes(net);
 const TRAIN = 'var(--c-train)';
 const VAL = 'var(--c-val)';
 const REJECT = 'var(--split-3)';
@@ -41,8 +54,10 @@ const nets = computed((): Net[] => {
   if (props.nets?.length) return props.nets;
   const stepKeys = props.progress.steps.map((step) => step.key);
   // The pretraining is a step of its own; in the logs before 30 Oct 2026 it was inside the classifier's: shown once it has a curve.
+  // The road type's network without the sign was a step of the runs before 29 Oct 2026: shown once it has a curve.
   const fromSteps = ALL_NETS.filter((net) => stepKeys.includes(net)
-    || (net === 'pretrain' && stepKeys.includes('classifier') && hasPoints(curves.value.pretrain)));
+    || (net === 'pretrain' && stepKeys.includes('classifier') && hasPoints(curves.value.pretrain))
+    || (net === 'road_type_gru_nosign' && stepKeys.includes('road_type_gru') && hasPoints(curves.value.road_type_gru_nosign)));
   if (fromSteps.length) return fromSteps;
   const withCurves = ALL_NETS.filter((net) => hasPoints(curves.value[net]));
   return withCurves.length ? withCurves : ['detector', 'reader'];
@@ -75,6 +90,9 @@ const loss = (value: number): string => value >= 10 ? value.toFixed(1) : value >
 const lossAxis = (value: number): string => value === 0 ? '0' : Number(value.toPrecision(3)).toString();
 const percent = (value: number): string => (Math.round(value * 10) / 10).toString() + '%';
 const percentAxis = (value: number): string => Math.round(value) + '%';
+/** The road score: macro F1 plus a little for the minute after a merge, less the false switches (about 0 to 1.1). */
+const score = (value: number): string => value.toFixed(2);
+const scoreAxis = (value: number): string => Number(value.toFixed(2)).toString();
 const cell = (value: number | undefined, text: (value: number) => string): string => value === undefined ? '–' : text(value);
 
 function lossSeries(curve: TrainingCurve): ChartSeries[] {
@@ -126,6 +144,37 @@ const pretrainBest = computed(() => shows('pretrain') && hasPoints(pretrain.valu
   ? best(pretrain.value, (point) => point.val_accuracy, true) : null);
 const pretrainBestLoss = computed(() => hasPoints(pretrain.value) ? best(pretrain.value, (point) => point.val_loss, false) : null);
 
+type Best = (EpochPoint & {value: number}) | null;
+interface NetCard {net: Net; curve: TrainingCurve | null; best: Best; lowest: Best; validation: ChartSeries[]; scored: boolean}
+/** The road type's networks: the road score on validation chooses the best epoch (a log before it: the macro F1). */
+const roadScored = (curve: TrainingCurve): boolean => curve.points.some((point) => point.val_road_score !== undefined);
+const roadJunction = computed(() => ROAD_NETS.some((net) => curves.value[net]?.points.some((point) => point.val_junction_f1 !== undefined)));
+const roadCards = computed((): NetCard[] => nets.value.filter(isRoad).map((net) => {
+  const curve = curves.value[net];
+  if (!hasPoints(curve)) return {net, curve: null, best: null, lowest: null, validation: [], scored: false};
+  const scored = roadScored(curve);
+  return {net, curve, scored, best: best(curve, (point) => scored ? point.val_road_score : point.val_macro_f1, true),
+    lowest: best(curve, (point) => point.train_loss, false),
+    validation: [
+      ...(scored ? [{key: 'val', label: 'road score', color: BALANCED, values: column(curve, (point) => point.val_road_score)}] : []),
+      {key: scored ? 'f1' : 'val', label: 'macro F1', color: VAL, values: column(curve, (point) => point.val_macro_f1)},
+      {key: 'accuracy', label: 'accuracy', color: REJECT, values: column(curve, (point) => point.val_accuracy)}]};
+}));
+/** Applicability's variants: the mean of the signs read right and the ownership macro F1 chooses the best epoch. */
+const deciderCards = computed((): NetCard[] => nets.value.filter(isDecider).map((net) => {
+  const curve = curves.value[net];
+  if (!hasPoints(curve)) return {net, curve: null, best: null, lowest: null, validation: [], scored: false};
+  return {net, curve, scored: true, best: best(curve, (point) => point.val_selection_score, true),
+    lowest: best(curve, (point) => point.val_loss, false),
+    validation: [
+      {key: 'val', label: 'chosen measure', color: BALANCED, values: column(curve, (point) => point.val_selection_score, 100)},
+      {key: 'read', label: 'read right', color: VAL, values: column(curve, (point) => point.val_accuracy, 100)},
+      {key: 'own', label: 'whose sign, macro F1', color: REJECT, values: column(curve, (point) => point.val_ownership_macro_f1, 100)}]};
+}));
+/** A tile per network with a best epoch. */
+const bestCards = computed(() => [...roadCards.value, ...deciderCards.value]
+  .flatMap((card) => card.best ? [{net: card.net, best: card.best, scored: card.scored}] : []));
+
 /** The network being trained now (from the steps; the pretraining until the classifier's first epoch), or the last
  * one with points. */
 const current = computed((): Net | null => {
@@ -149,17 +198,20 @@ const left = computed(() => {
   return epochsLeft > 0 ? 'the ' + NET_WORD[current.value as Net] + ' ends in about ' + roughText(epochsLeft * perEpoch.value * 1000) : '';
 });
 /** Still in the steps before the first network. */
-const beforeEpochs = computed(() => running.value && ['import', 'split', 'gpu_env', 'checks', 'mine']
+const beforeEpochs = computed(() => running.value && ['import', 'split', 'gpu_env', 'checks', 'mine', 'frames', 'signs']
   .includes(props.progress.steps.find((item) => item.state === 'current')?.key ?? ''));
 const beforeText = computed(() => shows('reader')
   ? 'First the training imports the reviews, checks the dataset and prepares the GPU: a few minutes.'
+  : roadCards.value.length ? 'First it checks the GPU, finds the junctions of the drives, resizes the frames and reads the motorway signs and the car’s motion: a few minutes, more the first time.'
+  : deciderCards.value.length ? 'First it checks the dataset and the GPU: a minute or two.'
   : shows('detector') || shows('signnet') ? 'First it checks the frames of the training and of the evaluation, and the GPU: a few minutes.'
     : 'First it checks the dataset, the split and the cutter in use, then runs the cutter on every frame to mine its false boxes.');
 const isRunning = (net: Net): boolean => running.value && current.value === net;
 /** Every value, for the table under the charts. */
 const tables = computed(() => nets.value.flatMap((net) => {
   const curve = curves.value[net];
-  return curve && curve.points.length ? [{net, rows: [...curve.points].sort((a, b) => a.epoch - b.epoch)}] : [];
+  return curve && curve.points.length ? [{net, rows: [...curve.points].sort((a, b) => a.epoch - b.epoch),
+    scored: roadScored(curve)}] : [];
 }));
 </script>
 
@@ -212,6 +264,21 @@ const tables = computed(() => nets.value.flatMap((net) => {
           <span class="tile-label">Best on our signs</span>
           <span class="tile-value">{{ percent(pretrainBest.value * 100) }}</span>
           <span class="tile-note">pretraining on Mapillary, epoch {{ pretrainBest.epoch }}</span>
+        </div>
+        <div v-for="card in bestCards" :key="'best-' + card.net" class="tile" :id="card.net + '-best'">
+          <template v-if="isRoad(card.net)">
+            <span class="tile-label">{{ card.scored ? 'Best road score' : 'Best validation macro F1' }}</span>
+            <span class="tile-value">{{ card.scored ? score(card.best.value) : percent(card.best.value * 100) }}</span>
+            <span class="tile-note">{{ NET_NAME[card.net] }}, epoch {{ card.best.epoch }}<template v-if="card.scored
+              && card.best.val_macro_f1 !== undefined">: macro F1 {{ percent(card.best.val_macro_f1 * 100) }}</template></span>
+          </template>
+          <template v-else>
+            <span class="tile-label">Best on validation</span>
+            <span class="tile-value">{{ percent(card.best.value * 100) }}</span>
+            <span class="tile-note">{{ NET_NAME[card.net] }}, epoch {{ card.best.epoch }}<template v-if="card.best.val_accuracy !== undefined">:
+              read right {{ percent(card.best.val_accuracy * 100) }}, whose sign {{ card.best.val_ownership_macro_f1 === undefined ? '–'
+              : percent(card.best.val_ownership_macro_f1 * 100) }}</template></span>
+          </template>
         </div>
         <div v-if="perEpoch !== null" class="tile">
           <span class="tile-label">Time per epoch</span>
@@ -307,13 +374,52 @@ const tables = computed(() => nets.value.flatMap((net) => {
           chooses the epoch whose weights are kept.</p>
       </div>
 
+      <div v-for="(card, index) in roadCards" :key="card.net" class="net" :id="card.net + '-curves'">
+        <h3>{{ NET_NAME[card.net] }}<span>the road type, once a second · on validation, {{ card.scored
+          ? 'the road score, macro F1 and accuracy' : 'macro F1 and accuracy' }}, higher is better, and train loss</span></h3>
+        <div v-if="card.curve" class="net-charts">
+          <LineChart :title="NET_NAME[card.net] + ' on validation'" :format="scoreAxis" :epochs="span(card.curve)"
+                     :series="card.validation" :best="card.best ? {series: 'val', epoch: card.best.epoch, label: 'best'} : null"
+                     :running="isRunning(card.net)"/>
+          <LineChart :title="NET_NAME[card.net] + ' loss'" :format="lossAxis" :epochs="span(card.curve)"
+                     :series="[{key: 'train', label: 'train', color: TRAIN, values: column(card.curve, (point) => point.train_loss)}]"
+                     :best="card.lowest ? {series: 'train', epoch: card.lowest.epoch, label: 'lowest'} : null"
+                     :running="isRunning(card.net)"/>
+        </div>
+        <p v-else class="net-wait">{{ running ? (index === 0 ? 'Its curves appear at the end of its first epoch.'
+          : 'It trains after the one above: its curves appear at the end of its first epoch.') : 'It did not reach its first epoch.' }}</p>
+      </div>
+      <p v-if="roadCards.some((card) => card.scored)" class="note" id="road-score-note">Road score: the macro F1 over the road types,
+        plus a little for the minute after a ramp said right, less the false switches. Each network keeps the weights of its best
+        epoch, and stops early after as many epochs without a better one as its Patience (Settings).</p>
+
+      <div v-for="(card, index) in deciderCards" :key="card.net" class="net" :id="card.net + '-curves'">
+        <h3>{{ NET_NAME[card.net] }}<span>applicability: is this sign for our road? · on validation, higher is better, and loss</span></h3>
+        <div v-if="card.curve" class="net-charts">
+          <LineChart :title="NET_NAME[card.net] + ' on validation'" :top="100" :format="percentAxis" :epochs="span(card.curve)"
+                     :series="card.validation" :best="card.best ? {series: 'val', epoch: card.best.epoch, label: 'best'} : null"
+                     :running="isRunning(card.net)"/>
+          <LineChart :title="NET_NAME[card.net] + ' loss'" :format="lossAxis" :epochs="span(card.curve)" :series="lossSeries(card.curve)"
+                     :best="card.lowest ? {series: 'val', epoch: card.lowest.epoch, label: 'lowest'} : null"
+                     :running="isRunning(card.net)"/>
+        </div>
+        <p v-else class="net-wait">{{ running ? (index === 0 ? 'Its curves appear at the end of its first epoch.'
+          : 'It trains after the one above: its curves appear at the end of its first epoch.') : 'It did not reach its first epoch.' }}</p>
+      </div>
+      <p v-if="deciderCards.length" class="note" id="decider-score-note">Chosen measure: the mean of the signs read right and the
+        macro F1 of whose sign it is (our road, another road, abstain); it chooses the epoch whose weights are kept.</p>
+
       <details class="chart-table">
         <summary>Values per epoch</summary>
         <div v-for="table in tables" :key="table.net" class="table-wrap">
           <table>
             <caption>{{ NET_NAME[table.net] }}</caption>
-            <thead><tr><th class="num">Epoch</th><th class="num">Train loss</th><th v-if="table.net !== 'signnet'" class="num">Val loss</th>
-              <template v-if="table.net !== 'detector' && table.net !== 'signnet'"><th class="num">Train acc.</th><th class="num">Val acc.</th></template>
+            <thead><tr><th class="num">Epoch</th><th class="num">Train loss</th><th v-if="table.net !== 'signnet' && !isRoad(table.net)" class="num">Val loss</th>
+              <template v-if="table.net !== 'detector' && table.net !== 'signnet' && !isRoad(table.net)"><th class="num">Train acc.</th><th class="num">Val acc.</th></template>
+              <template v-if="isRoad(table.net)"><th v-if="table.scored" class="num">Road score</th><th class="num">Macro F1</th>
+                <th class="num">Accuracy</th><th v-if="roadJunction" class="num">Junction F1</th></template>
+              <template v-if="isDecider(table.net)"><th class="num">Whose sign</th><th class="num" title="The signs of another road found">Other road</th>
+                <th class="num">Chosen</th></template>
               <th v-if="table.net === 'detector' && detectorRecall" class="num">Val recall</th>
               <template v-if="table.net === 'signnet'"><th class="num" title="Its 5 best boxes of each frame, at any score">Best 5, any score</th><th v-if="signnetFalse" class="num">False per frame</th></template>
               <template v-if="table.net === 'classifier' && withRejection"><th class="num">Signs</th><th class="num">Not a sign</th>
@@ -322,8 +428,8 @@ const tables = computed(() => nets.value.flatMap((net) => {
               <tr v-for="point in table.rows" :key="point.epoch">
                 <td class="num">{{ point.epoch }}</td>
                 <td class="num">{{ cell(point.train_loss, loss) }}</td>
-                <td v-if="table.net !== 'signnet'" class="num">{{ cell(point.val_loss, loss) }}</td>
-                <template v-if="table.net !== 'detector' && table.net !== 'signnet'">
+                <td v-if="table.net !== 'signnet' && !isRoad(table.net)" class="num">{{ cell(point.val_loss, loss) }}</td>
+                <template v-if="table.net !== 'detector' && table.net !== 'signnet' && !isRoad(table.net)">
                   <td class="num">{{ cell(point.train_accuracy, (value) => percent(value * 100)) }}</td>
                   <td class="num">{{ cell(point.val_accuracy, (value) => percent(value * 100)) }}</td>
                 </template>
@@ -331,6 +437,17 @@ const tables = computed(() => nets.value.flatMap((net) => {
                 <template v-if="table.net === 'signnet'">
                   <td class="num">{{ cell(point.val_recall, (value) => percent(value * 100)) }}</td>
                   <td v-if="signnetFalse" class="num">{{ cell(point.val_false_per_frame, (value) => value.toFixed(2)) }}</td>
+                </template>
+                <template v-if="isRoad(table.net)">
+                  <td v-if="table.scored" class="num">{{ cell(point.val_road_score, score) }}</td>
+                  <td class="num">{{ cell(point.val_macro_f1, (value) => percent(value * 100)) }}</td>
+                  <td class="num">{{ cell(point.val_accuracy, (value) => percent(value * 100)) }}</td>
+                  <td v-if="roadJunction" class="num">{{ cell(point.val_junction_f1, (value) => percent(value * 100)) }}</td>
+                </template>
+                <template v-if="isDecider(table.net)">
+                  <td class="num">{{ cell(point.val_ownership_macro_f1, (value) => percent(value * 100)) }}</td>
+                  <td class="num">{{ cell(point.val_other_road_recall, (value) => percent(value * 100)) }}</td>
+                  <td class="num">{{ cell(point.val_selection_score, (value) => percent(value * 100)) }}</td>
                 </template>
                 <template v-if="table.net === 'classifier' && withRejection">
                   <td class="num">{{ cell(point.val_sign_accuracy, (value) => percent(value * 100)) }}</td>

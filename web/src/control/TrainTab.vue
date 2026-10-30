@@ -81,11 +81,17 @@ const latest = (role: ModelRole): ModelVersion | null => roleOf(role)?.versions[
 const latestCutter = computed(() => latest('cutter'));
 /** The cutter in use (Models): the classifier's training mines its false boxes and measures the chain with it. */
 const cutterInUse = computed(() => roleOf('cutter')?.versions.find((version) => version.in_use) ?? null);
-/** Its numbers as the car reads it (best 5 boxes of 0.3 or more), on the test, else validation. */
-const cutterInUseCar = computed(() => {
+/** Its numbers as the car reads it (best 5 boxes of 0.3 or more), on the test, else validation: the lenient count (a box
+ * on the sign counts, car_centre) when measured, else the strict one (IoU 0.5); strict: the strict one beside the
+ * lenient, shown in small (null without the lenient). */
+const cutterInUseNumbers = computed(() => {
   const version = cutterInUse.value;
-  return version?.role === 'cutter' ? version.test?.car ?? version.validation?.car ?? null : null;
+  if (version?.role !== 'cutter') return null;
+  const numbers = version.test?.car ? version.test : version.validation?.car ? version.validation : null;
+  return numbers?.car ? {main: numbers.car_centre ?? numbers.car, strict: numbers.car_centre ? numbers.car : null} : null;
 });
+const cutterInUseCar = computed(() => cutterInUseNumbers.value?.main ?? null);
+const cutterInUseStrict = computed(() => cutterInUseNumbers.value?.strict ?? null);
 const cutterInUsePartition = computed(() => cutterInUse.value?.role === 'cutter' && cutterInUse.value.test?.car ? 'test' : 'validation');
 const latestClassifier = computed(() => latest('classifier'));
 const latestDecider = computed(() => latest('decider'));
@@ -221,16 +227,12 @@ const sectionActivities = computed(() => activitiesFor(section.value));
 /** The curves of a training: while it runs (a placeholder before the first epoch), or of the last one if it has any. */
 const charted = computed((): {progress: Progress; running: boolean} | null => {
   // A training started from a terminal: the server reads its progress from data/logs/train-<run>.log.
-  // The road type has no curves: its epochs are in its steps.
-  if (section.value === 'road') return null;
   const terminal = sectionActivities.value.find((activity) => activity.progress);
   if (terminal?.progress && !(job.value?.state === 'running')) return {progress: terminal.progress, running: true};
   const value = job.value;
   if (value === null || !CHARTED_ACTIONS.includes(value.action)) return null;
   const curves = value.progress.curves ?? {};
-  const shown = value.state === 'running'
-    || Boolean(curves.detector?.points.length || curves.reader?.points.length || curves.classifier?.points.length
-      || curves.signnet?.points.length);
+  const shown = value.state === 'running' || Object.values(curves).some((curve) => Boolean(curve?.points.length));
   return shown ? {progress: value.progress, running: value.state === 'running'} : null;
 });
 const numbers = computed(() => {
@@ -323,7 +325,9 @@ const numbers = computed(() => {
           <strong>{{ cutterInUse.label }}</strong> · {{ cutterInUse.trained_at ? isoWhen(cutterInUse.trained_at) : cutterInUse.run }}.<template
           v-if="cutterInUseCar"> On the {{ cutterInUsePartition }}, as the car reads it: it finds <strong>{{ pct(cutterInUseCar.recall) }}</strong>
           of the signs, and <strong>{{ pct(cutterInUseCar.precision) }}</strong> of its boxes are signs<template
-          v-if="cutterInUseCar.false_per_frame !== null"> ({{ cutterInUseCar.false_per_frame.toFixed(2) }} false a frame)</template>.</template>
+          v-if="cutterInUseCar.false_per_frame !== null"> ({{ cutterInUseCar.false_per_frame.toFixed(2) }} false a frame)</template>.<span
+          v-if="cutterInUseStrict" class="strict-note" title="Counted when the box sits on the sign: its centre on it, half to twice its size. The strict count needs the boxes to overlap by IoU 0.5, unfair to far signs boxed a pixel or two tight.">
+          Strict count (IoU 0.5): {{ pct(cutterInUseStrict.recall) }} / {{ pct(cutterInUseStrict.precision) }}.</span></template>
           Its mistakes are the “not a sign” the classifier learns, and the chain is measured with it. Another one: Models › Use this one.</template><template
           v-else-if="models">No cutter in use: choose one in Models first.</template></p>
         <p v-if="mapillaryState?.available" class="latest-none" id="train-mapillary-note">Mapillary: {{ thousands(mapillaryState.crops) }}
@@ -375,7 +379,7 @@ const numbers = computed(() => {
     <TrainingCharts v-if="charted?.running" :progress="charted.progress" :running="true"/>
     <details v-else-if="charted" class="latest-row curves-row">
       <summary><span class="latest-what"><span class="latest-name">Curves of the last training</span>
-        <span class="latest-text">recall and loss, epoch by epoch</span></span><span class="latest-chev" aria-hidden="true">›</span></summary>
+        <span class="latest-text">{{ section === 'road' ? 'road score' : section === 'decider' ? 'the chosen measure' : 'recall' }} and loss, epoch by epoch</span></span><span class="latest-chev" aria-hidden="true">›</span></summary>
       <TrainingCharts :progress="charted.progress" :running="false"/>
     </details>
 

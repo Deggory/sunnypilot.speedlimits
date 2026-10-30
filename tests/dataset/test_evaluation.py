@@ -6,7 +6,7 @@ import sys
 import pytest
 
 from nnslr_tools.annotations import load_jsonl
-from nnslr_tools.evaluation import box_iou, match_detections
+from nnslr_tools.evaluation import box_iou, centre_match, greedy_matching, match_detections, score_frame
 from test_training import _training_fixture
 from test_annotations import invoke
 
@@ -122,3 +122,47 @@ def test_evaluate_dry_run_counts_human_reviewed_samples(tmp_path, capsys, task) 
     report = json.loads(out.out)
     assert report["human_reviewed_sample_count"] == report["counts_by_label_basis"]["human_review"] == 1
     assert sum(report["counts_by_label_basis"].values()) == report["sample_count"]
+
+
+# -- The lenient match ("centre"): fair to the far, small signs ------------------------------------------------
+SMALL_SIGN = [100.0, 50.0, 110.0, 60.0]  # a far sign, 10 px
+TIGHT_BOX = {"box": [102.0, 52.0, 108.0, 58.0], "score": 0.9}  # 2 px tighter on each side: IoU 0.36
+
+
+def test_a_box_2_px_tighter_on_a_10_px_sign_is_a_strict_miss_and_a_lenient_hit() -> None:
+    assert box_iou(TIGHT_BOX["box"], SMALL_SIGN) == pytest.approx(0.36)
+    strict = score_frame([SMALL_SIGN], [TIGHT_BOX], score_threshold=0.0, iou_threshold=0.5)
+    assert (strict["true_positives"], strict["false_positives"], strict["false_negatives"]) == (0, 1, 1)
+    lenient = score_frame([SMALL_SIGN], [TIGHT_BOX], score_threshold=0.0, iou_threshold=0.5, match="centre")
+    assert (lenient["true_positives"], lenient["false_positives"], lenient["false_negatives"]) == (1, 0, 0)
+    assert lenient["matches"][0]["iou"] == pytest.approx(0.36) and lenient["found_truth_indexes"] == [0]
+
+
+def test_a_huge_box_around_a_small_sign_is_not_a_lenient_hit() -> None:
+    huge = {"box": [80.0, 30.0, 130.0, 80.0], "score": 0.9}  # centred on the sign, 5 times its size
+    assert centre_match(huge["box"], SMALL_SIGN) is False
+    lenient = match_detections([huge], [SMALL_SIGN], match="centre")
+    assert (lenient["true_positives"], lenient["false_positives"], lenient["false_negatives"]) == (0, 1, 1)
+    # Off the sign's centre, or too thin, neither; twice its size, on the edge of the rule, yes.
+    assert centre_match([111.0, 52.0, 117.0, 58.0], SMALL_SIGN) is False
+    assert centre_match([104.0, 52.0, 106.0, 58.0], SMALL_SIGN) is False
+    assert centre_match([95.0, 45.0, 115.0, 65.0], SMALL_SIGN) is True
+
+
+def test_the_lenient_match_stays_one_to_one_and_score_ordered() -> None:
+    second = {"box": [103.0, 53.0, 109.0, 59.0], "score": 0.5}
+    result = match_detections([second, TIGHT_BOX], [SMALL_SIGN], match="centre")
+    assert (result["true_positives"], result["false_positives"]) == (1, 1)
+    assert result["matches"][0]["score"] == 0.9 and result["false_positive_indexes"] == [0]
+
+
+def test_the_defaults_stay_the_strict_iou_match() -> None:
+    truth = [SMALL_SIGN, [0.0, 0.0, 40.0, 40.0]]
+    predicted = [TIGHT_BOX, {"box": [2.0, 2.0, 38.0, 38.0], "score": 0.8},
+                 {"box": [80.0, 30.0, 130.0, 80.0], "score": 0.7}]
+    assert greedy_matching(predicted, truth) == greedy_matching(predicted, truth, iou_threshold=0.5, match="iou")
+    assert match_detections(predicted, truth) == match_detections(predicted, truth, match="iou")
+    assert [index for _, index, _ in greedy_matching(predicted, truth)] == [-1, 1, -1]
+    assert [index for _, index, _ in greedy_matching(predicted, truth, match="centre")] == [0, 1, -1]
+    with pytest.raises(ValueError, match="invalid_match"):
+        match_detections(predicted, truth, match="near")

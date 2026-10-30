@@ -72,7 +72,8 @@ export function busyTabs(jobs: readonly Pick<Job, 'action' | 'state'>[], activit
   return tabs;
 }
 /** The trainings whose job shows its curves on the Train tab. */
-export const CHARTED_ACTIONS: ActionName[] = ['train', 'train_continue', 'train_classifier', 'train_cutter'];
+export const CHARTED_ACTIONS: ActionName[] = ['train', 'train_continue', 'train_classifier', 'train_cutter', 'train_decider',
+  'train_road_type'];
 /** The trainings of the whole pipeline (helpers/3_train.sh): a stopped one can be resumed on its run. */
 export const PIPELINE_ACTIONS: ActionName[] = ['train', 'train_continue', 'train_resume'];
 

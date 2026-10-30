@@ -114,6 +114,16 @@ export interface EpochPoint {
   val_sign_accuracy?: number;
   val_rejection?: number;
   val_balanced_accuracy?: number;
+  /** The road type: its macro F1 over the road types, its road score (which chooses its best epoch: macro F1, the minute
+   * after a merge, false switches) and the F1 of its junction head. */
+  val_macro_f1?: number;
+  val_road_score?: number;
+  val_junction_f1?: number;
+  /** Experiment B (applicability): whose sign it is (macro F1), the other-road signs found, and the mean of the reading
+   * accuracy and that macro F1, which chooses its best epoch. */
+  val_ownership_macro_f1?: number;
+  val_other_road_recall?: number;
+  val_selection_score?: number;
   seconds?: number;
 }
 
@@ -126,8 +136,11 @@ export interface TrainingCurve {
 }
 
 /** The networks with curves: the pipeline’s detector and reader, the classifier with “not a sign” and its pretraining
- * on the Mapillary signs alone (pretrain), SignNet (the cutter the comma runs). */
-export type CurveNet = 'detector' | 'reader' | 'classifier' | 'pretrain' | 'signnet';
+ * on the Mapillary signs alone (pretrain), SignNet (the cutter the comma runs), the road type's networks
+ * (scripts/run_road_type.sh; road_type_gru_nosign in the runs before 29 Oct 2026) and experiment B's variants. */
+export type RoadNet = 'road_type_gru' | 'road_type_gru_nosign' | 'road_type_gru_nomotion' | 'road_type_frame';
+export type DeciderNet = 'experiment_b_crop' | 'experiment_b_crop_geom' | 'experiment_b_full';
+export type CurveNet = 'detector' | 'reader' | 'classifier' | 'pretrain' | 'signnet' | RoadNet | DeciderNet;
 
 export interface StepProgress {
   done: number;
@@ -1087,12 +1100,21 @@ export interface CutterNumbers {
    * boxes frame by frame. */
   budget?: {boxes: number; truth_boxes: number; found: number; recall: number | null;
             by_family: Record<string, {truth: number; found: number; recall: number | null}> | null} | null;
-  /** A SignNet: what the car reads, its best max_boxes boxes of each frame of score score_threshold or more (5 at 0.3);
-   * null when not measured, missing from an older server and for an old Detector. */
-  car?: {images: number | null; truth_boxes: number | null; found: number | null; false_boxes: number | null; recall: number | null;
-         precision: number | null; boxes_per_frame: number | null; false_per_frame: number | null;
-         by_family: Record<string, {truth: number; found: number; recall: number | null}> | null;
-         score_threshold: number; max_boxes: number} | null;
+  /** A SignNet: what the car reads, its best max_boxes boxes of each frame of score score_threshold or more (5 at 0.3),
+   * a box found when it overlaps a sign by IoU 0.5; null when not measured, missing from an older server and for an
+   * old Detector. */
+  car?: CutterCar | null;
+  /** The same boxes with the lenient match: also found when the box's centre is on the sign and its size half to twice
+   * the sign's (fairer to the far, small signs). null in a result.json written before it; missing from an older server. */
+  car_centre?: CutterCar | null;
+}
+
+/** What the car reads of a SignNet on one partition (CutterNumbers.car, CutterNumbers.car_centre). */
+export interface CutterCar {
+  images: number | null; truth_boxes: number | null; found: number | null; false_boxes: number | null; recall: number | null;
+  precision: number | null; boxes_per_frame: number | null; false_per_frame: number | null;
+  by_family: Record<string, {truth: number; found: number; recall: number | null}> | null;
+  score_threshold: number; max_boxes: number;
 }
 
 /** An experiment B variant on one partition: whom the sign applies to, and the reading. */

@@ -43,18 +43,51 @@ def box_iou(a: list[float], b: list[float]) -> float:
     return 0.0 if union <= 0 else intersection / union
 
 
+# How a found box can match a reviewed box: "iou", the standard rule (IoU at least iou_threshold), or "centre", the
+# lenient one for far, small signs, where a box 2 px tighter on each side of a 10 px sign has IoU 0.36 though it sits
+# on the sign: IoU at least iou_threshold, or the found box's centre inside the reviewed box and its width and height
+# each between CENTRE_SIZE_RATIO[0] and CENTRE_SIZE_RATIO[1] times the reviewed box's (centre_match).
+MATCH_RULES = ("iou", "centre")
+CENTRE_SIZE_RATIO = (0.5, 2.0)
+
+
+def centre_match(box: list[float], truth_box: list[float]) -> bool:
+    """The lenient match of a found box on a reviewed box: its centre inside the reviewed box (edges included) and
+    its width and height each 0.5 to 2 times the reviewed box's. A huge box around a small sign does not match."""
+    x1, y1, x2, y2 = (float(value) for value in box)
+    tx1, ty1, tx2, ty2 = (float(value) for value in truth_box)
+    cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+    if not (tx1 <= cx <= tx2 and ty1 <= cy <= ty2):
+        return False
+    low, high = CENTRE_SIZE_RATIO
+    truth_w, truth_h = tx2 - tx1, ty2 - ty1
+    if truth_w <= 0 or truth_h <= 0:
+        return False
+    return low <= (x2 - x1) / truth_w <= high and low <= (y2 - y1) / truth_h <= high
+
+
+def _check_match(match: str) -> None:
+    if match not in MATCH_RULES:
+        raise ValueError(f"invalid_match: {match!r}, one of {', '.join(MATCH_RULES)}")
+
+
 def greedy_matching(
     predicted: list[dict[str, Any]],
     truth: list[list[float]],
     *,
     iou_threshold: float = 0.5,
+    match: str = "iou",
 ) -> list[tuple[int, int, float]]:
     """The greedy score-ordered one-to-one matching of match_detections: (position in predicted, index of the
     reviewed box it found or -1, best IoU) of every prediction, best score first.
 
     A prediction is matched against the reviewed boxes left by those of a higher score only, so the matching of the
     predictions at or above a score is this matching restricted to them: the Watch panel of the Evaluate tab draws
-    any score from the boxes matched once at the lowest (per_frame_record)."""
+    any score from the boxes matched once at the lowest (per_frame_record).
+
+    With match "centre" (MATCH_RULES), a prediction whose best IoU is under iou_threshold still finds the reviewed box
+    of highest IoU among those it centre_match-es; the IoU given is then that box's."""
+    _check_match(match)
     ordered = sorted(enumerate(predicted), key=lambda item: float(item[1]["score"]), reverse=True)
     unmatched = set(range(len(truth)))
     result = []
@@ -68,8 +101,15 @@ def greedy_matching(
         if best_index >= 0 and best_iou >= iou_threshold:
             unmatched.remove(best_index)
             result.append((position, best_index, best_iou))
-        else:
-            result.append((position, -1, best_iou))
+            continue
+        if match == "centre":
+            centred = [(iou, index) for iou, index in candidates if centre_match(box, truth[index])]
+            if centred:
+                centre_iou, centre_index = max(centred)
+                unmatched.remove(centre_index)
+                result.append((position, centre_index, centre_iou))
+                continue
+        result.append((position, -1, best_iou))
     return result
 
 
@@ -78,15 +118,16 @@ def match_detections(
     truth: list[list[float]],
     *,
     iou_threshold: float = 0.5,
+    match: str = "iou",
 ) -> dict[str, Any]:
-    """Greedy score-ordered one-to-one matching for a single detector class."""
+    """Greedy score-ordered one-to-one matching for a single detector class (match: MATCH_RULES)."""
     if not 0 < iou_threshold <= 1:
         raise ValueError("invalid_iou_threshold")
     matches = []
     false_positives = []
     false_positive_indexes = []
 
-    for position, truth_index, best_iou in greedy_matching(predicted, truth, iou_threshold=iou_threshold):
+    for position, truth_index, best_iou in greedy_matching(predicted, truth, iou_threshold=iou_threshold, match=match):
         if truth_index >= 0:
             matches.append({
                 "score": float(predicted[position]["score"]),
@@ -197,11 +238,11 @@ def width_bucket(width: float) -> str:
 
 
 def score_frame(truth: list[list[float]], predictions: list[dict[str, Any]], *, score_threshold: float,
-                iou_threshold: float) -> dict[str, Any]:
+                iou_threshold: float, match: str = "iou") -> dict[str, Any]:
     """The predictions of one frame at or above score_threshold, matched to its reviewed boxes: the matching of
-    match_detections plus the reviewed boxes found and the false boxes, for recall_by_width."""
+    match_detections (match: MATCH_RULES) plus the reviewed boxes found and the false boxes, for recall_by_width."""
     selected = [prediction for prediction in predictions if prediction["score"] >= score_threshold]
-    matched = match_detections(selected, truth, iou_threshold=iou_threshold)
+    matched = match_detections(selected, truth, iou_threshold=iou_threshold, match=match)
     return {
         **matched,
         "selected": selected,

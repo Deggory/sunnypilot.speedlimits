@@ -39,7 +39,9 @@ const cutterCaption = computed(() => cut.value === null ? ''
   : 'Found on the ' + (PARTITION_LABEL[cut.value.partition] ?? cut.value.partition).toLowerCase() + ' at score ' + (cut.value.score_threshold ?? '–')
     + (signnet.value ? ', as the car reads them (its best ' + (cut.value.car?.max_boxes ?? 5) + ' boxes of each frame of score '
       + (cut.value.car?.score_threshold ?? 0.3) + ' or more)' : '')
-    + ', and in the ' + (cut.value.budget?.boxes ?? 5) + ' best boxes of each frame at any score');
+    + ', and in the ' + (cut.value.budget?.boxes ?? 5) + ' best boxes of each frame at any score'
+    + (signnet.value && cut.value.car_centre ? '. As the car reads them, a box counts when it sits on the sign (its centre on '
+      + 'it, half to twice its size); in small, the strict count at IoU 0.5' : ''));
 const evaluated = computed(() => cut.value !== null || (classifier.value?.test ?? null) !== null || (classifier.value?.chain ?? null) !== null
   || decider.value?.validation != null || decider.value?.test != null || roadType.value?.test != null);
 const epoch = computed(() => epochText(props.version.best_epoch, props.version.epochs_run ?? props.version.epochs));

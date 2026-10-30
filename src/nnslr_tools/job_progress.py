@@ -171,10 +171,13 @@ EARLY = re.compile(r'^(detector|reader|classifier|pretrain|road_type_gru_nosign|
 # The values of an epoch line: "train_loss 0.5000 val_loss 0.6000 ... 40s" (the detector also writes
 # val_recall, its validation recall at score 0.1, which chooses its best epoch; the classifier with "not a sign"
 # val_sign_accuracy, the sign crops read right, and val_rejection, the "not a sign" crops it rejects: their mean,
-# the balanced accuracy, chooses its best epoch; the road-type network val_macro_f1, its F1 over the road types;
-# SignNet val_recall and val_false_per_frame in the 5 best boxes of a frame, as the car keeps them).
+# the balanced accuracy, chooses its best epoch; the road-type network val_macro_f1, its F1 over the road types,
+# val_road_score, its own measure that chooses its best epoch (road_type_net.road_score), and val_junction_f1, its
+# junction head; SignNet val_recall and val_false_per_frame in the 5 best boxes of a frame, as the car keeps them;
+# experiment B val_ownership_macro_f1, whose sign it is, and val_other_road_recall, a "-" when it has no case).
 METRIC = re.compile(r'\b(train_loss|val_loss|train_accuracy|val_accuracy|val_recall|val_sign_accuracy|val_rejection|'
-                    r'val_balanced_accuracy|val_macro_f1|val_false_per_frame) (-?[0-9.]+(?:e-?[0-9]+)?)\b')
+                    r'val_balanced_accuracy|val_macro_f1|val_false_per_frame|val_road_score|val_junction_f1|'
+                    r'val_ownership_macro_f1|val_other_road_recall) (-?[0-9.]+(?:e-?[0-9]+)?)\b')
 SECONDS = re.compile(r'\b([0-9]+)s$')
 FETCHED = re.compile(r'^== (\S+)--(\d+) -> ')
 # helpers/fetch_comma_segments.sh, a route and its segments (in Italian in the older logs).
@@ -257,7 +260,9 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
     'detail': str, 'last_line': str, 'step_progress': how far the current step is from the log alone (see
     _inside_step) or None, 'curves': {'detector'|'reader'|'classifier'|'signnet': {'epochs': total, ('stopped_early':
     epoch,) 'points': [{'epoch', 'train_loss', 'val_loss', ('train_accuracy', 'val_accuracy',) ('val_recall',)
-    ('val_false_per_frame',) ('val_sign_accuracy', 'val_rejection', 'val_balanced_accuracy',) 'seconds'}]}}} for an
+    ('val_false_per_frame',) ('val_sign_accuracy', 'val_rejection', 'val_balanced_accuracy',) ('val_macro_f1',
+    'val_road_score', 'val_junction_f1',) ('val_ownership_macro_f1', 'val_other_road_recall', 'val_selection_score',)
+    'seconds'}]}}} (also the road type's networks and experiment B's variants, by the names of their epoch lines) for an
     action in state running, ok, failed or interrupted; with 'seconds_left' (the server's time left, None while
     unknown) for Propose again running, 'signnet' (is_signnet) for the cutter's training and 'failure' (failure_text,
     '' when unknown) for a failed job."""
@@ -312,6 +317,10 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
             if 'val_sign_accuracy' in point and 'val_rejection' in point and 'val_balanced_accuracy' not in point:
                 # The measure that chooses the classifier's best epoch: the mean of the two.
                 point['val_balanced_accuracy'] = (point['val_sign_accuracy'] + point['val_rejection']) / 2
+            if epoch[0].startswith('experiment_b') and 'val_accuracy' in point:
+                # The measure that chooses experiment B's best epoch (context_experiment.selection_score): the mean of the
+                # reading accuracy and the ownership macro F1, a missing one ("-") counting 0.
+                point['val_selection_score'] = (point['val_accuracy'] + point.get('val_ownership_macro_f1', 0.0)) / 2
             seconds = SECONDS.search(line)
             if seconds:
                 point['seconds'] = int(seconds.group(1))

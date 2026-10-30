@@ -391,3 +391,39 @@ def test_the_road_types_have_their_steps_from_their_own_lines():
     # The import's "== b. " is not one of its steps, nor its "== b. Map roads" one of the import's.
     assert states(progress('road_types', 'running', '== b. controllo il dataset\n'))['gps'] == 'current'
     assert states(progress('dataset', 'running', '== a. importo\n== b. Map roads\n'))['split'] == 'current'
+
+
+def test_the_road_type_curves_have_the_measure_that_chooses_their_best_epoch():
+    log = ('== 5/8 Train the road type with memory ==\n'
+           'dry run road_type_gru epoch 1/1 train_loss 3.5848 val_macro_f1 0.0000 val_accuracy 0.0000 val_road_score 0.0000 '
+           'val_junction_f1 0.0000 4s\n'
+           'road_type_gru epoch 1/60 train_loss 3.0381 val_macro_f1 0.1415 val_accuracy 0.2983 val_road_score 0.0829 '
+           'val_junction_f1 0.1819 33s\n'
+           'road_type_gru epoch 2/60 train_loss 2.2930 val_macro_f1 0.3308 val_accuracy 0.5000 val_road_score -0.0123 5s\n'
+           'road_type_gru stops early after epoch 2: no better validation road score for 15 epochs\n'
+           'road_type_gru junction epoch 1/30 train_loss 0.3773 val_junction_f1 0.5661 val_false_passed_per_hour 36.43 4s\n')
+    curve = progress('train_road_type', 'running', log)['curves']['road_type_gru']
+    assert curve['epochs'] == 60 and curve['stopped_early'] == 2
+    # The dry run and the junction stage are not epochs of the network.
+    assert curve['points'] == [
+        {'epoch': 1, 'train_loss': 3.0381, 'val_macro_f1': 0.1415, 'val_accuracy': 0.2983, 'val_road_score': 0.0829,
+         'val_junction_f1': 0.1819, 'seconds': 33},
+        {'epoch': 2, 'train_loss': 2.2930, 'val_macro_f1': 0.3308, 'val_accuracy': 0.5000, 'val_road_score': -0.0123,
+         'seconds': 5}]
+
+
+def test_the_experiment_b_curves_have_the_measure_that_chooses_their_best_epoch():
+    log = ('== 3/5 Train variant crop ==\n'
+           'experiment_b_crop epoch 1/20 train_loss 2.2182 val_loss 2.6399 train_accuracy 0.6028 val_accuracy 0.5800 '
+           'val_ownership_macro_f1 0.379 val_other_road_recall 1.000 55s\n'
+           'experiment_b_crop epoch 2/20 train_loss 0.9910 val_loss 2.3751 train_accuracy 0.7798 val_accuracy 0.6252 '
+           'val_ownership_macro_f1 - val_other_road_recall - 20s\n')
+    result = progress('train_decider', 'running', log)
+    first, second = result['curves']['experiment_b_crop']['points']
+    assert first == {'epoch': 1, 'train_loss': 2.2182, 'val_loss': 2.6399, 'train_accuracy': 0.6028, 'val_accuracy': 0.58,
+                     'val_ownership_macro_f1': 0.379, 'val_other_road_recall': 1.0,
+                     'val_selection_score': (0.58 + 0.379) / 2, 'seconds': 55}
+    # "-": no measure; the score counts its macro F1 as 0, as context_experiment.selection_score does.
+    assert 'val_ownership_macro_f1' not in second and 'val_other_road_recall' not in second
+    assert second['val_selection_score'] == 0.6252 / 2 and second['seconds'] == 20
+    assert result['detail'] == 'The crop alone · epoch 2 of 20'
