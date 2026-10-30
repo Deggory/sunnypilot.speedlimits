@@ -85,6 +85,31 @@ function signnetText(version: ModelVersion): string {
   return [version.stride ? 'grid ' + version.stride + ' px' : '',
     version.train_share ? Math.round(version.train_share * 100) + ' % of the drives' : ''].filter(Boolean).join(' · ');
 }
+/** Whether the comma runs the version in use of a role, in words. Two versions often have the same name: the time
+ * of the one on the car tells them apart. The comma runs the cutter, the classifier and the road type (Send to the
+ * car sends the SignNet chosen with the classifier and the road type in use); a trial replaces the first two until
+ * its next software update; the decider runs only on this server. */
+interface CarLine {tone: 'same' | 'other' | 'none'; text: string; more?: string}
+function carLine(role: RoleModels): CarLine | null {
+  if (payload.value?.on_car_problem) return null;
+  if (role.role === 'decider') return {tone: 'none', text: 'On the car: not used there, only on this server'};
+  const used = inUseOf(role);
+  const car = carOf(role);
+  const tried = role.role === 'cutter' ? trial.value?.signnet.run : role.role === 'classifier' ? trial.value?.classifier.run : null;
+  if (tried) return used?.run === tried ? {tone: 'same', text: 'On the comma: this one, as a trial'}
+    : {tone: 'other', text: 'On the comma: a trial of ' + tried};
+  const more = role.role === 'cutter' ? 'Send to the car, on its version below, puts this one there.'
+    : 'It goes with the next Send to the car.';
+  if (car === null) return used ? {tone: 'other', text: 'On the car: none yet', more} : {tone: 'none', text: 'On the car: none'};
+  const when = car.trained_at ? isoWhen(car.trained_at) : car.run;
+  if (used === null) return {tone: 'none', text: 'On the car: ' + car.label + ', ' + when};
+  if (car.id === used.id) return payload.value?.car_build_pending
+    ? {tone: 'other', text: 'On the car: this one, once its build is finished'} : {tone: 'same', text: 'On the car: this one'};
+  const age = car.trained_at && used.trained_at ? (Date.parse(car.trained_at) < Date.parse(used.trained_at) ? 'an older one' : 'a newer one')
+    : 'another one';
+  return {tone: 'other', text: 'On the car: ' + age + ', ' + when, more};
+}
+const carLines = computed(() => Object.fromEntries(roles.value.map((role) => [role.role, carLine(role)])) as Record<ModelRole, CarLine | null>);
 /** The published models on the car, in a few words: "speed-limits-models 62dca08, 28 Oct". */
 const carText = computed((): string => {
   const car = payload.value?.on_car;
@@ -200,11 +225,12 @@ async function choose(version: ModelVersion): Promise<void> {
         <span class="inuse-role">{{ role.label }}<span class="inuse-tag" :class="{none: inUseOf(role) === null}">{{ inUseOf(role) ? 'In use' : 'None chosen' }}</span></span>
         <template v-if="inUseOf(role)">
           <strong class="inuse-name">{{ inUseOf(role)?.label }}</strong>
-          <span class="inuse-when">{{ inUseOf(role)?.trained_at ? isoWhen(inUseOf(role)?.trained_at ?? null) : inUseOf(role)?.run }}<template
-            v-if="role.active"> · {{ chosenText(role.active) }}</template></span>
+          <span class="inuse-when">{{ inUseOf(role)?.trained_at ? isoWhen(inUseOf(role)?.trained_at ?? null) : inUseOf(role)?.run }}<span
+            v-if="role.active" class="inuse-chosen"> · {{ chosenText(role.active) }}</span></span>
           <span class="inuse-figs">
             <span v-for="metric in metricsOf(inUseOf(role) as ModelVersion).slice(0, 2)" :key="metric.key" class="inuse-fig">
-              <b>{{ metric.value === null ? '–' : pct(metric.value) }}</b><small>{{ metric.label }}</small></span>
+              <b>{{ metric.value === null ? '–' : pct(metric.value) }}</b><small v-if="metric.short"><span class="fig-long">{{ metric.label }}</span><span
+                class="fig-short">{{ metric.short }}</span></small><small v-else>{{ metric.label }}</small></span>
           </span>
         </template>
         <template v-else-if="role.active && !role.active.found">
@@ -217,7 +243,8 @@ async function choose(version: ModelVersion): Promise<void> {
             : role.versions.length ? 'There is no default.' : ROLE_TEXT[role.role].emptyMore }}</span>
         </template>
         <span v-if="oldInUse(role)" class="inuse-old">{{ role.notice ?? 'The cutter in use is an old Detector: choose a SignNet.' }}</span>
-        <span v-if="carOf(role)" class="inuse-car">{{ carOf(role) === inUseOf(role) ? 'Also on the car' : 'On the car: ' + carOf(role)?.label }}</span>
+        <span v-if="carLines[role.role]" class="inuse-car" :class="carLines[role.role]!.tone">{{ carLines[role.role]!.text }}<span
+          v-if="carLines[role.role]!.more" class="inuse-car-more">{{ carLines[role.role]!.more }}</span></span>
         <span class="inuse-more">{{ role.versions.length }} {{ role.versions.length === 1 ? 'version' : 'versions' }} ›</span>
       </button>
     </div>

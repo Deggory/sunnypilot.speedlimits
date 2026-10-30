@@ -17,6 +17,9 @@ const PREPARE: [ActionName, string][] = [['networks_prepare',
   'Exports the cutter, classifier and applicability network in use to ONNX, checks each against PyTorch and writes the model card. '
   + 'Nothing is uploaded.']];
 const ROLES = ['cutter', 'classifier', 'decider'] as const;
+/** A job that ended well, in words. */
+const DONE: Partial<Record<ActionName, string>> = {networks_prepare: 'Package ready, nothing uploaded',
+  networks_publish: 'Published on Hugging Face'};
 
 const job = computed(() => jobOf(props.status, ['networks_prepare', 'networks_publish']));
 /** Running or failed: in place of the buttons; one done is a line. */
@@ -56,6 +59,11 @@ function publish(): void {
       <JobProgress v-if="bigJob" :job="bigJob" @details="emit('details', $event)" @stop="emit('stop', $event)"/>
       <template v-else>
         <ActionList :items="PREPARE" :actions="status?.actions ?? null" @run="(name, state) => emit('run', name, state)"/>
+        <!-- How the last one ended, under its button: a preparation takes less than a minute. -->
+        <p v-if="job" class="last-line" :class="{'pub-done': job.state === 'ok'}" id="publish-last"><template
+          v-if="job.state === 'ok'">✓ {{ DONE[job.action] ?? job.label }}, {{ startedWhen(job) }}</template><template
+          v-else>Last: {{ job.label }}, {{ startedWhen(job) }} · {{ job.state === 'interrupted' ? 'stopped' : JOB_STATE[job.state][0] }}</template> ·
+          <button type="button" class="link-button" @click="emit('details', job)">Details</button></p>
         <div v-if="latest" class="package-row" id="latest-package">
           <div class="latest-what">
             <span class="latest-kicker">Latest package · {{ isoWhen(latest.created) }} · {{ (latest.bytes / 1e6).toFixed(1) }} MB
@@ -70,9 +78,6 @@ function publish(): void {
                   @click="publish">Publish on Hugging Face</button>
         </div>
       </template>
-      <p v-if="job && !bigJob" class="last-line">Last: {{ job.label }}, {{ startedWhen(job) }} ·
-        {{ job.state === 'interrupted' ? 'stopped' : JOB_STATE[job.state][0] }} ·
-        <button type="button" class="link-button" @click="emit('details', job)">Details</button></p>
     </div>
   </section>
 </template>

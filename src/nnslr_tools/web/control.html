@@ -724,6 +724,9 @@ a.latest-link:hover{background:var(--surface-3)}
 .publish h2{margin:0}
 .publish .note{margin:0}
 .hf-line{margin:0;font-size:13.5px;color:var(--muted)}
+.publish .last-line{margin:0 4px}
+.publish .last-line.pub-done{color:var(--ok);font-weight:600}
+.publish .last-line.pub-done .link-button{font-weight:400}
 .package-row{display:flex;align-items:center;gap:12px;padding:10px 14px;border-radius:12px;background:var(--surface-2);min-width:0}
 .package-row .btn{flex:none}
 .warn-text{color:var(--warn);white-space:normal}
@@ -848,13 +851,14 @@ transition:box-shadow .15s,transform .1s}
 .inuse-role{display:flex;align-items:center;gap:8px;width:100%;font-size:13px;font-weight:600;color:var(--muted)}
 .inuse-tag{margin-left:auto;padding:2px 8px;border-radius:999px;background:var(--ok-soft);color:var(--ok);font-size:11.5px;font-weight:600}
 .inuse-tag.none{background:var(--surface-2);color:var(--muted)}
-.inuse-name{font-size:17px;font-weight:650;letter-spacing:-.015em;overflow-wrap:anywhere}
+.inuse-name{font-size:17px;font-weight:650;letter-spacing:-.015em;overflow-wrap:break-word;text-wrap:balance}
 .inuse-name.muted{color:var(--muted);font-weight:600}
 .inuse-when{font-size:12.5px;color:var(--muted)}
 .inuse-figs{display:flex;gap:18px;margin-top:6px}
 .inuse-fig{display:flex;flex-direction:column}
 .inuse-fig b{font-size:26px;font-weight:700;letter-spacing:-.03em;line-height:1.1;font-variant-numeric:tabular-nums}
 .inuse-fig small{font-size:12px;color:var(--muted)}
+.inuse-fig .fig-short{display:none}
 .inuse-more{margin-top:auto;padding-top:8px;font-size:13px;font-weight:500;color:var(--accent)}
 .versions-card{display:flex;flex-direction:column;gap:12px}
 .versions-seg{align-self:center;width:100%;max-width:560px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr))}
@@ -887,9 +891,13 @@ transition:box-shadow .15s,transform .1s}
 .vt-row[open] .vt-chev{transform:rotate(90deg)}
 .vt-row .model-list{padding:6px 0 12px}
 @media (max-width:900px){.inuse-grid{grid-template-columns:minmax(0,1fr);gap:10px}}
-@media (max-width:560px){.inuse-card{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"role role" "name figs";
+/* A phone: the numbers to the right of the name, with their short labels on at most two lines, so the name keeps its
+   words whole. */
+@media (max-width:560px){.inuse-card{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"role role" "name figs" "when figs";
 align-items:center;gap:2px 12px;padding:12px 14px}.inuse-role{grid-area:role}.inuse-name{grid-area:name;font-size:15px}
-.inuse-figs{grid-area:figs;margin:0;gap:12px}.inuse-fig b{font-size:19px}.inuse-fig small{font-size:11px}.inuse-when,.inuse-more{display:none}
+.inuse-when{grid-area:when;align-self:start}.inuse-chosen{display:none}
+.inuse-figs{grid-area:figs;margin:0;gap:12px}.inuse-fig{max-width:6.5em}.inuse-fig b{font-size:19px}
+.inuse-fig small{font-size:11px;line-height:1.25}.inuse-fig .fig-long{display:none}.inuse-fig .fig-short{display:inline}.inuse-more{display:none}
 .versions-card{scroll-margin-top:72px}}
 @media (max-width:560px){.vt{--vt-num:64px}.vt-head,.vt-row>summary{column-gap:10px}.vt-c-chain,.vt-c-town,.vt-c-macro,.vt-num small{display:none}
 .vt-head{grid-template-columns:minmax(0,1fr) repeat(min(var(--vt-cols),2),var(--vt-num)) 14px}
@@ -1302,7 +1310,12 @@ font-variant-numeric:tabular-nums}
 .vt-car{color:var(--accent)}
 .pill.car{background:var(--accent-soft);color:var(--accent)}
 .model-pills{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px;flex:none}
-.inuse-car{font-size:12.5px;font-weight:600;color:var(--accent);overflow-wrap:anywhere}
+/* Whether the version in use is the one on the car: green when it is, orange when the car has another one. */
+.inuse-car{font-size:12.5px;font-weight:600;color:var(--muted);overflow-wrap:break-word}
+.inuse-car.same{color:var(--ok)}
+.inuse-car.same::before{content:"✓ "}
+.inuse-car.other{color:var(--warn)}
+.inuse-car-more{display:block;font-weight:400;color:var(--muted)}
 .inuse-old{font-size:12.5px;font-weight:600;color:var(--warn);overflow-wrap:anywhere}
 .model-car-note{font-size:12.5px;color:var(--muted)}
 /* A SignNet tried on the comma (Models): its pill, the buttons of its card, the line with the way back. */

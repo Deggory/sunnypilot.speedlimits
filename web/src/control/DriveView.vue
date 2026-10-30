@@ -3,8 +3,9 @@
 // as they were taken; on the frame, the speed signs the networks read (green when right, orange when they read another
 // number, red on nothing) and those they missed (dashed); in the corner, the limit they would show now next to the limit
 // of the signs. Under it, the whole drive as a strip: green where the limit shown is right, red where it is wrong; a tap
-// goes there. The chain of a classifier version (with the cutter it was measured with), on the test drives (never
-// trained on) or the validation drives. Space plays, the arrows step.
+// goes there. The chain of a classifier version: the pair measured at the end of its training, the cutter it was
+// measured with and that classifier (the picker “Networks”), on the test drives (never trained on) or the validation
+// drives. Space plays, the arrows step.
 import {computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watch} from 'vue';
 import {api} from '../common/api';
 import {isoWhen, plural, thousands} from '../common/format';
@@ -32,10 +33,31 @@ const sourceId = computed({
   get: (): string => source.value?.id ?? '',
   set: (value: string) => { pickedSource.value = value; },
 });
-/** Each version as the picker shows it: when it was trained, with which cutter it was measured. */
-const sourceOptions = computed((): PickerOption[] => sources.value.map((version) => ({key: version.id,
-  title: 'Classifier ' + isoWhen(version.trained_at), short: isoWhen(version.trained_at), badge: version.in_use ? 'In use' : undefined,
-  sub: version.chain?.cutter_size ? 'with the cutter ' + sizeText(version.chain.cutter_size) : undefined})));
+/** The cutter a classifier was measured with, in words: "SignNet 896 × 288 of 30 Oct 10:46" (its version on Models),
+ * else its size; and whether it is the cutter in use. */
+const cutters = computed(() => models.value?.roles.find((role) => role.role === 'cutter')?.versions ?? []);
+function cutterOf(version: ClassifierModel): {text: string; inUse: boolean} | null {
+  const found = cutters.value.find((cutter) => cutter.id === version.chain?.cutter_id);
+  if (found) return {text: found.label + ' of ' + (found.trained_at ? isoWhen(found.trained_at) : found.run), inUse: found.in_use};
+  return version.chain?.cutter_size ? {text: 'a cutter ' + sizeText(version.chain.cutter_size), inUse: false} : null;
+}
+/** Each pair as the picker shows it: the classifier by its time, the cutter it was measured with under it; “In use”
+ * when both are the ones in use. */
+const sourceOptions = computed((): PickerOption[] => sources.value.map((version) => {
+  const cutter = cutterOf(version);
+  return {key: version.id, title: 'Classifier ' + isoWhen(version.trained_at), short: isoWhen(version.trained_at),
+    badge: version.in_use ? (cutter?.inUse ? 'In use' : 'Classifier in use') : undefined,
+    sub: cutter ? 'with ' + cutter.text : undefined};
+}));
+/** What is replayed, in words: the two networks of the pair and what is left out. */
+const pairText = computed((): string => {
+  const version = source.value;
+  if (version === null) return '';
+  const cutter = cutterOf(version);
+  return (cutter ? cutter.text.charAt(0).toUpperCase() + cutter.text.slice(1) : 'The cutter') + ' finds the signs, the classifier of '
+    + isoWhen(version.trained_at) + ' reads them: the pair measured at the end of that classifier’s training. '
+    + 'No Applicability and no road type: every speed sign read counts.';
+});
 
 const PARTITIONS = [{key: 'test' as WatchPartition, label: 'Test drives'}, {key: 'validation' as WatchPartition, label: 'Validation drives'}];
 const partition = ref<WatchPartition>('test');
@@ -288,9 +310,10 @@ const stateWords = {right: 'Right', wrong: 'Wrong', none: 'No limit yet'} as con
     <h2 id="drive-title" class="sr-only">Drive</h2>
     <div class="drive-bar">
       <PickerSheet v-model="route" :options="routeOptions" label="Drive" id="drive-route"/>
-      <PickerSheet v-model="sourceId" :options="sourceOptions" label="Classifier" id="drive-source"/>
+      <PickerSheet v-model="sourceId" :options="sourceOptions" label="Networks" id="drive-source"/>
       <Segmented v-model="partition" :options="PARTITIONS" label="Which drives" class="drive-part"/>
     </div>
+    <p v-if="pairText" class="drive-why" id="drive-networks">{{ pairText }}</p>
     <p class="drive-why">{{ partition === 'test'
       ? 'Test drives: roads the networks never saw while training — how they would do on a new road.'
       : 'Validation drives: used while training to choose when to stop, so a little easier than the test.' }}</p>
