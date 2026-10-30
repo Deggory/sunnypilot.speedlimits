@@ -180,6 +180,28 @@ def test_a_job_knows_its_proposer_and_when_it_ended(root, checkout, monkeypatch)
     assert next(item for item in panel.jobs() if item['action'] == 'prepare')['proposer'] == 'vietnam'
 
 
+def test_a_preparation_started_without_a_choice_takes_the_one_of_prepare(root, checkout, monkeypatch):
+    # The Overview's next step and Try again send no proposer: the choice kept on Prepare, never vietnam behind it.
+    (checkout / 'helpers' / '1_prepare.sh').write_text('#!/usr/bin/env bash\necho "proposer=$NNSLR_PROPOSER"\n')
+    (root / 'models').mkdir(parents=True, exist_ok=True)
+    (root / 'models' / 'active.json').write_text(json.dumps({'cutter': {'id': 'cutter:c/x'}, 'classifier': {'id': 'classifier:k/y'},
+                                                             'decider': {'id': 'decider:d/z'}}))
+    panel = Panel(root, repo=checkout)
+    # Nothing in use is whole yet: chosen all the same, then refused with the reason, not run with another one.
+    assert panel.set_proposer({'proposer': 'ours'})['chosen'] == 'ours'
+    monkeypatch.setattr('nnslr_tools.preannotate.ours_missing', lambda root: 'the decider is not in use yet')
+    with pytest.raises(PanelError) as refused:
+        panel.start('prepare')
+    assert refused.value.reason == 'not_available'
+    monkeypatch.setattr('nnslr_tools.preannotate.ours_missing', lambda root: None)
+    job = finished(panel, panel.start('prepare')['id'])
+    assert job['proposer'] == 'ours' and 'proposer=ours' in (panel.logs / (job['id'] + '.log')).read_text()
+    # Prepare and the Overview say which networks those are.
+    networks = {'cutter': 'cutter:c/x', 'classifier': 'classifier:k/y', 'decider': 'decider:d/z'}
+    assert panel.proposers()['networks'] == networks
+    assert panel.status()['proposers']['networks'] == networks and panel.status()['proposers']['chosen'] == 'ours'
+
+
 def test_propose_again_running_has_the_progress_of_the_preparation(root, checkout):
     panel = Panel(root, repo=checkout)
     panel.logs.mkdir(parents=True)

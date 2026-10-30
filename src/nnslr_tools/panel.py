@@ -727,9 +727,11 @@ class Panel:
         # Who can propose the signs on this server (the choice of the Prepare tab), and why not.
         from nnslr_tools.preannotate import ours_missing, vlm_missing
         # qwen: why it is not installed; qwen_gpu: why it cannot load on the GPU now (start() refuses it then); ours:
-        # why Our networks are not whole yet.
+        # why Our networks are not whole yet; chosen: the choice kept on the Prepare tab (None before one: then the
+        # best measured, proposers()); networks: what Our networks run, the parts in use.
         payload['proposers'] = {'qwen': vlm_missing(self.root), 'qwen_gpu': _qwen_gpu_reason(system['gpu']) or None,
-                                'ours': ours_missing(self.root)}
+                                'ours': ours_missing(self.root), 'chosen': self._kept_proposer(),
+                                'networks': _active_parts(self.root)}
         # The packages of our networks prepared here, newest first, and where they are published (Models tab).
         from nnslr_tools import hf_account
         from nnslr_tools.networks_package import packages
@@ -1093,7 +1095,9 @@ class Panel:
                               for key, label in PROPOSERS.items()], 'reports': reports,
                 # The choice of Prepare: kept on the server once made (one that cannot run stays chosen, and Prepare
                 # says why with its buttons off), else the best measured that can run.
-                'chosen': self._kept_proposer() or best or DEFAULT_PROPOSER, 'best': best}
+                'chosen': self._kept_proposer() or best or DEFAULT_PROPOSER, 'best': best,
+                # What Our networks propose with now: the cutter, classifier and decider in use (Models), by id.
+                'networks': _active_parts(self.root)}
 
     def _kept_proposer(self) -> str | None:
         """The proposer chosen on the Prepare tab (PROPOSER_FILE), or None before a choice."""
@@ -1488,6 +1492,10 @@ class Panel:
                 start_args.append('--host=' + configured(self.root))
         # [ai-reviewer] - END
         proposer = (options or {}).get('proposer')
+        if proposer is None and action in PREPARING:
+            # Started without a choice (the Overview's next step, Try again of an old job): the one of the Prepare
+            # tab, never the helpers' own default behind it.
+            proposer = self.proposers()['chosen']
         if proposer is not None:
             if action not in ('prepare', 'prepare_again', 'measure_proposer'):
                 raise PanelError(400, 'bad_option', 'Only preparing routes takes a proposer.')

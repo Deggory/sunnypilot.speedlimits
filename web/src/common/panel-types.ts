@@ -42,6 +42,8 @@ export interface ProposersPayload {
   chosen?: Proposer;
   /** The proposer measured best that can run here (most speed signs read right), or null. */
   best?: Proposer | null;
+  /** What Our networks propose with: the cutter, classifier and decider in use (Models), by id. */
+  networks?: Record<string, string>;
 }
 /** The options of an action: the signs the cutter finds, the proposer of a preparation, or what an AI review
  * reviews (the route, the provider, save yes or no, how many frames at most, as text). */
@@ -411,7 +413,9 @@ export interface PanelStatus {
   /** Why a proposer cannot run on this server (null: it can): qwen not installed, or qwen_gpu, the GPU memory it
    * needs taken now. */
   /** Why a proposer cannot run here: qwen not installed, its GPU memory taken, Our networks not whole yet. */
-  proposers?: {qwen: string | null; qwen_gpu?: string | null; ours?: string | null};
+  proposers?: {qwen: string | null; qwen_gpu?: string | null; ours?: string | null;
+    /** The choice kept on the Prepare tab (null before one), and the parts Our networks run (by id). */
+    chosen?: Proposer | null; networks?: Record<string, string>};
   /** The AI reviewer chosen in Settings (llm_providers.ai_state: a file read, no network). */
   ai_reviewer: AiState;
   /** The packages of our networks prepared here, newest first (nnslr_tools.networks_package.packages), and the Hugging

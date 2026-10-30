@@ -34,7 +34,7 @@ letter-spacing:0;display:inline-grid;place-items:center;font-variant-numeric:tab
 .k-review{--k:var(--rev);--k-soft:var(--rev-soft)}
 .k-prepare{--k:var(--todo);--k-soft:var(--todo-soft)}
 .k-train,.k-done{--k:var(--ok);--k-soft:var(--ok-soft)}
-/* The Overview's running work (RunRow.vue): one row per job, a tap opens its sheet. */
+/* The Overview's running work (RunRow.vue): one row per job, a tap opens its sheet, Stop beside it. */
 .run-card{display:flex;flex-direction:column;gap:4px;padding:14px 10px 10px}
 .run-card .run-title{margin:0 12px 2px;font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
 .run-row{appearance:none;border:0;background:none;font:inherit;color:inherit;text-align:left;width:100%;display:flex;align-items:center;
@@ -52,6 +52,10 @@ button.run-row:active{background:var(--surface-3)}
 .run-bar span{display:block;height:100%;width:0;border-radius:2px;background:var(--rev);transition:width .6s ease}
 .run-bar.indeterminate span{position:absolute;width:35%;animation:live-slide 1.4s ease-in-out infinite}
 .run-chev{flex:none;color:var(--muted);font-size:20px}
+.run-item{display:flex;align-items:center;gap:4px}
+.run-item .run-row{flex:1;min-width:0}
+.run-stop{flex:none;margin-right:6px}
+@media (max-width:520px){.run-item:has(.run-stop) .run-chev{display:none}.run-item:has(.run-stop) .run-row{padding-right:4px}}
 @media (prefers-reduced-motion:reduce){.run-bar span{transition:none}.run-bar.indeterminate span{animation:none}}
 
 /* Next step: a soft wash in the phase's colour and a coloured eyebrow. */

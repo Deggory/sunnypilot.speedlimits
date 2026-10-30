@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// Overview, the home page, in the order you look at it: what is running now, one row each (a tap opens its sheet with
-// the log and Stop), or the last job when it failed; the next step, with its one button; three summaries, links to the
+// Overview, the home page, in the order you look at it: what is running now, one row each with Stop (a tap opens its
+// sheet with the log), or the last job when it failed; the next step, with its one button; three summaries, links to the
 // drives, the review and the dataset; the last jobs that ended (three, the others on a click). The server, its gauges
 // and what is on the GPU are in the server's panel of the top bar (TopMachine.vue), with Update the site.
 import {computed, ref} from 'vue';
@@ -38,12 +38,13 @@ const shown = computed(() => showAll.value ? ended.value : ended.value.slice(0, 
 
   <section v-if="running.length + activities.length || failed" class="card run-card" aria-labelledby="running-title" aria-live="polite">
     <h2 class="run-title" id="running-title">{{ running.length + activities.length ? 'Running' : 'Last job failed' }}</h2>
-    <RunRow v-for="job in running" :key="job.id" :job="job" @open="$emit('details', $event)"/>
+    <RunRow v-for="job in running" :key="job.id" :job="job" @open="$emit('details', $event)" @stop="$emit('stop', $event)"/>
     <RunRow v-for="activity in activities" :key="activity.pid + activity.label" :activity="activity"/>
     <RunRow v-if="failed" :job="failed" @open="$emit('details', $event)"/>
   </section>
 
-  <NextStepCard :next="next" :actions="status?.actions ?? null" :review-href="reviewHref" @run="(name, state) => $emit('run', name, state)"/>
+  <NextStepCard :next="next" :actions="status?.actions ?? null" :review-href="reviewHref" :proposers="status?.proposers ?? null"
+                @run="(name, state) => $emit('run', name, state)"/>
   <FlowTiles :status="status" :attention="next.attention" :busy="busy"/>
 
   <section class="card recent" aria-labelledby="recent-title">

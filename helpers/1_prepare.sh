@@ -21,8 +21,9 @@
 # before it becomes the current one. Segments of a route that arrive later stay unused (helpers/status.sh
 # shows them).
 # Every route writes its own log in data/logs/prepare/<route>.log.
-# Who proposes the signs: NNSLR_PROPOSER=vietnam (the Vietnamese YOLO of Hugging Face, default) or ours (our
-# cutter and classifier, on the GPU), the choice of the Prepare tab.
+# Who proposes the signs: NNSLR_PROPOSER=vietnam (the Vietnamese YOLO of Hugging Face), ours (our cutter,
+# classifier and decider in use, on the GPU) or qwen; unset, the choice of the Prepare tab (data/web/proposer.json),
+# vietnam only before any choice.
 # -h, --help: this help.
 # Env: COMMA_VIDEOS_DIR (default ../comma-videos next to this repo), NNSLR_DATA_ROOT (default data/)
 
@@ -34,6 +35,11 @@ DATA_ROOT="${NNSLR_DATA_ROOT:-$ROOT/data}"
 NN="$ROOT/.venv/bin/nnslr"
 PY="$ROOT/.venv/bin/python"
 LOG_DIR="$DATA_ROOT/logs/prepare"
+if [ -z "${NNSLR_PROPOSER:-}" ] && [ -f "$DATA_ROOT/web/proposer.json" ]; then
+  NNSLR_PROPOSER="$("$PY" -c 'import json, sys; print(json.load(open(sys.argv[1])).get("proposer") or "")' \
+    "$DATA_ROOT/web/proposer.json" 2>/dev/null || true)"
+fi
+export NNSLR_PROPOSER="${NNSLR_PROPOSER:-vietnam}"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 

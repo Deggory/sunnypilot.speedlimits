@@ -13,6 +13,7 @@ import ActionList from './ActionList.vue';
 import JobProgress from './JobProgress.vue';
 import {activityTab, JOB_STATE, jobOf, PREPARE_ACTIONS, startedWhen, terminalActivities} from './jobs';
 import PrepRoutes from './PrepRoutes.vue';
+import {networksText, PROPOSER_LABELS, proposerText} from './proposer-words';
 import {reviewSummary} from './review-routes';
 import RouteTable from './RouteTable.vue';
 import TerminalActivity from './TerminalActivity.vue';
@@ -24,8 +25,7 @@ const emit = defineEmits<{run: [name: ActionName, state: ActionState, start?: un
 
 /** Who proposes the signs: the choice is kept on the server for every browser (POST /api/panel/proposer); before one
  * is made, the server offers the one measured best (Evaluate › Proposers). */
-const PROPOSERS: {key: Proposer; label: string}[] = [{key: 'vietnam', label: 'Vietnamese YOLO'}, {key: 'ours', label: 'Our networks'},
-  {key: 'qwen', label: 'Qwen3-VL'}];
+const PROPOSERS: {key: Proposer; label: string}[] = (['vietnam', 'ours', 'qwen'] as const).map((key) => ({key, label: PROPOSER_LABELS[key]}));
 /** What each one is; its measure follows (measureText). */
 const PROPOSER_TEXT: Record<Proposer, string> = {
   vietnam: 'A ready-made model trained on Vietnamese signs: it boxes and reads them by itself.',
@@ -134,13 +134,13 @@ const notReady = computed(() => (props.status?.routes ?? []).filter((row) => WAI
 /** The drives with frames left to review (in progress or not started), and those reviewed to the end. */
 const review = computed(() => reviewSummary(props.status));
 const toReview = computed(() => review.value.inProgress + review.value.toStart);
-/** Who proposes in a preparation, with Our networks' parts by their run: "Our networks: cutter 2026-10-26_1638, …". */
+/** Who proposes in a preparation, with Our networks' parts by their run: "Our networks: cutter SignNet, 30 Oct 10:46 · …". */
 function proposerLine(job: Job): string {
-  const name = PROPOSERS.find((item) => item.key === job.proposer)?.label ?? String(job.proposer);
-  const parts = Object.entries(job.networks ?? {}).map(([part, id]) =>
-    part + ' ' + ((id.split(':')[1] ?? id).split('/')[0] ?? id).replace('-' + part, ''));
-  return parts.length ? name + ': ' + parts.join(', ') : name;
+  return job.proposer && job.proposer in PROPOSER_LABELS ? proposerText(job.proposer as Proposer, job.networks)
+    : String(job.proposer);
 }
+/** The networks Our networks run now (the ones in use in Models), in words; '' while unknown. */
+const oursInUse = computed(() => networksText(props.status?.proposers?.networks ?? measures.value?.networks));
 
 /** The comma pill of the top bar, opened as a click on it would: Download new drives is there. */
 function openComma(): void {
@@ -170,6 +170,8 @@ function openComma(): void {
       <Segmented v-model="proposer" :options="PROPOSERS" label="Who proposes the signs" :disabled="runningProposer !== null"/>
       <p class="figure-note">{{ PROPOSER_TEXT[proposer] }} {{ measureText(proposer) }}<template v-if="runningProposer"> It is
         proposing now: you can choose again when it ends.</template></p>
+      <p v-if="proposer === 'ours' && oursInUse" class="figure-note" id="proposer-networks">In use now: {{ oursInUse }}.
+        <a href="/models">Change them in Models</a></p>
       <p v-if="oursMissing" class="figure-note proposer-missing">{{ sentence(oursMissing) }}</p>
       <template v-if="unavailable">
         <p class="figure-note proposer-missing" :title="unavailable">{{ unavailable.includes('not checked yet')

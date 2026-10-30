@@ -78,7 +78,7 @@ It copies new drives from the comma over SSH. It drops trips shorter than five m
 
 On the site: **Data › Drives**, then **Prepare new drives**. In a terminal: `helpers/1_prepare.sh`.
 
-It takes one picture a second, lets a model propose sign boxes, and reads the GPS position and country of each picture. **It takes a while and uses many CPU cores and the GPU.** You choose the model that proposes the boxes under **Found by**: Vietnamese YOLO (the default), Our networks, or Qwen3-VL (about 17 GB of GPU memory).
+It takes one picture a second, lets a model propose sign boxes, and reads the GPS position and country of each picture. **It takes a while and uses many CPU cores and the GPU.** You choose the model that proposes the boxes under **Found by**: Vietnamese YOLO (the default before any choice), Our networks, or Qwen3-VL (about 17 GB of GPU memory).
 
 For the scene network, **Data › Roads › Find the road types** (`helpers/road_types.sh`) reads the kind of each road from OpenStreetMap, offline. These are training labels only: the car never sees the map.
 

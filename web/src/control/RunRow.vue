@@ -1,14 +1,15 @@
 <script setup lang="ts">
 // One running job in one row (the Overview): its name, how far it is, what it does now and about how long is left,
-// with a thin bar; a tap opens its sheet (LogSheet.vue: the steps, the log, Stop). A job that failed is the same row in
-// red with what went wrong. Work started from a terminal has no sheet: the row only says what it is.
+// with a thin bar, and Stop beside it; a tap opens its sheet (LogSheet.vue: the steps, the log). A job that failed is
+// the same row in red with what went wrong. Work started from a terminal has no sheet: the row only says what it is.
 import {computed} from 'vue';
+import Icon from '../components/Icon.vue';
 import type {Activity, Job} from '../common/panel-types';
 import {useNow} from '../composables/now';
 import {etaText, failedStep, stepText} from './jobs';
 
 const props = defineProps<{job?: Job | null; activity?: Activity | null}>();
-defineEmits<{open: [job: Job]}>();
+defineEmits<{open: [job: Job]; stop: [job: Job]}>();
 const now = useNow();
 
 const failed = computed(() => props.job?.state === 'failed');
@@ -37,6 +38,7 @@ const line = computed(() => {
 </script>
 
 <template>
+  <div class="run-item">
   <component :is="job ? 'button' : 'div'" :type="job ? 'button' : undefined" class="run-row" :class="{failed}"
              :data-job="job?.id" @click="job && $emit('open', job)">
     <span class="run-icon" aria-hidden="true"><span v-if="!failed" class="spinner"></span><template v-else>!</template></span>
@@ -48,4 +50,7 @@ const line = computed(() => {
     </span>
     <span v-if="job" class="run-chev" aria-hidden="true">›</span>
   </component>
+  <button v-if="job && job.state === 'running' && job.stoppable" class="btn small danger run-stop" type="button"
+          :aria-label="'Stop ' + label" @click="$emit('stop', job)"><Icon name="stop"/>Stop</button>
+  </div>
 </template>
