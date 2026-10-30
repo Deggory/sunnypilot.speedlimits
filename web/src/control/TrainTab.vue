@@ -74,6 +74,12 @@ const latest = (role: ModelRole): ModelVersion | null => roleOf(role)?.versions[
 const latestCutter = computed(() => latest('cutter'));
 /** The cutter in use (Models): the classifier's training mines its false boxes and measures the chain with it. */
 const cutterInUse = computed(() => roleOf('cutter')?.versions.find((version) => version.in_use) ?? null);
+/** Its numbers as the car reads it (best 5 boxes of 0.3 or more), on the test, else validation. */
+const cutterInUseCar = computed(() => {
+  const version = cutterInUse.value;
+  return version?.role === 'cutter' ? version.test?.car ?? version.validation?.car ?? null : null;
+});
+const cutterInUsePartition = computed(() => cutterInUse.value?.role === 'cutter' && cutterInUse.value.test?.car ? 'test' : 'validation');
 const latestClassifier = computed(() => latest('classifier'));
 const latestDecider = computed(() => latest('decider'));
 /** The road type: the newest network with memory and the sign (road-type/gru, the one for the car), else the newest. */
@@ -269,7 +275,10 @@ const numbers = computed(() => {
         <ActionList :items="CLASSIFIER_ACTIONS" :actions="classifierActions"
                     @run="(name, state) => emit('run', name, state, undefined, mapillaryOptions)"/>
         <p class="latest-none" id="train-classifier-cutter"><template v-if="cutterInUse">Cutter: the one in use,
-          <strong>{{ cutterInUse.label }}</strong> · {{ cutterInUse.trained_at ? isoWhen(cutterInUse.trained_at) : cutterInUse.run }}.
+          <strong>{{ cutterInUse.label }}</strong> · {{ cutterInUse.trained_at ? isoWhen(cutterInUse.trained_at) : cutterInUse.run }}.<template
+          v-if="cutterInUseCar"> On the {{ cutterInUsePartition }}, as the car reads it: it finds <strong>{{ pct(cutterInUseCar.recall) }}</strong>
+          of the signs, and <strong>{{ pct(cutterInUseCar.precision) }}</strong> of its boxes are signs<template
+          v-if="cutterInUseCar.false_per_frame !== null"> ({{ cutterInUseCar.false_per_frame.toFixed(2) }} false a frame)</template>.</template>
           Its mistakes are the “not a sign” the classifier learns, and the chain is measured with it. Another one: Models › Use this one.</template><template
           v-else-if="models">No cutter in use: choose one in Models first.</template></p>
         <p v-if="mapillaryState?.available" class="latest-none" id="train-mapillary-note">Mapillary: {{ thousands(mapillaryState.crops) }}
