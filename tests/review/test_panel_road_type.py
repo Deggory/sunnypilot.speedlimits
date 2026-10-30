@@ -1,5 +1,5 @@
-"""The road type in the panel: "Train the road type" (scripts/run_road_type.sh) from the Train tab, its progress read
-from its log (nnslr_tools.job_progress), and its two networks, with memory and without, in Models
+"""The scene network in the panel: "Train the scene network" (scripts/run_road_type.sh) from the Train tab, its
+progress read from its log (nnslr_tools.job_progress), and its two networks, with memory and without, in Models
 (nnslr_tools.model_roles). Every run is a synthetic folder whose numbers come from the real metric functions of
 nnslr_tools.road_type_metrics: nothing is trained. numpy and road_type_metrics are imported inside the tests: collecting
 the tests must leave numpy out (tests/cli/test_import_isolation.py).
@@ -80,11 +80,11 @@ def test_the_progress_counts_the_epochs_of_each_network_and_not_those_of_the_dry
     assert result['percent'] == 84.5 and result['detail'] == 'Train without memory · epoch 30 of 60'
 
 
-# -- "Train the road type" ----------------------------------------------------------------------------------------
+# -- "Train the scene network" ------------------------------------------------------------------------------------
 def test_the_road_type_is_trained_from_the_train_tab_once_the_road_types_are_found(root, checkout, monkeypatch):
     panel = Panel(root, repo=checkout)
     assert panel._action_states(ready_payload(), [])['train_road_type'] == {
-        'label': 'Train the road type', 'allowed': False, 'reason': 'scripts/run_road_type.sh is missing in this installation'}
+        'label': 'Train the scene network', 'allowed': False, 'reason': 'scripts/run_road_type.sh is missing in this installation'}
     road_type_script(checkout)
     assert panel._action_states(ready_payload(), [])['train_road_type']['reason'] == \
         'no road types yet: Data › Roads, Find the road types'
@@ -101,7 +101,7 @@ def test_the_road_type_is_trained_from_the_train_tab_once_the_road_types_are_fou
     done = finished(panel, job['id'])
     first = full_log(panel, job['id']).splitlines()[0].split()
     assert first[:2] == ['==', 'scripts/run_road_type.sh'] and re.fullmatch(r'\d{4}-\d{2}-\d{2}_\d{4}-road-type', first[2])
-    assert (done['state'], done['run'], done['label']) == ('ok', first[2], 'Train the road type')
+    assert (done['state'], done['run'], done['label']) == ('ok', first[2], 'Train the scene network')
     assert _run_of(panel.logs / (job['id'] + '.log'), 'train_road_type') == first[2]
 
 
@@ -110,7 +110,7 @@ def test_a_road_type_training_started_from_a_terminal_has_the_progress_of_its_ru
     log = root / 'runs' / '2026-10-29_1200-road-type' / 'road-type.log'
     log.parent.mkdir(parents=True)
     log.write_text(LOG)
-    payload = {'jobs': [], 'activities': [{'group': 'train', 'label': 'road type training', 'pid': 1}]}
+    payload = {'jobs': [], 'activities': [{'group': 'train', 'label': 'scene training', 'pid': 1}]}
     panel._terminal_training(payload)
     assert payload['activities'][0]['progress']['detail'] == 'Train with memory, the sign and the motion · epoch 15 of 60'
 
@@ -185,7 +185,7 @@ def test_both_networks_are_versions_of_the_road_type_with_their_numbers(tmp_path
     chosen = models.set_active('road_type', gru['id'], who='admin', via='sign-in')
     assert chosen['id'] == gru['id']
     roles = {role['role']: role for role in models.index()['roles']}
-    assert roles['road_type']['label'] == 'Road type' and roles['road_type']['active']['id'] == gru['id']
+    assert roles['road_type']['label'] == 'Scene' and roles['road_type']['active']['id'] == gru['id']
 
 
 def test_a_result_of_another_task_is_no_road_type():

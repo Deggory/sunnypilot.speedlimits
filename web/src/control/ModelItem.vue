@@ -17,7 +17,7 @@ import {computed} from 'vue';
 import {isoWhen, thousands} from '../common/format';
 import type {DeciderNumbers, ModelVersion, RoadTypeNumbers} from '../common/panel-types';
 import {PARTITION_LABEL, pct} from './evaluate';
-import {ROLE_TEXT, epochText, evaluateHref, metricsOf, openRun, perFrame, sizeText, type CarState, type Metric} from './models';
+import {ROLE_TEXT, epochText, evaluateHref, metricsOf, openRun, perFrame, roleWords, sizeText, type CarState, type Metric} from './models';
 import MetricTiles from './MetricTiles.vue';
 
 const props = defineProps<{version: ModelVersion; roleLabel: string; score: number; readOnly: boolean; busy: string | null;
@@ -325,7 +325,7 @@ const hourly = (value: number | null): string => value === null ? '–' : value 
           <div><dt :title="'One step at batch 1 on ' + (roadType.step_device ?? 'this server')">Time per step</dt><dd>{{ roadType.step_ms === null ? '–' : roadType.step_ms + ' ms' }}</dd></div>
           <div><dt>Best epoch</dt><dd>{{ epoch }}</dd></div>
           <div v-if="roadType.motion !== undefined"><dt title="What it reads each second; never the map">Inputs</dt><dd>{{ inputsText }}</dd></div>
-          <div v-if="roadType.junctions?.branch"><dt title="Chosen on validation after the road type’s epoch">Junction head</dt><dd>{{
+          <div v-if="roadType.junctions?.branch"><dt title="Chosen on validation after the scene network’s epoch">Junction head</dt><dd>{{
             roadType.junctions.branch === 'separate' ? 'own memory' : 'shared memory' }}<span v-if="roadType.junctions.branch === 'separate'
             && roadType.junctions.stage_epoch" class="muted"> · epoch {{ roadType.junctions.stage_epoch }}</span></dd></div>
           <div v-if="roadType.memory === 'gru'"><dt>For the car</dt><dd>{{ roadType.onnx ? 'ONNX step exported' : 'not exported yet' }}</dd></div>
@@ -353,7 +353,7 @@ const hourly = (value: number | null): string => value === null ? '–' : value 
       <span v-if="forCar || (selectable && !version.in_use)" class="model-buttons">
         <button v-if="selectable && !version.in_use" class="btn small" type="button" :disabled="blocked !== '' || busy !== null"
                 :title="blocked || ROLE_TEXT[version.role].uses"
-                :aria-label="'Use ' + version.run + ' · ' + version.label + ' as the ' + roleLabel.toLowerCase()"
+                :aria-label="'Use ' + version.run + ' · ' + version.label + ' as the ' + roleWords(version, roleLabel)"
                 @click="emit('use', version)">{{ busy === version.id ? 'Saving…' : 'Use this one' }}</button>
         <template v-if="forCar">
           <button v-if="triable" class="btn small" type="button" :disabled="tryBlocked !== ''"

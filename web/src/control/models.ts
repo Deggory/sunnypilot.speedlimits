@@ -45,9 +45,9 @@ export const ROLE_TEXT: Record<ModelRole, {what: string; today: string; empty: s
       + 'With memory it remembers the seconds before, and how long ago a motorway sign was read, so the 60 of a ramp ends '
       + 'on the motorway without a sign.',
     today: 'Today: prototypes, with memory and the sign, without the sign and without memory, judged on the test drives.',
-    empty: 'No road type trained yet.',
-    emptyMore: '“Train the road type” on the Train tab; its two networks appear here.',
-    uses: 'Nothing uses the road type yet: the choice is only noted for the car.',
+    empty: 'No scene network trained yet.',
+    emptyMore: '“Train the scene network” on the Train tab; its two networks appear here.',
+    uses: 'The comma runs the scene network in use once Publish puts it in its software.',
   },
 };
 
@@ -77,9 +77,15 @@ export function versionName(version: ModelVersion): string {
   return version.run + ' · ' + version.label;
 }
 
+/** A role's name inside a sentence: “scene network” for the role road_type (its label, “Scene”, is a name), else
+ * its label in small letters. */
+export function roleWords(version: ModelVersion, roleLabel: string): string {
+  return version.role === 'road_type' ? 'scene network' : roleLabel.toLowerCase();
+}
+
 /** Asks, then makes a version the one in use for its role; true when it is. */
 export async function putInUse(version: ModelVersion, roleLabel: string): Promise<boolean> {
-  const role = roleLabel.toLowerCase();
+  const role = roleWords(version, roleLabel);
   const ok = await askConfirm({
     title: 'Use this ' + role + '?', action: 'Use this one',
     text: versionName(version) + ' becomes the ' + role + ' in use on this server. ' + ROLE_TEXT[version.role].uses
@@ -113,9 +119,9 @@ export function publishQuestion(signnet: ModelVersion, classifier: ModelVersion 
   const reader = classifier ? classifier.label + ' ' + (classifier.trained_at ? isoWhen(classifier.trained_at) : classifier.run)
     : 'the classifier in use';
   const scene = roadType
-    ? ' and the road type ' + roadType.label + ' of ' + roadType.run + ' to read the scene where no sign gives the limit '
+    ? ' and the scene network ' + roadType.label + ' of ' + roadType.run + ' to read the scene where no sign gives the limit '
       + '(a car park 10, a town 50)'
-    : '; no road type is in use, so it reads the signs alone';
+    : '; no scene network is in use, so it reads the signs alone';
   return {
     title: 'Publish the networks in use to the car?', action: 'Publish',
     text: 'The comma gets ' + signnet.label + ' of ' + signnet.run + ' to find the signs, ' + reader

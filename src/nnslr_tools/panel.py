@@ -304,7 +304,7 @@ ACTIONS = {
     # a run of its own (start() adds <time>-cutter; {'families'}).
     'train_cutter': {'label': 'Train the cutter', 'group': 'train', 'command': [CUTTER_SCRIPT]},
     'train_decider': {'label': 'Train applicability', 'group': 'train', 'command': [DECIDER_SCRIPT]},
-    'train_road_type': {'label': 'Train the road type', 'group': 'train', 'command': [ROAD_TYPE_SCRIPT]},
+    'train_road_type': {'label': 'Train the scene network', 'group': 'train', 'command': [ROAD_TYPE_SCRIPT]},
     # The cutter, classifier and decider in use exported as one package (start() names it); nothing is uploaded.
     'networks_prepare': {'label': 'Prepare the package', 'group': 'publish', 'command': [NETWORKS_SCRIPT]},
     # A package prepared here ({'package': name}) uploaded to Hugging Face, public: other people download it.
@@ -351,7 +351,7 @@ ACTIVITIES = (
     ('train', 'cutter training', 'run_signnet.sh'),
     ('train', 'cutter training', 'nnslr train-signnet'),
     ('train', 'cutter training', 'run_detector_sizes.sh'),
-    ('train', 'road type training', 'run_road_type.sh'),
+    ('train', 'scene training', 'run_road_type.sh'),
     ('update', 'code update', 'helpers/update.sh'),
     ('publish', 'package of the networks', 'publish_networks.sh'),
     ('publish', 'publish to the car', 'send_to_car.sh'),
@@ -375,7 +375,7 @@ RUNNING_NAMES = {'fetch': 'a download from the comma', 'prepare': 'a preparation
                  'dataset': 'an import of the reviews', 'train': 'a training', 'train_continue': 'a training',
                  'train_resume': 'a training', 'train_classifier': 'a classifier training',
                  'train_cutter': 'a cutter training', 'train_decider': 'a decider training',
-                 'train_road_type': 'a road type training', 'update': 'a code update',
+                 'train_road_type': 'a scene training', 'update': 'a code update',
                  'networks_prepare': 'the preparation of a package', 'networks_publish': 'a publication',
                  'send_to_car': 'a publication to the car', 'try_on_comma': 'a trial on the comma',
                  'comma_restore': "a return to the build's networks",
@@ -386,7 +386,7 @@ ACTIVITY_NAMES = {'download from the comma': 'a download from the comma', 'prepa
                   'frame extraction': 'a preparation', 'pre-annotation': 'a preparation',
                   'dataset and training': 'an import or a training', 'GPU training': 'a training',
                   'classifier training': 'a classifier training', 'cutter training': 'a cutter training',
-                  'road type training': 'a road type training',
+                  'scene training': 'a scene training',
                   'code update': 'a code update', 'AI review': 'an AI review',
                   'package of the networks': 'a package of the networks', 'publish to the car': 'a publication to the car',
                   'networks on the comma': 'a copy onto the comma',
@@ -762,7 +762,7 @@ class Panel:
         if from_panel or not trainings:
             return
         terminal = {'classifier training': 'train_classifier', 'cutter training': 'train_cutter',
-                    'road type training': 'train_road_type'}
+                    'scene training': 'train_road_type'}
         patterns = (('train', ('logs/train-*.log',)), ('train_classifier', ('runs/*/classifier.log',)),
                     ('train_cutter', ('runs/*/signnet.log', 'runs/*/train.log', 'runs/*/detector-sizes/*.log')),
                     ('train_road_type', ('runs/*/road-type.log',)))

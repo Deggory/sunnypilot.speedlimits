@@ -28,14 +28,14 @@ SETTINGS = (
      'help': '…within this many seconds.', 'default': 1.5, 'min': 0.2, 'max': 5.0, 'step': 0.1, 'unit': 's',
      'group': 'signs'},
     {'key': 'road_type_debounce', 'constant': 'ROAD_TYPE_DEBOUNCE', 'label': 'A road type counts after',
-     'help': 'The road-type network answers once a second; its answer counts once it is the same this many times '
+     'help': 'The scene network answers once a second; its answer counts once it is the same this many times '
              'in a row.', 'default': 3, 'min': 1, 'max': 10, 'step': 1, 'unit': 'answers', 'group': 'road'},
     {'key': 'road_type_seconds', 'constant': 'ROAD_TYPE_SECONDS', 'label': 'A new road type gives its limit after',
      'help': 'Where no sign holds the limit, a new road type (town, rural, a 30 zone…) gives its general limit only '
              'once seen this long; also how long a road must be seen to leave a car park.', 'default': 10.0,
      'min': 2.0, 'max': 60.0, 'step': 1.0, 'unit': 's', 'group': 'road'},
     {'key': 'zone_confidence', 'constant': 'ZONE_CONFIDENCE', 'label': 'A 30 zone when the network is',
-     'help': 'The road-type network says "30 zone" only this sure, else town: with Map Data + Vision the car takes '
+     'help': 'The scene network says "30 zone" only this sure, else town: with Map Data + Vision the car takes '
              'vision first, and a wrong 30 on a 50 street brakes for nothing.', 'default': 0.9, 'min': 0.5,
      'max': 0.999, 'step': 0.01, 'unit': 'sure', 'group': 'road'},
     {'key': 'parking_seconds', 'constant': 'PARKING_SECONDS', 'label': 'A car park after',

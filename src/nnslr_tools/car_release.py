@@ -159,17 +159,18 @@ def _road_type(runs: RunsIndex, index: ModelIndex) -> dict | None:
         return None
     entry, why = index.in_use('road_type')
     if entry is None:
-        raise ValueError(why)
+        raise ValueError(why.replace('road_type', 'scene network'))
     if entry['part'] != ROAD_TYPE_ON_CAR:
-        raise ValueError(f'the road type in use, {entry["id"]}, has no memory: only the one with memory goes on the car')
+        raise ValueError(f'the scene network in use, {entry["id"]}, has no memory: only the one with memory goes on '
+                         'the car')
     if not entry['finished']:
-        raise ValueError(f'the road type {entry["id"]} has not finished its training')
+        raise ValueError(f'the scene network {entry["id"]} has not finished its training')
     run = runs._run_dir(entry['run'])
     files = {key: None if run is None else runs._file(run, relative) for key, relative in (
         ('weights', f'{ROAD_TYPE_ON_CAR}/road-type-best.pt'), ('onnx', ROAD_TYPE_EXPORT + ROAD_TYPE_FILE),
         ('contract', ROAD_TYPE_EXPORT + ROAD_TYPE_FILE + '.contract.json'))}
     if None in files.values():
-        raise ValueError(f'the road type {entry["id"]} has no exported ONNX step on this server')
+        raise ValueError(f'the scene network {entry["id"]} has no exported ONNX step on this server')
     return {'id': entry['id'], 'run': entry['run'], **files}
 
 

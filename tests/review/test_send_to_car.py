@@ -280,14 +280,14 @@ def test_only_a_road_type_with_memory_and_its_exported_step_goes_on_the_car(tmp_
     data = tmp_path / 'data'
     servers_runs(data)
     use_road_type(data, road_type_run(data, 't1', b'road', export=False))
-    with pytest.raises(ValueError, match='has no exported ONNX step'):
+    with pytest.raises(ValueError, match='the scene network .* has no exported ONNX step'):
         car_release.choose(data, 's1')
     frame = data / 'runs' / 't3' / 'road-type' / 'frame'
     frame.mkdir(parents=True)
     (frame / 'road-type-best.pt').write_bytes(b'w')
     write(frame / 'result.json', {'task': 'road_type', 'memory': 'none'})
     use_road_type(data, 'road_type:t3/road-type/frame')
-    with pytest.raises(ValueError, match='has no memory'):
+    with pytest.raises(ValueError, match='the scene network in use, .*, has no memory'):
         car_release.choose(data, 's1')
 
 

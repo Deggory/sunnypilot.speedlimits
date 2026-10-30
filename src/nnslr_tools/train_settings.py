@@ -1,4 +1,4 @@
-"""The settings of the trainings of Train (Cutter, Classifier, Applicability, Road type): the epochs, the patience, the batch,
+"""The settings of the trainings of Train (Cutter, Classifier, Applicability, Scene): the epochs, the patience, the batch,
 the learning rate, the processes reading the frames and the classifier's false boxes. Each one is an environment
 variable its script already reads (scripts/run_signnet.sh, run_classifier.sh, run_experiment_b.sh, run_road_type.sh)
 with the same default: the panel sets the ones changed here when it starts the next training of that kind
@@ -81,7 +81,7 @@ TRAININGS = {
          'help': 'Passes over the training signs, for each of the three versions.', 'default': 20, 'min': 1,
          'max': 200, 'step': 1, 'unit': 'epochs'},
     ), 'fixed': ()},
-    'train_road_type': {'label': 'Road type', 'script': 'scripts/run_road_type.sh', 'settings': (
+    'train_road_type': {'label': 'Scene', 'script': 'scripts/run_road_type.sh', 'settings': (
         {'key': 'epochs', 'env': 'NNSLR_ROAD_TYPE_EPOCHS', 'label': 'Epochs',
          'help': 'Passes over the drives, for each of the three networks; the best one on validation is kept.',
          'default': 60, 'min': 1, 'max': 200, 'step': 1, 'unit': 'epochs'},
@@ -221,7 +221,8 @@ def save(root: Path, body: dict, who: str) -> dict:
     for key, value in body['values'].items():
         setting = _setting(training, key)
         if setting is None:
-            raise SettingsError(f'{key} is not a setting of the {training["label"].lower()}.')
+            words = 'scene network' if action == 'train_road_type' else training['label'].lower()
+            raise SettingsError(f'{key} is not a setting of the {words}.')
         if value is None:
             if setting.get('same_as'):
                 following.add(key)

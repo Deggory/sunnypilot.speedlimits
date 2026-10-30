@@ -30,11 +30,11 @@ const props = defineProps<{status: PanelStatus | null}>();
 const emit = defineEmits<{run: [name: ActionName, state: ActionState, start?: TrainingStart, options?: ActionOptions]; stop: [job: Job];
   details: [job: Job]; pipeline: [steps: {action: PipelineAction; options: ActionOptions}[], text: string]; stopPipeline: []}>();
 
-/** The page as an app: one line of data, then one network at a time (Cutter, Classifier, Applicability, Road type, the whole
+/** The page as an app: one line of data, then one network at a time (Cutter, Classifier, Applicability, Scene, the whole
  * Pipeline), whose Train button becomes its progress, in the same place, while it trains. */
 type Section = 'cutter' | 'classifier' | 'decider' | 'road' | 'pipeline';
 const SECTIONS: {key: Section; label: string}[] = [{key: 'cutter', label: 'Cutter'}, {key: 'classifier', label: 'Classifier'},
-  {key: 'decider', label: 'Applicability'}, {key: 'road', label: 'Road type'}, {key: 'pipeline', label: 'Pipeline'}];
+  {key: 'decider', label: 'Applicability'}, {key: 'road', label: 'Scene'}, {key: 'pipeline', label: 'Pipeline'}];
 function sectionOf(action: ActionName): Section | null {
   if (action === 'train_cutter') return 'cutter';
   if (action === 'train_classifier') return 'classifier';
@@ -50,7 +50,7 @@ function jobFor(section: Section): Job | null {
 function activitiesFor(section: Section): Activity[] {
   return activities.value.filter((activity) => {
     const named: Section = activity.label.includes('cutter') ? 'cutter' : activity.label.includes('classifier') ? 'classifier'
-      : activity.label.includes('road type') ? 'road' : 'pipeline';
+      : activity.label.includes('scene') ? 'road' : 'pipeline';
     return named === section;
   });
 }
@@ -272,7 +272,7 @@ const numbers = computed(() => {
       </template>
       <template v-else-if="section === 'road'">
         <ActionList :items="ROAD_ACTIONS" :actions="status?.actions ?? null" @run="(name, state) => emit('run', name, state)"/>
-        <p class="latest-none" id="train-road-note">It learns from the road types of Data › Roads. Nothing on the car uses it yet.</p>
+        <p class="latest-none" id="train-road-note">It learns from the road types of Data › Roads. The one in use (Models) goes to the comma with Publish.</p>
       </template>
       <PipelineSection v-else v-model:families="cutterFamilies" :status="status" :choices="choices" :fresh="numbers?.fresh ?? 0"
                        :family-options="FAMILY_OPTIONS" @pipeline="(steps, text) => emit('pipeline', steps, text)"

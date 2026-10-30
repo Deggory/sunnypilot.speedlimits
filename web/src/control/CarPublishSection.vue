@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Publish › Publish: the networks in use put into the comma's software in one go (scripts/send_to_car.sh): the SignNet
-// in use, the classifier in use and the road type in use are prepared as ONNX and checked, published in
+// in use, the classifier in use and the scene network in use are prepared as ONNX and checked, published in
 // speed-limits-models, the sunnypilot speed-limits branch moves to them and psa-torque-sunny-testing is built again;
 // then the comma's Check for updates finds them. Each network in use is shown next to the one the comma's software has
 // (models/on-car.json), and the job's steps while it runs.
@@ -79,7 +79,7 @@ const blocked = computed((): string => {
   return state.value.allowed ? '' : state.value.reason.charAt(0).toUpperCase() + state.value.reason.slice(1) + '.';
 });
 
-/** Asks, naming the SignNet, the classifier and the road type in use, then starts the job. */
+/** Asks, naming the SignNet, the classifier and the scene network in use, then starts the job. */
 async function publish(): Promise<void> {
   const version = signnet.value;
   const current = state.value;

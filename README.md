@@ -18,7 +18,7 @@ Maps lag behind the road. Roadworks, variable motorway displays and new signs ar
 
 ## How it works
 
-Three networks: the **sign finder** (SignNet, also called the *cutter*) puts a box around each sign, the **sign reader** (the *classifier*) reads each box, and the **road type** network says what kind of road the car is on.
+Three networks: the **sign finder** (SignNet, also called the *cutter*) puts a box around each sign, the **sign reader** (the *classifier*) reads each box, and the **scene** network says what kind of road the car is on.
 
 From a drive to the car, in six steps:
 
@@ -27,7 +27,7 @@ flowchart TD
   A["Drives<br/>from the comma"] --> B["Prepare<br/>pictures + proposed boxes"]
   B --> C["Review on the site<br/>a person confirms the boxes"]
   C --> D["Import reviews<br/>→ training dataset"]
-  D --> E["Train<br/>sign finder, sign reader, road type"]
+  D --> E["Train<br/>sign finder, sign reader, scene"]
   E --> F["Publish<br/>speed-limits-models"]
   F -.->|new drives| A
 ```
@@ -45,7 +45,7 @@ flowchart TD
   cam["Road camera<br/>5 pictures a second"] --> sn["SignNet<br/>boxes the signs"]
   sn --> cl["Classifier<br/>reads each box"]
   cl --> lim["Vision limit"]
-  cam --> rt["Road type<br/>town, rural, motorway…"]
+  cam --> rt["Scene<br/>town, rural, motorway…"]
   sig["Car signals<br/>speed, gyro, steering, blinkers"] --> rt
   rt -->|"general limit where<br/>no sign holds"| lim
   lim --> res["sunnypilot resolver<br/>Map Data + Vision"]
@@ -54,7 +54,7 @@ flowchart TD
 
 - **SignNet** looks only at a band at the top of the picture, where signs stand (896 × 288 pixels, a grid of 8 pixels). It keeps up to 5 boxes per picture.
 - The **classifier** reads each box: a speed and its value, end of limit, another kind of sign, or "not a sign". A number counts once it is read in 2 pictures within 1.5 s.
-- The **road type** network says what kind of road it is: town, 30 zone, rural, expressway, motorway, ramp or car park. Where no sign holds, that gives the country's general limit. In Switzerland: 50 in town, 80 rural, 100 expressway, 120 motorway, 10 in a car park.
+- The **scene** network says what kind of road it is: town, 30 zone, rural, expressway, motorway, ramp or car park. Where no sign holds, that gives the country's general limit. In Switzerland: 50 in town, 80 rural, 100 expressway, 120 motorway, 10 in a car park.
 - Everything runs inside the comma 4, on its own GPU, next to the driving model.
 - **The vision side never reads the map.** It uses only the camera and the car's own signals. Map and vision meet only in sunnypilot's resolver, when the Speed Limit Source is **Map Data + Vision**.
 
@@ -80,7 +80,7 @@ On the site: **Data › Drives**, then **Prepare new drives**. In a terminal: `h
 
 It takes one picture a second, lets a model propose sign boxes, and reads the GPS position and country of each picture. **It takes a while and uses many CPU cores and the GPU.** You choose the model that proposes the boxes under **Found by**: Vietnamese YOLO (the default), Our networks, or Qwen3-VL (about 17 GB of GPU memory).
 
-For the road type network, **Data › Roads › Find the road types** (`helpers/road_types.sh`) reads the kind of each road from OpenStreetMap, offline. These are training labels only: the car never sees the map.
+For the scene network, **Data › Roads › Find the road types** (`helpers/road_types.sh`) reads the kind of each road from OpenStreetMap, offline. These are training labels only: the car never sees the map.
 
 ### 3. Review
 
@@ -126,7 +126,7 @@ On the site: **Training**. There is one tab and one button per network. **They a
 
 - **Train the cutter** (SignNet): about 80 minutes.
 - **Train the classifier**: a few hours. It learns from the false boxes of the cutter in use, so choose a cutter first.
-- **Train the road type**: about 15 minutes (longer the first time). It needs **Find the road types** (step 2) to have run once. It needs no reviewed sign.
+- **Train the scene network**: about 15 minutes (longer the first time). It needs **Find the road types** (step 2) to have run once. It needs no reviewed sign.
 - **Train applicability** (is this sign for our road?): about 15 minutes. A prototype.
 
 <img src="docs/images/panel-train.png" alt="Training page, Cutter tab: a SignNet 896 by 288 training running at epoch 11 of 40, with its steps and charts of validation recall and loss." width="100%">
@@ -139,18 +139,18 @@ Each training writes its results in `data/runs/<name>/`. Nothing is put in use b
 
 On the site: **Models › Versions**. Every version has its test numbers. **Use this one** picks the version that the other steps use.
 
-<img src="docs/images/readme-models.png" alt="Models, Versions page: four In use cards for Cutter (SignNet 896 by 288, 67.6% of the speed signs as the car reads them), Classifier, Applicability and Road type, each with its main test numbers and whether it is also on the car." width="100%">
+<img src="docs/images/readme-models.png" alt="Models, Versions page: four In use cards for Cutter (SignNet 896 by 288, 67.6% of the speed signs as the car reads them), Classifier, Applicability and Scene, each with its main test numbers and whether it is also on the car." width="100%">
 
 <sub>The networks in use, each with its main test numbers.</sub>
 
 To the car:
 
-- **Publish** (**Models › Publish**, one button) publishes the SignNet, the classifier and the road type in use into the [`speed-limits-models`](https://github.com/cristianku/speed-limits-models) repository. That is a submodule of sunnypilot's `speed-limits` branch. It then rebuilds Cristian's sunnypilot test branch (`psa-torque-sunny-testing`), in a few minutes. On the comma: **Settings › Software › Check for updates**, then install. The Hugging Face package below it is optional, for other people.
-- **Try on the comma now**, on the card of a SignNet, copies that SignNet and the classifier in use straight onto a parked comma over SSH, after checking them with the comma's own code. The road type stays the build's. They last until the comma's next update. **Back to the build's networks** undoes it.
+- **Publish** (**Models › Publish**, one button) publishes the SignNet, the classifier and the scene network in use into the [`speed-limits-models`](https://github.com/cristianku/speed-limits-models) repository. That is a submodule of sunnypilot's `speed-limits` branch. It then rebuilds Cristian's sunnypilot test branch (`psa-torque-sunny-testing`), in a few minutes. On the comma: **Settings › Software › Check for updates**, then install. The Hugging Face package below it is optional, for other people.
+- **Try on the comma now**, on the card of a SignNet, copies that SignNet and the classifier in use straight onto a parked comma over SSH, after checking them with the comma's own code. The scene network stays the build's. They last until the comma's next update. **Back to the build's networks** undoes it.
 
 The **On the car** card holds the comma's settings: how sure a sign must be, in how many pictures, how long a road type must be seen. They travel with the next send.
 
-<img src="docs/images/panel-car.png" alt="The On the car card: settings for signs (classifier 70% sure, seen in 2 pictures within 1.5 s) and for the road type (counts after 3 answers, new limit after 10 s, 30 zone at 90%, car park after 5 s, car park 10 km/h, ramp 45 s, merged after 8 s)." width="100%">
+<img src="docs/images/panel-car.png" alt="The On the car card: settings for signs (classifier 70% sure, seen in 2 pictures within 1.5 s) and for the scene network (counts after 3 answers, new limit after 10 s, 30 zone at 90%, car park after 5 s, car park 10 km/h, ramp 45 s, merged after 8 s)." width="100%">
 
 <sub>Models › On the car: the comma's own settings, sent with the networks.</sub>
 
@@ -198,7 +198,7 @@ Day-to-day work happens on the site, whose buttons run a few helper scripts and 
 
 - **Sign finder (cutter).** SignNet is the one cutter, on the car since 28 October. The one in use, trained on 30 October, finds 68% of the speed signs as the car reads them (IoU 0.5).
 - **Classifier.** A version with "not a sign" is trained, measured, and on the car.
-- **Road type.** A network with memory: the kind of road from the camera and the car's own motion, one answer a second, and the merge after a ramp. On the car ([details](docs/NEURAL_NETWORK.md#the-road-type-with-memory-29-october-2026)).
+- **Scene.** A network with memory: the kind of road from the camera and the car's own motion, one answer a second, and the merge after a ramp. On the car ([details](docs/NEURAL_NETWORK.md#the-road-type-with-memory-29-october-2026)).
 - **Applicability** (is this sign for our road, or for another one?). A prototype. Not on the car, so a side road's sign can be taken for ours.
 - **Country rules.** The general limits (town, rural, expressway, motorway) of 22 countries are on the car, from [`docs/road-rules/`](docs/road-rules/README.md). The country is the one chosen in sunnypilot's settings (Switzerland by default). A small core with no dependencies ([`src/speed_vision_core`](src/speed_vision_core)) has the types and checks.
 - [`integrations/sunnypilot`](integrations/sunnypilot/README.md) keeps an old, frozen advisory snapshot. It is not the runtime on the comma.

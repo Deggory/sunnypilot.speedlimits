@@ -36,8 +36,8 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
         + 'the time it starts.'};
   }
   if (name === 'train_road_type') {
-    return {title: 'Train the road type?', action: 'Start training',
-      text: 'Trains the road-type network on the GPU twice, with memory and without, compares them and exports the one '
+    return {title: 'Train the scene network?', action: 'Start training',
+      text: 'Trains the scene network on the GPU twice, with memory and without, compares them and exports the one '
         + 'with memory for the car: about 15 minutes. Its run is a new one, named by the time it starts.'};
   }
   if (name === 'train_decider') {

@@ -19,7 +19,7 @@ const error = ref('');
 const saving = ref(false);
 /** The values typed, as text, by key. */
 const draft = reactive<Record<string, string | number>>({});
-const GROUPS = [['signs', 'Signs'], ['road', 'Road type']] as const;
+const GROUPS = [['signs', 'Signs'], ['road', 'Scene']] as const;
 
 /** A probability (unit "sure") is shown and typed in %, the rest as they are. */
 const percent = (setting: CarSetting): boolean => setting.unit === 'sure';

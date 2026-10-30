@@ -375,7 +375,7 @@ const tables = computed(() => nets.value.flatMap((net) => {
       </div>
 
       <div v-for="(card, index) in roadCards" :key="card.net" class="net" :id="card.net + '-curves'">
-        <h3>{{ NET_NAME[card.net] }}<span>the road type, once a second · on validation, {{ card.scored
+        <h3>{{ NET_NAME[card.net] }}<span>the scene network, once a second · on validation, {{ card.scored
           ? 'the road score, macro F1 and accuracy' : 'macro F1 and accuracy' }}, higher is better, and train loss</span></h3>
         <div v-if="card.curve" class="net-charts">
           <LineChart :title="NET_NAME[card.net] + ' on validation'" :format="scoreAxis" :epochs="span(card.curve)"

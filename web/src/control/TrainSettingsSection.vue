@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// The settings of a training of Train (Cutter, Classifier, Applicability, Road type): its epochs, patience, batch, learning
+// The settings of a training of Train (Cutter, Classifier, Applicability, Scene): its epochs, patience, batch, learning
 // rate, the processes reading the frames, the classifier's false boxes; GET/POST /api/panel/train-settings
 // (nnslr_tools.train_settings). Saved here, the next training of that kind uses them (Panel.start sets the variables
 // of its script); the one running keeps its own, and the job's chips say what each one used. What the car needs (the
@@ -21,6 +21,9 @@ const field = (key: string): string => props.training + '.' + key;
 const current = computed(() => payload.value?.trainings[props.training] ?? null);
 const settings = computed(() => current.value?.settings ?? []);
 const readOnly = computed(() => !payload.value?.can_edit);
+/** The network inside a sentence: “scene network” for train_road_type (its label, “Scene”, is a name). */
+const networkWords = computed(() => props.training === 'train_road_type' ? 'scene network'
+  : current.value?.label.toLowerCase() ?? 'network');
 
 /** The value typed, NaN when not a number (v-model of a number input gives a number once typed). */
 function typed(setting: TrainSetting): number {
@@ -67,7 +70,7 @@ async function save(values: Record<string, number | null>): Promise<void> {
   saving.value = true;
   try {
     fill(await post<TrainSettingsPayload>('/api/panel/train-settings', {training: props.training, values}));
-    toast('Saved: the next training of the ' + (current.value?.label.toLowerCase() ?? 'network') + ' uses them');
+    toast('Saved: the next training of the ' + networkWords.value + ' uses them');
   } catch (problem) {
     toast(messageOf(problem), true);
   } finally {
@@ -87,7 +90,7 @@ function resetAll(): void {
     <summary><span class="latest-what"><span class="latest-name">Settings</span>
       <span class="latest-text">{{ summary }}</span></span><span class="latest-chev" aria-hidden="true">›</span></summary>
     <div class="tset-body">
-      <p class="note">Used by the next training of the {{ current.label.toLowerCase() }}<template v-if="running">: the one
+      <p class="note">Used by the next training of the {{ networkWords }}<template v-if="running">: the one
         running keeps its own</template>. Each job says the values it used.</p>
       <label v-for="setting in settings" :key="setting.key" class="cs-row" :data-setting="setting.key">
         <span class="cs-text"><b>{{ setting.label }}</b><small>{{ setting.help }}<template

@@ -193,7 +193,7 @@ It added two points, both taken: "Unclear" is taught as abstain rather than drop
 
 ## The road type with memory (29 October 2026)
 
-**Why.** Mobileye, and today's sunnypilot, keep a sign's limit until another sign ends it. On a Swiss motorway on-ramp a 60 sign is never ended by a sign: the motorway's 120 starts where the ramp merges. The same holds for the end of a town (80 or 100 after the town's 50), for an expressway (100) and for a car park. The car needs the kind of road it is on, and the moment it changes, from the camera. One frame is often not enough (the first metres of a motorway look like a rural road), so the network has a memory of the seconds before.
+**Why.** Mobileye, and today's sunnypilot, keep a sign's limit until another sign ends it. On a Swiss motorway on-ramp a 60 sign is never ended by a sign: the motorway's 120 starts where the ramp merges. The same holds for the end of a town (80 or 100 after the town's 50), for an expressway (100) and for a car park. The car needs the kind of road it is on, and the moment it changes, from the camera. One frame is often not enough (the first metres of a motorway look like a rural road), so the network (**Scene** on the site) has a memory of the seconds before.
 
 **The network** (`src/nnslr_tools/road_type_net.py`, `nnslr train-road-type`):
 - one step a second: the whole road frame, resized to 256 × 144, and the car's speed;

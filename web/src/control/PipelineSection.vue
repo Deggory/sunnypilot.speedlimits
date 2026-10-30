@@ -24,7 +24,7 @@ const STEPS: {action: PipelineAction; label: string; text: string}[] = [
   {action: 'train_cutter', label: 'Cutter', text: 'A new SignNet. About 80 minutes.'},
   {action: 'train_classifier', label: 'Classifier', text: 'Learns the signs and the cutter’s mistakes. A few hours.'},
   {action: 'train_decider', label: 'Applicability', text: 'Three versions, compared. About 15 minutes.'},
-  {action: 'train_road_type', label: 'Road type', text: 'With memory and without, compared. About 20 minutes.'},
+  {action: 'train_road_type', label: 'Scene', text: 'With memory and without, compared. About 20 minutes.'},
 ];
 const LABEL = Object.fromEntries(STEPS.map((step) => [step.action, step.label])) as Record<PipelineAction, string>;
 
@@ -56,7 +56,8 @@ const reason = computed(() => {
   if (on('train_classifier') && props.choices.invalid) return sentence('Classifier: ' + props.choices.invalid);
   return '';
 });
-const startLabel = computed(() => chosen.value.length === 1 ? 'Train ' + chosen.value[0]!.label.toLowerCase()
+const startLabel = computed(() => chosen.value.length === 1 ? (chosen.value[0]!.action === 'train_road_type'
+  ? 'Train the scene network' : 'Train ' + chosen.value[0]!.label.toLowerCase())
   : 'Train these ' + chosen.value.length + ' in a row');
 
 function start(): void {
@@ -64,7 +65,8 @@ function start(): void {
   const words = chosen.value.map((step) => step.action === 'train_cutter'
     ? 'the cutter (' + (families.value === 'all' ? 'every sign' : 'speed signs only') + ')'
     : step.action === 'train_classifier' ? 'the classifier' + props.choices.words + (withCutter.value ? ', on that new cutter' : '')
-      : step.action === 'dataset' ? 'the import of the reviews' : LABEL[step.action].toLowerCase());
+      : step.action === 'dataset' ? 'the import of the reviews' : step.action === 'train_road_type' ? 'the scene network'
+        : LABEL[step.action].toLowerCase());
   emit('pipeline', steps, 'One after the other on the GPU, each a training of its own: ' + words.join(', then ')
     + '. The next one starts when one ends well; a failed one stops the pipeline. Each run is a new one, named by the time it starts.');
 }

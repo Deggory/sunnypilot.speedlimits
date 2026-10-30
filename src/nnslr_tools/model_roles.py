@@ -72,7 +72,7 @@ from nnslr_tools.signnet import CAR_MAX_BOXES, CAR_MIN_SCORE, car_measure, fits_
 from nnslr_tools.training import DETECTOR_FAMILIES
 
 ROLES = ('cutter', 'classifier', 'decider', 'road_type')
-ROLE_LABELS = {'cutter': 'Cutter', 'classifier': 'Classifier', 'decider': 'Applicability', 'road_type': 'Road type'}
+ROLE_LABELS = {'cutter': 'Cutter', 'classifier': 'Classifier', 'decider': 'Applicability', 'road_type': 'Scene'}
 # The road-type network of scripts/run_road_type.sh: its folders in <run>/road-type, with memory (and the sign input,
 # since the second version, and the car's own motion, since the fourth), with memory without the car's motion (with
 # memory without the sign input in the runs before), and without memory.
