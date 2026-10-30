@@ -997,8 +997,15 @@ def classifier_result_digest(result: Any) -> dict:
     selection = result.get('selection') if isinstance(result.get('selection'), dict) else {}
     weights = result.get('loss_weights') if isinstance(result.get('loss_weights'), dict) else {}
     negatives = result.get('negatives') if isinstance(result.get('negatives'), dict) else None
+    limitations = [item for item in result.get('limitations') or [] if isinstance(item, str)]
     return {
         **base,
+        # The split it learnt on (None before it was recorded: its test report says it then), and the classifier it
+        # started from in place of ImageNet (nnslr train --init-from): its run, whether it was the Mapillary stage of
+        # a two-stage run, and whether it learnt on another split (its test may then hold crops it saw).
+        'split_sha256': result.get('split_sha256') if isinstance(result.get('split_sha256'), str) else None,
+        'start': _start_digest(result.get('start'),
+                               any(item.startswith('start_of_another_split') for item in limitations)),
         'best_epoch': _int(result.get('best_epoch')) or base['best_epoch'],
         'epochs_run': len(base['history']) or None,
         'stopped_early': _int(result.get('stopped_early_after_epoch')),
@@ -1014,6 +1021,20 @@ def classifier_result_digest(result: Any) -> dict:
             'sha256': negatives.get('sha256') if isinstance(negatives.get('sha256'), str) else None,
             'by_split': _nested_counts(negatives.get('by_split'))},
     }
+
+
+def _start_digest(start: Any, another_split: bool) -> dict | None:
+    """The start of a classifier (result.json "start", nnslr_tools.training.reader_start) without its path: the run
+    and part of its .../runs/<run>/<part>/reader-best.pt (None for a file elsewhere), whether it was the pretraining
+    on Mapillary alone, its split, and whether that split is not the one this classifier learnt on."""
+    if not isinstance(start, dict):
+        return None
+    parts = Path(start['path']).parts if isinstance(start.get('path'), str) else ()
+    inside = len(parts) >= 4 and parts[-4] == 'runs' and parts[-1] == 'reader-best.pt'
+    return {'run': parts[-3] if inside else None, 'part': parts[-2] if inside else None,
+            'mapillary_only': bool(start.get('mapillary_only')),
+            'split_sha256': start.get('split_sha256') if isinstance(start.get('split_sha256'), str) else None,
+            'another_split': another_split}
 
 
 def _counts_map(value: Any) -> dict[str, int]:

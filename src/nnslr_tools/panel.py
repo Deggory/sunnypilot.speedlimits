@@ -62,6 +62,12 @@ RUN_LINE = re.compile(r'^== d\. training (\S+) \(', re.M)
 # <run>", "== scripts/run_signnet.sh <run>", the first line of the log), and the script says it again near its top
 # ("run:          <run>").
 CLASSIFIER_SCRIPT = 'scripts/run_classifier.sh'
+# Where "Train the classifier" starts ({'start': ...}): ImageNet (the default), or a finished classifier with "not a
+# sign" of the Models tab, by its id (its reader-best.pt becomes NNSLR_CLASSIFIER_INIT_FROM).
+CLASSIFIER_IMAGENET = 'imagenet'
+CLASSIFIER_ID = re.compile(r'classifier:([A-Za-z0-9][A-Za-z0-9._-]{0,99})/classifier')
+# A split file's sha256 (splits/latest.json).
+SPLIT_SHA = re.compile(r'[0-9a-f]{64}')
 # The cutter is SignNet, the network the comma runs, trained with the car's setup (896 x 288, stride 8). The jobs of
 # the old cutter, a detector of scripts/run_detector_sizes.sh NAME SIZE, still name their run (RUN_LINES).
 CUTTER_SCRIPT = 'scripts/run_signnet.sh'
@@ -101,7 +107,7 @@ CUTTER_FAMILY = 'all'
 # The options an action takes, besides a training's start and the run to resume (checked by Panel.start).
 # The GPU memory Qwen3-VL-8B takes in float16 (scripts/setup_vlm.sh: 17.5 GB), with a margin for one frame.
 QWEN_GPU_MB = 18 * 1024
-ACTION_OPTIONS = {'train_cutter': ('families',), 'train_classifier': ('mapillary', 'region', 'share'),
+ACTION_OPTIONS = {'train_cutter': ('families',), 'train_classifier': ('mapillary', 'region', 'share', 'start'),
                   'prepare': ('proposer',), 'prepare_again': ('proposer',),
                   'measure_proposer': ('proposer',), 'networks_publish': ('package',), 'send_to_car': ('signnet',),
                   'try_on_comma': ('signnet',),
@@ -699,8 +705,11 @@ class Panel:
         # The Mapillary switch of "Train the classifier": whether its crops are prepared (helpers/mapillary.sh), and
         # the regions its photos can be chosen by (helpers/mapillary_locations.sh).
         from nnslr_tools.mapillary import crops_state, regions_state
+        # And the split the next one learns on (splits/latest.json): a classifier to start from that learnt on another
+        # one may have seen some of its test signs ("Start from").
         payload['classifier_options'] = {'mapillary': crops_state(self.root),
-                                         'mapillary_regions': regions_state(self.root, self.repo)}
+                                         'mapillary_regions': regions_state(self.root, self.repo),
+                                         'split_sha256': current_split(self.root)}
         payload['dataset'] = self.dataset_summary()
         payload['training_starts'] = self.training_starts()
         payload['next_step_text'], payload['all_ready'] = _next_step_text(payload)
@@ -1339,12 +1348,40 @@ class Panel:
             env['NNSLR_CLASSIFIER_MAPILLARY_SHARE'] = f'{share:g}'
         return env
 
+    def _classifier_start(self, start: object, mapillary: object) -> dict:
+        """The environment of where "Train the classifier" starts: nothing for ImageNet (the default), or
+        NNSLR_CLASSIFIER_INIT_FROM, the reader-best.pt of a finished classifier with "not a sign" of the Models tab
+        given by its id ('classifier:<run>/classifier'); never with the two stages, which start from their own
+        Mapillary stage."""
+        if start is None or start == CLASSIFIER_IMAGENET:
+            return {}
+        if not isinstance(start, str):
+            raise PanelError(400, 'bad_option', 'The start is a string: imagenet or the id of a classifier.')
+        if mapillary == 'pretrain':
+            raise PanelError(400, 'bad_option', 'Mapillary, then ours starts from its own Mapillary stage: '
+                             'choose ImageNet, or another choice of signs.')
+        entry = next((entry for entry in self.models_index.artifacts(('classifier',))['classifier']
+                      if entry['id'] == start), None)
+        if entry is None:
+            raise PanelError(400, 'bad_option', 'Unknown classifier to start from: choose one of Models.')
+        if not CLASSIFIER_ID.fullmatch(start) or entry.get('part') != 'classifier':
+            raise PanelError(400, 'bad_option', 'An old reader cannot be a start: only a classifier with “not a sign”.')
+        if not entry['finished']:
+            raise PanelError(400, 'bad_option', 'That classifier has not finished its training: choose a finished one.')
+        from nnslr_tools.chain import resolve_model
+        try:
+            weights = resolve_model(start, 'classifier', self.root)['path']
+        except ValueError:
+            raise PanelError(400, 'bad_option', 'The weights of that classifier are missing on this server.') from None
+        return {'NNSLR_CLASSIFIER_INIT_FROM': str(weights)}
+
     def start(self, action: str, options: dict | None = None) -> dict:
         """Starts an action. The only options are the starting point of a training ({'start': key} of
         training_starts()), turned into a flag or the environment of helpers/3_train.sh, the run to resume, and the
         cutter's families (one of CUTTER_FAMILIES), the route, provider, save and limit of an AI
-        action (_ai_arguments), and whether the classifier adds the Mapillary signs ('on', 'off', or 'pretrain': first
-        on them alone, then on ours from those weights): never a command.
+        action (_ai_arguments), whether the classifier adds the Mapillary signs ('on', 'off', or 'pretrain': first
+        on them alone, then on ours from those weights) and where it starts ({'start': 'imagenet' or a classifier's
+        id}, _classifier_start): never a command.
         The classifier's and the cutter's trainings run on a new run named here (new_run_name)."""
         if action not in ACTIONS:
             raise PanelError(404, 'unknown_action', 'Unknown action.')
@@ -1412,6 +1449,8 @@ class Panel:
                     raise PanelError(409, 'not_available', state['reason'][0].upper() + state['reason'][1:] + '.')
                 start_env['NNSLR_CLASSIFIER_MAPILLARY'] = '1' if mapillary == 'on' else 'pretrain'
         start_env.update(self._mapillary_choice(action, options or {}, mapillary in ('on', 'pretrain')))
+        if action == 'train_classifier':
+            start_env.update(self._classifier_start((options or {}).get('start'), mapillary))
         package = (options or {}).get('package')
         if package is not None and action != 'networks_publish':
             raise PanelError(400, 'bad_option', 'Only "Publish on Hugging Face" takes a package.')
@@ -1464,7 +1503,7 @@ class Panel:
         elif resumed is not None:
             raise PanelError(400, 'bad_option', 'Only "Resume the training" takes a run.')
         start = (options or {}).get('start')
-        if start is not None:
+        if start is not None and action != 'train_classifier':
             if action != 'train':
                 raise PanelError(400, 'bad_option', 'Only a training has a starting point.')
             choice = next((item for item in self.training_starts() if item['key'] == start), None)
@@ -1780,6 +1819,13 @@ def _dataset_summary(root: Path) -> dict:
             'removed_frames': imported.get('removed_withdrawn_frame_count') or 0,
             'warnings': imported.get('warnings') or []},
     }
+
+
+def current_split(root: Path) -> str | None:
+    """The sha256 of the split a training takes now (splits/latest.json, as nnslr train reads it), None without one."""
+    pointer = _read_json(root / 'splits' / 'latest.json') or {}
+    sha = pointer.get('sha256')
+    return sha if isinstance(sha, str) and SPLIT_SHA.fullmatch(sha) else None
 
 
 def _read_json(path: Path) -> dict | None:

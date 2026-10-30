@@ -123,12 +123,18 @@ def _id_of(path: Path, role: str, runs: Path) -> str | None:
 
 
 def resolve_model(spec: str, role: str, data_root: Path) -> dict[str, Any]:
-    """{"path", "id"} of a cutter, classifier or decider given as a checkpoint path or as "active" (the model in use
-    of the role in <data root>/models/active.json; its weights must be inside <data root>/runs). A path inside
+    """{"path", "id"} of a cutter, classifier or decider given as a checkpoint path, as a model id of the role
+    ("classifier:<run>/classifier": the version of the Models tab) or as "active" (the model in use of the role in
+    <data root>/models/active.json). The weights of an id must be inside <data root>/runs. A path inside
     <data root>/runs gets the id of its model; any other path None."""
     if role not in WEIGHTS_FILE:
         raise ValueError(f"unknown role {role!r}")
     runs = (Path(data_root) / "runs").resolve()
+    if spec != "active" and _weights_of(spec, role) is not None:
+        path = (runs / _weights_of(spec, role)).resolve()
+        if not path.is_relative_to(runs) or not path.is_file():
+            raise ValueError(f"{role}_checkpoint_missing: {spec} has no runs/{_weights_of(spec, role)} on this server")
+        return {"path": path, "id": spec}
     if spec != "active":
         path = Path(spec)
         if not path.is_file():

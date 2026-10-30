@@ -9,14 +9,15 @@
 // (GET /api/panel/models, a link to its versions in Models). The page does not move while work runs.
 import {computed, ref} from 'vue';
 import {isoWhen, plural, thousands} from '../common/format';
-import type {ActionName, ActionOptions, ActionState, Activity, CutterFamilies, Job, JobProgress as Progress, ModelRole, ModelVersion,
-  PanelStatus, TrainingStart} from '../common/panel-types';
+import type {ActionName, ActionOptions, ActionState, Activity, ClassifierModel, CutterFamilies, Job, JobProgress as Progress,
+  ModelRole, ModelVersion, PanelStatus, TrainingStart} from '../common/panel-types';
 import ActionList from './ActionList.vue';
 import JobProgress from './JobProgress.vue';
 import {CHARTED_ACTIONS, JOB_STATE, jobOf, PIPELINE_ACTIONS, startedWhen, terminalActivities} from './jobs';
 import {pct} from './evaluate';
 import {regionCrops, shareOf} from './mapillary';
 import {sizeText, useModels} from './models';
+import PickerSheet, {type PickerOption} from '../components/PickerSheet.vue';
 import RegionPicker from './RegionPicker.vue';
 import Segmented from './Segmented.vue';
 import TerminalActivity from './TerminalActivity.vue';
@@ -168,11 +169,38 @@ const mapillarySigns = computed(() => Math.round(regionCrops(mapillaryRegions.va
 const mapillaryOptions = computed((): ActionOptions => withMapillary.value
   ? {mapillary: mapillary.value, region: region.value.length ? region.value.join(',') : 'all', share: String(share.value ?? shareText.value)}
   : {mapillary: 'off'});
+/** Where the classifier starts: ImageNet (the default: its test stays fair), or a finished classifier of Models with
+ * “not a sign”, whose weights it goes on learning from (the one in use first). Not with “Mapillary, then ours”, which
+ * starts from its own Mapillary stage. A start that learnt another split may have seen some of today's test signs. */
+const startVersions = computed((): ClassifierModel[] => (roleOf('classifier')?.versions ?? [])
+  .filter((version): version is ClassifierModel => version.role === 'classifier' && version.part === 'classifier'
+    && version.class_scheme !== undefined && version.finished)
+  .sort((a, b) => Number(b.in_use) - Number(a.in_use)));
+const currentSplit = computed(() => props.status?.classifier_options?.split_sha256 ?? null);
+const startSplit = (version: ClassifierModel): 'same' | 'another' | 'unknown' => !version.split_sha256 || !currentSplit.value
+  ? 'unknown' : version.split_sha256 === currentSplit.value ? 'same' : 'another';
+const SPLIT_WORDS = {same: 'learnt on today’s split', another: 'learnt on another split', unknown: 'its split not recorded'};
+const startOptions = computed((): PickerOption[] => [
+  {key: 'imagenet', title: 'ImageNet', sub: 'the usual start: a fair test'},
+  ...startVersions.value.map((version) => ({key: version.id, title: version.label + ' ' + isoWhen(version.trained_at),
+    short: version.label + ' ' + isoWhen(version.trained_at), badge: version.in_use ? 'In use' : undefined,
+    sub: SPLIT_WORDS[startSplit(version)]})),
+]);
+const pickedStart = ref('imagenet');
+const startKey = computed({
+  get: (): string => startVersions.value.some((version) => version.id === pickedStart.value) ? pickedStart.value : 'imagenet',
+  set: (value: string) => { pickedStart.value = value; },
+});
+const startVersion = computed(() => mapillary.value === 'pretrain' ? null
+  : startVersions.value.find((version) => version.id === startKey.value) ?? null);
+const classifierOptions = computed((): ActionOptions => mapillary.value === 'pretrain' ? mapillaryOptions.value
+  : {...mapillaryOptions.value, start: startVersion.value?.id ?? 'imagenet'});
 const CLASSIFIER_ACTIONS = computed((): [ActionName, string][] => [
   ['train_classifier', 'A new classifier, taught on the signs and on the cutter’s mistakes'
     + (mapillary.value === 'on' ? ', with about ' + thousands(mapillarySigns.value) + ' signs of Mapillary' : '')
     + (mapillary.value === 'pretrain' ? ', first on about ' + thousands(mapillarySigns.value) + ' signs of Mapillary alone, '
       + 'then on ours from there' : '')
+    + (startVersion.value ? ', starting from ' + startVersion.value.label + ' (' + isoWhen(startVersion.value.trained_at) + ')' : '')
     + '. Takes a few hours on the GPU.'],
 ]);
 /** The classifier's button: also not with a share that is not a percentage. */
@@ -272,8 +300,19 @@ const numbers = computed(() => {
             <span class="picker-sub">{{ share === null ? 'from 0.1 to 100' : 'about ' + thousands(mapillarySigns) + ' signs' }}</span>
           </label>
         </div>
+        <div v-if="mapillary !== 'pretrain'" class="cls-start">
+          <PickerSheet v-model="startKey" :options="startOptions" label="Start from" id="train-classifier-start"/>
+        </div>
+        <p v-if="mapillary === 'pretrain'" class="latest-none" id="train-start-note">Start: ImageNet, then its own Mapillary
+          stage; another classifier cannot be the start of “Mapillary, then ours”.</p>
+        <p v-else-if="startVersion && startSplit(startVersion) === 'another'" class="latest-none warn-text" id="train-start-note">Trained
+          on another split: it may have seen some of today's test signs, so the test of the new one is not fair.</p>
+        <p v-else-if="startVersion && startSplit(startVersion) === 'unknown'" class="latest-none warn-text" id="train-start-note">Its
+          split is not recorded: it may have seen some of today's test signs, so the test of the new one may not be fair.</p>
+        <p v-else-if="startVersion" class="latest-none" id="train-start-note">It goes on from that classifier's weights, learnt on
+          today's split: the test stays fair.</p>
         <ActionList :items="CLASSIFIER_ACTIONS" :actions="classifierActions"
-                    @run="(name, state) => emit('run', name, state, undefined, mapillaryOptions)"/>
+                    @run="(name, state) => emit('run', name, state, undefined, classifierOptions)"/>
         <p class="latest-none" id="train-classifier-cutter"><template v-if="cutterInUse">Cutter: the one in use,
           <strong>{{ cutterInUse.label }}</strong> · {{ cutterInUse.trained_at ? isoWhen(cutterInUse.trained_at) : cutterInUse.run }}.<template
           v-if="cutterInUseCar"> On the {{ cutterInUsePartition }}, as the car reads it: it finds <strong>{{ pct(cutterInUseCar.recall) }}</strong>

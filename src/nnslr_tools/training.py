@@ -2562,6 +2562,10 @@ def train_reader(
             "initialization": initialization,
             "initialization_source": initialization_source,
             "config": config.__dict__,
+            # The dataset and split it learnt and chose its epoch on: a later classifier that starts from it
+            # (--init-from) is measured fairly only on the same split (the Train tab warns otherwise).
+            "dataset_sha256": plan["dataset_sha256"],
+            "split_sha256": plan["split_sha256"],
             "crop_cache": {key: cache_summary.get(key) for key in ("folder", "key", "crops", "frames", "megabytes")},
             "history": history,
             "limitations": plan["limitations"],

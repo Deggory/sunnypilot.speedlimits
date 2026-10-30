@@ -786,3 +786,23 @@ def test_an_old_signnet_result_gives_the_car_its_numbers_at_0_3(root, models):
 def test_the_compare_only_text_does_not_say_the_cutter_in_use_is_a_signnet():
     from nnslr_tools.model_roles import NOT_SELECTABLE
     assert 'in use' not in NOT_SELECTABLE['compare_only'][1] and 'SignNet' in NOT_SELECTABLE['compare_only'][1]
+
+
+def test_a_classifier_says_its_split_and_the_classifier_it_started_from(root, models):
+    from test_panel_runs import SPLIT_SHA
+    make_classifier_run(root, 'c1')
+    run = make_classifier_run(root, 'c2')
+    # Before result.json recorded it, its split is the one of its training plan.
+    versions = {entry['run']: entry for entry in by_role(models.index())['classifier']['versions']}
+    assert (versions['c1']['split_sha256'], versions['c1']['start']) == (SPLIT_SHA, None)
+    result = json.loads((run / 'classifier/result.json').read_text())
+    result.update({'split_sha256': 'f' * 64, 'initialization': 'checkpoint',
+                   'start': {'path': str(root / 'runs/c1/classifier/reader-best.pt'), 'sha256': 'a' * 64,
+                             'split_sha256': SPLIT_SHA, 'mapillary_only': False, 'epoch': 2},
+                   'limitations': ['start_of_another_split: the start chose or learnt its weights on another split']})
+    write(run / 'classifier/result.json', result)
+    entry = next(entry for entry in by_role(models.index())['classifier']['versions'] if entry['run'] == 'c2')
+    assert entry['split_sha256'] == 'f' * 64
+    assert entry['start'] == {'run': 'c1', 'part': 'classifier', 'mapillary_only': False, 'split_sha256': SPLIT_SHA,
+                              'another_split': True}
+    json.dumps(models.index(), allow_nan=False)

@@ -52,9 +52,11 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
       + ' join its training crops, not its measures.'
       : options?.mapillary === 'pretrain' ? ' It first learns on ' + share.toLowerCase() + ' signs of Mapillary' + where
         + ' alone, then on yours from there: two trainings, not its measures.' : '';
+    const from = /^classifier:(.+)\/classifier$/.exec(options?.start ?? '')?.[1];
+    const start = from ? ' It starts from the classifier of ' + from + ', not from ImageNet.' : '';
     return {title: 'Train the classifier?', action: 'Start training',
       text: 'Mines the false boxes of the cutter in use, trains the classifier with “not a sign” on the GPU, then measures it '
-        + 'alone and in the chain: it takes hours. Its run is a new one, named by the time it starts.' + mapillary};
+        + 'alone and in the chain: it takes hours. Its run is a new one, named by the time it starts.' + mapillary + start};
   }
   if (name === 'networks_publish') {
     return {title: 'Publish ' + (options?.package ?? 'the package') + ' on Hugging Face?', action: 'Publish', danger: true,

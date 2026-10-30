@@ -387,6 +387,15 @@ def test_the_model_in_use_resolves_to_its_weights(tmp_path):
     active.write_text(json.dumps({"cutter": {"id": "cutter:s2/signnet"}}))
     with pytest.raises(ValueError, match=r"cutter_in_use_missing: cutter:s2/signnet has no runs/s2/signnet-best\.pt"):
         resolve_model("active", "cutter", root)
+    # A model id of the role, as the Models tab lists it (the Train tab's start of a classifier).
+    assert resolve_model("cutter:s1/signnet", "cutter", root) == {"path": signnet.resolve(), "id": "cutter:s1/signnet"}
+    classifier = root / "runs" / "c1" / "classifier" / "reader-best.pt"
+    classifier.parent.mkdir(parents=True)
+    classifier.write_bytes(b"x")
+    assert resolve_model("classifier:c1/classifier", "classifier", root) == {
+        "path": classifier.resolve(), "id": "classifier:c1/classifier"}
+    with pytest.raises(ValueError, match=r"classifier_checkpoint_missing: classifier:c2/classifier has no runs/c2"):
+        resolve_model("classifier:c2/classifier", "classifier", root)
     # A SignNet is a cutter only.
     active.write_text(json.dumps({"classifier": {"id": "classifier:s1/signnet"}}))
     with pytest.raises(ValueError, match="no_classifier_in_use"):

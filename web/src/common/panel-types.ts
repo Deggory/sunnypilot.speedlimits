@@ -63,6 +63,9 @@ export interface ActionOptions {
    * percentage of their signs ("5"). */
   region?: string;
   share?: string;
+  /** Where the classifier's training starts (train_classifier): "imagenet", or the id of a finished classifier of Models
+   * (classifier:<run>/classifier), whose weights it starts from. */
+  start?: string;
 }
 /** Where the Mapillary photos were taken (nnslr_tools.mapillary.regions_state), for the region of “Train the
  * classifier”: whether the positions were fetched, how many signs have one, and the signs of each place. */
@@ -362,7 +365,9 @@ export interface PanelStatus {
   /** The Mapillary switch of “Train the classifier”: whether its crops are prepared (helpers/mapillary.sh), how many
    * and of how many labels, and why not when they are not. */
   classifier_options?: {mapillary: {available: boolean; crops: number; labels: number; reason: string};
-    mapillary_regions?: MapillaryRegions};
+    mapillary_regions?: MapillaryRegions;
+    /** The split the next classifier is measured on (splits/latest.json), to warn when its start learnt another one. */
+    split_sha256?: string | null};
   /** Why a proposer cannot run on this server (null: it can): qwen not installed, or qwen_gpu, the GPU memory it
    * needs taken now. */
   /** Why a proposer cannot run here: qwen not installed, its GPU memory taken, Our networks not whole yet. */
@@ -1171,6 +1176,19 @@ export interface ClassifierModel extends ModelBase {
   augmentation?: boolean | null;
   chain?: ChainNumbers | null;
   chain_old_reader?: ChainNumbers | null;
+  /** The split it learnt and chose its epoch on (null: not recorded). */
+  split_sha256?: string | null;
+  /** The classifier it started from (null: ImageNet): its run and part, whether it was the Mapillary stage of the same
+   * run, its split, and whether that split differs from its own (its test may not be fair). */
+  start?: ClassifierStart | null;
+}
+
+export interface ClassifierStart {
+  run: string | null;
+  part: string | null;
+  mapillary_only: boolean;
+  split_sha256: string | null;
+  another_split: boolean;
 }
 
 export interface DeciderModel extends ModelBase {

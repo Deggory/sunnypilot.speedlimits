@@ -201,8 +201,14 @@ const hourly = (value: number | null): string => value === null ? '–' : value 
     <template v-else-if="classifier && rejects">
       <template v-if="classifier.test || chain">
         <MetricTiles :metrics="classifierMetrics" :caption="classifier.test ? 'Crops of the test signs; every sign without the kind of an other sign' : ''"/>
+        <p v-if="classifier.start?.another_split" class="note warn-text">Started from a classifier trained on another split: it may
+          have seen some of these test signs, so its test is not fair.</p>
         <details class="model-more"><summary>Details</summary>
         <dl class="model-facts">
+          <div v-if="classifier.start"><dt>Started from</dt><dd>{{
+            classifier.start.mapillary_only && classifier.start.run === classifier.run ? 'Its Mapillary stage'
+            : classifier.start.run ? classifier.start.run + (classifier.start.mapillary_only ? ' (its Mapillary stage)' : '')
+            : 'Another classifier' }}</dd></div>
           <div v-if="classifier.test"><dt>Human-reviewed</dt><dd>{{ pct(classifier.test.human_accuracy) }}<span v-if="classifier.test.human_samples"
             class="muted"> of {{ thousands(classifier.test.human_samples) }}</span></dd></div>
           <div v-if="classifier.test"><dt title="Share of the “not a sign” test crops it answers “not a sign”">“Not a sign” rejected</dt><dd>{{

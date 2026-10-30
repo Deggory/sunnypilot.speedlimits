@@ -67,7 +67,7 @@ from nnslr_tools.checkpoints import DEFAULT_DETECTOR_ANCHOR_MIN_RATIO, DEFAULT_D
 from nnslr_tools.runs import (CHAIN_WEIGHTS, EXPERIMENT_DIR, INPUT_NAMES, RUN_NAME, SIZE_BUCKETS, UNREADABLE,
                               VARIANT_LABELS, VARIANTS, RunsIndex, _dig, _int, _iso, _mtime, _num, _ratio, _size_table,
                               _words, chain_digest, chain_headline, classifier_headline, classifier_result_digest,
-                              reader_digest, result_digest)
+                              plan_digest, reader_digest, result_digest)
 from nnslr_tools.signnet import CAR_MAX_BOXES, CAR_MIN_SCORE, car_measure, fits_the_car
 from nnslr_tools.training import DETECTOR_FAMILIES
 
@@ -842,6 +842,11 @@ class ModelIndex:
         })
         return entry
 
+    def _plan_split(self, run: Path) -> str | None:
+        """The split of classifier/training-plan.json (None when missing or unreadable)."""
+        plan = self.runs._load(self.runs._file(run, 'classifier/training-plan.json'), plan_digest)
+        return plan.get('split_sha256') if isinstance(plan, dict) else None
+
     def _classifier_v2(self, name: str, run: Path) -> dict | None:
         """The classifier with "not a sign" of scripts/run_classifier.sh (its weights still say task "reader")."""
         checkpoint = self.runs._file(run, 'classifier/reader-best.pt')
@@ -866,6 +871,10 @@ class ModelIndex:
             'best_validation_sign_accuracy': trained.get('best_validation_sign_accuracy'),
             'best_validation_rejection': trained.get('best_validation_rejection'),
             'augmentation': trained.get('augmentation'),
+            # The split it learnt on, for the Train tab's "Start from" (before result.json recorded it, the one of its
+            # training plan, read once and cached as for the Runs tab); and the classifier it started from, if one.
+            'split_sha256': trained.get('split_sha256') or self._plan_split(run),
+            'start': trained.get('start'),
             'test': None if report is None else classifier_headline(report),
             # The chain end to end at the cutter's score, and the old reader in the same chain.
             'chain': None if chain is None else chain_headline(chain),

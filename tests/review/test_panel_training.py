@@ -632,3 +632,60 @@ def test_a_classifier_job_in_two_stages_shows_them(tmp_path):
     log.write_text('== scripts/run_classifier.sh r\nrun:          r\nsettings:     --classes v2 --epochs 30 '
                    '--init-from /d/runs/2026-10-29_1602-classifier/classifier/reader-best.pt\n')
     assert _settings_of(log, 'train_classifier') == ['classes v2', '30 epochs', 'from 2026-10-29_1602-classifier']
+
+
+def test_the_classifier_can_start_from_a_finished_classifier_of_models(root, checkout, monkeypatch):
+    from nnslr_tools.mapillary import CROPS_FILE
+    from test_panel_runs import SPLIT_SHA, make_classifier_run, write
+    classifier_script(checkout, FAKE_CLASSIFIER.replace(
+        'echo "args $*"', 'echo "args $* init=${NNSLR_CLASSIFIER_INIT_FROM:-imagenet}"'))
+    panel = Panel(root, repo=checkout)
+    monkeypatch.setattr(panel, 'activities', lambda: [])
+    cutter_in_use(root, panel)
+    done = make_classifier_run(root, 'c1')
+    make_classifier_run(root, 'c2', upto='classifier')
+    write(root / 'runs/r1/reader/reader-best.pt', 'weights')
+    (root / CROPS_FILE).parent.mkdir(parents=True)
+    (root / CROPS_FILE).write_text(json.dumps({'kind': 'mapillary_crops', 'version': 1, 'crops': 2,
+                                               'by_label': {'maximum_speed:50': 2}}) + '\n')
+    # The split the next one learns on, for the page's warning; each classifier says the split it learnt on.
+    assert panel.status()['classifier_options']['split_sha256'] == SPLIT_SHA
+    (root / 'splits/latest.json').unlink()
+    assert panel.status()['classifier_options']['split_sha256'] is None
+    write(root / 'splits/latest.json', {'path': 'splits/' + 'f' * 64 + '.json', 'sha256': 'f' * 64})
+    assert panel.status()['classifier_options']['split_sha256'] == 'f' * 64
+    versions = {entry['id']: entry for entry in panel.models_index.artifacts(('classifier',))['classifier']}
+    assert versions['classifier:c1/classifier']['split_sha256'] == SPLIT_SHA
+    # ImageNet, as before: no start in the environment.
+    for options in (None, {'start': 'imagenet'}):
+        job = panel.start('train_classifier', options)
+        finished(panel, job['id'])
+        assert re.search(r'init=imagenet$', full_log(panel, job['id']), re.M)
+        time.sleep(1.1)  # a job's log is named by its second
+    # A finished classifier with "not a sign", by its id: its reader-best.pt, also with the Mapillary signs in train.
+    job = panel.start('train_classifier', {'start': 'classifier:c1/classifier', 'mapillary': 'on'})
+    finished(panel, job['id'])
+    assert re.search(r'init=' + re.escape(str((done / 'classifier/reader-best.pt').resolve())) + '$',
+                     full_log(panel, job['id']), re.M)
+    refused = {'classifier:nothing/classifier': 'Unknown classifier to start from: choose one of Models.',
+               'classifier:c2/classifier': 'That classifier has not finished its training: choose a finished one.',
+               'classifier:r1/reader': 'An old reader cannot be a start: only a classifier with “not a sign”.',
+               '/etc/passwd': 'Unknown classifier to start from: choose one of Models.',
+               'random': 'Unknown classifier to start from: choose one of Models.'}
+    for start, message in refused.items():
+        with pytest.raises(PanelError) as error:
+            panel.start('train_classifier', {'start': start})
+        assert (error.value.status, error.value.message) == (400, message), start
+    # Two stages start from their own Mapillary stage: no other start.
+    with pytest.raises(PanelError) as error:
+        panel.start('train_classifier', {'start': 'classifier:c1/classifier', 'mapillary': 'pretrain'})
+    assert error.value.status == 400 and 'its own Mapillary stage' in error.value.message
+    # Weights gone since the list was read.
+    (done / 'classifier/reader-best.pt').unlink()
+    with pytest.raises(PanelError) as error:
+        panel.start('train_classifier', {'start': 'classifier:c1/classifier'})
+    assert error.value.status == 400
+    # The start of the other actions stays theirs.
+    with pytest.raises(PanelError) as error:
+        panel.start('train_cutter', {'start': 'classifier:c1/classifier'})
+    assert (error.value.status, error.value.message) == (400, 'Only a training has a starting point.')
