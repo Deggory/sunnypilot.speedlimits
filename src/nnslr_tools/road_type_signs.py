@@ -17,7 +17,9 @@ the car never has them; what the car's networks miss or misread, the road-type n
 Per drive, data/derived/road_type_signs/<route>.json: the fingerprint of the code and networks used, the frames read
 per segment, every frame with a sign read sure enough (time in seconds from the start of the drive, class, confidence)
 and the road signs SpeedLimitMemory confirms (time, road). Built again when the vision code, a network or the video
-changed. numpy and onnxruntime (CPU) only.
+changed. On the GPU when there is one (device 'auto'): the video decoded by NVDEC (ffmpeg -hwaccel cuda, bit-exact: HEVC
+decoding is), the two networks under onnxruntime-gpu (their outputs differ from the CPU's by about 1e-6); else, or
+with device 'cpu', ffmpeg and onnxruntime on the CPU.
 
 Two sources of the sign times (SIGN_SOURCES):
 - 'car': the signs the car's code confirms, as above. On the first 12 drives (October 2026) the car's classifier
@@ -95,14 +97,28 @@ def load_vision(package: Path):
 
 
 class _Network:
-    """One of the car's networks under onnxruntime on one CPU thread: numpy in, numpy out."""
+    """One of the car's networks under onnxruntime, on the GPU when asked and it works there (one inference on zeros
+    tries it), else on one CPU thread: numpy in, numpy out."""
 
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, gpu: bool = False):
         import onnxruntime
+        from nnslr_tools.onnx_device import CPU, CUDA
         options = onnxruntime.SessionOptions()
         options.intra_op_num_threads = options.inter_op_num_threads = 1
-        self.session = onnxruntime.InferenceSession(str(path), options, providers=['CPUExecutionProvider'])
+        self.session = None
+        if gpu and CUDA in onnxruntime.get_available_providers():
+            if hasattr(onnxruntime, 'preload_dlls'):
+                onnxruntime.preload_dlls()
+            try:
+                self.session = onnxruntime.InferenceSession(str(path), options, providers=[CUDA, CPU])
+                shape = [size if isinstance(size, int) else 1 for size in self.session.get_inputs()[0].shape]
+                self.session.run(None, {self.session.get_inputs()[0].name: np.zeros(shape, dtype=np.float32)})
+            except Exception:
+                self.session = None
+        if self.session is None:
+            self.session = onnxruntime.InferenceSession(str(path), options, providers=[CPU])
         self.name = self.session.get_inputs()[0].name
+        self.gpu = self.session.get_providers()[0] == CUDA
 
     def __call__(self, x):
         return self.session.run(None, {self.name: np.asarray(x, dtype=np.float32)})[0]
@@ -111,13 +127,13 @@ class _Network:
 _WORKER: dict = {}
 
 
-def _worker_start(package: str) -> None:
+def _worker_start(package: str, gpu: bool = False) -> None:
     package = Path(package)
     vision = load_vision(package)
     contract = json.loads((package / 'models' / (NETWORK_FILES['classifier'] + '.contract.json')).read_text('utf-8'))
-    _WORKER.update(vision=vision, finder=_Network(package / 'models' / NETWORK_FILES['finder']),
-                   classifier=_Network(package / 'models' / NETWORK_FILES['classifier']),
-                   classes=contract['output']['classes'])
+    _WORKER.update(vision=vision, finder=_Network(package / 'models' / NETWORK_FILES['finder'], gpu),
+                   classifier=_Network(package / 'models' / NETWORK_FILES['classifier'], gpu),
+                   classes=contract['output']['classes'], nvdec=gpu)
 
 
 def _video_size(video: Path) -> tuple[int, int]:
@@ -130,13 +146,24 @@ def _video_size(video: Path) -> tuple[int, int]:
 
 def read_segment(task: tuple[str, int]) -> dict:
     """The car's read_signs on one segment's road video, one frame in VIDEO_STEP: {'segment', 'frames' (read), 'signs':
-    [[seconds into the segment, [[class, confidence], ...]], ...] (the frames with a sign read sure enough)}."""
+    [[seconds into the segment, [[class, confidence], ...]], ...] (the frames with a sign read sure enough), 'gpu' (the
+    networks ran there), 'nvdec' (the video was decoded there)}. NVDEC first when the worker may use the GPU: a video it
+    cannot decode is read again on the CPU."""
     video, segment = task
-    vision, finder, classifier, classes = (_WORKER[name] for name in ('vision', 'finder', 'classifier', 'classes'))
     width, height = _video_size(Path(video))
+    if _WORKER.get('nvdec'):
+        result = _read_video(video, width, height, nvdec=True)
+        if result['frames']:
+            return {'segment': segment, **result}
+    return {'segment': segment, **_read_video(video, width, height, nvdec=False)}
+
+
+def _read_video(video: str, width: int, height: int, *, nvdec: bool) -> dict:
+    vision, finder, classifier, classes = (_WORKER[name] for name in ('vision', 'finder', 'classifier', 'classes'))
     size = width * height * 3 // 2
-    command = ['ffmpeg', '-hide_banner', '-loglevel', 'error', '-threads', '1', '-i', str(video), '-vf',
-               f'select=not(mod(n\\,{VIDEO_STEP}))', '-vsync', '0', '-pix_fmt', 'nv12', '-f', 'rawvideo', '-']
+    command = ['ffmpeg', '-hide_banner', '-loglevel', 'error', *(['-hwaccel', 'cuda'] if nvdec else []), '-threads', '1',
+               '-i', str(video), '-vf', f'select=not(mod(n\\,{VIDEO_STEP}))', '-vsync', '0', '-pix_fmt', 'nv12', '-f',
+               'rawvideo', '-']
     signnet_input = vision.SignNetInput(width, height)
     found, count = [], 0
     with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as process:
@@ -152,7 +179,7 @@ def read_segment(task: tuple[str, int]) -> dict:
             if sure:
                 found.append([round(count * VIDEO_STEP / VIDEO_FPS, 3), sure])
             count += 1
-    return {'segment': segment, 'frames': count, 'signs': found}
+    return {'frames': count, 'signs': found, 'gpu': finder.gpu, 'nvdec': nvdec}
 
 
 def confirmations(vision, readings: list[tuple[float, list]]) -> list[list]:
@@ -212,9 +239,10 @@ def load_signs(root: Path, route: str) -> dict | None:
 
 
 def build_signs(root: Path, routes: list[str], *, package: Path | None = None, workers: int | None = None,
-                log=print) -> dict[str, dict]:
+                device: str = 'auto', log=print) -> dict[str, dict]:
     """The readings of every drive (cached; read again when the code, a network or a video changed): {route: record}.
-    The segments of all drives are read in parallel, one process per core."""
+    The segments of all drives are read in parallel by workers processes (default a quarter of the cores), on the GPU
+    when there is one (device 'auto'; 'cpu' never)."""
     package = package_path() if package is None else Path(package)
     stamp = fingerprint(package)
     records, tasks, stamps = {}, [], {}
@@ -231,11 +259,15 @@ def build_signs(root: Path, routes: list[str], *, package: Path | None = None, w
         log(f'road-type signs: reading {len(tasks)} segments of {len({t[0] for t in tasks})} drives with the car\'s '
             f'SignNet and classifier, 5 frames a second, {workers} processes')
         results: dict[str, list] = {}
-        with ProcessPoolExecutor(max_workers=workers, initializer=_worker_start, initargs=(str(package),)) as pool:
+        gpu = device != 'cpu'
+        with ProcessPoolExecutor(max_workers=workers, initializer=_worker_start, initargs=(str(package), gpu)) as pool:
             done = 0
             for (route, _, _), result in zip(tasks, pool.map(read_segment, [(v, s) for _, s, v in tasks])):
                 results.setdefault(route, []).append(result)
                 done += 1
+                if done == 1:
+                    log('road-type signs: the networks on the ' + ('GPU' if result['gpu'] else 'CPU') + ', the video decoded'
+                        ' on the ' + ('GPU (NVDEC)' if result['nvdec'] else 'CPU'))
                 if done % 25 == 0 or done == len(tasks):
                     log(f'road-type signs: {done}/{len(tasks)} segments')
         vision = load_vision(package)

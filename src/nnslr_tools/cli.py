@@ -1668,11 +1668,14 @@ def build_parser() -> argparse.ArgumentParser:
                                                           "comma does (its vision.py, SignNet and classifier from the "
                                                           "sunnypilot clone, 5 frames a second of fcamera.hevc): "
                                                           "derived/road_type_signs/<route>.json, the sign input of the "
-                                                          "road-type network (CPU)")
+                                                          "road-type network (the GPU when there is one)")
     p_road_signs.add_argument("--sunnypilot", help="the sunnypilot clone (default: NNSLR_SUNNYPILOT_CLONE or "
                                                    "/root/sunnypilot); read only")
     p_road_signs.add_argument("--num-workers", "--workers", dest="workers", type=int, default=0,
                               help="processes (default: a quarter of the cores)")
+    p_road_signs.add_argument("--device", choices=("auto", "cpu"), default="auto",
+                              help="auto: the video decoded by NVDEC and the networks on the GPU when they work there, "
+                                   "else the CPU; cpu: always the CPU")
     p_road_signs.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_road_signs.set_defaults(func=_cmd_road_type_signs)
     p_motion = sub.add_parser("car-motion", help="the car's own motion of every second of the drives with GPS "
@@ -2563,7 +2566,7 @@ def _cmd_road_type_signs(args: argparse.Namespace) -> int:
         print("nnslr road-type-signs: no drive with road types (nnslr road-types)", file=sys.stderr)
         return 2
     records = build_signs(root, routes, package=package_path(Path(args.sunnypilot) if args.sunnypilot else None),
-                          workers=args.workers or None, log=lambda line: print(line, flush=True))
+                          workers=args.workers or None, device=args.device, log=lambda line: print(line, flush=True))
     for route, record in records.items():
         print(f"{route}: {sum(record['frames'].values())} frames read, {len(record['readings'])} with a sign, "
               f"motorway signs confirmed at {', '.join(f'{t:.0f} s' for t in sign_times(record)) or 'none'}",

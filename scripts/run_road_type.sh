@@ -17,7 +17,8 @@ set -euo pipefail
 #      data/derived/junctions: the labels of the junction head, a person's corrections over them) and resizes every
 #      frame of the drives with road types to 256 x 144 once (data/derived/road_type_frames);
 #   4. reads the motorway signs of those drives as the comma does (nnslr road-type-signs: the car's vision.py,
-#      SignNet and classifier from the sunnypilot clone, read only, 5 frames a second of fcamera.hevc, on the CPU;
+#      SignNet and classifier from the sunnypilot clone, read only, 5 frames a second of fcamera.hevc, decoded and
+#      read on the GPU (NVDEC and onnxruntime-gpu of .venv, the CPU when there is none);
 #      data/derived/road_type_signs): the comma's rule measured with the signs the car confirms today; and the car's
 #      own motion of every second from the drives' rlogs (nnslr car-motion --all: deviceMotion/livePose yaw rate,
 #      carState steering angle, blinkers and vEgo; data/derived/car_motion);
@@ -185,8 +186,11 @@ paths = data.build_frame_cache(sys.argv[1], dataset["frames"], workers=int(sys.a
 print(f"frame cache: {len(paths)} drives ready")
 ' "$DATA_ROOT" "$NUM_WORKERS"
 
-echo "== 4/8 Read the motorway signs as the car does and the car's motion (CPU) =="
-"$NN" road-type-signs --num-workers "$SIGN_WORKERS"
+echo "== 4/8 Read the motorway signs as the car does (GPU) and the car's motion (CPU) =="
+# The signs on the GPU: .venv has onnxruntime-gpu, .venv-gpu only the CPU's (torch brings its own CUDA).
+SIGNS_NN="$ROOT_DIR/.venv/bin/nnslr"
+[ -x "$SIGNS_NN" ] || SIGNS_NN="$NN"
+"$SIGNS_NN" road-type-signs --num-workers "$SIGN_WORKERS"
 "$NN" car-motion --all --num-workers "$SIGN_WORKERS"
 
 train() {
