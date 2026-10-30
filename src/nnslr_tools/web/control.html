@@ -666,8 +666,9 @@ font-variant-numeric:tabular-nums;appearance:textfield}
 .rp-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .rp-backdrop{display:none}
 @media (max-width:420px){.mly-share{flex:1 1 100%}.rp{flex-basis:100%}}
-/* The three sources of the classifier on one row of a phone. */
-@media (max-width:520px){.mly-seg{display:grid;grid-template-columns:repeat(3,auto);width:100%}.mly-seg button{padding-left:4px;padding-right:4px;font-size:12.5px;white-space:nowrap}}
+/* The three sources of the classifier on one row of a phone; a label that does not fit (a narrow phone, the step of
+   Train › Pipeline) goes to two lines instead of out of the row. */
+@media (max-width:520px){.mly-seg{display:grid;grid-template-columns:repeat(3,auto);width:100%}.mly-seg button{padding-left:4px;padding-right:4px;font-size:12.5px;white-space:normal;line-height:1.2;text-wrap:balance}}
 /* On a phone the menu is a sheet from the bottom, over the tab bar, the page dimmed behind it. */
 @media (max-width:767px){
   .rp-backdrop{display:block;position:fixed;inset:0;z-index:14;background:var(--backdrop)}
