@@ -58,6 +58,11 @@ SETTINGS = (
     {'key': 'merge_seconds', 'constant': 'MERGE_SECONDS', 'label': 'Merged after',
      'help': 'The ramp\'s limit ends once the network sees the main carriageway this long.', 'default': 8.0,
      'min': 2.0, 'max': 30.0, 'step': 1.0, 'unit': 's', 'group': 'road'},
+    {'key': 'carriageway_lag', 'constant': 'CARRIAGEWAY_LAG', 'label': 'A number off the motorway ends if read',
+     'help': 'A number read off the motorway (its end sign or the ramp missed) ends once the network has seen the '
+             'motorway or expressway as long as a new road type needs, if it was read at least this long before the '
+             'network saw it: read later, it may be the motorway\'s own (the network lags a few seconds).',
+     'default': 5.0, 'min': 0.0, 'max': 30.0, 'step': 1.0, 'unit': 's before it', 'group': 'road'},
 )
 BY_KEY = {setting['key']: setting for setting in SETTINGS}
 DEFAULTS = {setting['key']: setting['default'] for setting in SETTINGS}

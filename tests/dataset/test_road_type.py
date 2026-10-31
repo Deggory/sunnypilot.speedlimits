@@ -340,10 +340,20 @@ def test_comma_release_on_time_on_the_ramp_late_and_not_held():
     early[65:80] = MOTORWAY
     assert metrics.comma_release(early, no_sign, entry, ROAD_TYPES)['release'] == -7
     assert metrics.comma_release(early, no_sign, entry, ROAD_TYPES)['outcome'] == 'on_ramp'
-    # The road type says town at the number and no sign: the number is not a ramp's, nothing to release.
+    # The road type says town at the number and no sign: not the ramp's, but read off the carriageways it ends after
+    # 10 s of motorway (vision.CARRIAGEWAY_LAG: the motorway began 18 s after it).
     town = _entry_drive()
     town[60:70] = TOWN
-    assert metrics.comma_release(town, no_sign, entry, ROAD_TYPES)['outcome'] == 'not_held'
+    assert metrics.comma_release(town, no_sign, entry, ROAD_TYPES) == {
+        'number_at': -18, 'held_by': 'off', 'release': 10, 'outcome': 'in_time'}
+    # Motorway from second 65, 3 s after the number: it may be the motorway's own, it holds.
+    soon = town.copy()
+    soon[65:] = MOTORWAY
+    assert metrics.comma_release(soon, no_sign, entry, ROAD_TYPES)['outcome'] == 'late'
+    # Read on the motorway with no sign: nothing to release.
+    on_road = _entry_drive()
+    on_road[60:] = MOTORWAY
+    assert metrics.comma_release(on_road, no_sign, entry, ROAD_TYPES)['outcome'] == 'not_held'
     # A motorway sign 20 s before the number holds it; town after the merge breaks the 8 s, so it is late.
     sign = np.full(180, np.inf)
     sign[42:] = np.arange(180 - 42)
@@ -353,11 +363,12 @@ def test_comma_release_on_time_on_the_ramp_late_and_not_held():
     assert result['held_by'] == 'sign' and result['release'] is None and result['outcome'] == 'late'
     both = metrics.comma_release(_entry_drive(), sign, entry, ROAD_TYPES)
     assert both['held_by'] == 'ramp+sign' and both['outcome'] == 'in_time'
-    summary = metrics.release_summary([found, result, both,
-                                       metrics.comma_release(town, no_sign, entry, ROAD_TYPES)])
-    assert summary['merges'] == 4 and summary['held'] == 3 and summary['held_by_sign'] == 2
-    assert (summary['in_time'], summary['late'], summary['not_held'], summary['on_ramp']) == (2, 1, 1, 0)
-    assert summary['median_release'] == 8.0 and summary['releases'] == [8, None, 8, None]
+    summary = metrics.release_summary([found, result, both, metrics.comma_release(town, no_sign, entry, ROAD_TYPES),
+                                       metrics.comma_release(on_road, no_sign, entry, ROAD_TYPES)])
+    assert summary['merges'] == 5 and summary['held'] == 4 and summary['held_by_sign'] == 2
+    assert summary['held_by_off'] == 1
+    assert (summary['in_time'], summary['late'], summary['not_held'], summary['on_ramp']) == (3, 1, 1, 0)
+    assert summary['median_release'] == 8.0 and summary['releases'] == [8, None, 8, 10, None]
 
 
 

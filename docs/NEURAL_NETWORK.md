@@ -294,6 +294,8 @@ Each merge has one of four outcomes:
 - **late**: not released by 60 s after the merge;
 - **not held**: the ramp's number is kept as an ordinary limit, until another sign ends it, which is today's stuck 60.
 
+Since 31 October 2026 a number read off the carriageways that neither the ramp nor the sign holds is held "off" (see "A limit read before the motorway" below) and gets one of the first three outcomes too; "not held" is left for a number read on the carriageway or the lane.
+
 There are two scenarios: the map's signs, and the signs the car's code confirms today.
 
 **Results** (run `2026-10-29_1231-road-type`; v1 is `2026-10-29_0937-road-type`, measured again with `release-road-type`). Seconds are relative to the merge.
@@ -539,6 +541,14 @@ No version ever says merge (F1 0): the training has 48 merge frames. The version
 **A link right after an entry (31 October 2026).** Past a ramp's limit a number is the carriageway's, so the sign of an interchange's link, read within `RAMP_SECONDS` of the entry's motorway sign but before the debounced road type says ramp, stays on the next motorway: too low, until the next sign. At `74a0778ab` the car took it as the ramp's, but it took the carriageway's own 100 there as the ramp's too and gave 120. A rule that took the number back as the ramp's when the road type says ramp within 6 s of it was tried and dropped. The version in use never says ramp on a link between two carriageways (9 in test, ramp probability at most 0.05), so the rule changed none of the 9 test merges; and a false ramp on the carriageway right after its own number gave the general limit, too high. Neither case happens before the car confirms motorway signs, which it has not done on any drive so far.
 
 **Still to do.** More motorway entries for the class merge; check the lanes of the map by eye in Data › Roads; let the version without the car's motion go on the car (its ONNX step exported, chosen on the Models tab).
+
+### A limit read before the motorway (31 October 2026)
+
+**Why.** On a drive the network missed a motorway entry and the car the end of a 40: it held the 60 read before, in town, onto the motorway, where only the next sign would end it.
+
+**The rule** (`vision.SpeedLimitMemory`, `CARRIAGEWAY_LAG`). A number is remembered with the time it was read when the road type was neither motorway, expressway nor merge (`_number_at`). It ends, and the carriageway's general limit comes back as a sign's, once the debounced road type has said motorway or expressway for `ROAD_TYPE_SECONDS` (10 s), if that road type began at least `CARRIAGEWAY_LAG` (5 s, a setting in Models › On the car, `carriageway_lag`, 0 to 30 s) after the number: a number read in the last seconds before may already be the carriageway's own, since the network lags the road by a few seconds. A sign of a road, the end of a limit, a car park or the ramp's own release forget it; a number read on the carriageway or the lane is never ended this way. Roadworks are no exception in the code: their limit is read on the motorway itself, so it holds. The map is not read.
+
+**The measure.** `comma_release` applies the same rule to every merge, whichever rule comes first; a number neither the ramp nor the sign holds but read off the carriageways is held `off` (`held_by_off` in the summary, "off the carriageway" in `release_text`).
 
 ### Leaving a car park (31 October 2026)
 

@@ -72,7 +72,7 @@ How the readings become the limit (`SpeedLimitMemory` in `sunnypilot/speed_limit
 
 - A number read on a ramp, or within 45 s of a motorway or expressway sign (*setting*), is the ramp's.
 - It ends at the acceleration lane when the carriageway is known from its sign, otherwise after 8 s of acceleration lane or carriageway (*setting*). Then the carriageway's general limit comes back, so the car can join the traffic. Without the scene network it holds until the next sign.
-- A number read off the carriageways (in town, on a rural road, before a ramp the scene network missed) ends once the scene network has seen the motorway or expressway for 10 s (the *setting* of a new road type): a missed end sign must not keep the car at 40 or 60 on the motorway. A number read less than 5 s before the network saw the carriageway may already be the carriageway's (the network lags a few seconds) and holds.
+- A number read off the carriageways (in town, on a rural road, before a ramp the scene network missed) ends once the scene network has seen the motorway or expressway for 10 s (the *setting* of a new road type): a missed end sign must not keep the car at 40 or 60 on the motorway. A number read less than 5 s (*setting*) before the network saw the carriageway may already be the carriageway's (the network lags a few seconds) and holds.
 - Roadworks on the carriageway hold: their sign is read on the carriageway, and repeated there.
 
 **The scene, where no sign holds**

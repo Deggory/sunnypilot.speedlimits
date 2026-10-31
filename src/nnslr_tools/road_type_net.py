@@ -1504,11 +1504,11 @@ def release_of_checkpoint(data_root: Path, checkpoint: Path, output: Path | None
 
 
 def release_text(summary: dict) -> str:
-    """One line of release_summary: 'N merges: held H (ramp R, sign S); on the ramp O, in time I (median M s), late
+    """One line of release_summary: 'N merges: held H (ramp R, sign S, off the carriageway F); on the ramp O, in time I (median M s), late
     L, not held X'."""
     median = summary['median_release']
     return (f"{summary['merges']} merges: held {summary['held']} (ramp {summary['held_by_ramp']}, sign "
-            f"{summary['held_by_sign']}); released on the ramp {summary['on_ramp']}, in time {summary['in_time']}"
+            f"{summary['held_by_sign']}, off the carriageway {summary.get('held_by_off', 0)}); released on the ramp {summary['on_ramp']}, in time {summary['in_time']}"
             + (f' (median {median:g} s after the merge)' if median is not None else '')
             + f", late {summary['late']}, never held {summary['not_held']}")
 

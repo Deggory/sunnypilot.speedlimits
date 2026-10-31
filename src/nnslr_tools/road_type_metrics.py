@@ -301,10 +301,14 @@ def sequence_metrics(sequences: list[dict], classes: tuple[str, ...]) -> dict:
 # ROAD_TYPE_SECONDS since it), else once it says merge, motorway or expressway MERGE_SECONDS in a row and the step is
 # motorway or expressway (the first such step starts the count). The road type given to it is the
 # network's answer after the CONFIRM_SECONDS debounce, one step a second. The merge is the first second of the
-# acceleration lane, which the map's labels start MERGE_LEAD_M before the node of the ramp's end.
+# acceleration lane, which the map's labels start MERGE_LEAD_M before the node of the ramp's end. Any number read off
+# the carriageways (the road type not motorway, expressway or merge: a ramp the network missed, said town or rural)
+# also ends once the road type has said one carriageway ROAD_TYPE_SECONDS, if that began at least CARRIAGEWAY_LAG after
+# the number: whichever rule comes first.
 RAMP_SECONDS = 45.0
 MERGE_SECONDS = 8
 ROAD_TYPE_SECONDS = 10  # vision.ROAD_TYPE_SECONDS: a road type held this long is the road
+CARRIAGEWAY_LAG = 5  # vision.CARRIAGEWAY_LAG: a number read later than this before the carriageway may be its own
 LATE_SECONDS = 60
 NUMBER_SECOND = 2  # the ramp's number is read at its third second (the middle of a shorter ramp)
 RELEASE_OUTCOMES = ('on_ramp', 'in_time', 'late', 'not_held')
@@ -350,9 +354,10 @@ def comma_release(held: np.ndarray, sign_age: np.ndarray, entry: dict, classes: 
     road type says ramp then, or when the sign is at most RAMP_SECONDS old and neither a merge nor joined_at came since
     it; released on the first merge (the acceleration lane) when held by the sign and the car has not been on a
     carriageway for ROAD_TYPE_SECONDS since it (the sign still names the carriageway), else on motorway or expressway
-    after MERGE_SECONDS of merge, motorway or expressway in a row. {'number_at', 'held_by' (ramp, sign, ramp+sign or
-    None), 'release' (seconds after the merge, negative: on the ramp; None: not by LATE_SECONDS after it),
-    'outcome'}."""
+    after MERGE_SECONDS of merge, motorway or expressway in a row; read off the carriageways, also released by the
+    off-carriageway rule (see above), which alone holds it when neither the ramp nor the sign does. {'number_at',
+    'held_by' (ramp, sign, ramp+sign, off or None), 'release' (seconds after the merge, negative: on the ramp; None:
+    not by LATE_SECONDS after it), 'outcome'}."""
     held, sign_age = np.asarray(held), np.asarray(sign_age, dtype=float)
     ramp, roads = classes.index('ramp'), {classes.index(n) for n in CARRIAGEWAYS if n in classes}
     lane = classes.index('merge') if 'merge' in classes else None
@@ -370,26 +375,30 @@ def comma_release(held: np.ndarray, sign_age: np.ndarray, entry: dict, classes: 
         known = by_sign and lane is not None and not any(
             int(held[t]) in roads and t - max(_road_type_since(held, t, lane), sign_at) >= ROAD_TYPE_SECONDS
             for t in range(sign_at, number_at + 1))
-    held_by = '+'.join(name for name, flag in (('ramp', by_ramp), ('sign', by_sign)) if flag) or None
+    off = int(held[number_at]) not in roads and int(held[number_at]) != lane
+    held_by = '+'.join(name for name, flag in (('ramp', by_ramp), ('sign', by_sign)) if flag) or ('off' if off else None)
     result = {'number_at': number_at - merge, 'held_by': held_by, 'release': None}
     if held_by is None:
         return {**result, 'outcome': 'not_held'}
     since = None
     for t in range(number_at + 1, min(len(held), merge + LATE_SECONDS + 1)):
         answer = int(held[t])
-        if answer == lane and known:
-            return {**result, 'release': t - merge, 'outcome': 'on_ramp' if t < merge else 'in_time'}
+        released = held_by != 'off' and answer == lane and known
         if answer not in roads and answer != lane:
             since = None
         elif since is None:
             since = t
-        if answer in roads and t - since >= MERGE_SECONDS:
+        released = released or held_by != 'off' and answer in roads and t - since >= MERGE_SECONDS
+        if off and answer in roads:
+            began = _road_type_since(held, t, lane)
+            released = released or began - number_at >= CARRIAGEWAY_LAG and t - began >= ROAD_TYPE_SECONDS
+        if released:
             return {**result, 'release': t - merge, 'outcome': 'on_ramp' if t < merge else 'in_time'}
     return {**result, 'outcome': 'late'}
 
 
 def release_summary(found: list[dict]) -> dict:
-    """{'merges', 'held', 'held_by_ramp', 'held_by_sign', 'on_ramp', 'in_time', 'late', 'not_held', 'median_release'
+    """{'merges', 'held', 'held_by_ramp', 'held_by_sign', 'held_by_off', 'on_ramp', 'in_time', 'late', 'not_held', 'median_release'
     (of the releases on the carriageway within LATE_SECONDS), 'releases' (every release, None for none)} of
     comma_release results."""
     counts = {outcome: sum(1 for item in found if item['outcome'] == outcome) for outcome in RELEASE_OUTCOMES}
@@ -397,6 +406,7 @@ def release_summary(found: list[dict]) -> dict:
     return {'merges': len(found), 'held': sum(1 for item in found if item['held_by']),
             'held_by_ramp': sum(1 for item in found if item['held_by'] and 'ramp' in item['held_by']),
             'held_by_sign': sum(1 for item in found if item['held_by'] and 'sign' in item['held_by']),
+            'held_by_off': sum(1 for item in found if item['held_by'] == 'off'),
             **counts, 'median_release': float(np.median(timely)) if timely else None,
             'releases': [item['release'] for item in found]}
 
