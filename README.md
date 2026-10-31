@@ -58,6 +58,37 @@ flowchart TD
 - Everything runs inside the comma 4, on its own GPU, next to the driving model.
 - **The vision side never reads the map.** It uses only the camera and the car's own signals. Map and vision meet only in sunnypilot's resolver, when the Speed Limit Source is **Map Data + Vision**.
 
+### The rules on the car
+
+How the readings become the limit (`SpeedLimitMemory` in `sunnypilot/speed_limits/vision.py`, branch `speed-limits` of cristianku/sunnypilot). The numbers are the defaults; the ones marked *setting* can be changed on the site, **Models › On the car**.
+
+**Signs**
+
+- A number counts once it is read in 2 pictures within 1.5 s (*settings*), the classifier at least 70 % sure (*setting*). Two at once (a gantry, roadworks): the one seen most; on a tie, the lower.
+- A number holds until the next sign. The end of a limit gives the general limit of the road the car is on, or none if that is not known.
+- Town entry and exit, motorway and expressway start and end set the general limit of that road. In Sweden, Norway and Finland they only say which road it is: the limit held stays.
+
+**Ramps and carriageways**
+
+- A number read on a ramp, or within 45 s of a motorway or expressway sign (*setting*), is the ramp's.
+- It ends at the acceleration lane when the carriageway is known from its sign, otherwise after 8 s of acceleration lane or carriageway (*setting*). Then the carriageway's general limit comes back, so the car can join the traffic. Without the scene network it holds until the next sign.
+- A number read off the carriageways (in town, on a rural road, before a ramp the scene network missed) ends once the scene network has seen the motorway or expressway for 10 s (the *setting* of a new road type): a missed end sign must not keep the car at 40 or 60 on the motorway. A number read less than 5 s before the network saw the carriageway may already be the carriageway's (the network lags a few seconds) and holds.
+- Roadworks on the carriageway hold: their sign is read on the carriageway, and repeated there.
+
+**The scene, where no sign holds**
+
+- The scene network's answer counts after 3 equal answers in a row, one a second (*setting*).
+- At the start of a drive, or out of a car park, the road type gives its general limit. Such a limit follows another road type only after 10 s of it (*setting*). A sign always wins over the scene.
+- A 30 zone (the network at least 90 % sure, *setting*) seen for 10 s after the last sign lowers a town's 50 to 30. A higher number read (60, 80) holds: the network can be wrong.
+- A car park: seen for 5 s below 25 km/h (*setting*), it gives 20 km/h in the open and 10 km/h in a garage (*settings*) and drops the road's limit before; inside, a sign counts only when lower. Out of it, a road seen for 3 s (*setting*) gives that road's limit.
+- General limits in Switzerland: 50 town, 80 rural, 100 expressway, 120 motorway, 30 in a 30 zone. Other countries are in `IMPLICIT_LIMITS`; Germany has no motorway limit (none is set).
+
+**Speed Limit Assist** (sunnypilot's, changed on `speed-limits` for cars like the Peugeot, with openpilot longitudinal and the car's own cruise)
+
+- Automatic: the limit applies as soon as it is known. No confirmation and no set speed of 120/130 to confirm with (the Peugeot has no button for it), and changing the set speed does not switch it off.
+- The set speed is the maximum: the car drives to the lower of the limit and the set speed. With no limit known, the set speed.
+- **Set Speed Only Engages (Alpha)**, a sunnylink option shown with Assist mode, off by default: the car drives to the limit even above the set speed, which only engages. Only with the big driving model on the external GPU: the small one makes mistakes, so without it the set speed is the maximum again, at once. Curves and a forced deceleration still win. The driving screen then shows a green see-through **AUTO** square with an eye in the bottom right corner, above the final limit, and no longer the MAX set speed on +/-.
+
 ## Daily use
 
 Everything runs on the server. Most steps are a button on the site and also a script in `helpers/` or `scripts/`. Get the drives, Prepare and Import skip work that is already done; a training started again is a new run.
