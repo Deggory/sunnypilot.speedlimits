@@ -35,6 +35,7 @@ folder of raw comma files.
 """
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import math
@@ -229,9 +230,14 @@ def _shared_video_relpath(root: Path, target: Path) -> str | None:
     videos = resolve_videos_dir()
     try:
         resolved = link.resolve()
+        link.stat()
     except RuntimeError as exc:
         # Python 3.11 raises RuntimeError for a symlink loop.
         raise NnslerManifestError("symlink_loop", str(target)) from exc
+    except OSError as exc:
+        # Python 3.13 resolves a loop without a word; following the link says ELOOP. A missing target is not a loop.
+        if exc.errno == errno.ELOOP:
+            raise NnslerManifestError("symlink_loop", str(target)) from exc
     if resolved != videos and resolved.is_relative_to(videos):
         return target.as_posix()
     if resolved.is_relative_to(root):
