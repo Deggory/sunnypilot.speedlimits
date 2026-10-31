@@ -384,8 +384,9 @@ def attach_signs(dataset: dict, root: Path, source: str = signs_data.DEFAULT_SOU
         dataset['seconds'][route] = np.array([signs_data.frame_seconds(f) for f in frames], dtype=np.float64)
         dataset['signs'][route] = signs_data.frame_sign_features(frames, times)
         labels = np.array([f['label'] for f in frames], dtype=np.int64)
+        lead = np.array([bool(f.get('lead')) for f in frames], dtype=bool)
         emphasis = np.ones(len(frames), dtype=np.float32)
-        for entry in ramp_entries(labels, data.CLASSES):
+        for entry in ramp_entries(labels, data.CLASSES, lead):
             emphasis[entry['ramp']:entry['merge'] + AFTER_MERGE_SECONDS] = MERGE_WEIGHT
         dataset['emphasis'][route] = emphasis
     coverage = {'source': source, 'drives': len(dataset['frames']), 'read': len(read),
@@ -435,6 +436,7 @@ def _sequence_arrays(dataset: dict, run: dict) -> dict:
     motion = dataset.get('motion', {}).get(route)
     speed = dataset.get('speed_input', {}).get(route)
     return {'labels': np.array([f['label'] for f in chosen], dtype=np.int64),
+            'lead': np.array([bool(f.get('lead')) for f in chosen], dtype=bool),
             'weights': np.array([f['weight'] for f in chosen], dtype=np.float32),
             'speed': (speed[positions] if speed is not None else
                       np.array([data.speed_features(f['speed_mps']) for f in chosen], dtype=np.float32)
@@ -562,7 +564,7 @@ class WindowSampler:
         self.changes = [(i, change['time']) for i, (run, arrays) in enumerate(self.runs)
                         for change in change_points(arrays['labels'], data.CLASSES)]
         self.merges = [(i, entry['merge']) for i, (run, arrays) in enumerate(self.runs)
-                       for entry in ramp_entries(arrays['labels'], data.CLASSES)]
+                       for entry in ramp_entries(arrays['labels'], data.CLASSES, arrays['lead'])]
         self.lengths = [len(run['positions']) for run, _ in self.runs]
 
     def window(self, length: int):
@@ -685,7 +687,8 @@ def evaluate(torch, model, store: FrameStore, dataset: dict, runs: list[dict], d
                                                     arrays['speed'], device, sign=arrays['sign'], junction=True,
                                                     motion=arrays['motion'])
         predicted = probabilities.argmax(axis=1)
-        found.append({'labels': arrays['labels'], 'weights': arrays['weights'], 'predicted': predicted})
+        found.append({'labels': arrays['labels'], 'lead': arrays['lead'], 'weights': arrays['weights'],
+                      'predicted': predicted})
         if smooth:
             smoothed.append({**found[-1], 'predicted': majority(predicted, SMOOTH_SECONDS, len(data.CLASSES))})
         answer = {'route': run['route'], 'keys': arrays['keys'], 'labels': arrays['labels'].tolist(),
@@ -780,13 +783,12 @@ def release_evaluation(torch, model, store: FrameStore, dataset: dict, device, *
     for run in drive_runs(dataset):
         route, positions = run['route'], run['positions']
         arrays = _sequence_arrays(dataset, run)
-        entries = ramp_entries(arrays['labels'], data.CLASSES)
+        entries = ramp_entries(arrays['labels'], data.CLASSES, arrays['lead'])
         partitions = dataset['split']['partitions'][route]
         measured = [(entry, merge_partition([partitions[positions[t]] for t in
                                              range(entry['ramp'], min(len(positions), entry['merge'] + LATE_SECONDS))]))
                     for entry in entries]
-        measured = [(entry, partition) for entry, partition in measured if partition]
-        if not measured:
+        if not any(partition for _, partition in measured):
             continue
         key = (route, positions[0])
         if answers is not None and key in answers:
@@ -796,8 +798,13 @@ def release_evaluation(torch, model, store: FrameStore, dataset: dict, device, *
                                           sign=arrays['sign'], motion=arrays['motion']).argmax(axis=1)
         held = debounced(predicted)
         age = signs_data.sign_ages(arrays['seconds'], dataset.get('sign_times', {}).get(route, []))
+        joined = None  # the car's _joined_at: the last ramp's limit ended, measured or not
         for entry, partition in measured:
-            result = comma_release(held, age, entry, data.CLASSES)
+            result = comma_release(held, age, entry, data.CLASSES, joined)
+            if result['release'] is not None:
+                joined = entry['merge'] + result['release']
+            if not partition:
+                continue
             said = [data.CLASSES[int(v)] for v in held[entry['ramp']:min(len(held), entry['merge'] + LATE_SECONDS)]]
             found.append({'route': route, 'partition': partition, 'ramp_key': arrays['keys'][entry['ramp']],
                           'merge_key': arrays['keys'][entry['merge']], 'before': entry['before'],

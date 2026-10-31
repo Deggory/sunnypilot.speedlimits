@@ -330,5 +330,6 @@ def map_sign_times(frames: list[dict], classes: tuple[str, ...]) -> list[float]:
     another road onto the motorway or expressway (frames: the drive's 1 Hz frames with their 'label')."""
     from nnslr_tools.road_type_metrics import ramp_entries
     labels = np.array([frame['label'] for frame in frames], dtype=np.int64)
-    return [frame_seconds(frames[entry['ramp']]) for entry in ramp_entries(labels, classes)
+    lead = np.array([bool(frame.get('lead')) for frame in frames], dtype=bool)
+    return [frame_seconds(frames[entry['ramp']]) for entry in ramp_entries(labels, classes, lead)
             if entry['before'] != 'motorway']

@@ -17,8 +17,10 @@
 
 The acceleration lane (merge, road_types.merge_lanes) is the carriageway's first metres: the transitions, the false
 switches and the seconds after the merge fold it into the carriageway after it, in the map's labels and in the answers
-alike (fold_merge), so that they keep their meaning and a network trained before the class is measured the same way.
-The per-class F1 keeps it apart, and the comma's rule ends the ramp's limit on it (comma_release).
+alike (fold_merge), so that they keep their meaning and a network trained before the class is measured the same way;
+its lead, the ramp's last metres, folds back into the ramp, where "ramp" and "merge" are both right. The debounced
+measures debounce the answers first and fold them after, as the car holds merge and motorway apart. The per-class F1
+keeps the lane apart, and the comma's rule ends the ramp's limit on it (comma_release).
 
 One frame a second: a frame's position in its sequence is its time in seconds. numpy only.
 """
@@ -84,9 +86,10 @@ CAR_PARKS = ('parking', 'garage')
 CARRIAGEWAYS = ('motorway', 'expressway')
 
 
-def fold_labels(labels: np.ndarray, classes: tuple[str, ...]) -> np.ndarray:
+def fold_labels(labels: np.ndarray, classes: tuple[str, ...], lead: np.ndarray | None = None) -> np.ndarray:
     """The labels with every stretch of acceleration lane (merge) as the carriageway after it (motorway when none
-    follows); the same labels when the classes have no merge."""
+    follows) and its lead (the frames that were the ramp's, road_types' "lead") as the ramp; the same labels when the
+    classes have no merge."""
     labels = np.asarray(labels)
     if 'merge' not in classes:
         return labels
@@ -98,19 +101,24 @@ def fold_labels(labels: np.ndarray, classes: tuple[str, ...]) -> np.ndarray:
         if value == lane:
             after = runs[at + 1][0] if at + 1 < len(runs) else -1
             folded[start:end] = after if after in roads else motorway
+    if lead is not None:
+        folded[np.asarray(lead, dtype=bool) & (labels == lane)] = classes.index('ramp')
     return folded
 
 
-def fold_merge(labels: np.ndarray, predicted: np.ndarray, classes: tuple[str, ...]) -> tuple[np.ndarray, np.ndarray]:
-    """(labels, answers) with the acceleration lane folded into its carriageway (fold_labels): an answer "merge" is
-    the carriageway of the label there, motorway elsewhere."""
-    labels, predicted = fold_labels(labels, classes), np.asarray(predicted)
+def fold_merge(labels: np.ndarray, predicted: np.ndarray, classes: tuple[str, ...],
+               lead: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
+    """(labels, answers) with the acceleration lane folded into its carriageway and its lead into the ramp
+    (fold_labels): an answer "merge" is the label there on a carriageway or the lead, motorway elsewhere."""
+    labels, predicted = fold_labels(labels, classes, lead), np.asarray(predicted)
     if 'merge' not in classes:
         return labels, predicted
-    roads = [classes.index(name) for name in CARRIAGEWAYS]
+    keep = np.isin(labels, [classes.index(name) for name in CARRIAGEWAYS])
+    if lead is not None:
+        keep |= np.asarray(lead, dtype=bool)
     said = predicted == classes.index('merge')
     folded = predicted.copy()
-    folded[said] = np.where(np.isin(labels[said], roads), labels[said], classes.index('motorway'))
+    folded[said] = np.where(keep[said], labels[said], classes.index('motorway'))
     return labels, folded
 
 
@@ -141,15 +149,19 @@ def change_points(labels: np.ndarray, classes: tuple[str, ...]) -> list[dict]:
     return found
 
 
-def detection_delay(predicted: np.ndarray, change: dict) -> int | None:
+def detection_delay(predicted: np.ndarray, change: dict, raw: np.ndarray | None = None) -> int | None:
     """Seconds from a change to the first second of CONFIRM_SECONDS answers of its new type in a row (see the module's
-    text), None when missed."""
+    text), None when missed. raw: the answers before fold_merge, of which the run needs one class (merge, merge,
+    motorway is no run for the car)."""
     predicted = np.asarray(predicted)
     begin = max(change['time'] - STABLE_SECONDS, 0)
     end = min(change['time'] + WINDOW_SECONDS, len(predicted))
     run = 0
     for i in range(begin, end):
-        run = run + 1 if predicted[i] == change['new'] else 0
+        if predicted[i] != change['new']:
+            run = 0
+        else:
+            run = run + 1 if run and (raw is None or raw[i] == raw[i - 1]) else 1
         if run >= CONFIRM_SECONDS:
             return i - CONFIRM_SECONDS + 1 - change['time']
     return None
@@ -222,8 +234,9 @@ def after_merge(sequences: list[dict], classes: tuple[str, ...]) -> dict:
     said = {name: 0 for name in classes}
     per_merge = []
     for sequence in sequences:
-        truth, answer = fold_merge(sequence['labels'], sequence['predicted'], classes)
-        held = debounced(answer)
+        lead = sequence.get('lead')
+        truth, answer = fold_merge(sequence['labels'], sequence['predicted'], classes, lead)
+        held = fold_merge(sequence['labels'], debounced(sequence['predicted']), classes, lead)[1]
         for start, end in merges(truth, classes):
             hits = int((answer[start:end] == truth[start:end]).sum())
             total += end - start
@@ -241,16 +254,19 @@ def after_merge(sequences: list[dict], classes: tuple[str, ...]) -> dict:
 def sequence_metrics(sequences: list[dict], classes: tuple[str, ...]) -> dict:
     """The measure over sequences [{'labels', 'weights', 'predicted'}] (arrays per second): per_class_f1 of weight-1
     frames and of every labelled frame, the transitions by kind (count, found, missed, delays, median and mean delay)
-    and the false switches per hour, raw and debounced (these two with the acceleration lane folded: fold_merge)."""
+    and the false switches per hour, raw and debounced (these two with the acceleration lane folded: fold_merge, after
+    the debounce for the debounced ones). A sequence's 'lead' (optional): its acceleration lane frames that were the
+    ramp's."""
     labels = np.concatenate([np.asarray(s['labels']) for s in sequences]) if sequences else np.zeros(0, int)
     weights = np.concatenate([np.asarray(s['weights']) for s in sequences]) if sequences else np.zeros(0)
     predicted = np.concatenate([np.asarray(s['predicted']) for s in sequences]) if sequences else np.zeros(0, int)
     kinds = {kind: {'count': 0, 'found': 0, 'missed': 0, 'delays': []} for kind in TRANSITION_KINDS}
     raw = steady = seconds = 0
     for sequence in sequences:
-        truth, answer = fold_merge(sequence['labels'], sequence['predicted'], classes)
+        lead = sequence.get('lead')
+        truth, answer = fold_merge(sequence['labels'], sequence['predicted'], classes, lead)
         for change in change_points(truth, classes):
-            delay = detection_delay(answer, change)
+            delay = detection_delay(answer, change, raw=np.asarray(sequence['predicted']))
             entry = kinds[change['kind']]
             entry['count'] += 1
             if delay is None:
@@ -261,7 +277,7 @@ def sequence_metrics(sequences: list[dict], classes: tuple[str, ...]) -> dict:
         count, length = switches(answer, truth)
         raw += count
         seconds += length
-        steady += switches(debounced(answer), truth)[0]
+        steady += switches(fold_merge(sequence['labels'], debounced(sequence['predicted']), classes, lead)[1], truth)[0]
     for entry in kinds.values():
         delays = entry['delays']
         entry['median_delay'] = float(np.median(delays)) if delays else None
@@ -279,40 +295,64 @@ def sequence_metrics(sequences: list[dict], classes: tuple[str, ...]) -> dict:
 
 # -- the comma's rule: when the limit of a ramp ends on the carriageway --------------------------------------------
 # vision.SpeedLimitMemory (sunnypilot speed_limits): a number read on a ramp (the road type says "ramp") or within
-# RAMP_SECONDS of a motorway or expressway sign is the ramp's limit; it ends, and the motorway's general limit comes
-# back, as soon as the road type says merge (the acceleration lane), or once it says motorway or expressway
-# MERGE_SECONDS in a row (the first such step starts the count, the release comes MERGE_SECONDS later). The road type
-# given to it is the network's answer after the CONFIRM_SECONDS debounce, one step a second. The merge is the first
-# second of the acceleration lane, which the map's labels start MERGE_LEAD_M before the node of the ramp's end.
+# RAMP_SECONDS of a motorway or expressway sign (and not on the acceleration lane, nor past a ramp's limit, since that
+# sign) is the ramp's limit; it ends, and the motorway's general limit comes back, as soon as the road type says merge
+# (the acceleration lane) when the sign was that near and still names the carriageway (the car has not been on one for
+# ROAD_TYPE_SECONDS since it), else once it says merge, motorway or expressway MERGE_SECONDS in a row and the step is
+# motorway or expressway (the first such step starts the count). The road type given to it is the
+# network's answer after the CONFIRM_SECONDS debounce, one step a second. The merge is the first second of the
+# acceleration lane, which the map's labels start MERGE_LEAD_M before the node of the ramp's end.
 RAMP_SECONDS = 45.0
 MERGE_SECONDS = 8
+ROAD_TYPE_SECONDS = 10  # vision.ROAD_TYPE_SECONDS: a road type held this long is the road
 LATE_SECONDS = 60
 NUMBER_SECOND = 2  # the ramp's number is read at its third second (the middle of a shorter ramp)
 RELEASE_OUTCOMES = ('on_ramp', 'in_time', 'late', 'not_held')
 
 
-def ramp_entries(labels: np.ndarray, classes: tuple[str, ...]) -> list[dict]:
+def ramp_entries(labels: np.ndarray, classes: tuple[str, ...], lead: np.ndarray | None = None) -> list[dict]:
     """Every ramp followed by the carriageway (motorway or expressway within GAP_SECONDS), as merges() finds them, with
     the ramp's first second: [{'ramp': first second of the ramp, 'merge': first second of the carriageway (of its
-    acceleration lane when labelled), 'before': the road type before the ramp (None: none known)}]."""
+    acceleration lane when labelled, its lead included), 'before': the road type before the ramp (None: none
+    known)}]. lead: the acceleration lane frames that were the ramp's (fold_labels), counted in the ramp's length."""
     ramp = classes.index('ramp')
     roads = {classes.index(name) for name in CARRIAGEWAYS if name in classes}
-    runs = [run for run in _runs(fold_labels(labels, classes)) if run[0] >= 0]
+    lead = None if lead is None else np.asarray(lead, dtype=bool)
+    runs = [run for run in _runs(fold_labels(labels, classes, lead)) if run[0] >= 0]
     found = []
     for i, ((old, start_a, end_a), (new, start_b, _)) in enumerate(zip(runs, runs[1:])):
         if old == ramp and new in roads and end_a - start_a >= MERGE_RAMP_SECONDS and start_b - end_a <= GAP_SECONDS:
             before = classes[runs[i - 1][0]] if i > 0 and start_a - runs[i - 1][2] <= GAP_SECONDS else None
-            found.append({'ramp': start_a, 'merge': start_b, 'before': before})
+            merge = start_b
+            if lead is not None and start_b == end_a:
+                while merge > start_a and lead[merge - 1]:
+                    merge -= 1
+            found.append({'ramp': start_a, 'merge': merge, 'before': before})
     return found
 
 
-def comma_release(held: np.ndarray, sign_age: np.ndarray, entry: dict, classes: tuple[str, ...]) -> dict:
+def _road_type_since(held: np.ndarray, t: int, lane: int | None) -> int:
+    """The second the road type held at second t began, as vision's _road_type_since: a carriageway right after the
+    acceleration lane counts from the lane's start."""
+    start = t
+    while start > 0 and held[start - 1] == held[t]:
+        start -= 1
+    while lane is not None and held[t] != lane and start > 0 and held[start - 1] == lane:
+        start -= 1
+    return start
+
+
+def comma_release(held: np.ndarray, sign_age: np.ndarray, entry: dict, classes: tuple[str, ...],
+                  joined_at: int | None = None) -> dict:
     """The comma's rule on one merge (held: the debounced answer per second of the drive; sign_age: seconds since the
-    last motorway or expressway sign the car confirmed, inf when none): a number read at the ramp's NUMBER_SECOND;
-    held as the ramp's when the road type says ramp then or the sign is at most RAMP_SECONDS old; released on the
-    first merge (the acceleration lane) or after MERGE_SECONDS of motorway or expressway in a row. {'number_at',
-    'held_by' (ramp, sign, ramp+sign or None), 'release' (seconds after the merge, negative: on the ramp; None: not by
-    LATE_SECONDS after it), 'outcome'}."""
+    last motorway or expressway sign the car confirmed, inf when none; joined_at: the second the drive's last ramp's
+    limit ended before this ramp, None: none): a number read at the ramp's NUMBER_SECOND; held as the ramp's when the
+    road type says ramp then, or when the sign is at most RAMP_SECONDS old and neither a merge nor joined_at came since
+    it; released on the first merge (the acceleration lane) when held by the sign and the car has not been on a
+    carriageway for ROAD_TYPE_SECONDS since it (the sign still names the carriageway), else on motorway or expressway
+    after MERGE_SECONDS of merge, motorway or expressway in a row. {'number_at', 'held_by' (ramp, sign, ramp+sign or
+    None), 'release' (seconds after the merge, negative: on the ramp; None: not by LATE_SECONDS after it),
+    'outcome'}."""
     held, sign_age = np.asarray(held), np.asarray(sign_age, dtype=float)
     ramp, roads = classes.index('ramp'), {classes.index(n) for n in CARRIAGEWAYS if n in classes}
     lane = classes.index('merge') if 'merge' in classes else None
@@ -320,21 +360,31 @@ def comma_release(held: np.ndarray, sign_age: np.ndarray, entry: dict, classes: 
     number_at = start + min(NUMBER_SECOND, max(0, (merge - start) // 2))
     by_ramp = int(held[number_at]) == ramp
     by_sign = bool(sign_age[number_at] <= RAMP_SECONDS)
+    known = False
+    if by_sign:
+        sign_at = max(0, number_at - int(np.floor(sign_age[number_at])))
+        # On the acceleration lane, or past a ramp's limit, since the sign: the number is the carriageway's (vision.py).
+        by_sign = not (lane is not None and bool(np.any(held[sign_at:number_at + 1] == lane))
+                       or joined_at is not None and joined_at >= sign_at)
+        # The sign names the carriageway the lane joins until the car has been on one for ROAD_TYPE_SECONDS since it.
+        known = by_sign and lane is not None and not any(
+            int(held[t]) in roads and t - max(_road_type_since(held, t, lane), sign_at) >= ROAD_TYPE_SECONDS
+            for t in range(sign_at, number_at + 1))
     held_by = '+'.join(name for name, flag in (('ramp', by_ramp), ('sign', by_sign)) if flag) or None
     result = {'number_at': number_at - merge, 'held_by': held_by, 'release': None}
     if held_by is None:
         return {**result, 'outcome': 'not_held'}
     since = None
     for t in range(number_at + 1, min(len(held), merge + LATE_SECONDS + 1)):
-        if int(held[t]) == lane:
+        answer = int(held[t])
+        if answer == lane and known:
             return {**result, 'release': t - merge, 'outcome': 'on_ramp' if t < merge else 'in_time'}
-        if int(held[t]) not in roads:
+        if answer not in roads and answer != lane:
             since = None
         elif since is None:
             since = t
-        elif t - since >= MERGE_SECONDS:
-            outcome = 'on_ramp' if t < merge else 'in_time'
-            return {**result, 'release': t - merge, 'outcome': outcome}
+        if answer in roads and t - since >= MERGE_SECONDS:
+            return {**result, 'release': t - merge, 'outcome': 'on_ramp' if t < merge else 'in_time'}
     return {**result, 'outcome': 'late'}
 
 

@@ -498,9 +498,12 @@ def test_the_sunnypilot_clone_is_refused_unless_it_is_clean_on_speed_limits(car,
         (sp / 'README.md').write_text('local\n')
         git(sp, 'commit', '-q', '-am', 'local')
     before = git(car['sp_origin'], 'rev-parse', 'speed-limits')
+    models = git(car['clone'], 'rev-parse', 'HEAD')
     done = send(car, '--signnet', 's1', FAKE_PUBLISH='new networks')
     assert done.returncode == 1 and message in done.stderr, done.stderr
     assert 'build sunny' not in done.stdout and git(car['sp_origin'], 'rev-parse', 'speed-limits') == before
+    # Refused before step 1: the networks the comma downloads are not published ahead of the branch.
+    assert 'nnslr send-to-car' not in done.stdout and git(car['clone'], 'rev-parse', 'HEAD') == models
 
 
 def test_a_branch_behind_origin_is_fast_forwarded_first(car, tmp_path):

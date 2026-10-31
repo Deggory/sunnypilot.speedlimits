@@ -133,8 +133,9 @@ def _positions(root: Path, route: str) -> dict[str, dict]:
 
 
 def route_frames(root: Path, route: str) -> list[dict]:
-    """The frames of a drive in drive order: key, segment, index, label, weight, sure, basis, latitude, longitude,
-    speed_mps, image (path), present (the picture is on disk) and the junction labels (junction_in, junction_passed,
+    """The frames of a drive in drive order: key, segment, index, label, weight, sure, basis, lead (an acceleration
+    lane frame that was the ramp's: road_types), latitude, longitude, speed_mps, image (path), present (the picture is
+    on disk) and the junction labels (junction_in, junction_passed,
     junction_known, junction: the intersection's id; junction_ignore: near the end of a passage whose exit was not
     seen, where a "passed" is neither right nor wrong; distance_m: metres driven since the start of the drive)."""
     positions = _positions(root, route)
@@ -151,6 +152,7 @@ def route_frames(root: Path, route: str) -> list[dict]:
         frames.append({
             'route': route, 'key': line['frame_key'], 'segment': line['segment_index'], 'index': line['output_index'],
             'label': label, 'weight': weight, 'sure': bool(line.get('sure')), 'basis': line.get('basis'),
+            'lead': label == CLASS_INDEX['merge'] and bool(line.get('lead')),
             'latitude': gps.get('latitude'), 'longitude': gps.get('longitude'), 'speed_mps': gps.get('speed_mps'),
             'image': str(image), 'present': image.is_file(),
             'junction_known': bool(junction and junction['known']),

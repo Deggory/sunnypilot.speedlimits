@@ -17,7 +17,8 @@
 #   4/5 Move     the submodule openpilot/sunnypilot/speed_limits/models of the sunnypilot clone (branch speed-limits)
 #                to that commit, one commit of that path alone pushed to speed-limits; nothing when it is there.
 #                Refuses a clone on another branch, a submodule with changes of its own, a branch with commits not
-#                pushed or diverged (fast-forwarded first when it is only behind).
+#                pushed or diverged (fast-forwarded first when it is only behind): checked before step 1, so a
+#                refusal publishes nothing.
 #   5/5 Build    cristianku/openpilot psa-torque-sunny-testing again (openpilot_scripts' setup_psa_torque.sh sunny,
 #                pushed) when step 2 or 4 changed something or a build is still owed (models/send-to-car.pending),
 #                or with --rebuild. Then, on the comma: Settings, Software, Check for updates, then install.
@@ -94,6 +95,17 @@ if [ "$dry_run" -eq 1 ]; then
   mode=" (dry run)"
 fi
 echo "== Send to the car: SignNet $signnet${classifier:+, classifier $classifier}$mode"
+# The sunnypilot clone is checked before anything is published: models pushed with a clone step 4 then refuses would
+# leave the comma's download ahead of the branch that names it.
+head="$(git -C "$SUNNYPILOT" symbolic-ref --quiet --short HEAD || true)"
+[ "$head" = "$BRANCH" ] || die "$SUNNYPILOT is on ${head:-a detached HEAD}, not $BRANCH: switch it back first"
+[ -z "$(git -C "$SUNNYPILOT" status --porcelain -- "$SUBMODULE")" ] \
+  || die "$SUBMODULE in $SUNNYPILOT has changes of its own: commit or drop them first"
+git -C "$SUNNYPILOT" fetch --quiet origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+counts="$(git -C "$SUNNYPILOT" rev-list --left-right --count "$BRANCH...refs/remotes/origin/$BRANCH")"
+read -r ahead behind <<< "$counts"
+[ "$ahead" -eq 0 ] || [ "$behind" -eq 0 ] || die "$BRANCH of $SUNNYPILOT and origin's have diverged: reconcile them first"
+[ "$ahead" -eq 0 ] || die "$BRANCH of $SUNNYPILOT has $ahead commit(s) not pushed: push or drop them first"
 models_before="$(git -C "$MODELS" rev-parse HEAD)"
 output="$(mktemp)"
 trap 'rm -f "$output"' EXIT
@@ -106,15 +118,6 @@ would_publish=0
 ! grep -q '^dry run: would publish' "$output" || would_publish=1
 
 echo "== 4/5 Move the models of the sunnypilot $BRANCH branch to ${models_commit:0:7}"
-head="$(git -C "$SUNNYPILOT" symbolic-ref --quiet --short HEAD || true)"
-[ "$head" = "$BRANCH" ] || die "$SUNNYPILOT is on ${head:-a detached HEAD}, not $BRANCH: switch it back first"
-[ -z "$(git -C "$SUNNYPILOT" status --porcelain -- "$SUBMODULE")" ] \
-  || die "$SUBMODULE in $SUNNYPILOT has changes of its own: commit or drop them first"
-git -C "$SUNNYPILOT" fetch --quiet origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
-counts="$(git -C "$SUNNYPILOT" rev-list --left-right --count "$BRANCH...refs/remotes/origin/$BRANCH")"
-read -r ahead behind <<< "$counts"
-[ "$ahead" -eq 0 ] || [ "$behind" -eq 0 ] || die "$BRANCH of $SUNNYPILOT and origin's have diverged: reconcile them first"
-[ "$ahead" -eq 0 ] || die "$BRANCH of $SUNNYPILOT has $ahead commit(s) not pushed: push or drop them first"
 if [ "$behind" -gt 0 ]; then
   if [ "$dry_run" -eq 1 ]; then
     echo "dry run: $BRANCH is $behind commit(s) behind origin, would fast-forward"

@@ -36,7 +36,9 @@ names its type:
 
 Then along the drive: a gap of unknown frames between two stretches of the same type takes that type (a tunnel, a
 road of the map without a limit), and a stretch shorter than MIN_RUN frames between two stretches of the same type
-takes theirs (the GPS jumping to a side road, a bridge or a car park beside the road for a second).
+takes theirs (the GPS jumping to a side road, a bridge or a car park beside the road for a second). A ramp shorter
+than MIN_LINK_RUN between two stretches of the same motorway or expressway is the GPS on the link beside the car as it
+passes a junction: the carriageway too.
 
 Writes ``derived/road_types/<route>.jsonl``: one line per frame, ``{"frame_key", "segment_index", "output_index",
 "road_type" (town, rural, expressway, motorway, ramp, parking, zone30, garage, merge or null), "map_type" (before
@@ -44,7 +46,8 @@ the drive was looked at), "basis" (why: "maxspeed 50", "highway motorway", "park
 "garage on the map", "slow without gps", "filled", "smoothed", "acceleration lane (highway motorway)", "no road", "no
 gps"...), "sure" (false where the map is often wrong: WEAK_BASES, a car park of one signal, a garage without GPS,
 filled, smoothed; the acceleration lane as its road: the ramp's metres are not sure, the carriageway's are),
-"way_id", "highway", "maxspeed"}`` (the road found, also in a car park).
+"way_id", "highway", "maxspeed"}`` (the road found, also in a car park), and "lead": true on the frames of the
+acceleration lane that were the ramp's (the measures fold them back into the ramp).
 
 Measured on 27 Oct 2026, 240 frames of 11 drives looked at without the map: where the eye was sure, the map agreed on
 91% of town frames, 75% of rural ones and 95% of motorway ones; most rural misses were roads at 60 in a town.
@@ -96,6 +99,10 @@ GARAGE_SPEED = 20 / 3.6
 MAX_GAP = 60
 # A stretch shorter than this between two stretches of one type is a slip of the GPS, not a change of road.
 MIN_RUN = 4
+# A ramp shorter than this (frames, about seconds) between two stretches of the same motorway or expressway is the GPS
+# on the link beside it as the car passes a junction, not a way off and back on: 14 of the first 31 acceleration lanes
+# were such a slip (4-8 frames, 30 Oct 2026), the links from one carriageway to another lasted 12-36.
+MIN_LINK_RUN = 10
 TOWN_KINDS = ('urban', 'zone', 'zone30')
 # The reasons the map is often wrong about, measured on 27 Oct 2026 against 240 frames looked at without the map:
 # a road at 60 was in a town one time in three, a ramp is between two kinds of road, a filled gap is mostly a tunnel.
@@ -270,25 +277,30 @@ def smooth(types: list[str | None]) -> list[tuple[str | None, str | None]]:
         if value is None and 0 < at < len(runs) - 1 and runs[at - 1][0] == runs[at + 1][0] and end - start <= MAX_GAP:
             for index in range(start, end):
                 result[index] = (runs[at - 1][0], 'filled')
-    # Short stretches between two of one type, repeated until none is left (two slips side by side).
-    changed = True
-    while changed:
-        changed = False
-        runs = _runs([value for value, _ in result])
-        for at, (value, start, end) in enumerate(runs):
-            if 0 < at < len(runs) - 1 and runs[at - 1][0] == runs[at + 1][0] and runs[at - 1][0] is not None \
-                    and value != runs[at - 1][0] and end - start < MIN_RUN:
-                for index in range(start, end):
-                    result[index] = (runs[at - 1][0], 'smoothed')
-                changed = True
-                break
+    # Short stretches between two of one type, repeated until none is left (two slips side by side); then the short
+    # ramps between two stretches of one carriageway, once the slips inside a ramp are gone (a link of 13 s with a slip
+    # of 2 s back to the carriageway is no two short ramps).
+    for links in (False, True):
+        changed = True
+        while changed:
+            changed = False
+            runs = _runs([value for value, _ in result])
+            for at, (value, start, end) in enumerate(runs):
+                link = links and value == 'ramp' and 0 < at and runs[at - 1][0] in CARRIAGEWAYS
+                if 0 < at < len(runs) - 1 and runs[at - 1][0] == runs[at + 1][0] and runs[at - 1][0] is not None \
+                        and value != runs[at - 1][0] and end - start < (MIN_LINK_RUN if link else MIN_RUN):
+                    for index in range(start, end):
+                        result[index] = (runs[at - 1][0], 'smoothed')
+                    changed = True
+                    break
     return result
 
 
 def merge_lanes(types: list[str | None], positions: list[dict]) -> list[bool]:
     """Per frame (the road types after smooth, the positions in the same order): whether it is on the acceleration
     lane of an entry, a stretch of ramp followed by one of motorway or expressway. The distance is the GPS speed of
-    each second (the one before when it is missing); a missing frame between the two ends the ramp there."""
+    each second (the one before when it is missing); a missing frame ends the lane there, between the two, on the ramp
+    before them or on the carriageway after."""
     seconds = [(position.get('segment_index') or 0) * 60 + (position.get('output_index') or 0)
                for position in positions]
     metres, total, speed = [], 0.0, 0.0
@@ -305,11 +317,12 @@ def merge_lanes(types: list[str | None], positions: list[dict]) -> list[bool]:
             continue
         node = metres[start]
         for index in range(end - 1, -1, -1):
-            if types[index] != 'ramp' or node - metres[index] > MERGE_LEAD_M:
+            if types[index] != 'ramp' or node - metres[index] > MERGE_LEAD_M \
+                    or index < end - 1 and seconds[index + 1] - seconds[index] > 1:
                 break
             merge[index] = True
         for index in range(start, stop):
-            if metres[index] - node > MERGE_LANE_M:
+            if metres[index] - node > MERGE_LANE_M or index > start and seconds[index] - seconds[index - 1] > 1:
                 break
             merge[index] = True
     return merge
@@ -357,7 +370,8 @@ def frame_types(road_map: RoadMap, positions: list[dict], parking: ParkingMap | 
             line['basis'] = how + ' (' + line['basis'] + ')'
     for line, merge in zip(lines, merge_lanes([line['road_type'] for line in lines], positions)):
         if merge:
-            line.update(road_type='merge', basis=MERGE_BASIS + ' (' + line['basis'] + ')')
+            line.update(road_type='merge', basis=MERGE_BASIS + ' (' + line['basis'] + ')',
+                        lead=line['road_type'] == 'ramp')
     return lines
 
 
@@ -419,7 +433,8 @@ def load_corrections(root: Path, route: str) -> list[dict]:
 
 def corrected(lines: list[dict], corrections: list[dict]) -> list[dict]:
     """The map lines with a person's corrections over them (the last covering a frame wins): road_type from the person,
-    basis "reviewed", sure, reviewed true and the reviewer. A correction whose frames left the drive is skipped."""
+    basis "reviewed", sure, reviewed true and the reviewer; "lead" on the frames corrected to the acceleration lane that
+    were the ramp's (the map's ramp or lead). A correction whose frames left the drive is skipped."""
     where = {line['frame_key']: index for index, line in enumerate(lines)}
     chosen: list[dict | None] = [None] * len(lines)
     for correction in corrections:
@@ -430,7 +445,8 @@ def corrected(lines: list[dict], corrections: list[dict]) -> list[dict]:
             chosen[index] = correction
     return [line if correction is None else
             {**line, 'road_type': correction.get('road_type'), 'basis': 'reviewed', 'sure': True, 'reviewed': True,
-             'reviewer': correction.get('reviewer')}
+             'reviewer': correction.get('reviewer'), 'lead': correction.get('road_type') == 'merge'
+             and (bool(line.get('lead')) or line.get('road_type') == 'ramp')}
             for line, correction in zip(lines, chosen)]
 
 

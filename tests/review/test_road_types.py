@@ -163,6 +163,30 @@ def test_the_acceleration_lane_of_an_entry():
     slow = _seconds(30, 5.0)
     slow[14]['speed_mps'] = None
     assert sum(merge_lanes(['ramp'] * 10 + ['motorway'] * 20, slow)) == 10 + 20
+    # A missing second inside the lane ends it there, on the carriageway and on the ramp before.
+    gap = _seconds(16, 20.0) + _seconds(17, 20.0, start=40)
+    assert [i for i, merge in enumerate(merge_lanes(types, gap)) if merge] == list(range(11, 16))
+    gap = _seconds(12, 5.0) + _seconds(21, 5.0, start=40)
+    assert [i for i, merge in enumerate(merge_lanes(types, gap)) if merge] == list(range(12, 33))
+
+
+def test_a_short_ramp_between_two_stretches_of_motorway_is_a_slip_of_the_gps():
+    # Passing a junction, the GPS on the link beside the carriageway for 6 s: no way off and back on, no lane.
+    slip = smooth(['motorway'] * 20 + ['ramp'] * 6 + ['motorway'] * 20)
+    assert [value for value, _ in slip] == ['motorway'] * 46
+    assert not any(merge_lanes([value for value, _ in slip], _seconds(46, 25.0)))
+    # A link of 12 s from one carriageway to another stays, with its lane.
+    link = [value for value, _ in smooth(['motorway'] * 20 + ['ramp'] * 12 + ['motorway'] * 20)]
+    assert link[20:32] == ['ramp'] * 12 and any(merge_lanes(link, _seconds(52, 25.0)))
+    # A slip back to the carriageway inside a ramp goes first: the exit and the 13 s link stay whole.
+    exit_ramp = [value for value, _ in smooth(['motorway'] * 30 + ['ramp'] * 5 + ['motorway'] * 2 + ['ramp'] * 20
+                                              + ['town'] * 10)]
+    assert exit_ramp == ['motorway'] * 30 + ['ramp'] * 27 + ['town'] * 10
+    link = [value for value, _ in smooth(['motorway'] * 30 + ['ramp'] * 6 + ['motorway'] * 2 + ['ramp'] * 5
+                                         + ['motorway'] * 30)]
+    assert link == ['motorway'] * 30 + ['ramp'] * 13 + ['motorway'] * 30
+    # A short ramp between two other roads keeps the usual MIN_RUN.
+    assert [value for value, _ in smooth(['rural'] * 10 + ['ramp'] * 5 + ['rural'] * 10)][10:15] == ['ramp'] * 5
 
 
 def test_build_labels_the_lane_after_an_entry_ramp(tmp_path):
@@ -185,10 +209,24 @@ def test_build_labels_the_lane_after_an_entry_ramp(tmp_path):
     # The ramp's metres weigh as the ramp, the carriageway's as the motorway.
     on_ramp, on_road = lines[first], lines[last]
     assert on_ramp['basis'] == 'acceleration lane (highway motorway_link)' and not on_ramp['sure']
+    # The ramp's frames of the lane are its lead, for the measures to fold back into the ramp.
+    assert on_ramp['lead'] is True and on_road['lead'] is False
+    assert data.route_frames(tmp_path, ROUTE)[first]['lead'] is True
     assert on_road['basis'] == 'acceleration lane (highway motorway)' and on_road['sure']
     assert data.frame_label(on_ramp) == (data.CLASS_INDEX['merge'], data.RAMP_WEIGHT)
     assert data.frame_label(on_road) == (data.CLASS_INDEX['merge'], 1.0)
 
+
+
+def test_a_person_s_lane_takes_the_ramp_s_frames_as_its_lead():
+    from nnslr_tools.road_types import corrected
+    # The map: ramp, its lane (two frames of lead), the motorway. A person starts the lane two frames earlier.
+    kinds = ['ramp'] * 4 + ['merge'] * 4 + ['motorway'] * 2
+    lines = [{'frame_key': f'0/{i}', 'road_type': kind, 'lead': kind == 'merge' and i < 6} for i, kind in enumerate(kinds)]
+    lane = corrected(lines, [{'from': '0/2', 'to': '0/7', 'road_type': 'merge', 'reviewer': 'p'}])
+    assert [line['lead'] for line in lane[2:8]] == [True] * 4 + [False] * 2
+    # A frame of the lane said motorway by the person is no lead any more.
+    assert corrected(lines, [{'from': '0/4', 'to': '0/4', 'road_type': 'motorway', 'reviewer': 'p'}])[4]['lead'] is False
 
 # -- a person's corrections (Data › Roads, a drive opened) -----------------------------------------------------------
 def _drive_of(tmp_path, count=6):

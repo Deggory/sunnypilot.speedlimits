@@ -355,13 +355,22 @@ def test_the_acceleration_lane_ends_the_ramps_limit_and_is_the_carriageway_for_t
     entry = {'ramp': 60, 'merge': 78, 'before': 'town'}
     assert metrics.ramp_entries(labels, ROAD_TYPES) == [entry]
     no_sign = np.full(180, np.inf)
-    # The answer says merge from second 81: released there, not 8 s of motorway later.
+    # The answer says merge from second 81. Without a motorway sign the carriageway is not known: the lane counts for
+    # the 8 s of carriageway in a row (from second 80), released at 88 as by a network without the class.
     held = _entry_drive()
     held[81:88] = lane
     assert metrics.comma_release(held, no_sign, entry, ROAD_TYPES) == {
-        'number_at': -16, 'held_by': 'ramp', 'release': 3, 'outcome': 'in_time'}
-    # A network without the class (an older one) is held to the 8 s of motorway.
+        'number_at': -16, 'held_by': 'ramp', 'release': 10, 'outcome': 'in_time'}
     assert metrics.comma_release(_entry_drive(), no_sign, entry, ROAD_TYPES)['release'] == 10
+    # A motorway sign at the ramp's start names the carriageway: released on the lane's first second.
+    sign = np.full(180, np.inf)
+    sign[60:] = np.arange(120)
+    assert metrics.comma_release(held, sign, entry, ROAD_TYPES) == {
+        'number_at': -16, 'held_by': 'ramp+sign', 'release': 3, 'outcome': 'in_time'}
+    # Said on the lane since the sign: the number is the carriageway's, the sign no longer holds it.
+    on_lane = held.copy()
+    on_lane[61] = lane
+    assert metrics.comma_release(on_lane, sign, entry, ROAD_TYPES)['held_by'] == 'ramp'
     # The road measures: the lane is the motorway after it, in the labels and the answers.
     folded, answer = metrics.fold_merge(labels, held, ROAD_TYPES)
     assert (folded[78:91] == MOTORWAY).all() and (answer[81:88] == MOTORWAY).all()
@@ -377,6 +386,79 @@ def test_the_acceleration_lane_ends_the_ramps_limit_and_is_the_carriageway_for_t
     road[78:85] = lane
     assert (metrics.fold_labels(road, ROAD_TYPES)[78:85] == ROAD_TYPES.index('expressway')).all()
     assert (metrics.fold_labels(np.array([RAMP] * 5 + [lane] * 3), ROAD_TYPES)[5:] == MOTORWAY).all()
+
+
+
+def test_comma_release_forgets_the_signs_carriageway_as_the_car_does():
+    import numpy as np
+
+    from nnslr_tools import road_type_metrics as metrics
+    lane, expressway = ROAD_TYPES.index('merge'), ROAD_TYPES.index('expressway')
+    # A motorway sign, 18 s of motorway, then a link to an expressway: the sign no longer names the carriageway, the
+    # lane counts for the 8 s (test_vision: a ramp off the motorway does not take its limit to an expressway).
+    held = np.array([MOTORWAY] * 18 + [RAMP] * 12 + [lane] + [expressway] * 40)
+    sign = np.arange(len(held), dtype=float)
+    entry = {'ramp': 18, 'merge': 30, 'before': 'motorway'}
+    assert metrics.comma_release(held, sign, entry, ROAD_TYPES) == {
+        'number_at': -10, 'held_by': 'ramp+sign', 'release': 8, 'outcome': 'in_time'}
+    # An expressway's link to the motorway, the road type still the expressway's for 3 s after the sign (the
+    # debounce): the sign names the motorway, released on the lane's first second.
+    held = np.array([expressway] * 13 + [RAMP] * 17 + [lane] * 8 + [MOTORWAY] * 30)
+    sign = np.full(len(held), np.inf)
+    sign[10:] = np.arange(len(held) - 10)
+    entry = {'ramp': 13, 'merge': 30, 'before': 'expressway'}
+    assert metrics.comma_release(held, sign, entry, ROAD_TYPES)['release'] == 0
+    # The drive's previous ramp's limit ended after the sign: the number is the carriageway's, the sign holds nothing.
+    assert metrics.comma_release(held, sign, entry, ROAD_TYPES, joined_at=11)['held_by'] == 'ramp'
+    assert metrics.comma_release(held, sign, entry, ROAD_TYPES, joined_at=9)['held_by'] == 'ramp+sign'
+    # The car's dwell: a carriageway right after the lane counts from the lane's start.
+    assert metrics._road_type_since(np.array([RAMP, lane, lane, MOTORWAY, MOTORWAY]), 4, lane) == 1
+
+def test_the_lanes_lead_is_the_ramps_for_the_road_measures():
+    import numpy as np
+
+    from nnslr_tools import road_type_metrics as metrics
+    lane = ROAD_TYPES.index('merge')
+    labels = _entry_drive()
+    labels[78:91] = lane
+    lead = np.zeros(180, dtype=bool)
+    lead[78:80] = True
+    # The lane's first two seconds were the ramp's metres: the ramp for the road measures, the rest the motorway.
+    folded = metrics.fold_labels(labels, ROAD_TYPES, lead)
+    assert (folded[78:80] == RAMP).all() and (folded[80:91] == MOTORWAY).all()
+    # "merge" said on the lead is the ramp there; said in town it stays an error (the motorway).
+    said = labels.copy()
+    said[10] = lane
+    _, answer = metrics.fold_merge(labels, said, ROAD_TYPES, lead)
+    assert (answer[78:80] == RAMP).all() and (answer[80:91] == MOTORWAY).all() and answer[10] == MOTORWAY
+    # The entry: the merge at the lane's first second, the lead in the ramp's length.
+    assert metrics.ramp_entries(labels, ROAD_TYPES, lead) == [{'ramp': 60, 'merge': 78, 'before': 'town'}]
+    short = np.array([TOWN] * 5 + [RAMP] + [lane] * 6 + [MOTORWAY] * 5)
+    short_lead = np.zeros(len(short), dtype=bool)
+    short_lead[6:8] = True
+    assert metrics.ramp_entries(short, ROAD_TYPES) == []
+    assert metrics.ramp_entries(short, ROAD_TYPES, short_lead) == [{'ramp': 5, 'merge': 6, 'before': 'town'}]
+
+
+def test_a_detection_needs_one_class_said_in_a_row():
+    import numpy as np
+
+    from nnslr_tools import road_type_metrics as metrics
+    lane = ROAD_TYPES.index('merge')
+    change = {'time': 20, 'new': MOTORWAY}
+    raw = np.array([RAMP] * 20 + [lane, lane, MOTORWAY, MOTORWAY, MOTORWAY] + [MOTORWAY] * 20)
+    folded = np.where(raw == lane, MOTORWAY, raw)
+    # Folded, three seconds of motorway from 20; for the car merge, merge, motorway is no run: found at 22.
+    assert metrics.detection_delay(folded, change) == 0
+    assert metrics.detection_delay(folded, change, raw) == 2
+    # The car's debounce first, then the fold: merge and motorway in turn on the lane are no answer the car holds; it
+    # stays on the ramp until three seconds of one class (second 23 to 25), found 13 s after the merge.
+    labels = np.array([RAMP] * 10 + [lane] * 5 + [MOTORWAY] * 40)
+    flicker = {'labels': labels, 'weights': np.ones(55), 'predicted': np.array([RAMP] * 10 + [lane, MOTORWAY] * 7
+                                                                               + [MOTORWAY] * 31)}
+    found = metrics.after_merge([flicker], ROAD_TYPES)
+    assert found['accuracy'] == 1.0 and found['accuracy_debounced'] == round(30 / 45, 4)
+    assert metrics.sequence_metrics([flicker], ROAD_TYPES)['transitions']['ramp_to_motorway']['delays'] == [13]
 
 
 def test_confusion_counts_the_masked_frames_by_truth_and_answer():
