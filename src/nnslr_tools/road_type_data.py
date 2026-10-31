@@ -29,8 +29,9 @@ split by drive or by random frames would test the network on roads it learned. T
 about 300 m (splits.PLACE_CELL, the GPS of the frame, else of the nearest frame of the drive with one). The test is
 every area the test drives of the sign split went through (data/splits/latest.json: the same held-out drive), so the
 whole test drive is measured as it was driven, with its ramps and towns. The areas next to the test are the buffer.
-Validation grows in VALIDATION_CLUSTERS compact clusters of areas (seeded where it adds the classes it lacks) to about
-EVALUATION_SHARE of the labelled frames; the areas next to it are the buffer too. Everything else is train. A
+Validation grows in VALIDATION_CLUSTERS compact clusters of areas (seeded where it adds the classes it lacks, never
+without a class of MAIN_CLASS_SHARE of the frames) to about EVALUATION_SHARE of the labelled frames; the areas next to
+it are the buffer too. Everything else is train. A
 sequence is a run of frames of one drive, without a missing frame, in one partition: the network is trained and
 measured on whole stretches, never on lone frames.
 
@@ -75,10 +76,12 @@ GPS_RELATIVE = Path('derived') / 'gps'
 CACHE_RELATIVE = Path('derived') / 'road_type_frames'
 CACHE_VERSION = 1
 SPLITS_RELATIVE = Path('splits') / 'latest.json'
-SPLIT_POLICY = 'road-type-place-v1'
+SPLIT_POLICY = 'road-type-place-v2'
 PARTITIONS = ('train', 'validation', 'test')
 EVALUATION_SHARE = .15
 VALIDATION_CLUSTERS = 2
+# A class with this share of the candidates' frames is never left out of the validation: the epoch is chosen there.
+MAIN_CLASS_SHARE = .1
 # Shorter runs of one partition (frames) are dropped: too short to train or measure a memory.
 MIN_SEQUENCE = 30
 UNSEEN_EXIT_S = 4.0  # seconds after a passage whose exit was not seen in which a "passed" is not judged
@@ -265,12 +268,15 @@ def _validation_cells(candidates: set, weight_of: dict, classes_of: dict, share:
     """Validation areas: clusters compact clusters, each holding about share / clusters of the candidates' labelled
     frames, the one at each step whose seed brings every class closest to its share of the candidates' frames (the
     ramps sit at interchanges: a cluster grown blindly on one takes most of them from the training) with the fewest
-    training frames lost to its buffer."""
+    training frames lost to its buffer. A cluster that leaves out a class of MAIN_CLASS_SHARE of the frames loses to any
+    that holds it: with eight classes the rare ones weigh as much as the motorway, and a validation without the
+    motorway chose the epoch blind to it (31 Oct: motorway recall 0.11 on test)."""
     pool: dict[int, int] = {}
     for cell in candidates:
         for label, count in classes_of[cell].items():
             pool[label] = pool.get(label, 0) + count
     total = sum(weight_of[cell] for cell in candidates) or 1
+    main = [label for label, count in pool.items() if count >= MAIN_CLASS_SHARE * total]
     chosen: set = set()
     for step in range(1, clusters + 1):
         target = share * step / clusters
@@ -283,7 +289,8 @@ def _validation_cells(candidates: set, weight_of: dict, classes_of: dict, share:
                 for label, count in classes_of[cell].items():
                     have[label] = have.get(label, 0) + count
             lost = sum(weight_of[cell] for cell in (_around(together) - together) & candidates)
-            score = sum((have.get(label, 0) / count - target) ** 2 for label, count in pool.items()) + lost / total
+            score = (sum((have.get(label, 0) / count - target) ** 2 for label, count in pool.items()) + lost / total
+                     + sum(1 for label in main if not have.get(label)))
             if best_score is None or score < best_score:
                 best, best_score = cluster, score
         if not best:

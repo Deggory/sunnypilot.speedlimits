@@ -116,6 +116,23 @@ def test_split_by_place_keeps_the_test_drive_and_a_buffer(root):
     assert dataset['split_sha256'] == data.split_sha256(split)
 
 
+def test_the_validation_never_leaves_out_a_main_class(monkeypatch):
+    from nnslr_tools import road_type_data as data
+    town, rural, motorway = (data.CLASS_INDEX[name] for name in ('town', 'rural', 'motorway'))
+    classes_of = {
+        (0, 0): {town: 20, rural: 20},                 # a village and its country road, alone
+        (10, 0): {town: 30, rural: 30, motorway: 40},  # a junction onto the motorway...
+        (10, 1): {motorway: 150},                      # ...with more motorway beside it, lost to its buffer
+        (20, 0): {motorway: 150},
+        (30, 0): {town: 100, rural: 100},
+    }
+    weight_of = {cell: sum(counts.values()) for cell, counts in classes_of.items()}
+    assert data._validation_cells(set(classes_of), weight_of, classes_of, .15, 1) == {(10, 0)}
+    # Without the rule the village wins: closer to every share, nothing lost to its buffer, and no motorway.
+    monkeypatch.setattr(data, 'MAIN_CLASS_SHARE', 2.0)
+    assert data._validation_cells(set(classes_of), weight_of, classes_of, .15, 1) == {(0, 0)}
+
+
 def test_sequences_are_runs_in_drive_order_broken_at_gaps(root):
     import numpy as np
 
