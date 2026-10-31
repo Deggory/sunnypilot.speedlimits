@@ -522,4 +522,18 @@ Its own selection fixed what the junction head had spoilt in v3: after a merge 9
 
 **On the car** (`vision.SpeedLimitMemory`, sunnypilot branch `speed-limits`). With the ramp's limit held and the network saying merge, the general limit of the carriageway comes back at once, as a sign's, when the carriageway is known from its sign (a motorway or expressway sign confirmed within `RAMP_SECONDS` before the ramp's number). Without such a sign the lane only counts towards `MERGE_SECONDS`, and the carriageway the network names after it gives the limit. A merge without a ramp's limit held changes nothing. A number read on the lane, or after a ramp's limit was released, is the carriageway's even when its sign is near (`_joined_at`); the sign's kind is forgotten at a sign of another road and once the network has seen a carriageway for `ROAD_TYPE_SECONDS` since the sign (not in the first seconds, when the debounced road type is still the one before the sign), so a later ramp to the other kind is not given the first one's limit. `road_type_metrics.comma_release` follows the same rules, with the release of the ramp before as the join. The lane's seconds count for the carriageway's dwell (`ROAD_TYPE_SECONDS`). The map is still never read on the car.
 
-**Still to do.** Train with the class and measure the release on the comma's rule; check the lanes of the map by eye in Data › Roads.
+**First training with the class (31 October 2026).** Run `2026-10-31_0007-road-type` had a validation without a single motorway frame: with eight classes the rare ones weighed as much as the motorway in the choice of the validation areas, and the buffer's cost decided. Its epoch was chosen blind to the motorway, and on test it said rural on the motorways (recall 0.11; 0.92 on its own training drives: it had learnt the drives). The split now never leaves out a class of a tenth of the frames (`road_type_data.MAIN_CLASS_SHARE`, policy `road-type-place-v2`, split `d3fb3f48a194`): validation 3,431 frames, 1,061 of them motorway, 155 ramp, 19 merge. The test is unchanged (40 sequences, 11,840 frames), so run `2026-10-31_0046-road-type` is measured against the version in use (`2026-10-30_1216-road-type`, measured again on today's data with `nnslr release-road-type`):
+
+| test | in use (1216, with motion) | with memory and motion | with memory, no motion | without memory |
+|---|---|---|---|---|
+| accuracy | 0.789 | 0.742 | **0.811** | 0.648 |
+| macro F1 | **0.433** | 0.391 | 0.429 | 0.350 |
+| false switches/h (debounced) | 101.7 (44.5) | 70.6 (35.3) | **39.5 (24.9)** | 703.7 (94.1) |
+| after a merge | 0.767 | 0.830 | **0.850** | 0.744 |
+| F1 motorway / rural / town | 0.903 / 0.703 / 0.801 | 0.837 / 0.632 / 0.821 | **0.918 / 0.748 / 0.823** | 0.733 / 0.595 / 0.720 |
+| F1 ramp / parking / 30 zone | **0.183 / 0.833** / 0.037 | 0.033 / 0.720 / 0.087 | 0.039 / 0.748 / 0.154 | 0.051 / 0.504 / 0.195 |
+| ramp's limit (map signs, 9 merges) | on the ramp 2, in time 1, late 1, never held 5 | the same | on the ramp 2, in time 2, never held 5 | in time 3, late 1, never held 5 |
+
+No version ever says merge (F1 0): the training has 48 merge frames. The version in use stays: only the one with memory and motion goes on the car (`car_release.ROAD_TYPE_ON_CAR`, the only ONNX step the training exports) and it is worse; the one without motion is better on most measures but loses the ramp (11 of 527 frames) and some of the car parks.
+
+**Still to do.** More motorway entries for the class merge; check the lanes of the map by eye in Data › Roads; let the version without the car's motion go on the car (its ONNX step exported, chosen on the Models tab).
