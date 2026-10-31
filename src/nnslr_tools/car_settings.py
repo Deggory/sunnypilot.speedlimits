@@ -32,7 +32,7 @@ SETTINGS = (
              'in a row.', 'default': 3, 'min': 1, 'max': 10, 'step': 1, 'unit': 'answers', 'group': 'road'},
     {'key': 'road_type_seconds', 'constant': 'ROAD_TYPE_SECONDS', 'label': 'A new road type gives its limit after',
      'help': 'Where no sign holds the limit, a new road type (town, rural, a 30 zone…) gives its general limit only '
-             'once seen this long; also how long a road must be seen to leave a car park.', 'default': 10.0,
+             'once seen this long.', 'default': 10.0,
      'min': 2.0, 'max': 60.0, 'step': 1.0, 'unit': 's', 'group': 'road'},
     {'key': 'zone_confidence', 'constant': 'ZONE_CONFIDENCE', 'label': 'A 30 zone when the network is',
      'help': 'The scene network says "30 zone" only this sure, else town: with Map Data + Vision the car takes '
@@ -41,6 +41,10 @@ SETTINGS = (
     {'key': 'parking_seconds', 'constant': 'PARKING_SECONDS', 'label': 'A car park after',
      'help': 'A car park gives its limit once the network has seen it this long, the car slow.', 'default': 5.0,
      'min': 1.0, 'max': 30.0, 'step': 1.0, 'unit': 's', 'group': 'road'},
+    {'key': 'parking_exit_seconds', 'constant': 'PARKING_EXIT_SECONDS', 'label': 'Out of a car park after',
+     'help': 'The car park\'s limit ends once the network has seen a road this long (after its answers agree, about '
+             '3 s): the car speeds up to the street\'s limit.', 'default': 3.0, 'min': 0.0, 'max': 30.0, 'step': 1.0,
+     'unit': 's', 'group': 'road'},
     {'key': 'parking_limit', 'constant': 'PARKING_LIMIT', 'label': 'Limit in a car park in the open',
      'help': 'The limit a car park in the open gives (a sign there counts only when lower). A scene network trained '
              'before the class garage cannot tell the two apart: its car parks take the garage\'s limit.',
