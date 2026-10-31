@@ -3,8 +3,9 @@
 
 Some give a limit without a number (town entry, motorway, expressway), some carry numbers that are no
 speed (weight, height, width, minimum speed): the model has to know them apart from the speed signs.
-Direction signs say where they point. Only a box of family ``other_sign`` has a kind; ``None`` means not
-said (older reviews, or not chosen).
+Direction signs say where they point. ``no_vehicles`` is a round ban with a red ring and a white disc, empty or
+with pictograms (motor vehicles, motorcycles, lorries, bicycles...): the sign that looks most like a speed limit.
+Only a box of family ``other_sign`` has a kind; ``None`` means not said (older reviews, or not chosen).
 
 A box of family ``not_a_sign`` may say what it is instead (NOT_A_SIGN_TYPES): ``on_vehicle``, a sign-like
 disc or panel on a vehicle, such as the top-speed sticker on the back of a truck. It stays "not a sign" for
@@ -21,8 +22,8 @@ SIGN_TYPES = (
     # Priority
     'give_way', 'stop', 'priority_to_right', 'main_road', 'main_road_end',
     # Bans and other numbers
-    'no_overtaking', 'no_overtaking_end', 'no_entry', 'minimum_speed', 'weight_limit', 'height_limit',
-    'width_limit',
+    'no_overtaking', 'no_overtaking_end', 'no_entry', 'no_vehicles', 'minimum_speed', 'weight_limit',
+    'height_limit', 'width_limit',
     # Mandatory (round, blue)
     'keep_right', 'keep_left', 'ahead_only',
     # Roads and places

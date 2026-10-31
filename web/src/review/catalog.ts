@@ -71,6 +71,7 @@ export const SIGN_KIND_GROUPS: readonly {label: string; kinds: readonly SignKind
     {id: 'no_overtaking', label: 'No overtaking', chip: 'No overtaking', short: 'no overtaking'},
     {id: 'no_overtaking_end', label: 'End of no overtaking', chip: 'End of no overtaking', short: 'overtaking end'},
     {id: 'no_entry', label: 'No entry', chip: 'No entry', short: 'no entry'},
+    {id: 'no_vehicles', label: 'No vehicles (red ring, white disc)', chip: 'No vehicles', short: 'no vehicles'},
     {id: 'minimum_speed', label: 'Minimum speed (blue)', chip: 'Minimum speed', short: 'minimum'},
     {id: 'weight_limit', label: 'Weight limit', chip: 'Weight', short: 'weight'},
     {id: 'height_limit', label: 'Height limit', chip: 'Height', short: 'height'},
