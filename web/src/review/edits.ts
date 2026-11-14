@@ -214,6 +214,33 @@ export function squareSelected(): void {
   changed(row);
 }
 
+/** Shift ↑ / Shift ↓: the selected box grows or shrinks around its centre with its proportions, a step at a time (6 %
+ * of its sides, a pixel of the longer one at least), inside the image and never under 2 px a side. Held down, the key
+ * repeats. A square is Q's. */
+export function scaleSelected(direction: 1 | -1): void {
+  const row = currentRow();
+  const d = selectedDetection();
+  if (!row || !d || refuseChange()) return;
+  const [x1, y1, x2, y2] = d.bbox_xyxy;
+  const width = x2 - x1;
+  const height = y2 - y1;
+  const longer = Math.max(width, height);
+  if (longer <= 0) return;
+  const cx = (x1 + x2) / 2;
+  const cy = (y1 + y2) / 2;
+  // As large as the image lets it grow around its centre; never smaller than 2 px on its shorter side.
+  const most = Math.min(2 * Math.min(cx, row.width - cx) / width, 2 * Math.min(cy, row.height - cy) / height);
+  const least = 2 / Math.min(width, height);
+  const step = Math.max(0.06, 1 / longer);
+  const scale = Math.min(Math.max(1 + direction * step, least), most);
+  if (!Number.isFinite(scale) || Math.abs(scale - 1) < 1e-6) return;
+  d.bbox_xyxy = [cx - width * scale / 2, cy - height * scale / 2, cx + width * scale / 2, cy + height * scale / 2];
+  delete d.check_position;
+  d.box_source = 'hand';
+  markPlacedByHand(d, true);
+  changed(row);
+}
+
 export function removeSelected(): void {
   removeBox(state.selected);
 }

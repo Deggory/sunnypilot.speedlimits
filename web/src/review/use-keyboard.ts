@@ -1,4 +1,4 @@
-// Keyboard shortcuts: ← → frame by frame of the video (video.ts), Shift ← → a second (a whole cell of the timeline), ↑ ↓ box, the speed typed
+// Keyboard shortcuts: ← → frame by frame of the video (video.ts), Shift ← → a second (a whole cell of the timeline), ↑ ↓ box, Shift ↑ ↓ the selected box larger or smaller with its proportions, the speed typed
 // with one key (2 = 20 … 9 = 90, 1 = 100, "1 2" = 120, 0 = not readable; typed whole, "5 0", it works too; on a frame in the US
 // two keys in mph, "3 5" = 35, one alone and a pause its tens, 3 = 30), O X U the road (ours, another, unclear), S other
 // sign for our road, V on a vehicle (not a sign), L variable speed limit (a lit display) or back, G give way, P stop, R roundabout, E something else, M main road (a direction has no
@@ -14,7 +14,7 @@ import {askAi, fitBox, fitLocal} from './ai';
 import {toggleCar} from './car';
 import {applyPrevious} from './carry';
 import {confirmFrame} from './confirm';
-import {cancelAll, removeAllBoxes, removeSelected, squareSelected, selectBox, setField, setKind, setOnVehicle, setOtherOurs, setUserKind, setValue,
+import {cancelAll, removeAllBoxes, removeSelected, scaleSelected, squareSelected, selectBox, setField, setKind, setOnVehicle, setOtherOurs, setUserKind, setValue,
   toggleDrawing, toggleHints, toggleUsersComplete, toggleVariable} from './edits';
 import {signStyleOf} from './catalog';
 import {countryOf, currentRow, workOf} from './frames';
@@ -234,13 +234,16 @@ export function useKeyboard(): void {
       return;
     }
     switch (event.key) {
+      // Shift ↑ ↓ with a box selected: it grows or shrinks with its proportions (edits.ts scaleSelected).
       case 'ArrowUp':
         event.preventDefault();
-        stepBox(-1);
+        if (event.shiftKey && state.selected >= 0) scaleSelected(1);
+        else stepBox(-1);
         break;
       case 'ArrowDown':
         event.preventDefault();
-        stepBox(1);
+        if (event.shiftKey && state.selected >= 0) scaleSelected(-1);
+        else stepBox(1);
         break;
       case 'ArrowLeft':
         event.preventDefault();
