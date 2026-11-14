@@ -57,6 +57,8 @@ export interface ActionOptions {
   limit?: string;
   /** The package to publish (networks_publish). */
   package?: string;
+  /** That package's licence, for the question before it is published: never sent to the server. */
+  license?: string;
   /** The run of the SignNet sent to the car (send_to_car) or tried on the comma (try_on_comma). */
   signnet?: string;
   /** Build psa-torque-sunny-testing also when nothing changed (send_to_car, "Build again"). */
@@ -638,6 +640,10 @@ export interface NetworkPackage {
   name: string;
   created: string | null;
   networks: Record<'cutter' | 'classifier' | 'decider', string | null>;
+  /** Its licence ("MIT", "CC BY-NC-SA 4.0") and the networks that learnt from Mapillary's pictures, which give it the
+   * second one. A server not restarted since 15 Nov 2026 sends neither. */
+  license?: string | null;
+  mapillary?: ('cutter' | 'classifier' | 'decider')[];
   bytes: number;
   /** Where and when it was uploaded; null: only here. */
   published: {repo: string; url: string; at: string} | null;

@@ -420,6 +420,11 @@ def test_a_known_failure_is_one_plain_sentence():
     assert failed['failure'].startswith('The GPU ran out of memory') and 'request.json' in failed['last_line']
     assert failure_text('ERROR: per dividere il dataset servono almeno 5 route (o luoghi) indipendenti\n').startswith('More reviewed')
     assert failure_text('ssh: connect to host comma port 22: Connection refused\n').startswith('The comma did not answer')
+    # Publish on Hugging Face with a login that may not make a repository: what to do, not a traceback.
+    for line in ('error: the Hugging Face login of this server may not create cristianku/x: make that model repository on '
+                 'huggingface.co (public) and let the login write to it',
+                 '403 Forbidden: You don\'t have the rights to create a model under the namespace "cristianku".'):
+        assert failure_text(line + '\n').startswith('The Hugging Face login may not create the repository. Connect a token')
     killed = ('scripts/run_experiment_b.sh: line 159: 335787 Killed                  "$NN" experiment-b\n'
               '     335788 Done                    | tee "$RUN_ROOT/$variant.log"\n\n== finished with code 137\n')
     assert failure_text(killed).startswith('Stopped by the system: the server ran out of memory')

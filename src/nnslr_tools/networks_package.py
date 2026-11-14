@@ -565,6 +565,11 @@ def packages(root: Path) -> list[dict]:
                       'networks': {role: ((manifest.get('networks') or {}).get(role) or {}).get('id')
                                    for role in ROLES},
                       'measured': manifest.get('measured'),
+                      # Its licence and the networks that learnt from Mapillary's pictures (why it is not MIT); a
+                      # package of before 15 Nov 2026 says MIT and names none, whatever its networks learnt from.
+                      'license': manifest.get('license'),
+                      'mapillary': [role for role in ROLES
+                                    if ((manifest.get('networks') or {}).get(role) or {}).get('uses_mapillary')],
                       'bytes': sum(p.stat().st_size for p in path.iterdir() if p.is_file()),
                       'published': published})
     return sorted(found, key=lambda item: str(item['created']), reverse=True)

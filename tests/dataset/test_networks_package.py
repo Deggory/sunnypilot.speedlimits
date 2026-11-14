@@ -119,6 +119,18 @@ def test_the_model_card_says_what_each_number_of_the_classifier_means(tmp_path):
     assert card.index('## What the classifier says') < card.index('## Measured')
 
 
+def test_the_packages_here_say_their_licence_and_which_network_gives_it(tmp_path):
+    folder = _package(tmp_path / 'publish' / 'networks' / 'speedlimits-20261114-2144')
+    manifest = json.loads((folder / 'networks.json').read_text())
+    manifest['networks']['cutter']['uses_mapillary'] = manifest['networks']['classifier']['uses_mapillary'] = True
+    manifest['license'], manifest['created'] = package_license(manifest['networks']), '2026-11-14T21:44:00Z'
+    (folder / 'networks.json').write_text(json.dumps(manifest))
+    _package(tmp_path / 'publish' / 'networks' / 'speedlimits-20261030-1416', name='speedlimits-20261030-1416')
+    newest, old = packages(tmp_path)
+    assert (newest['license'], newest['mapillary']) == ('CC BY-NC-SA 4.0', ['cutter', 'classifier'])
+    assert (old['license'], old['mapillary']) == ('MIT', [])
+
+
 def test_the_countries_of_a_package_are_those_its_drives_were_driven_in(tmp_path):
     for drive, codes in (('a', ['CH', 'CH', 'DE']), ('b', ['CH', None]), ('c', [])):
         folder = tmp_path / 'derived' / 'gps' / drive

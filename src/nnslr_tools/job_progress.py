@@ -319,6 +319,11 @@ FAILURES = (
     (re.compile(r'^helpers/simulate_drive\.sh: (?:no nvidia-smi|nvidia-smi)|did not load on the GPU|no onnxruntime for the GPU|'
                 r'The GPU did not decode', re.M),
      'No GPU for the replay: it always runs on a V100, never on the CPU. Free a card, then try again.'),
+    # scripts/publish_networks.sh: a Hugging Face login that may write to its repositories but not make new ones (a
+    # fine-grained token), and the repository is not there yet.
+    (re.compile(r'may not create \S+: make that model repository|You don\'t have the rights to create a model'),
+     'The Hugging Face login may not create the repository. Connect a token with Write access in Settings › Hugging '
+     'Face, or make the repository on huggingface.co, then publish again. Nothing was uploaded.'),
     # scripts/train_box_fit.sh and its refiner.
     (re.compile(r'^Too few boxes drawn by people to train the box fit', re.M),
      'Too few boxes drawn by people to train Fit box yet: nothing changed.'),

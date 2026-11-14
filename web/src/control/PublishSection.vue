@@ -37,8 +37,21 @@ function runOf(id: string | null): string {
   return id ? id.slice(id.indexOf(':') + 1).split('/')[0] ?? id : '–';
 }
 
+const ROLE_WORDS = {cutter: 'the cutter', classifier: 'the classifier', decider: 'the applicability network'} as const;
+/** "CC BY-NC-SA 4.0: the cutter and the classifier learnt from Mapillary's pictures", "MIT"; '' when the server does
+ * not say. */
+const licence = computed(() => {
+  const found = latest.value?.license;
+  if (!found) return '';
+  const learnt = (latest.value?.mapillary ?? []).map((role) => ROLE_WORDS[role]);
+  return 'Licence ' + found + (learnt.length ? ': ' + learnt.join(' and ') + ' learnt from Mapillary’s pictures, non-commercial use only' : '');
+});
+
 function publish(): void {
-  if (latest.value && publishState.value) emit('run', 'networks_publish', publishState.value, undefined, {package: latest.value.name});
+  if (latest.value && publishState.value) {
+    emit('run', 'networks_publish', publishState.value, undefined,
+      {package: latest.value.name, ...(latest.value.license ? {license: latest.value.license} : {})});
+  }
 }
 </script>
 
@@ -71,6 +84,7 @@ function publish(): void {
               <span v-if="latest.published" class="latest-use">published {{ isoWhen(latest.published.at) }}</span></span>
             <span class="latest-name">{{ latest.name }}</span>
             <span class="latest-text">{{ ROLES.map((role) => role + ' ' + runOf(latest!.networks[role])).join(' · ') }}</span>
+            <span v-if="licence" class="latest-text" id="package-licence">{{ licence }}</span>
             <span v-if="outdated" class="latest-text warn-text">The models in use changed since: prepare a new package to publish them.</span>
           </div>
           <a v-if="latest.published" class="btn small" :href="latest.published.url" target="_blank" rel="noopener">Open</a>

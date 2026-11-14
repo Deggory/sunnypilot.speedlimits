@@ -101,7 +101,7 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
     return {title: 'Publish ' + (options?.package ?? 'the package') + ' on Hugging Face?', action: 'Publish', danger: true,
       text: 'Uploads the cutter, the classifier and the applicability network of this package, their model card and the catalog to '
         + 'Hugging Face, public: anyone can download them, and a copy may stay even if you delete it later. No frame '
-        + 'or dataset is uploaded.'};
+        + 'or dataset is uploaded.' + (options?.license ? ' Its licence: ' + options.license + '.' : '')};
   }
   if (name === 'setup_vlm') {
     return {title: 'Install Qwen3-VL?', action: 'Install',
@@ -236,7 +236,9 @@ export function usePanelActions(refresh: () => Promise<void>) {
     const ask = question(name, state, start, options);
     if (ask !== null && !await askConfirm(ask)) return;
     try {
-      const job = await post<StartedJob>('/api/panel/run/' + name, start ? {start: start.key} : options ? {...options} : {});
+      // The package's licence is for the question only: the server reads it from the package itself.
+      const {license: _shown, ...sent} = options ?? {};
+      const job = await post<StartedJob>('/api/panel/run/' + name, start ? {start: start.key} : sent);
       toast('Started: ' + job.label);
       await refresh();
     } catch (error) {
