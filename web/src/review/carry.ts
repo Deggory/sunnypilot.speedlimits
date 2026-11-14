@@ -1,4 +1,4 @@
-// "Apply previous": the boxes confirmed on the frame before, carried onto the frame on screen by the server
+// "Apply previous": the boxes of the last frame confirmed before this one, carried onto the frame on screen by the server
 // (review_service.apply_previous). A box of this frame that is the same sign takes the previous labels; a sign
 // not found here gets a box where it should be, marked "check": Confirm refuses the frame until the reviewer
 // has looked at each one (moved it onto the sign, pressed "Here", or deleted it). Pressing A is that look: once the fit
@@ -20,11 +20,24 @@ import type {CarryAnswer, FrameEdit, FrameRow} from './types';
 
 /** The frame just before in the timeline (this segment or the end of the one before), or null. For a frame of the
  * video not saved (video.ts): the frame of the report just before it. */
-export function previousRow(row: FrameRow): FrameRow | null {
+function rowBefore(row: FrameRow): FrameRow | null {
   const key = row.frame_key;
   const before = report.rows[isVirtual(key) ? anchorIndex(key) : indexOf(key) - 1];
   if (!before || before.segment_index < row.segment_index - 1) return null;
   return before;
+}
+
+/** The frame Apply previous takes the boxes from: the last one confirmed before this frame (or confirmed here and still
+ * on its way to the server), in this segment or the one before; the reviewer may have gone some frames on without
+ * confirming those between (Cristian, 14 Nov 2026). Null when none is. As review_service.apply_previous. */
+export function previousRow(row: FrameRow): FrameRow | null {
+  const key = row.frame_key;
+  for (let index = isVirtual(key) ? anchorIndex(key) : indexOf(key) - 1; index >= 0; index -= 1) {
+    const before = report.rows[index];
+    if (!before || before.segment_index < row.segment_index - 1) return null;
+    if (isConfirmed(before.frame_key) || savingConfirmed(before.frame_key)) return before;
+  }
+  return null;
 }
 
 export interface CarryState {
@@ -41,11 +54,9 @@ export const carried = ref<string | null>(null);
 export function carryState(row: FrameRow): CarryState {
   if (!report.apiBase) return {shown: false, enabled: false, title: ''};
   if (state.inFlight.has(row.frame_key)) return {shown: true, enabled: false, title: 'Saving…'};
+  if (rowBefore(row) === null) return {shown: true, enabled: false, title: 'No frame just before this one.'};
   const before = previousRow(row);
-  if (before === null) return {shown: true, enabled: false, title: 'No frame just before this one.'};
-  if (!isConfirmed(before.frame_key) && !savingConfirmed(before.frame_key)) {
-    return {shown: true, enabled: false, title: 'The previous frame (' + before.frame_key + ') is not confirmed yet.'};
-  }
+  if (before === null) return {shown: true, enabled: false, title: 'No frame before this one is confirmed yet.'};
   return {
     shown: true,
     enabled: true,

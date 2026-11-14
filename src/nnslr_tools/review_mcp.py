@@ -380,12 +380,14 @@ def build_server(service, *, client: str, read_only: bool = False):
                              detections: Annotated[list[Detection] | None, Field(max_length=100, description=(
                                  'The boxes of this frame as you have them now; omit to start from the model '
                                  'proposals.'))] = None) -> Carried:
-        """The boxes confirmed on the previous frame carried onto this one (saves nothing). A box of this
+        """The boxes of the last frame confirmed before this one (source_frame_key: the frame just before, or an
+        earlier one of this minute or the minute before when those between are not confirmed) carried onto this one
+        (saves nothing). A box of this
         frame that is the same sign (moved and grown) takes the previous labels; a sign not found here gets a
         box where it should be, with check_position true: look at the image, fix its bbox_xyxy or drop it if
         the sign is gone, and remove check_position before save_frame_review (which refuses it otherwise).
-        Check every carried value in this image too. 409 previous_not_confirmed: confirm the previous frame
-        first."""
+        Check every carried value in this image too. 409 previous_not_confirmed: no frame before it is confirmed,
+        confirm one first."""
         return call(tools.apply_previous_frame, route_id, frame_key, detections)
 
     @server.tool(annotations=reading)

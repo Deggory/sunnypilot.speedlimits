@@ -357,9 +357,10 @@ def test_apply_previous_and_fit_box_work_on_a_frame_of_the_video_not_saved(drive
     assert len(carried) == 1 and carried[0]['value_kph'] == 50 and answer['followed'] == 1
     assert all(abs(a - b) < 1 for a, b in zip(carried[0]['bbox_xyxy'], BOX['bbox_xyxy']))
     assert 'check_position' not in carried[0] and not answer['to_check']
-    # The frame before is the one of the report before it in time: the next second starts at its own picture.
+    # In the next second the frame just before is its own picture, 0/2, not confirmed: the source is the last frame
+    # confirmed before it, 0/1 (14 Nov 2026; before, the frame just before had to be confirmed).
     status, answer = apply('0/1041')
-    assert status == 409 and answer['error'] == 'previous_not_confirmed' and '0/2' in answer['message']
+    assert status == 200 and answer['source_frame_key'] == '0/1', answer
     # Not such a frame: the picture at 1 a second under another key, past the end of the video.
     assert apply('0/1020')[0] == 404 and apply('0/1060')[0] == 404
     fit = f'/api/route/{ROUTE}/frame/0/1025/fit'
@@ -399,9 +400,11 @@ def test_apply_previous_takes_the_boxes_of_a_frame_before_still_on_its_way(drive
     status, answer = apply('0/1026', {'frame_key': '0/1025', 'detections': [moved]})
     assert status == 200, answer
     assert answer['source_frame_key'] == '0/1025' and answer['detections'][0]['value_kph'] == 60
-    # Not between the server's frame before (0/1) and this one.
+    # Not before this frame.
     assert apply('0/1026', {'frame_key': '0/1030', 'detections': [moved]})[0] == 409
-    assert apply('0/1026', {'frame_key': '0/0', 'detections': [moved]})[0] == 409
+    # Older than the confirmed frame the server has (0/1): that one, nearer, is the source (14 Nov 2026).
+    status, answer = apply('0/1026', {'frame_key': '0/0', 'detections': [moved]})
+    assert status == 200 and answer['source_frame_key'] == '0/1' and answer['detections'][0]['value_kph'] == 50
     assert apply('0/1026', {'frame_key': '0/1025', 'detections': 'boxes'})[0] == 400
     manifest = root / 'derived/frames' / ROUTE / '0' / video_frames.VIDEO_MANIFEST
     assert not manifest.exists()

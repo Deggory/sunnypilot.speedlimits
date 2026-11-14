@@ -840,7 +840,8 @@ class ReviewService:
     # ---------- apply previous ----------
 
     def apply_previous(self, route, frame_key, body=None) -> dict:
-        """"Apply previous": the boxes confirmed on the frame before, carried onto this one. Saves nothing.
+        """"Apply previous": the boxes of the last frame confirmed before this one (in this minute of the drive or the
+        one before), carried onto this one. Saves nothing. ``source_frame_key`` says which frame it was.
 
         ``body`` may hold ``run_id`` (checked when given) and ``detections``, the boxes of this frame as
         they are now (default: the model proposals). See :mod:`nnslr_tools.carry_over`: a box placed
@@ -868,12 +869,19 @@ class ReviewService:
             position = sum(1 for other in snapshot.order if frame_order(snapshot.by_key[other]) < place)
         if body.get('run_id') is not None and body.get('run_id') != snapshot.run_id:
             raise ReviewRejected(409, 'stale_report', 'The report of this route was rebuilt: read the frame again.')
-        source_key = snapshot.order[position - 1] if position > 0 else None
-        # The frame before in the timeline, in this segment or at the end of the one before.
-        if source_key is None or snapshot.by_key[source_key]['segment_index'] < row['segment_index'] - 1:
+        # The frames before in the timeline, in this segment or the one before, the nearest first: the source is the
+        # nearest confirmed one (since 14 Nov 2026; before, only the frame just before, which had to be confirmed: a
+        # reviewer who goes a few frames on to the moment that matters has not confirmed those in between).
+        near = []
+        for index in range(position - 1, -1, -1):
+            if snapshot.by_key[snapshot.order[index]]['segment_index'] < row['segment_index'] - 1:
+                break
+            near.append(snapshot.order[index])
+        if not near:
             raise ReviewRejected(409, 'no_previous_frame', 'This frame has no frame just before it.')
-        source = snapshot.reviews.get(source_key)
-        before_row = snapshot.by_key[source_key]
+        source_key = next((other for other in near if (snapshot.reviews.get(other) or {}).get('confirmed')), None)
+        source = snapshot.reviews.get(source_key) if source_key is not None else None
+        before_row = snapshot.by_key[source_key] if source_key is not None else None
         previous = body.get('previous')
         if previous is not None:
             # The frame before confirmed on the page and still on its way here (Confirm goes on at once): its boxes
@@ -886,16 +894,20 @@ class ReviewService:
                                      'previous is {frame_key, detections}: the boxes confirmed on the frame before.')
             previous_key = frame_key_of(previous['frame_key'])
             previous_row = snapshot.by_key.get(previous_key) or self.video_stand_in(snapshot, previous_key)
-            if not frame_order(before_row) <= frame_order(previous_row) < frame_order(row):
+            # A frame before this one, no further back than the frames above; the nearer of it and the confirmed
+            # frame the server has is the source.
+            if not frame_order(snapshot.by_key[near[-1]]) <= frame_order(previous_row) < frame_order(row):
                 raise ReviewRejected(409, 'no_previous_frame',
-                                     f'{previous_key} is not the frame just before this one.')
-            kept = snapshot.reviews.get(previous_key)
-            source_key, before_row = previous_key, previous_row
-            source = {'payload': {'detections': previous['detections']}, 'confirmed': True,
-                      'revision': kept['revision'] if kept is not None else 0, 'reviewer_kind': 'human'}
-        if source is None or not source['confirmed']:
+                                     f'{previous_key} is not a frame just before this one.')
+            if before_row is None or frame_order(previous_row) >= frame_order(before_row):
+                kept = snapshot.reviews.get(previous_key)
+                source_key, before_row = previous_key, previous_row
+                source = {'payload': {'detections': previous['detections']}, 'confirmed': True,
+                          'revision': kept['revision'] if kept is not None else 0, 'reviewer_kind': 'human'}
+        if source is None:
             raise ReviewRejected(409, 'previous_not_confirmed',
-                                 f'The previous frame ({source_key}) is not confirmed: confirm it first.')
+                                 f'No frame before this one is confirmed, back to {near[-1]} (the frame just before, '
+                                 f'{near[0]}, is not): confirm one first.')
         proposals = row.get('detections')
         if not isinstance(proposals, list):
             proposals = []

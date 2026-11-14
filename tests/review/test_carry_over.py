@@ -275,6 +275,31 @@ def test_rest_and_mcp_offer_it_too(server):
     assert status == 400 and json_of(data)['error'] == 'position_not_checked'
 
 
+def test_apply_previous_goes_back_to_the_last_confirmed_frame(server):
+    """14 Nov 2026: the reviewer goes some frames on without confirming those between: the boxes come from the last
+    frame confirmed before, not only from the frame just before. The page may send a frame confirmed there and still
+    on its way: the nearer of the two is the source."""
+    running, rows = server
+    assert running.post_frame(ROUTE, '0/0', page_body(rows['0/0'], value_kph=50))[0] == 200
+    status, answer = apply_on_page(running, '0/2', {'run_id': RUN_ID, 'detections': []})
+    assert status == 200 and answer['source_frame_key'] == '0/0', answer
+    assert [item['value_kph'] for item in answer['detections']] == [50]
+    # A box of 80 on 0/1 (the report has no proposal there): as the page sends it, then as the server has it.
+    box = dict(page_body(rows['0/0'], value_kph=80)['detections'][0], detection_id='manual-1')
+    status, answer = apply_on_page(running, '0/2', {'run_id': RUN_ID, 'detections': [],
+                                                    'previous': {'frame_key': '0/1', 'detections': [box]}})
+    assert status == 200 and answer['source_frame_key'] == '0/1', answer
+    assert [item['value_kph'] for item in answer['detections']] == [80]
+    # A frame sent that is older than the confirmed one the server has: the server's, nearer, stays the source.
+    body = page_body(rows['0/1'])
+    body['detections'] = [box]
+    assert running.post_frame(ROUTE, '0/1', body)[0] == 200
+    older = {'frame_key': '0/0', 'detections': [dict(box, value_kph=30)]}
+    status, answer = apply_on_page(running, '0/2', {'run_id': RUN_ID, 'detections': [], 'previous': older})
+    assert status == 200 and answer['source_frame_key'] == '0/1', answer
+    assert [item['value_kph'] for item in answer['detections']] == [80]
+
+
 def test_only_the_frame_just_before(server):
     running, rows = server
     assert running.post_frame(ROUTE, '0/2', page_body(rows['0/2']))[0] == 200
