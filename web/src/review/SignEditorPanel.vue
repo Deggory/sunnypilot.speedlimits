@@ -14,6 +14,7 @@ import {row, work} from './current';
 import {keepSaving} from './embed';
 import {currentRow, unsavedKeys, workOf} from './frames';
 import Inspector from './Inspector.vue';
+import RecentLabels from './RecentLabels.vue';
 import StageBar from './StageBar.vue';
 import {state} from './store';
 import {useKeyboard} from './use-keyboard';
@@ -38,10 +39,11 @@ onBeforeUnmount(() => stop?.());
        :data-save-count="state.saveCount" :data-unsaved="unsavedKeys().length"
        :data-last-save="state.lastSave ? state.lastSave.key + ' ' + state.lastSave.result : ''">
     <template v-if="row && work">
+      <RecentLabels :row="row"/>
       <StageBar :row="row"/>
       <CarSection :row="row" :work="work"/>
       <AiSection :row="row"/>
-      <Inspector :row="row" :work="work"/>
+      <Inspector :row="row" :work="work" :recent="false"/>
     </template>
   </div>
 </template>

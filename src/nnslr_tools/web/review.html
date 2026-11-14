@@ -484,6 +484,8 @@ details[open] summary::after { transform: rotate(45deg); }
 /* Recent: the labels given last on this drive, under the box's heading; six at most. */
 .recent-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin: -2px 0 0; }
 .recent-label { flex: none; font-size: 12px; font-weight: 600; color: var(--muted); margin-right: 2px; }
+.recent-row.recent-top { margin: 0 0 8px; }
+.chip.recent:disabled { opacity: .45; cursor: default; }
 .chip.recent { flex: none; display: inline-flex; align-items: center; gap: 5px; padding: 2px 10px 2px 6px; min-height: 30px; font-size: 12.5px; white-space: nowrap; }
 .chip.recent:not(:has(.mini-sign)) { padding-left: 10px; }
 .mini-sign {

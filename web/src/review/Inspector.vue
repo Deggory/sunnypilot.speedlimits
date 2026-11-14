@@ -12,6 +12,7 @@ import {boxCountText} from './boxes';
 import {applyPrevious, carried, carryState} from './carry';
 import ConfirmArea from './ConfirmArea.vue';
 import RoutePick from './RoutePick.vue';
+import RecentLabels from './RecentLabels.vue';
 import ReviewToolbar from './ReviewToolbar.vue';
 import {releaseFocus} from './dom';
 import Icon from '../components/Icon.vue';
@@ -23,7 +24,8 @@ import SecondReading from './SecondReading.vue';
 import {report, state} from './store';
 import type {FrameEdit, FrameRow} from './types';
 
-const props = defineProps<{row: FrameRow; work: FrameEdit}>();
+// recent: the labels used last at its top (RecentLabels.vue); false where the page puts them higher itself.
+const props = withDefaults(defineProps<{row: FrameRow; work: FrameEdit; recent?: boolean}>(), {recent: true});
 const reasons = computed(() => reasonsOf(props.row.frame_key));
 const count = computed(() => props.work.detections.length);
 const carry = computed(() => carryState(props.row));
@@ -55,6 +57,7 @@ const driveHref = computed(() => report.apiBase === null || isGuest() || report.
 <template>
   <aside class="panel" :class="{editing: selectedBox !== null}" aria-label="Review of the frame">
     <section>
+      <RecentLabels v-if="props.recent" :row="row"/>
       <RoutePick v-if="!report.embedded"/>
       <ReviewToolbar v-else/>
       <BusyBanner/>

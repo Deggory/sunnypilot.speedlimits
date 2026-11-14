@@ -7,18 +7,14 @@ import {BOOLEAN_FIELDS, FAMILIES, PANELS, PLATE_HOURS, QUICK_VALUES, ROADS, SELE
 import {aiBlocker, canFitLocally, fitBox, fitLocal, fitting, localFitting} from './ai';
 import {addedBy, originalOf} from './boxes';
 import {releaseFocus} from './dom';
-import {applyLabel, setFamily, setField, setKind, setOnVehicle, setOtherOurs, setValue, squareSelected, togglePainted, toggleVariable} from './edits';
+import {setFamily, setField, setKind, setOnVehicle, setOtherOurs, setValue, squareSelected, togglePainted, toggleVariable} from './edits';
 import {countryOf, workOf} from './frames';
 import {vFill} from './fill';
-import {labelKey, labelOf, recentLabels} from './recent';
 import {report, state} from './store';
 import type {Detection, FrameRow} from './types';
 
 const props = defineProps<{row: FrameRow; detection: Detection | null}>();
 
-// The labels given last on this drive, one tap each (recent.ts); pressed, the one the box has.
-const recent = computed(() => (props.detection === null ? [] : recentLabels(props.row, state.selected)));
-const labelNow = computed(() => (props.detection === null ? '' : labelKey(labelOf(props.detection))));
 
 const usual = FAMILIES.filter((family) => !family.minor);
 const minor = FAMILIES.filter((family) => family.minor);
@@ -139,13 +135,6 @@ function booleanChanged(key: BooleanField, event: Event): void {
         <button v-if="canFit" type="button" class="chip fit ai" id="fitBox" :disabled="fitting.key !== null"
                 @click="fitBox(true); releaseFocus($event)">{{ fittingThis ? 'Fitting…' : 'Fit with AI' }}<kbd>⇧C</kbd></button>
       </div>
-    </div>
-    <!-- The labels given last on this drive: one tap puts the whole label on this box (its place stays). -->
-    <div v-if="recent.length" class="recent-row" id="recentLabels" role="group" aria-label="Labels used last on this drive">
-      <span class="recent-label">Recent</span>
-      <button v-for="item in recent" :key="item.key" type="button" class="chip recent" :aria-pressed="item.key === labelNow"
-              :title="item.title" @click="applyLabel(item.label); releaseFocus($event)"><span v-if="item.disc !== null"
-              class="mini-sign">{{ item.disc }}</span>{{ item.text }}</button>
     </div>
     <!-- Asked for nearly every box: right under the box's heading. -->
     <p class="field-label">Road</p>
