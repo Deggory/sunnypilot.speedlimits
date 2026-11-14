@@ -598,3 +598,97 @@ def test_a_replay_names_the_road_type_on_the_memory_of_the_cars_brain_at_each_of
     assert made['in']['brain'] == {'0': [0.0], '2': [8.0]} and made['brain_type_head'] == sha
     assert made['brain_type'] == {'0': ['town', round(float(np.exp(2) / (np.exp(2) + 1)), 3)],
                                   '2': ['motorway', round(float(np.exp(3) / (np.exp(3) + 1)), 3)]}
+
+
+# ---------- with the map and without it (#87) ----------
+
+def test_a_brain_reads_the_map_when_its_contract_names_the_maps_limit():
+    assert simulation.reads_map({'step': {'groups': ['signs', 'motion', 'map_limit']}})
+    assert not simulation.reads_map({'step': {'groups': ['signs', 'motion']}})
+    assert not simulation.reads_map({'checkpoint': 'brain:x'}) and not simulation.reads_map(None)
+
+
+def test_a_replay_without_the_map_is_kept_beside_the_usual_one_and_never_takes_its_place(tmp_path):
+    """The same drive and the same networks, once as on the car and once with no map given to the brain: two results,
+    to look at both. Only the first is a set's replay for the lists, the certification and the regression test."""
+    usual, without = record([50, 50, 80]), {**record([50, 60, 60], made_at='2026-11-14T22:00:00+00:00'), 'no_map': True}
+    simulation.write_result(tmp_path, usual)
+    path = simulation.write_result(tmp_path, without)
+    assert path.name == 'in-use.no-map.json.gz' and path != simulation.result_path(tmp_path, ROUTE, 'in-use')
+    assert simulation.read(tmp_path, ROUTE, 'in-use') == usual
+    assert simulation.read(tmp_path, ROUTE, 'in-use', no_map=True) == without
+    assert simulation.read(tmp_path, ROUTE, 'car', no_map=True) is None
+    states = {key: {'networks': usual['networks'], 'ready': True} for key in simulation.SETS}
+    summary = simulation.summary(tmp_path, ROUTE, states, usual['code'])
+    assert summary['sets']['in-use']['made_at'] == usual['made_at']
+    assert summary['no_map'] == {'in-use': {'made_at': '2026-11-14T22:00:00+00:00', 'name': 'speed-limits test',
+                                            'frames': 3, 'current': True, 'changed': []}}
+    # Where the two differ: the same comparison as with a certified replay.
+    found = simulation.compare(usual, without)
+    assert found['limit_frames'] == 2
+    # Certifying takes the usual replay, whatever else is beside it.
+    assert simulation.certify(tmp_path, ROUTE, 'in-use', 'cristianku')['frames'] == 3
+    assert simulation.reference(tmp_path, ROUTE) == usual
+
+
+def test_no_replay_without_the_map_for_a_brain_that_does_not_read_it(tmp_path, monkeypatch):
+    """Without the map it would be the very same replay: refused before anything is read."""
+    release_files = SimpleNamespace(name='speed-limits fake', settings={})
+    monkeypatch.setattr(simulation, 'car_modules', lambda package=None: SimpleNamespace(
+        pipeline=SimpleNamespace(release=lambda directory: release_files)))
+    monkeypatch.setattr(simulation, 'release_networks', lambda directory: [{'role': 'finder'}])
+    monkeypatch.setattr(simulation, 'brain_contract', lambda directory: {'step': {'groups': ['signs']}})
+    with pytest.raises(simulation.SimulationError) as refused:
+        simulation.replay(tmp_path, ROUTE, 'car', device='cpu', no_map=True, log=lambda text: None)
+    assert (refused.value.status, refused.value.reason) == (409, 'no_map_input')
+
+
+class MapLoop(Loop):
+    def map_limit(self, now, metres_per_second, valid):
+        self.calls.append(('map', round(now, 3), metres_per_second, valid))
+
+
+@pytest.mark.parametrize('no_map', [False, True])
+def test_a_replay_gives_the_loop_the_maps_limit_unless_it_is_without_the_map(tmp_path, monkeypatch, no_map):
+    from nnslr_tools import road_type_signs
+    width, height, second = 16, 16, 1_000_000_000
+    loops = []
+
+    def speed_vision(*args, **kwargs):
+        loops.append(MapLoop())
+        return loops[-1]
+
+    car = SimpleNamespace(
+        pipeline=SimpleNamespace(release=lambda directory: SimpleNamespace(
+            name='speed-limits fake', settings={}, finder='f', classifier='c', brain=None, road_type=None, decider=None),
+            SpeedVision=speed_vision, DEFAULT_COUNTRY='CH'),
+        vision=SimpleNamespace(apply_settings=lambda settings: {}, FOCAL_LENGTHS={},
+                               nv12_planes=lambda data, w, h, stride, offset: (data[:w * h].reshape(h, w), data[w * h:].reshape(h // 2, w))),
+        applicability=SimpleNamespace(), brain=SimpleNamespace(),
+        country=SimpleNamespace(GpsFix=lambda *fix: SimpleNamespace(time=fix[0], valid=fix[4])))
+    monkeypatch.setattr(simulation, 'car_modules', lambda package=None: car)
+    monkeypatch.setattr(simulation, 'release_networks', lambda directory: [{'role': 'finder', 'file': 'f', 'id': 'x', 'sha256': 'a'}])
+    monkeypatch.setattr(simulation, 'brain_contract', lambda directory: {'step': {'groups': ['signs', 'map_limit']}})
+    monkeypatch.setattr(simulation, 'code_hashes', lambda package=None: {'pipeline.py': 'c'})
+    monkeypatch.setattr(simulation, 'OneNetwork', lambda path, device: None)
+    monkeypatch.setattr(road_type_signs, '_videos', lambda root, route: {0: tmp_path / 'fcamera.hevc'})
+    monkeypatch.setattr(road_type_signs, '_video_size', lambda video: (width, height))
+    monkeypatch.setattr(road_type_signs, '_video_stamp', lambda videos: [[0, 1, 2]])
+    (tmp_path / 'fcamera.hevc').write_bytes(b'video')
+    times = [10 * second + 50_000_000 * index for index in range(6)]
+    monkeypatch.setattr(simulation, 'read_logs', lambda root, route, workers=None: {
+        'car': [], 'enabled': [], 'motion': [], 'radar': [], 'gps': [],
+        # Two before the first frame (its socket keeps the last one), one before the frame at 10.2 s.
+        'map': [(10 * second - 9_000_000, 50 / 3.6, True), (10 * second - 2_000_000, 80 / 3.6, True),
+                (10 * second + 180_000_000, 0.0, False)],
+        'frames': {0: times}, 'files': [[0, 'rlog', 'b' * 64]]})
+    monkeypatch.setattr(simulation, '_decode', lambda video, w, h, *, reduce, device: (
+        bytes([index]) * (w * h * 3 // 2) for index in range(6)))
+    made = simulation.replay(tmp_path, ROUTE, 'car', device='cpu', no_map=no_map, log=lambda text: None)
+    (loop,) = loops
+    given = [call for call in loop.calls if call[0] == 'map']
+    if no_map:
+        assert given == [] and made['no_map'] is True
+    else:
+        assert given == [('map', 10.0, 80 / 3.6, True), ('map', 10.2, 0.0, False)] and 'no_map' not in made
+    assert [call[1] for call in loop.calls if call[0] == 'frame'] == [10.0, 10.2]

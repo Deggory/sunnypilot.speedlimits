@@ -25,6 +25,12 @@ card the replay stops and says so, it never moves to the CPU (device 'cpu' is fo
 READ: the vision limit comes from the camera and the car's own signals. One exception since 14 Nov 2026 (#85): a brain
 trained with the map's limit as an input is given the limit the comma's map had (liveMapDataSP), as on the car.
 
+Without the map (no_map, #87): the same replay with no liveMapDataSP given, so that such a brain gets "no map" on
+every step, as past a border with no map downloaded. Its result is kept beside the usual one
+(<set>.no-map.json.gz, 'no_map': true in it), to see on the same drive what the brain says with the map and without
+it; compare() of the two says where they differ. It is never certified and never the reference of the regression
+test: those are the replay as on the car. A set whose brain does not read the map has no such replay (reads_map).
+
 Two sets (SETS): 'car', the release in the sunnypilot clone (models/speed_limits.json: what the comma downloads, as
 models/on-car.json records it), and 'in-use', the versions in use on Models exported as Publish would (export_set, in
 the GPU environment for PyTorch: derived/simulation/sets/in-use/, made again when a version in use changes).
@@ -153,8 +159,12 @@ def set_directory(root: Path, set_key: str, package: Path | None = None) -> Path
     return (package or package_path()) / 'models' if set_key == 'car' else Path(root) / SETS_RELATIVE / set_key
 
 
-def result_path(root: Path, route: str, set_key: str) -> Path:
-    return Path(root) / RESULTS_RELATIVE / route / f'{set_key}.json.gz'
+NO_MAP_SUFFIX = '.no-map'  # in the name of the result of a replay without the map, after its set
+MAP_GROUP = 'map_limit'  # the group of a brain's contract that makes it read the map (the car's brain_inputs)
+
+
+def result_path(root: Path, route: str, set_key: str, no_map: bool = False) -> Path:
+    return Path(root) / RESULTS_RELATIVE / route / f'{set_key}{NO_MAP_SUFFIX if no_map else ""}.json.gz'
 
 
 def certified_path(root: Path, route: str) -> Path:
@@ -195,7 +205,7 @@ def _dump_gz(path: Path, record: dict) -> None:
 
 
 def write_result(root: Path, record: dict) -> Path:
-    path = result_path(root, record['route'], record['set'])
+    path = result_path(root, record['route'], record['set'], bool(record.get('no_map')))
     _write_atomic(path, lambda temporary: _dump_gz(temporary, record))
     meta = {name: record.get(name) for name in META_FIELDS}
     meta['frames'] = len(record['frames']['t_ns'])
@@ -204,9 +214,10 @@ def write_result(root: Path, record: dict) -> Path:
     return path
 
 
-def result_meta(root: Path, route: str, set_key: str) -> dict | None:
-    """What a result is, without its rows: {name, made_at, device, networks, code, settings, frames}; None without one."""
-    path = result_path(root, route, set_key)
+def result_meta(root: Path, route: str, set_key: str, no_map: bool = False) -> dict | None:
+    """What a result is, without its rows: {name, made_at, device, networks, code, settings, frames}; None without one.
+    no_map: the replay without the map."""
+    path = result_path(root, route, set_key, no_map)
     if not path.is_file():
         return None
     meta_path = path.with_name(path.name + META_SUFFIX)
@@ -227,9 +238,17 @@ def result_meta(root: Path, route: str, set_key: str) -> dict | None:
     return meta
 
 
-def read(root: Path, route: str, set_key: str) -> dict | None:
-    """The result of a drive with a set, None when it was never replayed (or by an older format)."""
-    return _read_gz(result_path(root, route, set_key)) if set_key in SETS else None
+def read(root: Path, route: str, set_key: str, no_map: bool = False) -> dict | None:
+    """The result of a drive with a set, None when it was never replayed (or by an older format). no_map: the replay
+    without the map."""
+    return _read_gz(result_path(root, route, set_key, no_map)) if set_key in SETS else None
+
+
+def reads_map(contract: dict | None) -> bool:
+    """Whether a brain's contract (brain_contract) names the map's limit among its groups: only such a brain is given
+    the map on the car and in a replay, and only its set has a replay without the map."""
+    step = (contract or {}).get('step')
+    return MAP_GROUP in ((step.get('groups') if isinstance(step, dict) else None) or [])
 
 
 # -- the sets of networks ------------------------------------------------------------------------------------------------
@@ -381,6 +400,8 @@ def set_states(root: Path, in_use: dict[str, str | None] | None = None, package:
         state = {'label': label, 'name': release_name(directory), 'networks': networks or [],
                  'settings': release_settings(directory), 'ready': networks is not None,
                  'reason': '' if networks is not None else 'No release of the networks in the sunnypilot clone.',
+                 # its brain reads the map's limit: the drive can also be replayed without the map (no_map)
+                 'reads_map': reads_map(brain_contract(directory)),
                  # the checkpoint_sha256 of its brain's road type head, once save_type_head wrote it
                  'type_head': head.stem if head is not None and head.is_file() else None}
         if key == 'in-use':
@@ -787,7 +808,16 @@ def summary(root: Path, route: str, states: dict[str, dict] | None = None, code:
         counts = regression_counts(root, route, key, entry, meta) if entry else None
         if counts is not None:
             regression[key] = counts
-    return {'route': route, 'sets': sets, 'certified': entry, 'regression': regression}
+    # The replays without the map, by set: as sets, never next to the certified one.
+    without = {}
+    for key in SETS:
+        meta = result_meta(root, route, key, no_map=True)
+        if meta is not None:
+            without[key] = {'made_at': meta.get('made_at'), 'name': meta.get('name') or '', 'frames': meta.get('frames', 0),
+                            'current': is_current(meta, states[key]['networks'] if states[key]['ready'] else None, code,
+                                                  states[key].get('settings'), states[key].get('type_head')),
+                            'changed': changes(meta, states[key], code)}
+    return {'route': route, 'sets': sets, 'no_map': without, 'certified': entry, 'regression': regression}
 
 
 # -- the replay: the car's loop over a recorded drive --------------------------------------------------------------------
@@ -981,9 +1011,11 @@ def _number(value, digits: int = 4):
 
 
 def replay(root: Path, route: str, set_key: str, *, device: str = 'cuda', package: Path | None = None,
-           workers: int | None = None, settings_country: str | None = None, log=print) -> dict:
+           workers: int | None = None, settings_country: str | None = None, no_map: bool = False, log=print) -> dict:
     """The drive through the car's loop with the networks of a set: its result (the module's docstring), not written.
-    settings_country: the country until GPS gives one (the comma's Settings › OSM), the pipeline's default without it."""
+    settings_country: the country until GPS gives one (the comma's Settings › OSM), the pipeline's default without it.
+    no_map: no liveMapDataSP is given, so a brain that reads the map gets "no map" on every step; refused for a set
+    whose brain does not read the map, where it would be the same replay."""
     import numpy as np
 
     from nnslr_tools import progress
@@ -997,6 +1029,9 @@ def replay(root: Path, route: str, set_key: str, *, device: str = 'cuda', packag
     networks = release_networks(directory)
     if files is None or networks is None:
         raise SimulationError(409, 'no_release', f'No networks of the set "{SETS[set_key]}" in {directory}.')
+    if no_map and not reads_map(brain_contract(directory)):
+        raise SimulationError(409, 'no_map_input', f'The brain of the set "{SETS[set_key]}" does not read the map: '
+                                                   'without the map it is the same replay.')
     videos = _videos(Path(root), route)
     if not videos:
         raise SimulationError(409, 'no_video', f'{route} has no video on this server.')
@@ -1074,7 +1109,7 @@ def replay(root: Path, route: str, set_key: str, *, device: str = 'cuda', packag
             while at['map'] < len(rows) and rows[at['map']][0] <= now_ns:
                 last = rows[at['map']]
                 at['map'] += 1
-            if last is not None and hasattr(speed_vision, 'map_limit'):
+            if last is not None and not no_map and hasattr(speed_vision, 'map_limit'):
                 speed_vision.map_limit(now, *last[1:])
             if not speed_vision.due(now):
                 continue
@@ -1126,25 +1161,27 @@ def replay(root: Path, route: str, set_key: str, *, device: str = 'cuda', packag
             'brain_groups': [[name, car.brain.brain_inputs.INPUT_SIZES[name]] for name in reader.groups] if reader else None,
             'sources': {'video': video_sha, 'logs': [row for row in logs['files'] if row[0] in segments]},
             'frames': frames, 'out': out, 'signs': signs, 'in': {**inputs, 'brain': brain_rows},
+            **({'no_map': True} if no_map else {}),
             **({'brain_type': brain_types, 'brain_type_head': head['sha256']} if head is not None else {})}
 
 
 def run(root: Path, routes: list[str], set_key: str, *, device: str = 'cuda', again: bool = False,
-        package: Path | None = None, log=print) -> int:
+        package: Path | None = None, no_map: bool = False, log=print) -> int:
     """The drives replayed with a set and their results written, one after the other; a drive whose result is the one
-    of today's networks and code is passed by (again: replayed anyway). The drives that failed."""
+    of today's networks and code is passed by (again: replayed anyway). no_map: the replays without the map (replay).
+    The drives that failed."""
     states = set_states(root, package=package)
     code = code_hashes(package)
     failed = 0
     log(f'drives: {len(routes)}')
     for position, route in enumerate(routes):
-        meta = result_meta(root, route, set_key)
+        meta = result_meta(root, route, set_key, no_map)
         if not again and meta is not None and is_current(meta, states[set_key]['networks'] or None, code,
                                                           states[set_key]['settings'], states[set_key]['type_head']):
             log(f'drive {position + 1}/{len(routes)} {route}: replayed already with these networks')
             continue
         try:
-            record = replay(root, route, set_key, device=device, package=package, log=log)
+            record = replay(root, route, set_key, device=device, package=package, no_map=no_map, log=log)
         except SimulationError as exc:
             failed += 1
             log(f'drive {position + 1}/{len(routes)} {route}: FAILED, {exc.message}')

@@ -33,6 +33,9 @@ export interface SetState {
   reason: string;
   /** In use only: the versions in use on Models by role, which Compute exports first when they changed. */
   wanted?: Record<string, string>;
+  /** Its brain reads the map's limit (#85): the drive can also be replayed without the map (#87). A server not
+   * restarted since 15 Nov 2026 does not say. */
+  reads_map?: boolean;
 }
 export type SetStates = Partial<Record<SetKey, SetState>>;
 
@@ -80,6 +83,8 @@ export interface Counts {
 export interface Summary {
   route: string;
   sets: Partial<Record<SetKey, SetResult>>;
+  /** Its replays without the map, by set (#87): beside the usual ones, never certified. */
+  no_map?: Partial<Record<SetKey, SetResult>>;
   certified: Certified | null;
   regression: Partial<Record<SetKey, Counts & {identical: boolean}>>;
 }
@@ -429,6 +434,17 @@ export function regressionText(found: Counts): string {
   const alone = found.only_was + found.only_now;
   if (alone) parts.push(plural(alone, 'frame') + (alone === 1 ? ' was' : ' were') + ' read in one of the two only');
   return sentence(parts.join(', '));
+}
+/** A replay without the map next to the same networks' replay with it, in one sentence. */
+export function mapText(found: Counts): string {
+  if (identical(found)) return 'The same with the map and without it: the map changes nothing on this drive.';
+  const parts: string[] = [];
+  if (found.limit_frames) parts.push('the speed to hold differs for ' + secondsText(found.limit_frames));
+  if (found.reading_frames) parts.push('the reading ' + (found.limit_frames ? '' : 'differs ') + 'for ' + plural(found.reading_frames, 'frame'));
+  const alone = found.only_was + found.only_now;
+  if (alone) parts.push(plural(alone, 'frame') + (alone === 1 ? ' was' : ' were') + ' read in one of the two only');
+  if (found.sources?.length) parts.push('the two did not read the same video or logs');
+  return sentence('Without the map ' + parts.join(', '));
 }
 /** The same in two words, for a row of the list: "identical", "12.4 s differ". */
 export function regressionShort(found: Counts): string {

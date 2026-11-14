@@ -1817,7 +1817,9 @@ def make_handler(app: ReviewApp):
                 self._problem(404, 'not_found', 'Not found.', True)
                 return
             try:
-                self._json(200, app.panel.simulation_drive(match.group(1), parse_qs(query).get('set', ['in-use'])[0]))
+                asked = parse_qs(query)
+                self._json(200, app.panel.simulation_drive(match.group(1), asked.get('set', ['in-use'])[0],
+                                                           asked.get('map', ['on'])[0] == 'off'))
             except simulation.SimulationError as exc:
                 self._problem(exc.status, exc.reason, exc.message, True)
 
@@ -2136,7 +2138,9 @@ def make_handler(app: ReviewApp):
                     # The networks of a replay and whether it goes through every certified drive ({"set": "in-use",
                     # "certified": "1"}), the same way: a set left out, or sent as something else, must be refused,
                     # never dropped into a replay with other networks or of another drive.
-                    options.update((key, body[key]) for key in ('set', 'certified')
+                    # The map of a replay or of a brain's training ({"map": "off"} / {"map": "on"}) too: sent as
+                    # something else it must be refused, never dropped into a replay with the map.
+                    options.update((key, body[key]) for key in ('set', 'certified', 'map')
                                    if isinstance(body, dict) and body.get(key) is not None)
                     # UserNet's stage ({"stage": "bdd" | "drives"}), the same way: a stage sent as something else must be
                     # refused, never dropped into a training on BDD100K.

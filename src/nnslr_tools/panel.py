@@ -219,7 +219,7 @@ ACTION_OPTIONS = {'train_cutter': ('families', 'start', 'mapillary', 'region', '
                                   'sign_classifier', 'sign_decider', 'users', 'routes_from', 'map'),
                   'train_users': ('stage', 'start'),
                   'regression': ('openpilot', 'brains'),
-                  'simulate': ('route', 'set', 'certified'),
+                  'simulate': ('route', 'set', 'certified', 'map'),
                   'road_labeler_train': ('dry',), 'road_labeler_predict': ('dry', 'labeler', 'marks'),
                   'box_fit_train': ('dry', 'refiner'),
                   'train_classifier': ('mapillary', 'region', 'share', 'start', 'cutter'),
@@ -2346,6 +2346,16 @@ class Panel:
         route, certified = options.get('route'), options.get('certified')
         if certified not in (None, '1'):
             raise PanelError(400, 'bad_option', 'Every certified drive is "1", or none.')
+        # Without the map ({'map': 'off'}, #87): one drive, with a set whose brain reads the map.
+        no_map = options.get('map')
+        if no_map not in (None, 'off'):
+            raise PanelError(400, 'bad_option', 'The map is "off", or left out.')
+        if no_map and certified:
+            raise PanelError(400, 'bad_option', 'Without the map a drive is replayed by its route: the certified drives '
+                             'are the test of the replay as on the car.')
+        if no_map and not simulation.set_states(self.root)[chosen]['reads_map']:
+            raise PanelError(409, 'not_available', 'The brain of these networks does not read the map: without the map '
+                             'it is the same replay.')
         if (route is None) == (certified is None):
             raise PanelError(400, 'bad_option', 'Replay one drive (route) or every certified drive (certified): one of '
                              'the two.')
@@ -2355,7 +2365,7 @@ class Panel:
             return ['--set=' + chosen, '--certified']
         if not ROUTE_ID.match(route) or route not in drive_review.all_routes(self.root):
             raise PanelError(400, 'bad_option', 'Unknown drive: ' + route[:40] + '.')
-        return ['--set=' + chosen, '--route=' + route]
+        return ['--set=' + chosen, '--route=' + route] + (['--no-map'] if no_map else [])
 
     def _simulation_sets(self) -> dict:
         """The two sets of networks as Models › Drive shows them (simulation.set_states): the release on the car and the
@@ -2375,24 +2385,30 @@ class Panel:
         rows = []
         for drive in speed_review.drives_list(speed_review.store_for(self.root), drive_review.store_for(self.root)):
             found = simulation.summary(self.root, drive['route'], states, code)
-            rows.append({**drive, **{key: found[key] for key in ('sets', 'certified', 'regression')}})
+            rows.append({**drive, **{key: found[key] for key in ('sets', 'no_map', 'certified', 'regression')}})
         return {'ok': True, 'sets': states, 'drives': rows}
 
-    def simulation_drive(self, route: str, set_key: str) -> dict:
-        """GET /api/simulation/drives/<route>?set=<car|in-use|certified>: the replay of a drive with a set as the page
-        draws it (view: None when that set was never replayed on it; 'certified': the certified replay), and, for a
-        set next to a certified drive, where the two differ (differences). On the clock of the drive's logs as the
-        timeline has it (the last scan's t0_ns): SimulationError 409 no_logs before Read the logs."""
+    def simulation_drive(self, route: str, set_key: str, no_map: bool = False) -> dict:
+        """GET /api/simulation/drives/<route>?set=<car|in-use|certified>[&map=off]: the replay of a drive with a set as
+        the page draws it (view: None when that set was never replayed on it; 'certified': the certified replay), and,
+        for a set next to a certified drive, where the two differ (differences). With map=off, the replay without the
+        map (#87), and differences is where it differs from the same set's replay with the map (None without that
+        one). On the clock of the drive's logs as the timeline has it (the last scan's t0_ns): SimulationError 409
+        no_logs before Read the logs."""
         from nnslr_tools import drive_review, simulation
         if set_key != 'certified' and set_key not in simulation.SETS:
             raise simulation.SimulationError(400, 'bad_set', 'The set is ' + ', '.join(simulation.SETS) + ' or certified.')
+        if no_map and set_key == 'certified':
+            raise simulation.SimulationError(400, 'bad_set', 'The certified replay is as on the car: it has no replay '
+                                             'without the map.')
         t0_ns = (drive_review.store_for(self.root).summary(route) or {}).get('t0_ns')
         if t0_ns is None:
             raise simulation.SimulationError(409, 'no_logs', 'The logs of this drive are not read yet: Read the logs on '
                                              'Data › Speed review first, the replay is drawn on their clock.')
         states = self._simulation_sets()
-        was = simulation.reference(self.root, route)
-        record = was if set_key == 'certified' else simulation.read(self.root, route, set_key)
+        # Next to what: the certified replay, or for a replay without the map the same set's replay with it.
+        was = simulation.read(self.root, route, set_key) if no_map else simulation.reference(self.root, route)
+        record = was if set_key == 'certified' else simulation.read(self.root, route, set_key, no_map)
         differences = None
         if set_key != 'certified' and was is not None and record is not None:
             differences = simulation.differences(simulation.compare(was, record), t0_ns)
@@ -2664,7 +2680,9 @@ class Panel:
         if action in NETWORK_STARTS:
             start_env.update(self._network_start(action, (options or {}).get('start')))
         for key in ('works', 'road', 'types', 'driver', 'pool', 'seeds', 'users', 'routes_from', 'map', *BRAIN_SIGN_NETWORKS):
-            if (options or {}).get(key) is not None and action != 'train_brain':
+            # The map is also a choice of a replay (simulate: {'map': 'off'}, checked with its other options).
+            if (options or {}).get(key) is not None and action != 'train_brain' \
+                    and key not in ACTION_OPTIONS.get(action, ()):
                 raise PanelError(400, 'bad_option', 'Only "Train the brain" takes ' + key + '.')
         if action == 'train_brain':
             start_env.update(self._brain_choices(options or {}, check_only))

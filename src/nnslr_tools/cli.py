@@ -1131,10 +1131,13 @@ def _cmd_simulate(args: argparse.Namespace) -> int:
     root = resolve_data_root(Path(args.data_root) if args.data_root else None)
     if bool(args.route) == bool(args.certified):
         raise ValueError("which drives? --route <drive> (may repeat), or --certified")
+    if args.no_map and args.certified:
+        raise ValueError("--no-map replays drives named with --route: the certified drives are the test of the replay "
+                         "as on the car")
     routes = sorted(simulation.certified(root)) if args.certified else list(dict.fromkeys(args.route))
     if not routes:
         raise ValueError("no drive is certified yet: certify one on Models › Drive first")
-    failed = simulation.run(root, routes, args.set, device=args.device, again=args.again,
+    failed = simulation.run(root, routes, args.set, device=args.device, again=args.again, no_map=args.no_map,
                             log=lambda text: print(text, flush=True))
     return 1 if failed else 0
 
@@ -2485,6 +2488,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_simulate.add_argument("--route", action="append", help="a drive (may repeat)")
     p_simulate.add_argument("--certified", action="store_true", help="every certified drive: the regression test")
     p_simulate.add_argument("--again", action="store_true", help="also the drives replayed already with these networks")
+    p_simulate.add_argument("--no-map", action="store_true",
+                            help="replay without the map's limit, kept beside the usual replay: what a brain that "
+                                 "reads the map says with no map (refused for a set whose brain does not read it)")
     p_simulate.add_argument("--device", default="cuda", choices=("cuda", "cpu"),
                             help="cuda (default); cpu is for the tests alone: a replay never moves to the CPU by itself")
     p_simulate.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")

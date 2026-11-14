@@ -17,6 +17,10 @@
 // than today's; Certify this drive; and on a certified drive the answer of the regression test with the way to each
 // difference. The squares follow the time shown alone, the pulse too: a paused video is a still screen. Nothing here
 // changes the car, the labels or the networks in use.
+// With the map or without it (#87): a set whose brain reads the map's limit has the switch Map; "without" shows the
+// drive replayed with no map given to the brain (?map=off, Compute with {map: 'off'}), kept beside the usual replay,
+// and the lane Differs and the side then say where it differs from that one. Never certified: the reference is the
+// replay as on the car.
 import {computed, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import {isoWhen, sentence} from '../common/format';
@@ -31,7 +35,7 @@ import {jobOf, terminalActivities} from './jobs';
 import Segmented from './Segmented.vue';
 import {ROAD_TYPE_LABELS, roadTypeLabel} from './speed-review';
 import {boxesAt, changeLines, chosenSet, type Differences, FRAME, identical, inputTexts, isSet, PERIOD, pyRound, readingWords, readTimes,
-  regressionText, screenAt, screenPlace, SET_LABEL, type SetKey, type SetStates, showBoxes, type SignBox, type SimulationDrive,
+  mapText, regressionText, screenAt, screenPlace, SET_LABEL, type SetKey, type SetStates, showBoxes, type SignBox, type SimulationDrive,
   type Source, type Summary, type VideoFrame} from './simulation';
 
 const props = defineProps<{route: string; status: PanelStatus | null}>();
@@ -56,8 +60,10 @@ async function readTimeline(): Promise<void> {
     timeline.value = null;
   }
 }
-/** A replay asked of the server: with a set, or the certified one. */
-type Asked = Exclude<Source, 'comma'>;
+/** A replay asked of the server: with a set, that set without the map, or the certified one. */
+type Asked = Exclude<Source, 'comma'> | `${SetKey}~no-map`;
+const NO_MAP = '~no-map';
+const withoutMap = (key: SetKey): Asked => `${key}${NO_MAP}`;
 /** The server's answers by what was asked, and from the last one what the drive has and the sets as they are now. */
 const answers = shallowRef<Partial<Record<Asked, SimulationDrive>>>({});
 const summary = shallowRef<Summary | null>(null);
@@ -68,7 +74,7 @@ let generation = 0;
 async function read(key: Asked): Promise<void> {
   const mine = generation;
   try {
-    const answer = await api<SimulationDrive>(address() + '?set=' + key);
+    const answer = await api<SimulationDrive>(address() + '?set=' + (key.endsWith(NO_MAP) ? key.slice(0, -NO_MAP.length) + '&map=off' : key));
     if (mine !== generation) return;
     // A cut answer (the page left while it came) reads as {message} in api(): never a drive without its summary.
     if (!answer || typeof answer.summary !== 'object' || answer.summary === null) throw new Error('The server sent a drive this page cannot read.');
@@ -97,13 +103,24 @@ const sources = computed((): {key: Source; label: string}[] => (['comma', 'car',
  * answer shown stays until the new one comes, the others are asked again when they are shown. */
 function reload(): void {
   generation += 1;
-  const key: Asked = source.value === 'comma' ? chosenSet.value : source.value;
+  const key: Asked = source.value === 'comma' ? chosenSet.value : asked.value ?? source.value as Asked;
   const kept = answers.value[key];
   answers.value = kept ? {[key]: kept} : {};
   void read(key);
 }
-watch(source, (key) => {
-  if (key === 'comma') return;
+/** The switch Map: "without" shows the replay with no map given to the brain. Only a set whose brain reads the map has it. */
+const mapOff = ref(false);
+const MAP_CHOICES = [{key: 'with', label: 'With the map'}, {key: 'without', label: 'Without'}] as const;
+const mapChoice = computed({get: (): 'with' | 'without' => mapOff.value ? 'without' : 'with',
+  set: (choice: 'with' | 'without') => { mapOff.value = choice === 'without'; }});
+const readsMap = computed(() => isSet(source.value) && sets.value[source.value]?.reads_map === true);
+/** The replay shown is the one without the map. */
+const noMap = computed(() => mapOff.value && readsMap.value);
+/** What is asked of the server for the source shown; null on the comma's own log. */
+const asked = computed((): Asked | null => source.value === 'comma' ? null
+  : isSet(source.value) && noMap.value ? withoutMap(source.value) : source.value);
+watch(asked, (key) => {
+  if (key === null) return;
   if (answers.value[key]) error.value = '';
   else void read(key);
 });
@@ -122,13 +139,14 @@ function onScan(state: ScanState): void {
   searching = busy;
 }
 
-const answer = computed(() => source.value === 'comma' ? null : answers.value[source.value] ?? null);
+const answer = computed(() => asked.value === null ? null : answers.value[asked.value] ?? null);
 const view = computed(() => answer.value?.view ?? null);
 /** The set shown, null on the comma's own log and on the certified replay: what Compute and Certify act on. */
 const set = computed((): SetKey | null => isSet(source.value) ? source.value : null);
 const setState = computed(() => set.value ? sets.value[set.value] ?? null : null);
 /** The drive's replay with the set shown, as the server has it. */
-const result = computed(() => set.value ? summary.value?.sets[set.value] ?? null : null);
+const result = computed(() => !set.value ? null
+  : (noMap.value ? summary.value?.no_map?.[set.value] : summary.value?.sets[set.value]) ?? null);
 const shownSeries = computed((): Record<string, Series> | null => source.value !== 'comma' ? view.value?.series ?? null
   : logged.value ? timeline.value?.series ?? null : null);
 const reads = computed(() => readTimes(source.value === 'comma' ? timeline.value?.events ?? [] : view.value?.events ?? []));
@@ -222,7 +240,9 @@ const blocked = computed((): string => {
   return set.value === 'car' && setState.value && !setState.value.ready ? sentence(setState.value.reason) : '';
 });
 function compute(): void {
-  if (state.value && set.value) emit('run', 'simulate', state.value, undefined, {route: props.route, set: set.value});
+  if (state.value && set.value) {
+    emit('run', 'simulate', state.value, undefined, {route: props.route, set: set.value, ...(noMap.value ? {map: 'off' as const} : {})});
+  }
 }
 
 // -- certify, and the regression test ---------------------------------------------------------------------------------------
@@ -260,8 +280,13 @@ const certifiedText = computed((): string => {
   const label = entry.set === 'car' || entry.set === 'in-use' ? SET_LABEL[entry.set] : entry.set;
   return 'Certified ' + isoWhen(entry.at) + (entry.who ? ' by ' + entry.who : '') + ' with ' + label + (entry.name ? ', ' + entry.name : '') + '.';
 });
-/** The replay shown next to the certified one: only a set's replay of a certified drive has it. */
-const found = computed((): Differences | null => set.value && certified.value ? answer.value?.differences ?? null : null);
+/** The replay shown next to the certified one: only a set's replay of a certified drive has it. Without the map: next
+ * to the same set's replay with the map, certified or not. */
+const found = computed((): Differences | null => set.value && (noMap.value || certified.value) ? answer.value?.differences ?? null : null);
+/** What the replay shown is compared with, in the words of the lane and of the sentences. */
+const other = computed(() => noMap.value ? {lane: 'with map', was: 'with the map', held: 'With the map it held ', read: 'With the map it read ',
+  now: 'without it '} : {lane: 'certified', was: 'certified', held: 'Here the certified drive held ', read: 'Here the certified drive read ',
+  now: 'this one '});
 /** Where a difference starts, the speed to hold's and the reading's together. */
 const starts = computed(() => [...new Set([...(found.value?.limit ?? []), ...(found.value?.reading ?? [])].map((run) => run[0]))]
   .sort((a, b) => a - b));
@@ -282,8 +307,8 @@ const here = computed((): string => {
   const at = seconds.value;
   const limit = found.value?.limit.find((run) => run[0] <= at && at < run[1] + PERIOD);
   const reading = found.value?.reading.find((run) => run[0] <= at && at < run[1] + PERIOD);
-  return [limit ? 'Here the certified drive held ' + (limit[2] || 'no speed') + ', this one ' + (limit[3] || 'no speed') + '.' : '',
-    reading ? 'Here the certified drive read ' + readingName(reading[2]) + ', this one ' + readingName(reading[3]) + '.' : '']
+  return [limit ? other.value.held + (limit[2] || 'no speed') + ', ' + other.value.now + (limit[3] || 'no speed') + '.' : '',
+    reading ? other.value.read + readingName(reading[2]) + ', ' + other.value.now + readingName(reading[3]) + '.' : '']
     .filter(Boolean).join(' ');
 });
 
@@ -330,8 +355,8 @@ function lanesIn(from: number, to: number, width: number, x: (seconds: number) =
     .filter((run) => run[1] + PERIOD >= from && run[0] <= to)
     .map((run) => ({from: Math.max(from, run[0]), to: Math.min(to, run[1] + PERIOD), start: run[0], title: title(run)}));
   drawn = {from, to, width, series: all, reads: times, found: differs, hold, types, ticks,
-    limit: inside(differs?.limit ?? [], (run) => 'The speed to hold: certified ' + (run[2] || 'none') + ', now ' + (run[3] || 'none')),
-    reading: inside(differs?.reading ?? [], (run) => 'The reading: certified ' + readingName(run[2]) + ', now ' + readingName(run[3]))};
+    limit: inside(differs?.limit ?? [], (run) => 'The speed to hold: ' + other.value.was + ' ' + (run[2] || 'none') + ', now ' + (run[3] || 'none')),
+    reading: inside(differs?.reading ?? [], (run) => 'The reading: ' + other.value.was + ' ' + readingName(run[2]) + ', now ' + readingName(run[3]))};
   return drawn;
 }
 </script>
@@ -354,7 +379,7 @@ function lanesIn(from: number, to: number, width: number, x: (seconds: number) =
     </template>
     <template #lane="{x, w, width, from, to, fits}">
       <div v-if="shownSeries" class="dr-lane" title="The speed to hold along the drive, as the vision square shows it; – none held; hatched: no frame read there">
-        <span class="dr-lane-name">Hold<small>{{ SOURCE_SHORT[source] }}</small></span>
+        <span class="dr-lane-name">Hold<small>{{ SOURCE_SHORT[source] + (noMap ? ', no map' : '') }}</small></span>
         <svg :width="width" height="24" :viewBox="`0 0 ${width} 24`" aria-hidden="true">
           <g v-for="(run, index) in lanesIn(from, to, width, x).hold" :key="index">
             <rect :x="x(run.from)" y="4" :width="w(run.from, run.to)" height="17" rx="2" :class="run.cls"/>
@@ -383,8 +408,8 @@ function lanesIn(from: number, to: number, width: number, x: (seconds: number) =
           </g>
         </svg>
       </div>
-      <div v-if="found" class="dr-lane" title="Where this replay differs from the certified drive: red the speed to hold, orange the reading; a tap goes to where it starts">
-        <span class="dr-lane-name">Differs<small>certified</small></span>
+      <div v-if="found" class="dr-lane" :title="'Where this replay differs from ' + (noMap ? 'the replay with the map' : 'the certified drive') + ': red the speed to hold, orange the reading; a tap goes to where it starts'">
+        <span class="dr-lane-name">Differs<small>{{ other.lane }}</small></span>
         <svg :width="width" height="20" :viewBox="`0 0 ${width} 20`" aria-hidden="true">
           <g v-for="run in lanesIn(from, to, width, x).limit" :key="'limit' + run.start" class="dv-differ" @pointerdown.stop="go(run.start)">
             <rect class="dv-hit" :x="x(run.from) - 5" y="0" :width="Math.max(3, w(run.from, run.to)) + 10" height="10"/>
@@ -402,7 +427,9 @@ function lanesIn(from: number, to: number, width: number, x: (seconds: number) =
     <template #side>
       <section class="sr-card dv-card" aria-labelledby="dv-card-title">
         <Segmented v-if="sources.length > 1" v-model="source" :options="sources" label="Whose squares are on the picture" class="dv-source"/>
-        <h3 id="dv-card-title">{{ SOURCE_LABEL[source] }} at {{ clockOf(seconds) }}</h3>
+        <Segmented v-if="readsMap" v-model="mapChoice" :options="MAP_CHOICES" class="dv-source dv-map"
+                   label="The drive replayed with the map’s limit given to the brain, as on the car, or with no map at all"/>
+        <h3 id="dv-card-title">{{ SOURCE_LABEL[source] + (noMap ? ', no map' : '') }} at {{ clockOf(seconds) }}</h3>
         <p v-if="source !== 'comma' && error" class="dr-hint" id="dv-error">{{ error }}</p>
         <p v-else-if="source !== 'comma' && !answer" class="dr-hint">Loading…</p>
         <template v-else>
@@ -419,7 +446,8 @@ function lanesIn(from: number, to: number, width: number, x: (seconds: number) =
             <template v-if="now.road"><dt>Road</dt><dd>{{ now.road }}</dd></template>
             <template v-if="now.brainType !== null"><dt>Road type (brain)</dt><dd id="dv-brain-type-now">{{ now.brainType }}</dd></template>
           </dl>
-          <p v-else-if="set" class="dr-hint" id="dv-none">This drive is not replayed with these networks yet.</p>
+          <p v-else-if="set" class="dr-hint" id="dv-none">{{ noMap ? 'This drive is not replayed without the map yet: Compute replays it with no map given to the brain, as past a border with no map downloaded.'
+            : 'This drive is not replayed with these networks yet.' }}</p>
           <div v-if="view" class="sr-tools">
             <button type="button" class="bc-switch" id="dv-boxes" :aria-pressed="showBoxes"
                     title="SignNet’s boxes of the frame read, on the picture: grey and dashed a sign of another road. Drawn on the frame the car read. The car reads one frame in 4 or 5: in between, a box follows its sign to the next frame read; one whose sign the next frame read lost shows on its own frame only"
@@ -439,17 +467,18 @@ function lanesIn(from: number, to: number, width: number, x: (seconds: number) =
             <button type="button" class="link-button" @click="emit('details', job)">Details</button></p>
         </template>
 
-        <div v-if="certified && set && answer" class="dv-regression" id="dv-regression">
+        <div v-if="(certified || noMap) && set && answer" class="dv-regression" id="dv-regression">
           <template v-if="found">
-            <p class="dv-verdict" :class="{same: identical(found)}">{{ regressionText(found) }}</p>
+            <p class="dv-verdict" :class="{same: identical(found)}">{{ noMap ? mapText(found) : regressionText(found) }}</p>
             <div v-if="starts.length" class="sr-tools">
               <button type="button" class="btn small" id="dv-previous" :disabled="before === null" @click="go(before)">‹ Previous</button>
               <button type="button" class="btn small" id="dv-next" :disabled="after === null" @click="go(after)">Next difference ›</button>
             </div>
             <p v-if="here" class="dr-hint">{{ here }}</p>
-            <p v-for="text in inputTexts(found)" :key="text" class="dr-hint">{{ text }}</p>
+            <template v-if="!noMap"><p v-for="text in inputTexts(found)" :key="text" class="dr-hint">{{ text }}</p></template>
           </template>
-          <p v-else-if="!view" class="dr-hint">Compute compares these networks with the certified drive.</p>
+          <p v-else-if="noMap && view" class="dr-hint">Replay it with the map too (the switch above, then Compute) to see where the two differ.</p>
+          <p v-else-if="!view && !noMap" class="dr-hint">Compute compares these networks with the certified drive.</p>
         </div>
 
         <template v-if="summary">
@@ -458,7 +487,7 @@ function lanesIn(from: number, to: number, width: number, x: (seconds: number) =
             <button v-if="!readOnly" type="button" class="btn small" id="dv-remove" :disabled="saving" @click="remove">Remove</button>
           </div>
           <!-- Not while a replay runs: the page cannot tell which drive it replays, and it may be this one. -->
-          <button v-else-if="set && view && !readOnly" type="button" class="btn sr-wide" id="dv-certify" :disabled="saving || working"
+          <button v-else-if="set && view && !readOnly && !noMap" type="button" class="btn sr-wide" id="dv-certify" :disabled="saving || working"
                   :title="working ? 'A drive is being replayed: certify once it has ended' : 'This replay becomes the drive’s reference: the next sets are compared with it'"
                   @click="certify">Certify this drive</button>
         </template>

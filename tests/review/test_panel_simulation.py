@@ -154,10 +154,14 @@ def test_the_replay_needs_its_script_and_room_on_a_gpu_and_no_confirmed_frame(ro
     ({'route': ROUTE, 'set': 'car'}, f'--set=car --route={ROUTE}'),
     ({'certified': '1', 'set': 'car'}, '--set=car --certified'),
     ({'certified': '1', 'set': 'in-use'}, '--set=in-use --certified'),
+    # Without the map (#87): one drive, with a set whose brain reads the map.
+    ({'route': ROUTE, 'set': 'in-use', 'map': 'off'}, f'--set=in-use --route={ROUTE} --no-map'),
 ])
-def test_a_drive_or_the_certified_drives_are_replayed_with_the_set_chosen(root, checkout, options, arguments):  # noqa: F811
+def test_a_drive_or_the_certified_drives_are_replayed_with_the_set_chosen(root, checkout, options, arguments, monkeypatch):  # noqa: F811
     simulate_script(checkout)
     known(root)
+    monkeypatch.setattr(simulation, 'set_states', lambda root, **_asked: {
+        key: {'reads_map': key == 'in-use'} for key in simulation.SETS})
     simulation.write_result(root, replay())
     simulation.certify(root, ROUTE, 'in-use', 'cristian')
     panel = Panel(root, repo=checkout)  # noqa: F811
@@ -189,6 +193,13 @@ def test_a_drive_or_the_certified_drives_are_replayed_with_the_set_chosen(root, 
     ({'set': 'car', 'route': 7}, 400, 'The route is a string.'),
     # No certified drive yet.
     ({'set': 'in-use', 'certified': '1'}, 409, 'Certify a drive first.'),
+    # Without the map: "off" or nothing, one drive by its route, and only where the brain reads the map.
+    ({'set': 'in-use', 'route': ROUTE, 'map': 'on'}, 400, 'The map is "off", or left out.'),
+    ({'set': 'in-use', 'route': ROUTE, 'map': False}, 400, 'The map is "off", or left out.'),
+    ({'set': 'in-use', 'certified': '1', 'map': 'off'}, 400,
+     'Without the map a drive is replayed by its route: the certified drives are the test of the replay as on the car.'),
+    ({'set': 'car', 'route': ROUTE, 'map': 'off'}, 409,
+     'The brain of these networks does not read the map: without the map it is the same replay.'),
     # It has no dry run on the CPU, and none of the other actions' options.
     ({'set': 'car', 'route': ROUTE, 'dry': 'on'}, 400, '"Replay a drive" does not take dry.'),
     ({'set': 'car', 'route': ROUTE, 'provider': 'x'}, 400, '"Replay a drive" does not take a provider.'),
@@ -360,11 +371,12 @@ def test_the_list_has_the_sets_and_every_drive_with_its_replays(site, root, no_c
     answer = json_of(data)
     assert answer['ok'] is True and list(answer['sets']) == ['car', 'in-use']
     assert answer['sets']['car'] == {'label': 'On the car', 'name': 'speed-limits 2026-11-08', 'networks': NETWORKS,
-                                     'settings': {}, 'ready': True, 'reason': '', 'type_head': None}
+                                     'settings': {}, 'ready': True, 'reason': '', 'type_head': None,
+                                     'reads_map': False}
     # The versions in use on Models, by the car's names of the networks: not exported yet.
     assert answer['sets']['in-use'] == {
         'label': 'In use', 'name': '', 'networks': [], 'settings': {}, 'ready': False, 'wanted': {'finder': CUTTER},
-        'reason': 'Not exported yet: Compute exports the versions in use first.', 'type_head': None}
+        'reason': 'Not exported yet: Compute exports the versions in use first.', 'type_head': None, 'reads_map': False}
     assert [row['route'] for row in answer['drives']] == [ROUTE]
     row = answer['drives'][0]
     # A row of Speed review's list, with what the drive has here.
@@ -505,12 +517,32 @@ def test_only_a_person_signed_in_certifies_an_agent_with_the_token_reads(root, c
         server.close()
 
 
+def test_a_drive_is_read_without_the_map_next_to_its_replay_with_it(site, root):  # noqa: F811
+    """?map=off (#87): the replay without the map, and where it differs from the same set's replay with the map."""
+    address = f'/api/simulation/drives/{ROUTE}?set=in-use&map=off'
+    answer = json_of(site.request('GET', address)[2])
+    assert answer['view'] is None and answer['differences'] is None and answer['summary']['no_map'] == {}
+    simulation.write_result(root, {**replay(kph=(50, 50, 50, 50, 50)), 'no_map': True, 'made_at': '2026-11-14T22:00:00+00:00'})
+    answer = json_of(site.request('GET', address)[2])
+    assert answer['view']['series']['vis_limit'] == [[10.0, 50.0]] and answer['view']['made_at'] == '2026-11-14T22:00:00+00:00'
+    assert answer['summary']['no_map']['in-use']['frames'] == 5
+    # Next to the replay with the map: the speed to hold differs where the 80 was read.
+    assert answer['differences']['limit_frames'] == 2
+    # The usual replay is untouched, and has nothing to be compared with here (no certified drive).
+    usual = json_of(site.request('GET', f'/api/simulation/drives/{ROUTE}?set=in-use')[2])
+    assert usual['view']['series']['vis_limit'] == [[10.0, 50.0], [10.6, 80.0]] and usual['differences'] is None
+    status, _, data = site.request('GET', f'/api/simulation/drives/{ROUTE}?set=certified&map=off')
+    assert (status, json_of(data)['error']) == (400, 'bad_set')
+
+
 def test_the_replay_starts_through_the_site_and_no_choice_is_dropped(site, root):  # noqa: F811
     run = '/api/panel/run/simulate'
     # A set left out or sent as something else is refused, never dropped into a replay with other networks; a
     # "certified" sent as true is refused, never dropped into the replay of the drive beside it.
+    # A map sent as false is refused the same way, never dropped into a replay with the map.
     for body in ({'route': ROUTE}, {'route': ROUTE, 'set': 7}, {'route': ROUTE, 'set': 'in-use', 'certified': True},
-                 {'set': 'in-use'}, {'route': 7, 'set': 'in-use'}):
+                 {'set': 'in-use'}, {'route': 7, 'set': 'in-use'}, {'route': ROUTE, 'set': 'in-use', 'map': False},
+                 {'route': ROUTE, 'set': 'in-use', 'map': 'on'}):
         status, _, data = site.request('POST', run, body=body)
         assert (status, json_of(data)['error']) == (400, 'bad_option'), body
     status, _, data = site.request('POST', run, body={'certified': '1', 'set': 'in-use'})

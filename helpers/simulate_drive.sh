@@ -5,13 +5,15 @@
 # derived/simulation/<drive>/<set>.json.gz, a row per frame read. With --certified it replays every certified drive:
 # the regression test of a new set. The portal runs it from Models › Drive (Compute, Replay the certified drives).
 #
-# usage: helpers/simulate_drive.sh --set=car|in-use (--route=R [--route=R ...] | --certified) [--again]
+# usage: helpers/simulate_drive.sh --set=car|in-use (--route=R [--route=R ...] | --certified) [--again] [--no-map]
 #   --set=car     the release in the sunnypilot clone (what the comma downloads)
 #   --set=in-use  the versions in use on Models: exported first as Publish would (PyTorch, in .venv-gpu), unless they
 #                 are exported already
 #   Either set: the road type head of its brain (type_head, for the training only) is read from the brain's weights
 #   (PyTorch, in .venv-gpu) into derived/simulation/type-heads/, and the replay names the road type the brain sees.
 #   --again       also a drive replayed already with these networks
+#   --no-map      with --route: the drive replayed with no map given to the brain, written beside the usual replay
+#                 (<set>.no-map.json.gz); only for a set whose brain reads the map's limit (Models › Drive: Without)
 # Effects: writes derived/simulation/ and uses a V100: the video is decoded by the GPU and the networks run on it.
 # ALWAYS ON THE GPU: there is no CPU run. The replay takes about 1 GB of a card and shares it with what else runs
 # there: NNSLR_GPU_INDEX names the card (the panel gives the one with the most free memory), without it the card with the
@@ -43,7 +45,7 @@ for argument in "$@"; do
     case "$argument" in
         --set=*) set_key="${argument#--set=}" ;;
         --route=*) arguments+=(--route "${argument#--route=}") ;;
-        --certified|--again) arguments+=("$argument") ;;
+        --certified|--again|--no-map) arguments+=("$argument") ;;
         -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) bad "unknown argument: $argument" ;;
     esac
