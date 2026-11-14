@@ -46,6 +46,14 @@ PACKAGE_FILES = (*NETWORK_FILES, *(f'{name}.contract.json' for name in NETWORK_F
 # Written next to the package once it is on Hugging Face (not one of its files).
 PUBLISHED_FILE = 'published.json'
 LICENSE = 'MIT'
+# A network that learnt from the Mapillary Traffic Sign Dataset, itself or the weights it went on from, carries that
+# dataset's licence (mtsd_windows.mapillary_lineage), and so does a package that holds one.
+MAPILLARY_LICENSE = 'CC BY-NC-SA 4.0'
+MAPILLARY_URL = 'https://www.mapillary.com/dataset/trafficsign'
+# The licence as Hugging Face names it in a model card.
+LICENSE_IDS = {LICENSE: 'mit', MAPILLARY_LICENSE: 'cc-by-nc-sa-4.0'}
+COUNTRY_NAMES = {'CH': 'Switzerland', 'DE': 'Germany', 'FR': 'France', 'IT': 'Italy', 'AT': 'Austria', 'LI': 'Liechtenstein',
+                 'US': 'the USA', 'NL': 'the Netherlands', 'BE': 'Belgium', 'ES': 'Spain', 'GB': 'the United Kingdom'}
 # The lowest score an old Detector's boxes are kept at, as Prepare's "ours" proposer used it. A SignNet keeps the car's:
 # its best CAR_MAX_BOXES heat-map peaks of score >= CAR_MIN_SCORE.
 CUTTER_SCORE = 0.1
@@ -178,9 +186,29 @@ def _number(value: Any, digits: int = 2) -> str:
     return '–' if not isinstance(value, (int, float)) else f'{value:.{digits}f}'
 
 
+def package_license(networks: dict) -> str:
+    """The licence of a package from its networks (the manifest's): Mapillary's when one of them learnt from its
+    pictures, ours otherwise."""
+    return MAPILLARY_LICENSE if any((networks.get(role) or {}).get('uses_mapillary') for role in ROLES) else LICENSE
+
+
+def _listed(words: list[str]) -> str:
+    return words[0] if len(words) == 1 else ', '.join(words[:-1]) + ' and ' + words[-1]
+
+
+def _where(countries: Any) -> str:
+    """' in Switzerland, Germany and France' from the drives of each country, the most first; '' when not known."""
+    if not isinstance(countries, dict) or not countries:
+        return ''
+    codes = sorted(countries, key=lambda code: (-countries[code], code))
+    return ' in ' + _listed([COUNTRY_NAMES.get(code, code) for code in codes])
+
+
 def model_card(manifest: dict) -> str:
     """README.md of the package."""
     networks, numbers, data = manifest['networks'], manifest.get('measured', {}), manifest.get('training_data', {})
+    license_ = manifest.get('license') or LICENSE
+    learnt = [role for role in ROLES if (networks.get(role) or {}).get('uses_mapillary')]
     cutter = numbers.get('cutter', {})
     chain = numbers.get('cutter_and_classifier', {})
     decider = numbers.get('decider', {})
@@ -196,7 +224,7 @@ def model_card(manifest: dict) -> str:
         cutter_row = (f'| Cutter | SSDlite MobileNetV3-Large on the whole 1344 x 760 frame: a box on everything that '
                       f'could be a sign | `cutter.onnx` | `{networks["cutter"]["id"]}` |')
     lines = [
-        '---', f'license: {LICENSE.lower()}', 'tags:', '- onnx', '- traffic-sign-recognition', '- openpilot',
+        '---', f'license: {LICENSE_IDS.get(license_, "other")}', 'tags:', '- onnx', '- traffic-sign-recognition', '- openpilot',
         '- sunnypilot', '---', '',
         f'# Speed-limit networks {manifest["name"]}', '',
         'Three small networks that find speed signs on the narrow road camera of a comma device, read them and say '
@@ -241,19 +269,56 @@ def model_card(manifest: dict) -> str:
                      f'{_number(decider.get("another_road_recall"))} on {_count(decider.get("another_road_boxes"))} such '
                      'boxes; '
                      f'ownership macro-F1 {_number(decider.get("macro_f1"))}.')
+    # A manifest of before 15 Nov 2026 has no countries: its drives were in Switzerland and Germany.
+    where = _where(data.get('countries')) or ' in Switzerland and Germany'
+    names = {'cutter': 'cutter', 'classifier': 'classifier', 'decider': 'applicability network'}
     lines += ['', '## Trained on', '',
               f'{_count(data.get("boxes"))} reviewed sign boxes on {_count(data.get("frames"))} frames of '
-              f'{_count(data.get("drives"))} drives in Switzerland and Germany, checked by a person or by an AI '
-              'reviewer. No image is published. '
-              f'Dataset sha256 `{data.get("dataset_sha256")}`.', '',
-              '## Licence', '', f'{LICENSE}. ' + ('The classifier and the decider start from torchvision\'s ImageNet '
-                                                  'weights; SignNet is trained from scratch.' if signnet else
-                                                  'The networks start from torchvision\'s ImageNet weights.'), '']
+              f'{_count(data.get("drives"))} drives{where}, recorded by comma devices and checked by a person or by an '
+              'AI reviewer. No image is published. '
+              f'Dataset sha256 `{data.get("dataset_sha256")}`.']
+    starts = ('The classifier and the decider start from torchvision\'s ImageNet weights; SignNet is trained from '
+              'scratch.' if signnet else 'The networks start from torchvision\'s ImageNet weights.')
+    if learnt:
+        whom = _listed([names[role] for role in learnt])
+        lines += ['', f'Before these drives the {whom} learnt from the [Mapillary Traffic Sign Dataset]({MAPILLARY_URL}): '
+                      f'street photos from all over the world, © Mapillary, {MAPILLARY_LICENSE}. None of its pictures '
+                      'is published here.',
+                  '', '## Licence', '',
+                  f'{license_}: free to use, change and share for non-commercial purposes, with attribution and under '
+                  f'the same licence. It is the licence of the Mapillary Traffic Sign Dataset, which the {whom} learnt '
+                  f'from, so the weights carry it. The code that runs them is MIT '
+                  '([sunnypilot.speedlimits](https://github.com/cristianku/sunnypilot.smartspeed)). ' + starts, '']
+    else:
+        lines += ['', '## Licence', '', f'{license_}. ' + starts, '']
     return '\n'.join(lines)
 
 
+def drive_countries(root: Path, drives) -> dict[str, int]:
+    """In how many of these drives each country was driven (ISO code: drives), from the country of their frames
+    (derived/gps/<drive>/positions.jsonl); a drive without it counts nowhere."""
+    found: dict[str, int] = {}
+    for drive in sorted(drive for drive in drives if isinstance(drive, str) and drive):
+        codes = set()
+        try:
+            with (Path(root) / 'derived' / 'gps' / drive / 'positions.jsonl').open(encoding='utf-8') as lines:
+                for line in lines:
+                    try:
+                        code = json.loads(line).get('country')
+                    except ValueError:
+                        continue
+                    if isinstance(code, str) and code:
+                        codes.add(code)
+        except OSError:
+            continue
+        for code in codes:
+            found[code] = found.get(code, 0) + 1
+    return dict(sorted(found.items()))
+
+
 def training_data(root: Path, dataset_sha256: str | None) -> dict:
-    """Counts of the reviewed boxes of the dataset (annotations/objects.jsonl): boxes, frames, drives."""
+    """Counts of the reviewed boxes of the dataset (annotations/objects.jsonl): boxes, frames, drives, and in how many
+    of the drives each country was driven (countries)."""
     path = Path(root) / 'annotations' / 'objects.jsonl'
     boxes, frames, drives = 0, set(), set()
     if path.is_file():
@@ -268,7 +333,8 @@ def training_data(root: Path, dataset_sha256: str | None) -> dict:
             drives.add(row.get('route_id'))
             if row.get('bbox_xyxy') and row.get('sign_family') not in (None, 'not_a_sign'):
                 boxes += 1
-    return {'boxes': boxes, 'frames': len(frames), 'drives': len(drives), 'dataset_sha256': dataset_sha256}
+    return {'boxes': boxes, 'frames': len(frames), 'drives': len(drives), 'dataset_sha256': dataset_sha256,
+            'countries': drive_countries(root, drives)}
 
 
 # -- verify (stdlib) ------------------------------------------------------------------------------------------------
@@ -345,6 +411,7 @@ def prepare_package(root: Path, name: str, *, log: Callable[[str], None] = print
     from nnslr_tools.chain import MAX_SIGN_SIDE, resolve_model
     from nnslr_tools.exporting import export_decider_onnx, export_detector_onnx, export_reader_onnx
     from nnslr_tools.model_roles import SIGNNET_ID, ModelIndex
+    from nnslr_tools.mtsd_windows import mapillary_lineage
     from nnslr_tools.preannotate import ours_missing
     from nnslr_tools.runs import RunsIndex
     from nnslr_tools.signnet import export_signnet_onnx
@@ -394,15 +461,22 @@ def prepare_package(root: Path, name: str, *, log: Callable[[str], None] = print
             _write_json(path, contract)
             contracts[role] = contract
         classifier_size = int(contracts['classifier']['input']['resize'][0])
+        # Whether each network learnt from Mapillary's pictures, itself or the weights it went on from: the licence.
+        networks = {role: {'id': resolved[role]['id'], 'file': f'{role}.onnx',
+                           'sha256': exports[role]['onnx_sha256'], 'contract': f'{role}.onnx.contract.json',
+                           'checkpoint_sha256': contracts[role].get('checkpoint_sha256'),
+                           'dataset_sha256': contracts[role].get('dataset_sha256'),
+                           'split_sha256': contracts[role].get('split_sha256'),
+                           'uses_mapillary': mapillary_lineage(Path(resolved[role]['path']))['uses_mapillary']}
+                    for role in ROLES}
+        log('Licence: ' + package_license(networks)
+            + ''.join(f'; the {role} learnt from the Mapillary Traffic Sign Dataset' for role in ROLES
+                      if networks[role]['uses_mapillary']))
         manifest = {
             'schema_version': SCHEMA_VERSION, 'kind': KIND, 'name': name,
             'created': datetime.now(timezone.utc).isoformat(timespec='seconds').replace('+00:00', 'Z'),
-            'license': LICENSE, 'experimental': True,
-            'networks': {role: {'id': resolved[role]['id'], 'file': f'{role}.onnx',
-                                'sha256': exports[role]['onnx_sha256'], 'contract': f'{role}.onnx.contract.json',
-                                'checkpoint_sha256': contracts[role].get('checkpoint_sha256'),
-                                'dataset_sha256': contracts[role].get('dataset_sha256'),
-                                'split_sha256': contracts[role].get('split_sha256')} for role in ROLES},
+            'license': package_license(networks), 'experimental': True,
+            'networks': networks,
             'pipeline': pipeline(contracts['decider'], CAR_MIN_SCORE if signnet else CUTTER_SCORE,
                                  None if signnet else MAX_SIGN_SIDE, classifier_size, contracts['cutter']),
             'measured': measured(entries),

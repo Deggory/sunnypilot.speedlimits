@@ -7,8 +7,9 @@ import json
 
 import pytest
 
-from nnslr_tools.networks_package import (PACKAGE_FILES, PackageError, ROLES, add_to_catalog, mark_published,
-                                          measured, model_card, packages, pipeline, verify_package)
+from nnslr_tools.networks_package import (PACKAGE_FILES, PackageError, ROLES, add_to_catalog, drive_countries,
+                                          mark_published, measured, model_card, package_license, packages, pipeline,
+                                          verify_package)
 
 
 SIGNNET_CONTRACT = {'task': 'signnet', 'stride': 8, 'input': {'name': 'images', 'shape': [1, 3, 288, 896]},
@@ -75,6 +76,38 @@ def test_the_model_card_says_what_it_is_how_to_run_it_and_what_it_measured(tmp_p
     assert '`decider:run/decider`' in card and 'score >= 0.1' in card and 'Drop the boxes called not_a_sign' in card
     assert 'found 5 of 10 (50%) signs' in card and '(measured with another cutter)' in card
     assert '1,234 reviewed sign boxes' in card and 'No image is published' in card
+
+
+def test_a_package_with_a_network_that_learnt_mapillarys_pictures_has_their_licence_and_says_so(tmp_path):
+    """The Mapillary Traffic Sign Dataset is CC BY-NC-SA 4.0: weights that learnt from it, themselves or through the
+    weights they went on from, are not published as MIT."""
+    folder = _package(tmp_path / 'p')
+    manifest = json.loads((folder / 'networks.json').read_text())
+    assert package_license(manifest['networks']) == 'MIT'
+    for role in ('cutter', 'classifier'):
+        manifest['networks'][role]['uses_mapillary'] = True
+    manifest['networks']['decider']['uses_mapillary'] = False
+    manifest['license'] = package_license(manifest['networks'])
+    assert manifest['license'] == 'CC BY-NC-SA 4.0'
+    manifest['training_data']['countries'] = {'CH': 43, 'DE': 10, 'FR': 3, 'US': 2}
+    card = model_card(manifest)
+    assert card.startswith('---\nlicense: cc-by-nc-sa-4.0\n')
+    assert 'drives in Switzerland, Germany, France and the USA, recorded by comma devices' in card
+    assert ('Before these drives the cutter and classifier learnt from the [Mapillary Traffic Sign Dataset]'
+            '(https://www.mapillary.com/dataset/trafficsign)') in card and '© Mapillary, CC BY-NC-SA 4.0' in card
+    assert 'CC BY-NC-SA 4.0: free to use, change and share for non-commercial purposes' in card
+    assert 'MIT. ' not in card.split('## Licence')[1].split('The code that runs them is MIT')[0]
+    # Without it: ours, and a manifest of before, with no countries, keeps the two of its time.
+    plain = (folder / 'README.md').read_text()
+    assert '## Licence\n\nMIT. ' in plain and 'Mapillary' not in plain and 'drives in Switzerland and Germany, recorded' in plain
+
+
+def test_the_countries_of_a_package_are_those_its_drives_were_driven_in(tmp_path):
+    for drive, codes in (('a', ['CH', 'CH', 'DE']), ('b', ['CH', None]), ('c', [])):
+        folder = tmp_path / 'derived' / 'gps' / drive
+        folder.mkdir(parents=True)
+        (folder / 'positions.jsonl').write_text(''.join(json.dumps({'country': code}) + '\n' for code in codes))
+    assert drive_countries(tmp_path, {'a', 'b', 'c', 'gone', None}) == {'CH': 2, 'DE': 1}
 
 
 def test_the_model_card_of_a_signnet_cutter_says_how_the_car_runs_it(tmp_path):

@@ -54,8 +54,8 @@ export NNSLR_DATA_ROOT="$DATA_ROOT"
 
 if [ "$upload" -eq 0 ]; then
   echo "== Package of the networks${name:+ $name}"
-  # One CPU thread per export is plenty, and leaves the server to the rest.
-  CUDA_VISIBLE_DEVICES="" "$NN" networks-package ${name:+--name "$name"} --data-root "$DATA_ROOT"
+  # The checks of the exports run the ONNX on a V100 (onnx_device.check_providers): the cards are never hidden.
+  "$NN" networks-package ${name:+--name "$name"} --data-root "$DATA_ROOT"
   exit 0
 fi
 
