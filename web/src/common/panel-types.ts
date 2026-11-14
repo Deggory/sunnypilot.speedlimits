@@ -622,6 +622,9 @@ export interface PanelStatus {
   /** The packages of our networks prepared here, newest first (nnslr_tools.networks_package.packages), and the Hugging
    * Face repository they are published to. */
   networks?: {packages: NetworkPackage[]; repo: string;
+    /** The licence a package of the networks in use now would have, and the networks that give it (as a package's);
+     * license null when the three are not all in use. A server not restarted since 15 Nov 2026 does not send it. */
+    in_use?: {license: string | null; mapillary: ('cutter' | 'classifier' | 'decider')[]};
     /** The Hugging Face account publishing uses (nnslr_tools.hf_account.public_state; never the token). */
     account?: {connected: boolean; source: 'portal' | 'server' | null; user: string | null; can_write: boolean | null}};
 }

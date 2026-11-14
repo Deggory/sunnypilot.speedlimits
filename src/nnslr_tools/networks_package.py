@@ -192,6 +192,26 @@ def package_license(networks: dict) -> str:
     return MAPILLARY_LICENSE if any((networks.get(role) or {}).get('uses_mapillary') for role in ROLES) else LICENSE
 
 
+_IN_USE: dict[tuple, dict] = {}
+
+
+def in_use_license(root: Path) -> dict:
+    """What a package of the networks in use now would be: {'license', 'mapillary' (the roles that learnt from
+    Mapillary's pictures)}; {'license': None, 'mapillary': []} when the three are not all in use. For the page, before
+    a package is made: read again only when the networks in use change. No torch."""
+    from nnslr_tools.chain import resolve_model
+    from nnslr_tools.mtsd_windows import mapillary_lineage
+    try:
+        paths = tuple(str(resolve_model('active', role, Path(root))['path']) for role in ROLES)
+    except (ValueError, KeyError, OSError):
+        return {'license': None, 'mapillary': []}
+    if paths not in _IN_USE:
+        learnt = [role for role, path in zip(ROLES, paths) if mapillary_lineage(Path(path))['uses_mapillary']]
+        _IN_USE.clear()
+        _IN_USE[paths] = {'license': MAPILLARY_LICENSE if learnt else LICENSE, 'mapillary': learnt}
+    return dict(_IN_USE[paths])
+
+
 def _listed(words: list[str]) -> str:
     return words[0] if len(words) == 1 else ', '.join(words[:-1]) + ' and ' + words[-1]
 

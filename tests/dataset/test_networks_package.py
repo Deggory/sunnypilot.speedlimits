@@ -131,6 +131,11 @@ def test_the_packages_here_say_their_licence_and_which_network_gives_it(tmp_path
     assert (old['license'], old['mapillary']) == ('MIT', [])
 
 
+def test_without_the_three_networks_in_use_no_licence_is_told(tmp_path):
+    from nnslr_tools.networks_package import in_use_license
+    assert in_use_license(tmp_path) == {'license': None, 'mapillary': []}
+
+
 def test_the_countries_of_a_package_are_those_its_drives_were_driven_in(tmp_path):
     for drive, codes in (('a', ['CH', 'CH', 'DE']), ('b', ['CH', None]), ('c', [])):
         folder = tmp_path / 'derived' / 'gps' / drive

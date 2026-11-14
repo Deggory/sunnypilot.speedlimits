@@ -477,7 +477,8 @@ ACTIONS = {
     'box_fit_train': {'label': 'Train Fit box', 'group': 'box_fit', 'command': [BOX_FIT_SCRIPT]},
     # The cutter, classifier and decider in use exported as one package (start() names it); nothing is uploaded.
     'networks_prepare': {'label': 'Prepare the package', 'group': 'publish', 'command': [NETWORKS_SCRIPT]},
-    # A package prepared here ({'package': name}) uploaded to Hugging Face, public: other people download it.
+    # The networks in use on Hugging Face, public, for other people: a new package of them prepared and uploaded in
+    # one job, or a package prepared here before ({'package': name}) uploaded as it is.
     'networks_publish': {'label': 'Publish on Hugging Face', 'group': 'publish', 'command': [NETWORKS_SCRIPT, '--upload']},
     # Publish (Publish tab): the SignNet in use ({'signnet': run}), the classifier and the road type in use put into the
     # comma's software: exported, published in cristianku/speed-limits-models, recorded on the car, the sunnypilot
@@ -1232,9 +1233,10 @@ class Panel:
                                 'networks': _active_parts(self.root)}
         # The packages of our networks prepared here, newest first, and where they are published (Models tab).
         from nnslr_tools import hf_account
-        from nnslr_tools.networks_package import packages
+        from nnslr_tools.networks_package import in_use_license, packages
+        # in_use: the licence a package of the networks in use now would have, for the question before it is published.
         payload['networks'] = {'packages': packages(self.root)[:NETWORK_PACKAGES_SHOWN], 'repo': NETWORKS_REPO,
-                               'account': hf_account.public_state(self.root)}
+                               'account': hf_account.public_state(self.root), 'in_use': in_use_license(self.root)}
         # [ai-reviewer] - START
         # The AI reviewer of Settings (a read of its file, no network): whether a route can be reviewed with AI.
         payload['ai_reviewer'], ai_providers = self._ai_settings()
@@ -1532,8 +1534,10 @@ class Panel:
             elif name == 'networks_prepare':
                 # Our networks only whole (the same rule as Prepare's proposer).
                 reason = payload.get('proposers', {}).get('ours') or ''
-            elif name == 'networks_publish' and not payload.get('networks', {}).get('packages'):
-                reason = 'no package prepared yet'
+            elif name == 'networks_publish' and not payload.get('networks', {}).get('packages') \
+                    and payload.get('proposers', {}).get('ours'):
+                # No package here, and none can be made: our networks only whole, as Prepare the package.
+                reason = payload['proposers']['ours']
             elif name == 'networks_publish' and not (payload.get('networks', {}).get('account') or {}).get('connected'):
                 reason = 'connect Hugging Face first: Settings, Hugging Face'
             elif name == 'send_to_car':
@@ -2696,13 +2700,22 @@ class Panel:
         if package is not None and action != 'networks_publish':
             raise PanelError(400, 'bad_option', 'Only "Publish on Hugging Face" takes a package.')
         if action == 'networks_publish':
-            from nnslr_tools.networks_package import packages
-            if not isinstance(package, str) or package not in {item['name'] for item in packages(self.root)}:
+            from nnslr_tools.networks_package import new_name, packages
+            if package is not None and (not isinstance(package, str)
+                                        or package not in {item['name'] for item in packages(self.root)}):
                 raise PanelError(400, 'bad_option', 'Unknown package: prepare it first.')
             from nnslr_tools import hf_account
             if not hf_account.public_state(self.root)['connected']:
                 raise PanelError(409, 'not_available', 'Connect Hugging Face first: Settings, Hugging Face.')
-            start_args.append('--name=' + package)
+            if package is None:
+                # The one button: a new package of the networks in use, then its upload, in one job.
+                from nnslr_tools.preannotate import ours_missing
+                missing = ours_missing(self.root)
+                if missing:
+                    raise PanelError(409, 'not_available', missing + '.')
+                start_args += ['--publish', '--name=' + new_name()]
+            else:
+                start_args.append('--name=' + package)
             # The token kept in Settings, in the job's environment only (never its command line or log); without
             # it the script uses this server's own Hugging Face login.
             kept = hf_account.token(self.root)

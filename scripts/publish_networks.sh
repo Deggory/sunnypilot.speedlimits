@@ -7,6 +7,8 @@
 #                                                         model card; <data root>/publish/networks/<name>/. Uploads
 #                                                         nothing. Default name: speedlimits-<UTC date>-<time>.
 #   scripts/publish_networks.sh --upload --name=<name>    publish the package prepared under that name.
+#   scripts/publish_networks.sh --publish [--name=<name>] both in a row: prepare a new package of the networks in use,
+#                                                         then publish it (the one button of Models › Publish).
 #
 # Publishing: the package is checked again; the catalog speed_networks.json of the repository is read (a repository
 # or catalog that does not exist yet starts a new one) and gets the package; the repository is created, public, when
@@ -37,10 +39,12 @@ usage() {
 
 name=""
 upload=0
+publish=0
 for argument in "$@"; do
   case "$argument" in
     -h|--help) usage ;;
     --upload) upload=1 ;;
+    --publish) publish=1; upload=1 ;;
     --name=*) name="${argument#--name=}" ;;
     *) die "unknown argument: $argument" ;;
   esac
@@ -59,19 +63,28 @@ if [ "$upload" -eq 0 ]; then
   exit 0
 fi
 
-[ -n "$name" ] || die "--upload needs --name=<the package to publish>"
+if [ "$publish" -eq 1 ]; then
+  # The name here, so that the upload knows it: speedlimits-<UTC date>-<time>, as networks_package.new_name.
+  [ -n "$name" ] || name="speedlimits-$(date -u +%Y%m%d-%H%M)"
+  echo "== 1/4 Prepare the package $name of the networks in use"
+  # Its own four steps as plain lines: the steps of this job are the four of this script.
+  "$NN" networks-package --name "$name" --data-root "$DATA_ROOT" | sed -u 's|^== \([0-9]\)/4 |   \1 of 4: |'
+else
+  [ -n "$name" ] || die "--upload needs --name=<the package to publish>"
+  echo "== 1/4 The package $name, prepared before"
+fi
 package="$DATA_ROOT/publish/networks/$name"
 [ -d "$package" ] || die "no package $name: prepare it first ($0 --name=$name)"
 command -v uvx >/dev/null 2>&1 || die "uvx is missing: install uv (https://docs.astral.sh/uv/)"
 
-echo "== 1/3 Check the package $name"
+echo "== 2/4 Check the package $name"
 "$NN" verify-networks "$package" >/dev/null || die "the package $name does not pass its check: not published"
 echo "Package checked"
 
 work="$(mktemp -d "$DATA_ROOT/tmp/publish-networks.XXXXXX" 2>/dev/null || mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-echo "== 2/3 The catalog $CATALOG_NAME of $HF_REPO"
+echo "== 3/4 The catalog $CATALOG_NAME of $HF_REPO"
 uvx -q --from "$HF_CLI" python - "$HF_REPO" "$CATALOG_NAME" "$work" <<'EOF'
 import shutil
 import sys
@@ -89,7 +102,7 @@ EOF
 "$NN" networks-catalog "$work/$CATALOG_NAME" --package "$package" \
   --base-url "https://huggingface.co/$HF_REPO/resolve/main" >/dev/null
 
-echo "== 3/3 Upload to https://huggingface.co/$HF_REPO"
+echo "== 4/4 Upload to https://huggingface.co/$HF_REPO"
 uvx -q --from "$HF_CLI" python - "$HF_REPO" "$package" "$name" "$work/$CATALOG_NAME" <<'EOF'
 import json
 import sys

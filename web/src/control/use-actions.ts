@@ -98,8 +98,12 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
         + 'alone and in the chain: it takes hours. Its run is a new one, named by the time it starts.' + mapillary + start};
   }
   if (name === 'networks_publish') {
-    return {title: 'Publish ' + (options?.package ?? 'the package') + ' on Hugging Face?', action: 'Publish', danger: true,
-      text: 'Uploads the cutter, the classifier and the applicability network of this package, their model card and the catalog to '
+    // With a package: that one, prepared before, as it is. Without: a new one of the networks in use, made first.
+    return {title: 'Publish ' + (options?.package ?? 'the networks in use') + ' on Hugging Face?', action: 'Publish', danger: true,
+      text: (options?.package
+        ? 'Uploads the cutter, the classifier and the applicability network of this package, their model card and the catalog to '
+        : 'Exports the cutter, the classifier and the applicability network in use to ONNX, checks each against PyTorch on '
+          + 'the GPU and writes their model card (about a minute), then uploads them and the catalog to ')
         + 'Hugging Face, public: anyone can download them, and a copy may stay even if you delete it later. No frame '
         + 'or dataset is uploaded.' + (options?.license ? ' Its licence: ' + options.license + '.' : '')};
   }

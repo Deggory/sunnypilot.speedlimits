@@ -111,8 +111,10 @@ SIMULATE_STEPS = (('networks', 'Get the networks ready', 10), ('replay', 'Replay
 # scripts/publish_networks.sh: "== 1/4 Export the cutter" ... (prepare), "== 1/3 Check the package" ... (upload).
 NETWORKS_PREPARE_STEPS = (('cutter', 'Export the cutter', 40), ('classifier', 'Export the classifier', 20),
                           ('decider', 'Export applicability', 30), ('package', 'Model card and checks', 10))
-NETWORKS_PUBLISH_STEPS = (('check', 'Check the package', 10), ('catalog', 'Read the catalog', 10),
-                          ('upload', 'Upload to Hugging Face', 80))
+# scripts/publish_networks.sh --upload and --publish: "== 1/4 Prepare the package ..." (a minute; "The package ...,
+# prepared before" at once, for one prepared earlier) to "== 4/4 Upload ...".
+NETWORKS_PUBLISH_STEPS = (('package', 'Prepare the package', 45), ('check', 'Check the package', 5),
+                          ('catalog', 'Read the catalog', 5), ('upload', 'Upload to Hugging Face', 45))
 # scripts/send_to_car.sh: "== 1/5 Export ..." to "== 5/5 Build ..."; the build of the testing branch takes the minutes.
 CAR_STEPS = (('export', 'Prepare the package: the networks in use to ONNX, checked', 10), ('publish', 'Publish it in speed-limits-models', 5),
              ('record', 'Record them as on the car', 2), ('move', 'Move the sunnypilot speed-limits branch', 3),
@@ -197,7 +199,7 @@ SUBSTEPS = {'train_classifier': (7, CLASSIFIER_PIPELINE), 'train_cutter': (None,
             'regression': (3, {1: 'openpilot', 2: 'signs', 3: 'brains'}),
             'simulate': (2, {1: 'networks', 2: 'replay'}),
             'networks_prepare': (4, {1: 'cutter', 2: 'classifier', 3: 'decider', 4: 'package'}),
-            'networks_publish': (3, {1: 'check', 2: 'catalog', 3: 'upload'}),
+            'networks_publish': (4, {1: 'package', 2: 'check', 3: 'catalog', 4: 'upload'}),
             'send_to_car': (5, {1: 'export', 2: 'publish', 3: 'record', 4: 'move', 5: 'build'}),
             'try_on_comma': (5, {1: 'check', 2: 'export', 3: 'verify', 4: 'copy', 5: 'prepare'}),
             'comma_restore': (2, {1: 'check', 2: 'restore'}),

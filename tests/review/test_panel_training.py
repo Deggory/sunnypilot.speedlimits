@@ -489,7 +489,11 @@ def test_the_networks_are_packaged_then_published_from_the_models_tab(root, chec
                'networks': {'packages': []}}
     states = panel._action_states(payload, [])
     assert states['networks_prepare']['reason'] == 'Our networks propose only with all three parts in use'
-    assert states['networks_publish']['reason'] == 'no package prepared yet'
+    # Publish makes its package itself: with none here it asks what Prepare the package asks.
+    assert states['networks_publish']['reason'] == 'Our networks propose only with all three parts in use'
+    with pytest.raises(PanelError) as refused:
+        panel.start('networks_publish', None)
+    assert refused.value.reason == 'not_available'
     monkeypatch.setattr(panel, 'activities', lambda: [])
     with pytest.raises(PanelError) as refused:
         panel.start('networks_prepare', None)
@@ -513,6 +517,12 @@ def test_the_networks_are_packaged_then_published_from_the_models_tab(root, chec
     job = panel.start('networks_publish', {'package': 'pkg-1'})
     finished(panel, job['id'])
     assert re.search(r'args: --upload --name=pkg-1$', full_log(panel, job['id']), re.M)
+    # The one button: no package named, so a new one of the networks in use is prepared and published in one job.
+    time.sleep(1.1)  # a job's name has the second it started
+    job = panel.start('networks_publish', None)
+    done = finished(panel, job['id'])
+    assert re.search(r'args: --upload --publish --name=speedlimits-\d{8}-\d{4}$', full_log(panel, job['id']), re.M)
+    assert [step['key'] for step in panel.job_progress(done, None)['steps']] == ['package', 'check', 'catalog', 'upload']
 
 
 def test_the_classifier_takes_the_mapillary_signs_only_when_prepared(root, checkout, monkeypatch):
