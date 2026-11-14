@@ -52,7 +52,8 @@ def load_brain(checkpoint: Path):
     table = saved['weights'].get('class_kph')
     model = build_brain_net(tuple(saved['groups']), pool=saved['pool'], works=False, ahead=saved.get('ahead', False),
                             pretrained=False, features=saved['features'], hidden=saved['hidden'],
-                            kph=None if table is None else table.tolist(), road_types=len(road_types_of(saved)))
+                            kph=None if table is None else table.tolist(), road_types=len(road_types_of(saved)),
+                            map_path='trust_map.weight' in saved['weights'])
     weights = {name: value for name, value in saved['weights'].items()
                if name in car_weights(model) or name.startswith('type_head.')}
     model.load_state_dict(weights, strict=True)
@@ -86,7 +87,7 @@ def step_module(model):
             x = torch.cat([self.model.encode(image), extra], dim=-1)
             hidden_out = gru_step(self.model.gru, x, hidden)
             number = self.model.number_in_force(extra)
-            speed = self.model.speed_head(hidden_out) + self.model.trust(hidden_out) * number
+            speed = self.model.speed(hidden_out, extra)
             found = (speed,)
             if self.model.ahead:
                 following = (self.model.next_head(hidden_out) +

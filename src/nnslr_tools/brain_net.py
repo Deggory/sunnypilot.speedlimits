@@ -61,6 +61,15 @@ road. The network still decides: trust comes from the memory and can be 0 or bel
 speed_head can say any speed. It is all comparisons, which export as they are. A comparison with no signs among the groups
 has no number and no such path.
 
+The map's limit has the same path (map_path=True, a brain trained with the group map_limit since 14 Nov 2026 evening):
+
+    speed = speed_head(h) + trust(h) * number + trust_map(h) * map_number
+
+with map_number 1 on the class of the limit the map has, all 0 with no map. The first brain with the map as one more value
+among the GRU's inputs did not read it: with the map turned off its answer moved by more than 2 km/h on 4 % of the
+validation frames and its error stayed the same. trust_map starts at zero, so a brain that goes on from another starts
+saying what that one said, and it comes from the memory as trust does: the network decides where the map is to be believed.
+
 The limit ahead (ahead=True, the brains of 7 to 11 Nov 2026 only): two more heads on the same h,
 
     next   = next_head(h) + trust_next(h) * number   the next limit: a class of the speed's table, or the last one, none
@@ -84,7 +93,7 @@ The picture's features go through a LayerNorm, so that they keep the scale of th
 """
 from __future__ import annotations
 
-from nnslr_tools.brain_targets import BRAIN_INPUTS, INPUT_SIZES, SPEED_CLASSES, class_kph
+from nnslr_tools.brain_targets import BRAIN_INPUTS, INPUT_SIZES, MAP_GROUP, SPEED_CLASSES, class_kph
 from nnslr_tools.road_users import COLUMNS as _USER_COLUMNS
 from nnslr_tools.usernet import KINDS as _USER_KINDS
 from nnslr_tools.road_type_net import FEATURES, HIDDEN, IMAGENET_MEAN, IMAGENET_STD, _torch
@@ -125,7 +134,7 @@ def _table(kph) -> list[float]:
 
 def build_brain_net(groups: tuple[str, ...], *, pool: str = 'grid', works: bool = True, ahead: bool = False,
                     pretrained: bool = True, features: int = FEATURES, hidden: int = HIDDEN, kph=None, road_kinds: int = 0,
-                    road_types: int = 0, users: bool = False):
+                    road_types: int = 0, users: bool = False, map_path: bool = False):
     """The network (torch.nn.Module): forward(images (B, T, 3, H, W) float 0..1, extra (B, T, inputs of the groups), state
     (B, hidden) or None) -> (speed logits (B, T, classes), works logit (B, T) or None, state); with ahead=True asked of
     forward (a network built with ahead: only for a checkpoint of 7 to 11 Nov 2026 that has those heads, never for a
@@ -135,7 +144,9 @@ def build_brain_net(groups: tuple[str, ...], *, pool: str = 'grid', works: bool 
     last, users_head's (B, T, 2, kinds, columns): presence logits ([:, :, 0]) and log sizes ([:, :, 1]) of the road
     users, or None for a network built without it (outputs reads them by name).
     kph: the km/h of each class, in order (a list, or the class_kph buffer of a checkpoint): the heads have as many classes,
-    and a number in force falls on the class within half the table's step of it. None: the table of today's training."""
+    and a number in force falls on the class within half the table's step of it. None: the table of today's training.
+    map_path: the map's limit goes straight to the answer too (trust_map; the module's text): only with map_limit among
+    the groups. A checkpoint has it when it has trust_map's weights."""
     torch = _torch()
     from torch import nn
     from torchvision.models import MobileNet_V3_Small_Weights, mobilenet_v3_small
@@ -150,6 +161,9 @@ def build_brain_net(groups: tuple[str, ...], *, pool: str = 'grid', works: bool 
     signs_at = sum(INPUT_SIZES[name] for name in groups[:groups.index('signs')]) if 'signs' in groups else None
     distance_at = (sum(INPUT_SIZES[name] for name in groups[:groups.index('sign_distance')])
                    if 'sign_distance' in groups else None)
+    if map_path and MAP_GROUP not in groups:
+        raise ValueError(f'the map’s limit has a path to the answer only when {MAP_GROUP} is among the groups')
+    map_at = sum(INPUT_SIZES[name] for name in groups[:groups.index(MAP_GROUP)]) if map_path else None
 
     class BrainNet(nn.Module):
         def __init__(self):
@@ -166,6 +180,11 @@ def build_brain_net(groups: tuple[str, ...], *, pool: str = 'grid', works: bool 
             self.gru = nn.GRU(features + extra, hidden, batch_first=True)
             self.speed_head = nn.Linear(hidden, classes)
             self.trust = nn.Linear(hidden, 1)
+            self.trust_map = nn.Linear(hidden, 1) if map_path else None
+            if self.trust_map is not None:
+                # At zero: the answer of a brain that goes on from another starts as that one's, the map adding nothing yet.
+                nn.init.zeros_(self.trust_map.weight)
+                nn.init.zeros_(self.trust_map.bias)
             self.works_head = nn.Linear(hidden, 1) if works else None
             self.road_head = nn.Linear(hidden, road_kinds) if road_kinds else None
             self.type_head = nn.Linear(hidden, road_types) if road_types else None
@@ -201,6 +220,18 @@ def build_brain_net(groups: tuple[str, ...], *, pool: str = 'grid', works: bool 
             near = (signs[..., :1] * BRAIN_INPUTS.SIGN_KPH_SCALE - self.class_kph).abs() < self.near_kph
             return (near & held).to(extra_input.dtype)
 
+        def map_number(self, extra_input):
+            """(B, T, inputs) -> (B, T, classes): 1 on the class of the limit the map has, all 0 with no map. Only a
+            network with the map's path (trust_map)."""
+            limit = extra_input[..., map_at:map_at + INPUT_SIZES[MAP_GROUP]]
+            near = (limit[..., :1] * BRAIN_INPUTS.SIGN_KPH_SCALE - self.class_kph).abs() < self.near_kph
+            return (near & (limit[..., 1:2] > 0)).to(extra_input.dtype)
+
+        def speed(self, out, extra_input):
+            """The speed's logits from the memory's output and the inputs: forward's and the car's step (brain_export)."""
+            said = self.speed_head(out) + self.trust(out) * self.number_in_force(extra_input)
+            return said if self.trust_map is None else said + self.trust_map(out) * self.map_number(extra_input)
+
         def sign_metres(self, extra_input):
             """(B, T, inputs) -> (B, T): vision.SignDistance's metres over METRES_SCALE, 0 without a sign or the input:
             what the metres head of a brain with the limit ahead adds to."""
@@ -215,7 +246,7 @@ def build_brain_net(groups: tuple[str, ...], *, pool: str = 'grid', works: bool 
             x = torch.cat([self.encode(images.flatten(0, 1)).view(b, t, -1), extra_input], dim=-1)
             out, last = self.gru(x, None if state is None else state[None].contiguous())
             number = self.number_in_force(extra_input)
-            speed = self.speed_head(out) + self.trust(out) * number
+            speed = self.speed(out, extra_input)
             works = None if self.works_head is None else self.works_head(out)[..., 0]
             found = (speed, works, last[0])
             if ahead:

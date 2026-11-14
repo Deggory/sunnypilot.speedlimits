@@ -794,8 +794,9 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
         log('Road users pos_weight (the most of the columns): '
             + ', '.join(f'{kind} {lift[at].max():.1f}' for at, kind in enumerate(USER_KINDS)))
     store = FrameStore(_pictures(root, drives, dry_run=dry_run, log=log), device)
+    # A brain that learns the map's limit has its path straight to the answer (brain_net: trust_map).
     model = build_brain_net(groups, pool=pool, works=works, pretrained=not dry_run, road_kinds=len(kinds),
-                            road_types=len(ROAD_TYPES) if types else 0, users=users).to(device)
+                            road_types=len(ROAD_TYPES) if types else 0, users=users, map_path=map_limit).to(device)
     pos_weight = None if lift is None else torch.from_numpy(lift).to(device)
     optimizer = torch.optim.AdamW([value for value in model.parameters() if value.requires_grad], lr=LEARNING_RATE,
                                   weight_decay=WEIGHT_DECAY)
@@ -846,7 +847,7 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
         no_map = {'validation_no_map': measure(blind, said, 'validation'), 'test_no_map': measure(blind, said, 'test')}
     table = [int(round(value)) for value in model.class_kph.tolist()]
     # rate_hz, hidden and kph: how the car steps it and what it says, for Models (model_roles.brain_digest).
-    result = {'groups': list(groups), 'map_limit': map_limit, 'pool': pool, 'works': works, 'road_kinds': kinds,
+    result = {'groups': list(groups), 'map_limit': map_limit, 'map_path': map_limit, 'pool': pool, 'works': works, 'road_kinds': kinds,
               'road_types': list(ROAD_TYPES) if types else [], 'users': users, 'user_kinds': source['user_kinds'],
               'users_pos_weight': None if lift is None else lift.round(3).tolist(),
               'users_answers': users_counts(drives), 'rate_hz': source['rate_hz'],

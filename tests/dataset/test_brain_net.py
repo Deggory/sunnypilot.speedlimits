@@ -603,3 +603,68 @@ def test_the_speed_does_not_depend_on_the_users_head_and_the_car_does_not_get_it
     weights = car_weights(model)
     without = build_brain_net(GROUPS, pretrained=False, works=False)
     assert set(weights) == set(without.state_dict())
+
+
+MAP_GROUPS = (*GROUPS, 'map_limit')
+
+
+def map_row(kph, sign=None):
+    """(1, 2, inputs) of a brain with the map: the map's limit (None: no map) and, with sign, that number in force."""
+    from nnslr_tools.brain_targets import BRAIN_INPUTS, INPUT_SIZES
+    extra = number_row(sign or 0, known=1.0 if sign else 0.0, groups=MAP_GROUPS)
+    at = sum(INPUT_SIZES[name] for name in MAP_GROUPS[:-1])
+    extra[..., at:at + 2] = torch.from_numpy(BRAIN_INPUTS.map_limit_row(kph))
+    return extra
+
+
+def map_net(trust_map=None):
+    from nnslr_tools.brain_net import build_brain_net
+    torch.manual_seed(0)
+    model = build_brain_net(MAP_GROUPS, pretrained=False, map_path=True).eval()
+    if trust_map is not None:
+        with torch.no_grad():
+            model.trust_map.bias.fill_(trust_map)
+    return model
+
+
+def test_the_maps_path_starts_at_zero_so_a_brain_starts_saying_what_it_said_without_it():
+    """The first brain with the map hardly read it as one value among the inputs (14 Nov 2026): it has trust_map since,
+    which adds nothing until it has learnt to."""
+    model = map_net()
+    assert not model.trust_map.weight.any() and not model.trust_map.bias.any()
+    out = torch.rand(1, 2, 128)
+    with torch.no_grad():
+        assert torch.equal(model.speed(out, map_row(80)), model.speed(out, map_row(None)))
+    assert model(batch(2)[0], map_row(80))[0].shape == (1, 2, 200)
+
+
+@pytest.mark.parametrize('kph', [30, 50, 80, 120])
+def test_the_maps_trust_goes_to_the_class_of_the_maps_limit_alone(kph):
+    from nnslr_tools.brain_targets import speed_class
+    model, images = map_net(trust_map=3.0), batch(2)[0]
+    with torch.no_grad():
+        added = model(images, map_row(kph))[0] - model(images, map_row(None))[0]
+    assert added[0, :, speed_class(kph)].tolist() == pytest.approx([3.0, 3.0], abs=0.05)
+    added[0, :, speed_class(kph)] = 0
+    # The map is also one of the memory's inputs, so the other classes may move a little; the trust is on one class.
+    assert added.abs().max() < 1.0
+    assert model.map_number(map_row(kph)).sum(dim=-1).tolist() == [[1.0, 1.0]]
+    assert not model.map_number(map_row(None)).any()
+
+
+def test_the_sign_and_the_map_each_add_their_trust():
+    from nnslr_tools.brain_targets import speed_class
+    model = trusting(map_net(trust_map=2.0), 3.0)
+    with torch.no_grad():
+        both = model(batch(2)[0], map_row(80, sign=50))[0][0, 0]
+        same = model(batch(2)[0], map_row(50, sign=50))[0][0, 0]
+    assert both[speed_class(50)] == pytest.approx(3.0) and both[speed_class(80)] == pytest.approx(2.0)
+    assert same[speed_class(50)] == pytest.approx(5.0)
+
+
+def test_the_maps_path_needs_the_map_among_the_groups_and_goes_to_the_car():
+    from nnslr_tools.brain_net import build_brain_net, car_weights
+    with pytest.raises(ValueError, match='map_limit'):
+        build_brain_net(GROUPS, pretrained=False, map_path=True)
+    assert 'trust_map.weight' in car_weights(map_net())
+    assert build_brain_net(MAP_GROUPS, pretrained=False).trust_map is None  # the brain of 14 Nov 20:23: the input alone

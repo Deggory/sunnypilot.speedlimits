@@ -241,3 +241,44 @@ def test_a_brain_that_learnt_the_road_type_gives_it_to_the_screen_with_the_same_
     assert contract['output']['road_types'] == ['town', 'rural', 'motorway']
     assert [output['name'] for output in contract['outputs']] == ['speed', 'next', 'metres', 'road_type', 'hidden_out']
     assert contract['step']['outputs'] == ['speed', 'next', 'metres', 'road_type', 'hidden_out']
+
+
+def test_a_brain_with_the_maps_path_steps_on_the_car_as_in_its_training(tmp_path):
+    """trust_map goes to the car in the file: the step the car runs says the speeds forward says, with the map and without."""
+    import numpy as np
+    import torch
+
+    from nnslr_tools.brain_net import build_brain_net
+    from nnslr_tools.brain_targets import BRAIN_INPUTS, INPUT_SIZES
+    groups = (*GROUPS, 'map_limit')
+    torch.manual_seed(0)
+    trained = build_brain_net(groups, pool='grid', works=True, pretrained=False, map_path=True)
+    with torch.no_grad():
+        trained.trust_map.weight.normal_()
+        trained.trust_map.bias.fill_(2.0)
+    path = tmp_path / 'brain-last.pt'
+    torch.save({'weights': trained.state_dict(), 'epoch': 0, 'groups': groups, 'pool': 'grid', 'works': True,
+                'road_kinds': [], 'features': 128, 'hidden': 128, 'rate_hz': 4.0, 'picture': 'brain', 'split': 'x',
+                'reader': None, 'inputs_sha256': inputs_sha256()}, path)
+    model, _saved = brain_export.load_brain(path)
+    assert model.trust_map is not None and torch.equal(model.trust_map.bias, trained.trust_map.bias)
+    step = brain_export.step_module(model)
+    width = sum(INPUT_SIZES[name] for name in groups)
+    image, hidden = torch.rand(1, 3, 144, 256), torch.zeros(1, 128)
+    for kph in (80, None):
+        extra = torch.zeros(1, width)
+        extra[0, -2:] = torch.from_numpy(BRAIN_INPUTS.map_limit_row(kph))
+        with torch.no_grad():
+            stepped = step(image, extra, hidden)[0]
+            whole = model(image[None], extra[None])[0][0]
+        assert np.allclose(stepped.numpy(), whole.numpy(), atol=1e-5)
+    # The file for the car is made, checked against the network by the export itself, and its contract names the group.
+    brain_export.export_brain_onnx(path, tmp_path / 'brain.onnx')
+    contract = json.loads((tmp_path / 'brain.onnx.contract.json').read_text())
+    assert 'map_limit' in json.dumps(contract)
+    # A checkpoint with the map as an input alone (the first one, 14 Nov 2026) still loads: no path, no weights for it.
+    plain = build_brain_net(groups, pool='grid', works=True, pretrained=False)
+    torch.save({'weights': plain.state_dict(), 'epoch': 0, 'groups': groups, 'pool': 'grid', 'works': True,
+                'road_kinds': [], 'features': 128, 'hidden': 128, 'rate_hz': 4.0, 'picture': 'brain', 'split': 'x',
+                'reader': None, 'inputs_sha256': inputs_sha256()}, path)
+    assert brain_export.load_brain(path)[0].trust_map is None
