@@ -96,13 +96,26 @@ import sys
 from pathlib import Path
 
 from huggingface_hub import CommitOperationAdd, HfApi
+from huggingface_hub.errors import HfHubHTTPError, RepositoryNotFoundError
 
 repo, package, name, catalog = sys.argv[1:5]
 package = Path(package)
 sums = json.loads((package / "sha256sums.json").read_text())
 files = sorted(sums) + ["sha256sums.json"]
 api = HfApi()
-api.create_repo(repo, repo_type="model", private=False, exist_ok=True)
+# Created only when it is missing: a login that may write to the repository but not make new ones (a fine-grained
+# token) still publishes into one made by hand.
+try:
+    api.repo_info(repo, repo_type="model")
+except RepositoryNotFoundError:
+    try:
+        api.create_repo(repo, repo_type="model", private=False)
+    except HfHubHTTPError as error:
+        if getattr(error.response, "status_code", None) != 403:
+            raise
+        sys.exit(f"error: the Hugging Face login of this server may not create {repo}: make that model repository "
+                 "on huggingface.co (public) and let the login write to it, or connect a token that may create "
+                 "repositories in Settings, Hugging Face. Nothing was uploaded.")
 operations = [CommitOperationAdd(path_in_repo=f"networks/{name}/{file}", path_or_fileobj=str(package / file))
               for file in files]
 operations.append(CommitOperationAdd(path_in_repo="speed_networks.json", path_or_fileobj=catalog))
