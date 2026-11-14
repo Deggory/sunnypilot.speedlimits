@@ -31,8 +31,12 @@ def test_the_file_of_the_car_needs_nothing_of_openpilot_and_reads_no_map():
     imported = {name.name.split('.')[0] for node in ast.walk(tree) if isinstance(node, ast.Import) for name in node.names}
     imported |= {node.module.split('.')[0] for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)}
     assert imported <= {'bisect', 'datetime', 'gzip', 'json', 'math', 'numpy', 'pathlib'}
-    code = ''.join(ast.unparse(node) for node in tree.body[1:])
+    # The map: only the group map_limit of a brain trained with it (MapInputs, map_limit_row: #85, 14 Nov 2026); nothing
+    # else of the file names the map, and never the road's name.
+    code = ''.join(ast.unparse(node) for node in tree.body[1:]
+                   if getattr(node, 'name', None) not in ('MapInputs', 'map_limit_row'))
     assert 'liveMapData' not in code and 'roadName' not in code
+    assert 'roadName' not in BRAIN_INPUTS_PATH.read_text(encoding='utf-8')
 
 
 def test_one_reading_is_a_single_reading_and_a_second_within_the_time_confirms_it():
@@ -198,7 +202,8 @@ def test_a_group_has_the_size_it_says():
             'engaged': brain.EngagedInputs().row(10.0), 'sign_distance': brain.sign_distance_row(80.0),
             'motion': brain.MotionInputs().row(10.0), 'road_signs': signs.road_signs_row(10.0),
             'sign_boxes': sign_boxes().row(10.0), 'light_boxes': light_boxes().row(10.0),
-            'country_iso': brain.country_iso_row('PL'), 'hour_tz': brain.hour_row(12.0, 'hour_tz')}
+            'country_iso': brain.country_iso_row('PL'), 'hour_tz': brain.hour_row(12.0, 'hour_tz'),
+            'map_limit': brain.map_limit_row(80.0)}
     assert {name: len(row) for name, row in rows.items()} == sizes
     assert brain.pack_inputs(rows, tuple(sizes)).shape == (sum(sizes.values()),)
 

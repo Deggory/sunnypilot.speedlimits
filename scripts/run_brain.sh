@@ -48,6 +48,8 @@ set -euo pipefail
 # roadworks; 0: not), NNSLR_BRAIN_ROAD (1: it also learns the kinds of road of Speed review; 0: not),
 # NNSLR_BRAIN_TYPES (1: it also learns the road type of the map and of Speed review, and only from the seconds that have
 # one; 0: not, every second), NNSLR_BRAIN_USERS (1: step 4 reads the road users and it learns them; 0: not),
+# NNSLR_BRAIN_MAP (1: the map's limit the comma had, liveMapDataSP, is one more input of the brain, #85; 0, the default:
+# not, the brain never reads the map),
 # NNSLR_BRAIN_ROUTES_FROM (an earlier brain run's NAME: its drives instead of every dashcam drive; a run started again
 # keeps its own),
 # NNSLR_BRAIN_POOL (grid: the picture's features keep where they are; mean: not), NNSLR_BRAIN_INIT_FROM (an earlier
@@ -72,6 +74,7 @@ WORKS="${NNSLR_BRAIN_WORKS:-1}"
 ROAD="${NNSLR_BRAIN_ROAD:-1}"
 TYPES="${NNSLR_BRAIN_TYPES:-1}"
 USERS="${NNSLR_BRAIN_USERS:-1}"
+MAP="${NNSLR_BRAIN_MAP:-0}"
 ROUTES_FROM="${NNSLR_BRAIN_ROUTES_FROM:-}"
 POOL="${NNSLR_BRAIN_POOL:-grid}"
 INIT_FROM="${NNSLR_BRAIN_INIT_FROM:-}"
@@ -120,6 +123,11 @@ fi
 
 if [[ "$USERS" != "0" && "$USERS" != "1" ]]; then
   echo "error: NNSLR_BRAIN_USERS must be 0 or 1: $USERS" >&2
+  exit 2
+fi
+
+if [[ "$MAP" != "0" && "$MAP" != "1" ]]; then
+  echo "error: NNSLR_BRAIN_MAP must be 0 or 1: $MAP" >&2
   exit 2
 fi
 
@@ -221,6 +229,9 @@ fi
 if [[ "$USERS" == "0" ]]; then
   SETTINGS+=(--no-users)
 fi
+if [[ "$MAP" == "1" ]]; then
+  SETTINGS+=(--map-limit)
+fi
 if [[ -n "$INIT_FROM" ]]; then
   SETTINGS+=(--init-from "$INIT_FROM")
 fi
@@ -229,6 +240,7 @@ echo "== Brain =="
 echo "run:          $RUN_ID"
 echo "seeds:        ${SEEDS[*]}"
 echo "road users:   $([[ "$USERS" == "1" ]] && echo on || echo off)"
+echo "map's limit:  $([[ "$MAP" == "1" ]] && echo "on (an input of the brain)" || echo off)"
 if [[ -n "$ROUTES_FROM" ]]; then
   echo "drives:       the same as $ROUTES_FROM"
 else

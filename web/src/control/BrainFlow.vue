@@ -14,7 +14,7 @@ import {BRAIN_GROUPS, BRAIN_OUT, BRAIN_OUTPUTS, BRAIN_PICTURE, type BrainFact} f
 
 const props = defineProps<{choices: BrainChoice}>();
 const learns = computed(() => ({works: props.choices.works === 'on', road: props.choices.road === 'on',
-  types: props.choices.types === 'on'}));
+  types: props.choices.types === 'on', map: props.choices.map === 'on'}));
 
 type Kind = 'input' | 'net' | 'car' | 'train';
 interface Block {id: string; title: string; sub: string; kind: Kind; facts: BrainFact[]; note?: string}
@@ -38,6 +38,9 @@ const inputs = computed<Block[]>(() => [
       + 'No metres to a sign: the brain gets the box of each sign, where it is in the picture and how big.'},
   {id: 'place', title: 'Hour, country, car ahead', sub: 'from the car', kind: 'input', facts: facts(placeGroups),
     note: 'Never your pedals nor the car’s speed: the answer is your own speed, and a brain that had them followed it.'},
+  // Only with the switch on (#85): the one brain that reads the map.
+  ...(learns.value.map ? [{id: 'map', title: 'Map’s limit', sub: 'from the comma’s map', kind: 'input' as Kind, facts: facts(['map_limit']),
+    note: 'The limit the map had where the car was, none where it had none. On the car this brain reads the map, which no other does.'}] : []),
 ]);
 const memory: Block = {id: 'memory', title: 'GRU memory', sub: 'one step every ¼ s', kind: 'net', facts: [BRAIN_PICTURE[1]!],
   note: 'The image features and every other input go into it at each step; every output reads its state.'};

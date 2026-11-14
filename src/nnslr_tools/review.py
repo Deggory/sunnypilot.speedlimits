@@ -2116,7 +2116,7 @@ def make_handler(app: ReviewApp):
                     options = {key: body[key] for key in ('start', 'run', 'size', 'families', 'proposer', 'package',
                                                           'signnet', 'mapillary', 'region', 'share', 'cutter',
                                                           'classifier', 'boards', 'works', 'road', 'types', 'driver', 'pool',
-                                                          'seeds', 'users', 'routes_from', 'rebuild',
+                                                          'seeds', 'users', 'routes_from', 'rebuild', 'map',
                                                           'openpilot',
                                                           'brains', 'sign_cutter', 'sign_classifier', 'sign_decider')
                                if isinstance(body, dict) and isinstance(body.get(key), str)}

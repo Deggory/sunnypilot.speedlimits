@@ -15,14 +15,15 @@ speedvisiond receives, in the same order:
 - each frame at the time speedvisiond got it: the logMonoTime of its narrowRoadCameraState (the frame of the video
   through narrowRoadEncodeIdx), about 42 ms after its exposure started;
 - before each frame, the car's own messages logged up to that time: every carState, selfdriveState and deviceMotion,
-  the last radarState; and before a frame it reads (pipeline.PERIOD after the last one read) the last GPS message;
+  the last radarState, and the last liveMapDataSP (the map's limit, taken only by a brain trained with it as an input, #85); and before a frame it reads (pipeline.PERIOD after the last one read) the last GPS message;
 - SignNet, the classifier, the applicability network and the brain of the set, their ONNX under onnxruntime on the GPU.
 
 Not the car bit for bit: the video comes after the comma's encoder, the car reads the camera's own frame with tinygrad
 on its GPU. A confidence right at a threshold can fall on the other side, and the frames read are not the very ones the
 car read that day (it reads the first frame 0.2 s after the last one, whenever that came). ALWAYS ON THE GPU: without a
 card the replay stops and says so, it never moves to the CPU (device 'cpu' is for the tests alone). THE MAP IS NEVER
-READ: the vision limit comes from the camera and the car's own signals.
+READ: the vision limit comes from the camera and the car's own signals. One exception since 14 Nov 2026 (#85): a brain
+trained with the map's limit as an input is given the limit the comma's map had (liveMapDataSP), as on the car.
 
 Two sets (SETS): 'car', the release in the sunnypilot clone (models/speed_limits.json: what the comma downloads, as
 models/on-car.json records it), and 'in-use', the versions in use on Models exported as Publish would (export_set, in
@@ -870,7 +871,7 @@ def _read_log(task: tuple[str, str]) -> dict:
     from nnslr_tools.drive_extract import _messages
 
     path, schema = task
-    found: dict = {name: [] for name in ('car', 'enabled', 'motion', 'radar', 'gps', 'encode', 'camera')}
+    found: dict = {name: [] for name in ('car', 'enabled', 'motion', 'radar', 'gps', 'map', 'encode', 'camera')}
     found['sha256'] = _sha256(Path(path))
     for event in _messages(Path(path), Path(schema), Path(schema)):
         try:
@@ -890,6 +891,9 @@ def _read_log(task: tuple[str, str]) -> dict:
         elif which == 'radarState':
             one = event.radarState.leadOne
             found['radar'].append((at, one.present, one.dRel, one.vLead))
+        elif which == 'liveMapDataSP':
+            # Only a brain trained with the map's limit as an input is given it (#85): speedLimit in m/s, and its valid flag.
+            found['map'].append((at, event.liveMapDataSP.speedLimit, bool(event.liveMapDataSP.speedLimitValid)))
         elif which in GPS_SERVICES:
             fix = getattr(event, which)
             found['gps'].append((at, fix.latitude, fix.longitude, fix.horizontalAccuracy, bool(event.valid and fix.hasFix),
@@ -922,7 +926,8 @@ def read_logs(root: Path, route: str, *, workers: int | None = None) -> dict:
             parts = list(pool.map(_read_log, tasks))
     else:
         parts = [_read_log(task) for task in tasks]
-    merged = {name: sorted({row for part in parts for row in part[name]}) for name in ('car', 'enabled', 'motion', 'radar', 'gps')}
+    merged = {name: sorted({row for part in parts for row in part.get(name, ())})
+              for name in ('car', 'enabled', 'motion', 'radar', 'gps', 'map')}
     camera = {frame_id: at for part in parts for frame_id, at in part['camera']}
     frames: dict[int, list] = {}
     for part in parts:
@@ -1023,7 +1028,7 @@ def replay(root: Path, route: str, set_key: str, *, device: str = 'cuda', packag
     log(f'{route}: {files.name}, {" + ".join(ROLES[one["role"]] for one in networks)}, {len(segments)} minutes of '
         f'{width} x {height}' + (f', settings {taken}' if taken else ''))
 
-    messages = {name: logs[name] for name in ('car', 'enabled', 'motion', 'radar', 'gps')}
+    messages = {name: logs.get(name, []) for name in ('car', 'enabled', 'motion', 'radar', 'gps', 'map')}
     at = dict.fromkeys(messages, 0)  # the next message of each kind
     frames: dict[str, list] = {'t_ns': [], 'segment': [], 'frame': []}
     out: dict[str, list] = {field: [] for field in FIELDS}
@@ -1064,6 +1069,13 @@ def replay(root: Path, route: str, set_key: str, *, device: str = 'cuda', packag
                 at['radar'] += 1
             if last is not None:  # its socket keeps the last one only
                 speed_vision.radar(*last[1:])
+            # The map's limit, for a brain trained with it as an input (#85): its socket keeps the last one only too.
+            rows, last = messages['map'], None
+            while at['map'] < len(rows) and rows[at['map']][0] <= now_ns:
+                last = rows[at['map']]
+                at['map'] += 1
+            if last is not None and hasattr(speed_vision, 'map_limit'):
+                speed_vision.map_limit(now, *last[1:])
             if not speed_vision.due(now):
                 continue
             rows, last = messages['gps'], None

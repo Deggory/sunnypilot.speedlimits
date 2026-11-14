@@ -101,7 +101,7 @@ import numpy as np
 
 from nnslr_tools import road_type_data as data
 from nnslr_tools.brain_net import USER_COLUMNS, USER_KINDS, USERS_POS_WEIGHT_MAX, brain_loss, build_brain_net, outputs
-from nnslr_tools.brain_targets import (INPUT_SIZES, LEFT_OUT, METRES_SCALE, NO_TYPE, NS, RATE_HZ,
+from nnslr_tools.brain_targets import (INPUT_SIZES, LEFT_OUT, METRES_SCALE, NO_TYPE, NS, OPTIONAL, RATE_HZ,
                                        check_drives, class_kph, dataset, epoch_drives, hours_in_train, inputs_sha256,
                                        learning_pieces, loss_weights, night_frames, pack_inputs, plates_in_train, read_split,
                                        road_weights, sign_kph, swap_passages, swapped, training_counts,
@@ -127,7 +127,13 @@ RIGHT_KPH = 2  # a speed said this near the answer is right (the site says "with
 AFTER_PERCENTILE = 90  # the speed he reaches after the end of works (_site)
 DRY_FRAMES = 12
 DRY_STEPS = 2
-LEARNED_INPUTS = tuple(name for name in INPUT_SIZES if name not in LEFT_OUT)
+LEARNED_INPUTS = tuple(name for name in INPUT_SIZES if name not in LEFT_OUT and name not in OPTIONAL)
+
+
+def learned_inputs(map_limit: bool = False) -> tuple[str, ...]:
+    """The groups a brain learns from: LEARNED_INPUTS, and after them the optional ones asked for (map_limit: the map's
+    limit, #85)."""
+    return LEARNED_INPUTS + (('map_limit',) if map_limit else ())
 # The columns of road_users.COLUMNS in front of us (2 to 5 of 0 to 7: x from 336 to 1008 of 1344 pixels): a road user
 # there is in or next to our path, the frames users_speed measures apart.
 MIDDLE_COLUMNS = slice(2, 6)
@@ -712,7 +718,7 @@ def _start_text(start: dict) -> str:
 def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid', works: bool = True,
                 road: bool = True, types: bool = True, users: bool = True, epochs: int = EPOCHS, chunk: int = CHUNK, device: str | None = None,
                 dry_run: bool = False, seed: int = 0, routes: list[str] | None = None, init_from: Path | None = None,
-                sign_networks: dict | None = None, log=_print) -> dict:
+                sign_networks: dict | None = None, map_limit: bool = False, log=_print) -> dict:
     """Train on train, keep the last epoch, measure once. Writes routes.json (the drives it takes, ROUTES), brain-last.pt
     and result.json into run_dir; the checkpoint
     says what it came from, its table of the speeds too (the class_kph of its weights), and its kinds of road. Refuses what
@@ -725,14 +731,18 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
     weights it goes on from (brain_start; the dry run checks it), else ImageNet and random weights. sign_networks: the
     networks its signs were read with (sign_networks.load: the cutter, classifier and applicability network chosen in
     Train › Brain, for its inputs), recorded in result.json; None, the car's release of the sunnypilot
-    clone."""
+    clone. map_limit: the map's limit the comma had is one more input (learned_inputs, #85: Train › Brain's switch, off
+    unless asked); the brain is then the one case where the vision side reads the map."""
     torch = _torch()
     root, run_dir = Path(data_root), Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
     rng = random.Random(seed)
     torch.manual_seed(seed)
     device = torch.device(device or ('cpu' if dry_run else 'cuda'))
-    groups = LEARNED_INPUTS
+    groups = learned_inputs(map_limit)
+    if map_limit:
+        log("The map's limit is an input of this brain (liveMapDataSP, as the comma had it): on the car it will read the "
+            'map, which no other brain does.')
     # Every dashcam drive, each whole (brain_targets.training_routes): how many and how long, before the dry run keeps
     # only a piece of the first.
     counts = training_counts(root)
@@ -826,7 +836,7 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
     swapped_measure = partial(_swapped_measure, model, drives, answers, groups=groups, store=store, chunk=chunk, device=device)
     table = [int(round(value)) for value in model.class_kph.tolist()]
     # rate_hz, hidden and kph: how the car steps it and what it says, for Models (model_roles.brain_digest).
-    result = {'groups': list(groups), 'pool': pool, 'works': works, 'road_kinds': kinds,
+    result = {'groups': list(groups), 'map_limit': map_limit, 'pool': pool, 'works': works, 'road_kinds': kinds,
               'road_types': list(ROAD_TYPES) if types else [], 'users': users, 'user_kinds': source['user_kinds'],
               'users_pos_weight': None if lift is None else lift.round(3).tolist(),
               'users_answers': users_counts(drives), 'rate_hz': source['rate_hz'],

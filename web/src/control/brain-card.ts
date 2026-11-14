@@ -10,10 +10,11 @@ export interface BrainFact {
 
 /** One group of the frame's inputs (INPUT_SIZES): its size, and whether a training of today gives it to the network:
  * car (always, brain_train.LEARNED_INPUTS), never (made on the car, no brain learns it: brain_targets.LEFT_OUT; the
- * driver's pedals and the car's speed since 10 Nov 2026, the metres to the sign ahead since 12 Nov 2026). */
+ * driver's pedals and the car's speed since 10 Nov 2026, the metres to the sign ahead since 12 Nov 2026), optional (only
+ * a brain asked for it: brain_targets.OPTIONAL; the map's limit, Train › Brain's switch, #85). */
 export interface BrainGroup extends BrainFact {
   size: number;
-  use: 'car' | 'never';
+  use: 'car' | 'never' | 'optional';
 }
 
 /** What every step gets on the car beside the groups. */
@@ -44,6 +45,7 @@ export const BRAIN_GROUPS: BrainGroup[] = [
     + 'Zeros until the cutter and the classifier know the lights and the drives are read again'},
   {name: 'motion', size: 8, use: 'car', what: 'the car’s turn signals (on in the last second, seconds since last on, left and right), '
     + 'the steering angle and the yaw rate (carState, deviceMotion)'},
+  {name: 'map_limit', size: 2, use: 'optional', what: 'the limit the comma’s map had (liveMapDataSP), or none: only with the switch “Map’s limit” on'},
   {name: 'pedals', size: 3, use: 'never', what: 'gas and brake pressed in the last second (carState)'},
   {name: 'speed', size: 2, use: 'never', what: 'the car’s own speed, vEgo'},
   {name: 'engaged', size: 7, use: 'never', what: 'openpilot on or off (selfdriveState.enabled)'},

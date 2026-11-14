@@ -1777,6 +1777,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_brain_net.add_argument("--no-users", action="store_true",
                              help="the comparison: without users_head, the road users (nnslr road-users) as a task of "
                                   "the network; they are still measured (users_speed)")
+    p_brain_net.add_argument("--map-limit", action="store_true",
+                             help="the map's limit the comma had (liveMapDataSP) is one more input of the brain "
+                                  "(#85); without it the brain never reads the map")
     p_brain_net.add_argument("--pool", choices=("mean", "grid"), default="grid",
                              help="grid keeps where things are in the frame, mean only what is there")
     p_brain_net.add_argument("--epochs", type=int, default=None)
@@ -2958,7 +2961,7 @@ def _cmd_train_brain(args: argparse.Namespace) -> int:
                                      dry_run=args.dry_run, routes=args.route,
                                      epochs=args.epochs or brain_train.EPOCHS, seed=args.seed,
                                      init_from=Path(args.init_from) if args.init_from else None,
-                                     sign_networks=_sign_networks(args))
+                                     sign_networks=_sign_networks(args), map_limit=args.map_limit)
     print(json.dumps({**{part: {key: result[part][key] for key in ('speed', 'speeds_said', 'one_speed', 'follow_the_sign')}
                          for part in ('train', 'validation', 'test')},
                       **{part: result[part] for part in ('validation_swapped', 'test_swapped')}}, indent=2))

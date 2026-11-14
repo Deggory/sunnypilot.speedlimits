@@ -256,6 +256,10 @@ INPUT_SIZES = BRAIN_INPUTS.INPUT_SIZES
 # it gets the boxes of the signs instead (sign_boxes). The brain of 11 Nov took it and can still be chosen in Models.
 # country and hour (13 Nov 2026, #81): only the countries of his drives; country_iso and hour_tz take the whole world.
 LEFT_OUT = ('engaged', 'pedals', 'speed', 'sign_distance', 'country', 'hour')
+# Groups made for every drive and learned only by a brain asked for them (Train › Brain's switches, off unless turned on):
+# map_limit, the map's limit the comma had (liveMapDataSP), Cristian's choice of 14 Nov 2026 (#85). The vision never read
+# the map before: such a brain does, any other still does not.
+OPTIONAL = ('map_limit',)
 pack_inputs = BRAIN_INPUTS.pack_inputs
 
 
@@ -820,6 +824,10 @@ def drive_inputs(frames: list[dict], ns: np.ndarray, merged: dict, readings: lis
                         for moment, name, position in zip(unix, countries, positions_so_far(gps, ns))], dtype=np.float32)
     country_iso = np.array([BRAIN_INPUTS.country_iso_row(name) for name in countries], dtype=np.float32)
     signs, plate, plate_hours, plate_wet = sign_inputs(seconds, readings)
+    # The map's limit the comma had at each frame (liveMapDataSP, km/h in the drive's series), none where it was not valid.
+    map_limit = np.array([BRAIN_INPUTS.map_limit_row(kph if valid is True and isinstance(kph, (int, float)) else None)
+                          for kph, valid in zip(_last_at(series.get('map_limit') or [], ns),
+                                                _last_at(series.get('map_valid') or [], ns))], dtype=np.float32)
     return {'signs': signs, 'plate': plate, 'plate_hours': plate_hours, 'plate_wet': plate_wet,
             'hour': hour.reshape(len(ns), INPUT_SIZES['hour']),
             'lead': lead.reshape(len(ns), INPUT_SIZES['lead']), 'country': country.reshape(len(ns), INPUT_SIZES['country']),
@@ -830,7 +838,8 @@ def drive_inputs(frames: list[dict], ns: np.ndarray, merged: dict, readings: lis
             'sign_boxes': box_inputs(seconds, readings, boxes),
             'light_boxes': box_inputs(seconds, readings, boxes, 'light_boxes'),
             'country_iso': country_iso.reshape(len(ns), INPUT_SIZES['country_iso']),
-            'hour_tz': hour_tz.reshape(len(ns), INPUT_SIZES['hour_tz'])}
+            'hour_tz': hour_tz.reshape(len(ns), INPUT_SIZES['hour_tz']),
+            'map_limit': map_limit.reshape(len(ns), INPUT_SIZES['map_limit'])}
 
 
 def inputs_sha256() -> str:

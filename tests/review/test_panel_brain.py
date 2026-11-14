@@ -66,6 +66,7 @@ def brain_script(checkout):
                       'echo "init=${NNSLR_BRAIN_INIT_FROM:-fresh}"\n'
                       'echo "signs: ${NNSLR_BRAIN_CUTTER-unset} ${NNSLR_BRAIN_CLASSIFIER-unset} ${NNSLR_BRAIN_DECIDER-unset}"\n'
                       'echo "users: ${NNSLR_BRAIN_USERS-unset}"\n'
+                      'echo "map: ${NNSLR_BRAIN_MAP-unset}"\n'
                       'echo "routes from: ${NNSLR_BRAIN_ROUTES_FROM-unset}"\n')
     script.chmod(0o755)
     return script
@@ -271,6 +272,30 @@ def kept_drives(root, name, routes, *, seed=None, at=None):
     if at is not None:
         import os
         os.utime(folder / 'routes.json', (at, at))
+
+
+def test_the_map_limit_is_an_input_only_when_turned_on(root, checkout, monkeypatch):
+    """#85, 14 Nov 2026: Train › Brain's switch "Map's limit": off unless turned on (the script's NNSLR_BRAIN_MAP), and
+    only the brain takes it."""
+    panel = Panel(root, repo=checkout)
+    brain_script(checkout)
+    scanned(root)
+    monkeypatch.setattr(panel, 'activities', lambda: [])
+
+    def told(options):
+        job = panel.start('train_brain', options)
+        finished(panel, job['id'])
+        time.sleep(1.1)  # a job's log is named by its second
+        return {line for line in full_log(panel, job['id']).splitlines() if line.startswith('map:')}
+
+    assert told({}) == {'map: 0'} and told({'map': 'off'}) == {'map: 0'}
+    assert told({'map': 'on'}) == {'map: 1'}
+    for wrong in ('yes', True):
+        with pytest.raises(PanelError):
+            panel.start('train_brain', {'map': wrong})
+    with pytest.raises(PanelError) as refused:
+        panel.start('train_decider', {'map': 'on'})
+    assert refused.value.status == 400
 
 
 def test_the_road_users_and_the_drives_of_an_earlier_brain_reach_the_script(root, checkout, monkeypatch):

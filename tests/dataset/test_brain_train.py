@@ -1008,7 +1008,11 @@ def test_a_brain_of_before_says_its_speeds_in_its_own_table():
 def test_no_brain_learns_engaged_the_pedals_the_speed_or_the_sign_distance():
     import inspect
     from nnslr_tools import brain_train
-    assert set(brain_train.INPUT_SIZES) - set(brain_train.LEARNED_INPUTS) == {'engaged', 'pedals', 'speed', 'sign_distance'}
+    # country and hour since 13 Nov 2026 (#81: country_iso and hour_tz instead); map_limit only when asked (#85).
+    assert set(brain_train.INPUT_SIZES) - set(brain_train.LEARNED_INPUTS) == {'engaged', 'pedals', 'speed', 'sign_distance',
+                                                                             'country', 'hour', 'map_limit'}
+    assert brain_train.learned_inputs(map_limit=True)[-1] == 'map_limit' and brain_train.learned_inputs() == brain_train.LEARNED_INPUTS
+    assert inspect.signature(brain_train.train_brain).parameters['map_limit'].default is False
     assert 'sign_boxes' in brain_train.LEARNED_INPUTS  # the boxes of the signs instead of the metres to one
     assert 'driver' not in inspect.signature(brain_train.train_brain).parameters
 

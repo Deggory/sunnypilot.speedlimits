@@ -374,6 +374,17 @@ def inputs_of(ns, series, readings=None, gps=()):
     return _targets().drive_inputs(frames, ns, {'series': series, 'gps': gps}, readings, None)
 
 
+def test_the_map_limit_is_the_one_the_comma_had_and_none_where_it_was_not_valid():
+    """#85, 14 Nov 2026: the group map_limit, made for every drive and learned only by a brain asked for it (OPTIONAL)."""
+    targets, numpy = _targets(), _np()
+    scale = targets.BRAIN_INPUTS.SIGN_KPH_SCALE
+    series = {'map_limit': [[2 * NS, 80.0], [25 * NS, 50.0]], 'map_valid': [[2 * NS, True], [15 * NS, False], [25 * NS, True]]}
+    found = inputs_of(seconds(1, 10, 20, 30), series)['map_limit']
+    assert numpy.allclose(found, [[0, 0], [80 / scale, 1], [0, 0], [50 / scale, 1]])
+    assert not inputs_of(seconds(1, 10), {})['map_limit'].any()  # a drive whose logs have no map
+    assert targets.OPTIONAL == ('map_limit',) and 'map_limit' not in targets.LEFT_OUT
+
+
 def test_no_input_of_a_frame_knows_what_comes_after_it():
     numpy = _np()
     ns = seconds(10, 20, 30)
@@ -459,7 +470,7 @@ def test_engaged_the_pedals_the_speed_and_the_sign_distance_are_made_and_never_l
     keeps packing every group it took."""
     numpy = _np()
     targets = _targets()
-    assert targets.LEFT_OUT == ('engaged', 'pedals', 'speed', 'sign_distance')
+    assert targets.LEFT_OUT == ('engaged', 'pedals', 'speed', 'sign_distance', 'country', 'hour')  # the last two: #81
     assert set(targets.LEFT_OUT) <= set(targets.INPUT_SIZES) and 'sign_boxes' not in targets.LEFT_OUT
     made = inputs_of(seconds(10, 20), {})
     assert set(made) == set(targets.INPUT_SIZES) and made['sign_distance'].shape == (2, 2) and made['sign_boxes'].shape == (2, 50)

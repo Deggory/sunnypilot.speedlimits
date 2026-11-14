@@ -85,6 +85,8 @@ export interface ActionOptions {
   /** The brain's road users head (train_brain, on when not given; off: --no-users), and the drives of an earlier brain
    * run it takes instead of every dashcam drive (BrainLabels.same_drives). */
   users?: 'on' | 'off';
+  /** The map's limit as an input of the brain (train_brain, #85): off when not given. */
+  map?: 'on' | 'off';
   routes_from?: string;
   /** The networks that read the brain's signs (train_brain, sign-networks.ts): ids of Models, a SignNet the comma runs,
    * a classifier with “not a sign”, an applicability network; the server takes the one in use for one not given. */
