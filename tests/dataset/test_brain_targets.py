@@ -1173,6 +1173,32 @@ def test_the_map_that_says_the_number_changes_with_it_and_any_other_stays():
     assert np.array_equal(drive['inputs']['map_limit'], before)
 
 
+def test_a_brain_with_the_map_goes_through_a_stretch_without_it_every_epoch_and_another_brain_never():
+    """On the car the map can go anywhere (a border with no map downloaded, no GPS): the training turns it off on a stretch
+    taken at random, another every epoch."""
+    import random
+    np, targets = _np(), _targets()
+    groups = (*GROUPS, 'map_limit')
+    drive = plated(hours=[14.0] * 40, plate=None)
+    drive['inputs']['map_limit'][:] = targets.BRAIN_INPUTS.map_limit_row(80)
+    drive['extra'], before = targets.pack_inputs(drive['inputs'], groups), drive['inputs']['map_limit'].copy()
+    rng, stretches = random.Random(0), set()
+    for _ in range(50):
+        (seen,) = targets.epoch_drives([drive], groups, rng)
+        off = np.flatnonzero(seen['inputs']['map_limit'][:, 1] == 0)
+        assert not seen['inputs']['map_limit'][off].any() and np.array_equal(seen['inputs']['map_limit'][:, 1] > 0,
+                                                                              seen['inputs']['map_limit'][:, 0] > 0)
+        assert not len(off) or np.array_equal(off, np.arange(off[0], off[-1] + 1))  # one stretch
+        assert np.array_equal(seen['extra'], targets.pack_inputs(seen['inputs'], groups))
+        stretches.add((int(off[0]), int(off[-1])) if len(off) else None)
+    assert len(stretches) > 30 and np.array_equal(drive['inputs']['map_limit'], before)
+    assert .2 < np.mean([0 if s is None else s[1] - s[0] + 1 for s in stretches]) / 40 < .5
+    for seed in range(20):
+        assert in_an_epoch(drive, seed)[0]['inputs']['map_limit'] is drive['inputs']['map_limit']
+    blind = targets.without_map(drive, groups)
+    assert not blind['inputs']['map_limit'].any() and np.array_equal(drive['inputs']['map_limit'], before)
+
+
 def test_an_epoch_swaps_half_of_the_passages_with_a_new_clock_and_leaves_the_drive_as_it_is():
     drive = numbered([100, 100], [100, 100])
     seen = [in_an_epoch(drive, seed)[0] for seed in range(200)]

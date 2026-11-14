@@ -165,6 +165,14 @@ and on a dry one, with his speed of each. The plate comes from the class the rea
 maximum_speed_wet:<number>, a sign with its plate in one box), so with a classifier without that class it is unknown on every
 frame, and the export says so (wet_in_train).
 
+The map turned off (without_map, epoch_drives), only for a brain that learns the map's limit (map_limit). On the car the
+map can go at any place: across a border with no map downloaded, without GPS, in a tunnel. In the drives it is missing
+where the map has no limit (car parks, small roads), so a motorway without the map is hardly ever seen. So every epoch
+each drive goes with no map on one stretch of it, between two of its frames taken at random (a third of the drive on
+average, another stretch every epoch): the same roads with the map and without it, and the moments it goes and comes
+back. A measure has the real map, but brain_train's validation_no_map and test_no_map, with no map on any frame: what
+such a brain says when the map is gone.
+
 The numbers swapped (swap_passages, swapped). On a few drives the picture tells the road and a road seen in training tells its
 speed, so the network has no reason to read the sign: the second run said 50 past a 60, and took no notice of the signs. So
 every epoch half of the passages (the frames in a row with one number) whose answers all stay within SWAP_TOLERANCE_KPH of the
@@ -1186,17 +1194,41 @@ def _half_swapped(drive: dict, groups: tuple[str, ...], rng) -> dict:
     return swapped(drive, passages, groups) if passages else drive
 
 
+MAP_GROUP = 'map_limit'
+
+
+def without_map(drive: dict, groups: tuple[str, ...], frames=None) -> dict:
+    """The drive with no map on these frames (a slice or indexes; None: on all of it): the row the car gives a brain
+    when liveMapDataSP is not valid or does not come, map_limit_row(None)."""
+    limit = drive['inputs'][MAP_GROUP].copy()
+    limit[slice(None) if frames is None else frames] = BRAIN_INPUTS.map_limit_row(None)
+    inputs = {**drive['inputs'], MAP_GROUP: limit}
+    return {**drive, 'inputs': inputs, 'extra': pack_inputs(inputs, groups)}
+
+
+def _map_off_stretch(drive: dict, groups: tuple[str, ...], rng) -> dict:
+    """The drive with no map on one stretch of it, between two frames taken at random: see the module's text. As it is
+    for a brain that does not learn the map."""
+    frames = len(drive['partitions'])
+    if MAP_GROUP not in groups or frames < 2:
+        return drive
+    first, last = sorted(rng.randrange(frames + 1) for _ in range(2))
+    return without_map(drive, groups, slice(first, last)) if last > first else drive
+
+
 def epoch_drives(drives: list[dict], groups: tuple[str, ...], rng) -> list[dict]:
-    """What an epoch of training goes through, new every epoch: the drives with a moved clock and half of their numbers
-    swapped, and the night copies. See the module's text. Never for a measure: drives stays as it is."""
+    """What an epoch of training goes through, new every epoch: the drives with a moved clock, half of their numbers
+    swapped and, for a brain that learns the map's limit, no map on a stretch taken at random; and the night copies. See
+    the module's text. Never for a measure: drives stays as it is."""
     found = []
     for drive in drives:
         if (_hours_plate(drive) & (np.array(drive['partitions']) == 'train')).any():
             copy = night_copy(drive, groups, rng)
-            seen = _half_swapped(drive, groups, rng)
+            seen = _map_off_stretch(_half_swapped(drive, groups, rng), groups, rng)
             found += [seen] if copy is None else [seen, copy]
         else:
-            found.append(_half_swapped(_with_hour(drive, groups, rng.uniform(0, 24)), groups, rng))
+            seen = _half_swapped(_with_hour(drive, groups, rng.uniform(0, 24)), groups, rng)
+            found.append(_map_off_stretch(seen, groups, rng))
     return found
 
 

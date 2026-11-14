@@ -449,6 +449,8 @@ def brain_digest(result: Any) -> dict:
             'plates': bool(result.get('plates')), 'hours': bool(result.get('hours')), 'wet': bool(result.get('wet')), 'dry_run': bool(result.get('dry_run')), 'epochs': len(result.get('history') or []),
             'users': _brain_users(result),
             'validation': speed('validation'), 'test': speed('test'),
+            # Of a brain that learns the map's limit: the test frames with no map at all (brain_train, test_no_map).
+            'test_no_map': speed('test_no_map'),
             # The split it learnt on and the brain it went on from (None: ImageNet and random weights; before 10 Nov 2026
             # not recorded).
             'split_sha256': result.get('split_sha256') if isinstance(result.get('split_sha256'), str) else None,
@@ -958,7 +960,8 @@ class ModelIndex:
                       **{key: trained.get(key) for key in ('rate_hz', 'ahead', 'hidden', 'kph', 'road_kinds', 'road_types',
                                                            'pool', 'sign_networks', 'users')},
                       'epochs': trained.get('epochs'), 'epochs_run': trained.get('epochs'),
-                      'validation': trained.get('validation'), 'test': trained.get('test')})
+                      'validation': trained.get('validation'), 'test': trained.get('test'),
+                      'test_no_map': trained.get('test_no_map')})
         return entry
 
     def _users(self, name: str, run: Path) -> dict | None:

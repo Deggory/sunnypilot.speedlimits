@@ -1558,6 +1558,8 @@ export interface BrainModel extends ModelBase {
   sign_networks?: {cutter: string; classifier: string; decider: string} | null;
   validation: BrainNumbers | null;
   test: BrainNumbers | null;
+  /** Of a brain that learns the map’s limit: the test frames with no map at all. */
+  test_no_map?: BrainNumbers | null;
 }
 
 /** UserNet on one partition at its score (0.5, what the brain will read; nnslr_tools.usernet.digest): the frames, the road

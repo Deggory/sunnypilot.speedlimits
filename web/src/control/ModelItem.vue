@@ -239,6 +239,7 @@ const noOtherOnTest = computed(() => decider.value?.test?.other_road_support ===
         <dl class="model-facts">
           <div><dt>Off on average</dt><dd>{{ brain.test.mean_error_kph?.toFixed(1) ?? '–' }} km/h</dd></div>
           <div><dt>On validation</dt><dd>{{ pct(brain.validation?.right) }}</dd></div>
+          <div v-if="brain.test_no_map"><dt title="The same test frames with no map at all, as past a border with no map downloaded: what is left of it without the map">Off without the map</dt><dd>{{ brain.test_no_map.mean_error_kph?.toFixed(1) ?? '–' }} km/h</dd></div>
           <div><dt title="What it reads each second beside the picture; the map only when map_limit is among them">Inputs</dt><dd>{{ brain.groups?.join(', ') ?? '–' }}</dd></div>
           <div><dt title="Whether the frames it trained on had a limit with a plate of hours">Hours plates</dt><dd>{{ brain.hours ? 'Reads them and their hours' : brain.plates ? 'Reads them' : 'Does not read them' }}</dd></div>
           <div><dt title="Whether the frames it trained on had a limit valid only on a wet road">Wet plates</dt><dd>{{ brain.wet ? 'Reads them' : 'Does not read them' }}</dd></div>

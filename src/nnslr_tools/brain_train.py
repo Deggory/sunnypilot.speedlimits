@@ -61,6 +61,10 @@ passage says its number (brain_targets.swap_passages: within SWAP_TOLERANCE_KPH)
 family and his answers moved as much. A network deaf to the sign is still right on the frames that go to the speed it says, so
 moved counts the answers that changed by more than RIGHT_KPH: the network reads the sign when they follow it.
 
+validation_no_map and test_no_map, of a brain that learns the map's limit: the same partitions with no map on any frame
+(brain_targets.without_map), as past a border with no map downloaded. Beside validation and test they say what the map
+is worth to the brain and what is left of it without the map.
+
 The brain steps at RATE_HZ, every reading of the car (brain_targets): its pictures are those vision.BrainInput makes on the
 car, kept while the signs are read. Each measure counts one frame a second, the frames of the old 1 Hz brains, so that the
 numbers of a brain of today and of one before read the same.
@@ -101,12 +105,12 @@ import numpy as np
 
 from nnslr_tools import road_type_data as data
 from nnslr_tools.brain_net import USER_COLUMNS, USER_KINDS, USERS_POS_WEIGHT_MAX, brain_loss, build_brain_net, outputs
-from nnslr_tools.brain_targets import (INPUT_SIZES, LEFT_OUT, METRES_SCALE, NO_TYPE, NS, OPTIONAL, RATE_HZ,
+from nnslr_tools.brain_targets import (INPUT_SIZES, LEFT_OUT, MAP_GROUP, METRES_SCALE, NO_TYPE, NS, OPTIONAL, RATE_HZ,
                                        check_drives, class_kph, dataset, epoch_drives, hours_in_train, inputs_sha256,
                                        learning_pieces, loss_weights, night_frames, pack_inputs, plates_in_train, read_split,
                                        road_weights, sign_kph, swap_passages, swapped, training_counts,
                                        training_counts_text, type_weights, users_counts, users_counts_text, users_weights,
-                                       wet_in_train)
+                                       wet_in_train, without_map)
 from nnslr_tools.media import FRAME_SIZE
 from nnslr_tools.road_users import CHECK_BINS
 from nnslr_tools.road_types import ROAD_TYPES
@@ -834,6 +838,12 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
     torch.save({'weights': model.state_dict(), 'epoch': epochs - 1, **source}, run_dir / CHECKPOINT)
     cold = [predict(model, drive, store, chunk=chunk, device=device, cold=True) for drive in drives]
     swapped_measure = partial(_swapped_measure, model, drives, answers, groups=groups, store=store, chunk=chunk, device=device)
+    # Of a brain that learns the map's limit: the same drives with no map on any frame, as past a border with no map.
+    no_map = {}
+    if MAP_GROUP in groups:
+        blind = [without_map(drive, groups) for drive in drives]
+        said = [predict(model, drive, store, chunk=chunk, device=device) for drive in blind]
+        no_map = {'validation_no_map': measure(blind, said, 'validation'), 'test_no_map': measure(blind, said, 'test')}
     table = [int(round(value)) for value in model.class_kph.tolist()]
     # rate_hz, hidden and kph: how the car steps it and what it says, for Models (model_roles.brain_digest).
     result = {'groups': list(groups), 'map_limit': map_limit, 'pool': pool, 'works': works, 'road_kinds': kinds,
@@ -850,6 +860,6 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
               'train': measure(drives, answers, 'train'), 'validation': measure(drives, answers, 'validation'),
               'test': measure(drives, answers, 'test'), 'validation_cold': measure(drives, cold, 'validation'),
               'test_cold': measure(drives, cold, 'test'),
-              'validation_swapped': swapped_measure('validation'), 'test_swapped': swapped_measure('test')}
+              'validation_swapped': swapped_measure('validation'), 'test_swapped': swapped_measure('test'), **no_map}
     (run_dir / RESULT).write_text(json.dumps(result, indent=2), encoding='utf-8')
     return result

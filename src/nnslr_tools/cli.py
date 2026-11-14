@@ -2964,7 +2964,9 @@ def _cmd_train_brain(args: argparse.Namespace) -> int:
                                      sign_networks=_sign_networks(args), map_limit=args.map_limit)
     print(json.dumps({**{part: {key: result[part][key] for key in ('speed', 'speeds_said', 'one_speed', 'follow_the_sign')}
                          for part in ('train', 'validation', 'test')},
-                      **{part: result[part] for part in ('validation_swapped', 'test_swapped')}}, indent=2))
+                      **{part: result[part] for part in ('validation_swapped', 'test_swapped')},
+                      **{part: {'speed': result[part]['speed']} for part in ('validation_no_map', 'test_no_map')
+                         if part in result}}, indent=2))
     return 0
 
 

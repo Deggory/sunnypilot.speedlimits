@@ -667,7 +667,7 @@ def test_cold_starts_the_memory_again_where_a_stretch_out_of_train_begins():
 BUILT = []  # what the last run_training asked of build_brain_net
 
 
-def run_training(torch, tmp_path, monkeypatch, scores, change=lambda _drive: None):
+def run_training(torch, tmp_path, monkeypatch, scores, change=lambda _drive: None, map_limit=False):
     """Every epoch's validation scores what scores says: nothing may follow from it."""
     from nnslr_tools import brain_train
     drive = fake_drive(['train'] * 4 + ['validation'] * 2 + ['test'] * 2)
@@ -676,7 +676,7 @@ def run_training(torch, tmp_path, monkeypatch, scores, change=lambda _drive: Non
     monkeypatch.setattr(brain_train, 'dataset', lambda *_args, **_options: [drive])
     monkeypatch.setattr(brain_train, 'read_split', lambda _root: {'sha256': 'split'})
     monkeypatch.setattr(brain_train, '_pictures', lambda *_args, **_options: {drive['route']: pictures(drive)})
-    model = tiny(torch, groups=brain_train.LEARNED_INPUTS)
+    model = tiny(torch, groups=brain_train.learned_inputs(map_limit))
 
     def build(*_args, **options):
         BUILT[:] = [options]
@@ -693,8 +693,26 @@ def run_training(torch, tmp_path, monkeypatch, scores, change=lambda _drive: Non
 
     monkeypatch.setattr(brain_train, 'measure', scripted)
     result = brain_train.train_brain(tmp_path, tmp_path / 'run', None, epochs=len(scores), chunk=4, device='cpu',
-                                     log=lambda _text: None)
+                                     log=lambda _text: None, map_limit=map_limit)
     return result, torch.load(tmp_path / 'run' / 'brain-last.pt', weights_only=False), model
+
+
+def test_a_brain_with_the_map_is_also_measured_without_it_and_another_brain_is_not(tmp_path, monkeypatch):
+    """validation_no_map and test_no_map: the same frames with no map at all, as past a border with no map downloaded."""
+    torch = torch_or_skip()
+    from nnslr_tools import brain_train
+
+    def mapped(drive):
+        from nnslr_tools.brain_targets import BRAIN_INPUTS, pack_inputs
+        drive['inputs']['map_limit'][:] = BRAIN_INPUTS.map_limit_row(50)
+        drive['extra'] = pack_inputs(drive['inputs'], brain_train.learned_inputs(True))
+
+    result, _saved, _model = run_training(torch, tmp_path, monkeypatch, [1.0], change=mapped, map_limit=True)
+    assert result['map_limit'] is True and result['groups'][-1] == 'map_limit'
+    for part, real in (('validation_no_map', 'validation'), ('test_no_map', 'test')):
+        assert result[part]['speed']['frames'] == result[real]['speed']['frames'] > 0
+    result, _saved, _model = run_training(torch, tmp_path / 'plain', monkeypatch, [1.0])
+    assert 'validation_no_map' not in result and 'test_no_map' not in result
 
 
 def test_the_epoch_kept_is_the_last_whatever_validation_says_and_the_checkpoint_says_what_it_came_from(tmp_path, monkeypatch):
