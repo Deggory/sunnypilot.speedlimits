@@ -84,12 +84,15 @@ function brainBlocks(version: BrainModel): FlowBlock[] {
     ['place', 'The car and the place', has('hour', 'lead', 'country', 'sign_distance', 'country_iso', 'hour_tz')],
     ['motion', 'Your turn signals and steering', has('motion')],
     ['driver', 'Your pedals and speed', has('pedals', 'speed')],
+    ['map', 'Map’s limit', has('map_limit')],
   ];
   for (const [id, title, names] of sets) {
     if (!names.length) continue;
     inputs.push({id, title, sub: names.join(' · '), kind: 'input', column: 0, facts: names.map(group), to: ['memory'],
       ...(id === 'signs' ? {note: 'What SignNet and the classifier read on this car, mistakes included.'
-        + (version.plates ? '' : ' This version did not learn the plates: the car gives it plate unknown and no hours.')} : {})});
+        + (version.plates ? '' : ' This version did not learn the plates: the car gives it plate unknown and no hours.')} : {}),
+      ...(id === 'map' ? {note: 'The limit the comma’s map has for this road. Only a version trained with the switch '
+        + '“Map’s limit” gets it: the signs are read without the map.'} : {})});
   }
   const outputs: FlowBlock[] = [
     {id: 'speed', title: 'Speed to hold', sub: `${kph.from ?? '?'}–${kph.to ?? '?'} km/h, every ${kph.step ?? '?'}`, kind: 'car',
@@ -106,7 +109,7 @@ function brainBlocks(version: BrainModel): FlowBlock[] {
   const extras = [
     {on: version.road_types.length > 0, id: 'type', title: 'Road type', sub: 'motorway, rural, town…',
       what: 'the road type it sees', answer: 'Road type (map)', where: 'OpenStreetMap, offline only, corrected in Speed review',
-      note: 'The map only made these labels, offline: the car never gets it.'},
+      note: 'The map only made these labels, offline: the car never gets the map’s road type.'},
     {on: version.works === true, id: 'works', title: 'Roadworks', sub: 'inside roadworks or not',
       what: 'whether the car is inside roadworks', answer: 'Roadworks', where: 'your marks in Speed review'},
     {on: version.road_kinds.length > 0, id: 'road', title: 'Road conditions', sub: version.road_kinds.join(', '),

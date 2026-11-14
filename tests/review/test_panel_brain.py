@@ -261,6 +261,8 @@ def test_what_it_learns_reaches_the_script_and_is_shown_on_the_job(root, checkou
     assert _settings_of(log, 'train_brain') == ['40 epochs', 'driver’s inputs']
     log.write_text('== scripts/run_brain.sh r\nrun:          r\nsettings:     --epochs 40 --pool grid\n')
     assert _settings_of(log, 'train_brain') == ['40 epochs']
+    log.write_text('== scripts/run_brain.sh r\nrun:          r\nsettings:     --epochs 40 --pool grid --map-limit\n')
+    assert _settings_of(log, 'train_brain') == ['40 epochs', 'map’s limit']
 
 
 def kept_drives(root, name, routes, *, seed=None, at=None):

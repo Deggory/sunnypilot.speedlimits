@@ -369,6 +369,8 @@ def _settings_of(log: Path, action: str) -> list[str]:
         chips.append('no driver’s inputs')
     if flags.get('--pool') == 'mean':
         chips.append('picture as a mean')
+    if '--map-limit' in flags:
+        chips.append('map’s limit')
     if flags.get('--batch-size') or flags.get('--batch'):
         chips.append('batch ' + (flags.get('--batch-size') or flags['--batch']))
     if flags.get('--learning-rate'):

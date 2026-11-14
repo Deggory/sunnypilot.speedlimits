@@ -553,11 +553,22 @@ def selectable(entry: dict) -> tuple[bool, str | None]:
     return True, None
 
 
+def _group_names(entry: dict) -> set:
+    """The groups a brain of the index learnt from (as its result.json keeps them: names, or [name, size])."""
+    return {group[0] if isinstance(group, (list, tuple)) and group else group for group in entry.get('groups') or ()}
+
+
 def takes_the_driver(entry: dict) -> bool:
-    """Whether a brain of the index learnt from the driver's pedals or the car's speed (its groups, as its result.json
-    keeps them: names, or [name, size])."""
-    names = {group[0] if isinstance(group, (list, tuple)) and group else group for group in entry.get('groups') or ()}
-    return any(name in names for name in DRIVER_GROUPS)
+    """Whether a brain of the index learnt from the driver's pedals or the car's speed."""
+    return any(name in _group_names(entry) for name in DRIVER_GROUPS)
+
+
+MAP_GROUP = 'map_limit'
+
+
+def reads_the_map(entry: dict) -> bool:
+    """Whether a brain of the index was trained with the map's limit as an input (Train › Brain's switch, #85)."""
+    return MAP_GROUP in _group_names(entry)
 
 
 def _active_entry(role: str, value: Any) -> dict | None:
@@ -935,7 +946,8 @@ class ModelIndex:
             return None
         entry = self._base('brain', name, BRAIN_PART, checkpoint, result, problems)
         seed = trained.get('seed')
-        entry.update({'label': 'Brain' if seed is None else f'Brain, seed {seed}', 'detail': 'says the speed to hold',
+        detail = 'says the speed to hold' + (' · reads the map’s limit' if reads_the_map(trained) else '')
+        entry.update({'label': 'Brain' if seed is None else f'Brain, seed {seed}', 'detail': detail,
                       'groups': trained.get('groups'),
                       'architecture': 'mobilenet_v3_small+gru',
                       'initialization': 'start' if trained.get('start') else 'ImageNet', 'best_epoch': None,

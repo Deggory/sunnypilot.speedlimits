@@ -926,6 +926,20 @@ def test_a_drive_takes_one_clock_for_all_its_frames_and_nothing_else_changes():
     assert np.array_equal(drive['inputs']['hour'], real) and np.array_equal(drive['extra'], extra)
 
 
+def test_the_moved_clock_reaches_the_clock_a_brain_of_today_learns():
+    """Since 13 Nov 2026 a brain learns hour_tz and not hour: a move of hour alone changed nothing of what it is given."""
+    import random
+    np, targets = _np(), _targets()
+    groups = ('signs', 'plate', 'hour_tz', 'lead')
+    drive = plated(hours=(10.0, 10.5, 11.0), plate=None)
+    drive['inputs']['hour_tz'][:] = drive['inputs']['hour']
+    drive['extra'] = targets.pack_inputs(drive['inputs'], groups)
+    (seen,) = targets.epoch_drives([drive], groups, random.Random(0))
+    assert np.allclose(seen['inputs']['hour_tz'], seen['inputs']['hour'])
+    assert not np.allclose(seen['inputs']['hour_tz'], drive['inputs']['hour_tz'])
+    assert not np.array_equal(seen['extra'], drive['extra'])
+
+
 def test_every_epoch_has_another_clock_and_a_seed_the_same_ones():
     import random
     np, targets = _np(), _targets()
@@ -1142,6 +1156,21 @@ def test_a_single_reading_changes_only_where_it_says_the_number():
     np, targets = _np(), _targets()
     seen = all_swapped(numbered([100, 100, 100, 0], [100, 100, 100, 90], singles=[100, 80, 0, 100]))
     assert np.rint(seen['inputs']['signs'][:, 8] * targets.BRAIN_INPUTS.SIGN_KPH_SCALE).tolist() == [120, 80, 0, 100]
+
+
+def test_the_map_that_says_the_number_changes_with_it_and_any_other_stays():
+    """A map left at 100 beside a sign moved to 120 would teach a disagreement nobody saw."""
+    np, targets = _np(), _targets()
+    groups, scale = (*GROUPS, 'map_limit'), targets.BRAIN_INPUTS.SIGN_KPH_SCALE
+    drive = numbered([100, 100, 100, 100], [100, 100, 100, 100])
+    drive['inputs']['map_limit'][:] = [targets.BRAIN_INPUTS.map_limit_row(kph) for kph in (100, 80, None, 100)]
+    before = drive['inputs']['map_limit'].copy()
+    seen = targets.swapped(drive, targets.swap_passages(drive, 'train'), groups)
+    assert numbers(seen) == [120] * 4
+    assert np.rint(seen['inputs']['map_limit'][:, 0] * scale).tolist() == [120, 80, 0, 120]
+    assert seen['inputs']['map_limit'][:, 1].tolist() == [1, 1, 0, 1]
+    assert np.array_equal(seen['extra'], targets.pack_inputs(seen['inputs'], groups))
+    assert np.array_equal(drive['inputs']['map_limit'], before)
 
 
 def test_an_epoch_swaps_half_of_the_passages_with_a_new_clock_and_leaves_the_drive_as_it_is():

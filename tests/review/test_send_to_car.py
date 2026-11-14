@@ -351,6 +351,41 @@ def test_a_brain_goes_only_finished_and_its_dry_run_is_not_a_version(tmp_path):
     assert car_release.choose(data, 's1')['brain'] is None
 
 
+def test_a_brain_that_reads_the_map_goes_on_the_car_only_when_the_pushed_daemon_gives_it(tmp_path, monkeypatch):
+    """A comma whose daemon does not read liveMapDataSP gives such a brain "no map" on every step, without a word (#85):
+    Publish refuses it until the daemon of the pushed speed-limits branch reads the map; the replay still takes it."""
+    data = tmp_path / 'data'
+    servers_runs(data)
+    model_id = brain_run(data, 'b1', result={'groups': ['signs', 'motion', 'map_limit'], 'seed': 0, 'history': [{}],
+                                             'test': {}, 'validation': {}})
+    use_brain(data, model_id)
+    index = ModelIndex(RunsIndex(data))
+    clone = tmp_path / 'sunnypilot'
+    monkeypatch.setenv(car_release.SUNNYPILOT_CLONE_ENV, str(clone))
+    assert not car_release.daemon_feeds_the_map()  # no clone at all: nothing says the car gives it
+    assert 'reads the map’s limit' in car_release.brain_refused(index)
+    with pytest.raises(ValueError, match='reads the map’s limit'):
+        car_release.choose(data, 's1')
+    assert car_release.choose(data, 's1', brain_on_car=False)['brain']['id'] == model_id
+
+    def pushed(body):
+        daemon = clone / car_release.CAR_DAEMON
+        daemon.parent.mkdir(parents=True, exist_ok=True)
+        daemon.write_text(body)
+        for command in (['init', '-q'], ['add', '-A'], ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'x'],
+                        ['update-ref', 'refs/remotes/' + car_release.CAR_BRANCH, 'HEAD']):
+            subprocess.run(['git', '-C', str(clone), *command], check=True)
+
+    pushed('radar = sub_sock("radarState")\n')
+    assert 'reads the map’s limit' in car_release.brain_refused(index)
+    pushed('map_data = sub_sock("liveMapDataSP")\n')
+    assert car_release.brain_refused(index) == ''
+    assert car_release.choose(data, 's1')['brain']['id'] == model_id
+    use_brain(data, brain_run(data, 'b2'))
+    monkeypatch.setenv(car_release.SUNNYPILOT_CLONE_ENV, str(tmp_path / 'none'))
+    assert car_release.brain_refused(index) == ''  # a brain without the map asks nothing of the daemon
+
+
 def test_a_brain_that_takes_the_drivers_inputs_never_goes_on_the_car(tmp_path):
     """With his pedals and the car's speed in, the brain followed his speed on the road (10 Nov 2026): one chosen before
     stays in use on Models, but Publish refuses it; Models › Drive's replay and a trial on the comma still take it."""

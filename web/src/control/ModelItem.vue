@@ -239,7 +239,7 @@ const noOtherOnTest = computed(() => decider.value?.test?.other_road_support ===
         <dl class="model-facts">
           <div><dt>Off on average</dt><dd>{{ brain.test.mean_error_kph?.toFixed(1) ?? '–' }} km/h</dd></div>
           <div><dt>On validation</dt><dd>{{ pct(brain.validation?.right) }}</dd></div>
-          <div><dt title="What it reads each second beside the picture; never the map">Inputs</dt><dd>{{ brain.groups?.join(', ') ?? '–' }}</dd></div>
+          <div><dt title="What it reads each second beside the picture; the map only when map_limit is among them">Inputs</dt><dd>{{ brain.groups?.join(', ') ?? '–' }}</dd></div>
           <div><dt title="Whether the frames it trained on had a limit with a plate of hours">Hours plates</dt><dd>{{ brain.hours ? 'Reads them and their hours' : brain.plates ? 'Reads them' : 'Does not read them' }}</dd></div>
           <div><dt title="Whether the frames it trained on had a limit valid only on a wet road">Wet plates</dt><dd>{{ brain.wet ? 'Reads them' : 'Does not read them' }}</dd></div>
           <div><dt title="The cutter, the classifier and the applicability network that read the signs it learnt from">Signs read by</dt><dd>{{

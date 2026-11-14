@@ -141,8 +141,9 @@ without a frame (memory_cuts), as on the car.
 
 The hour in training (epoch_drives). Nearly every drive is by day, so the real hour says which drive a frame is from and
 nothing of the speed, unless a plate gives it a meaning. So every epoch a drive takes a clock moved by a random number of
-hours, one for all its frames, since on the car the clock runs on. A drive with a plate of hours on frames of train keeps its
-real clock: there the hour is part of the answer. Validation and test always have the real one.
+hours, one for all its frames, since on the car the clock runs on: both clocks move (HOUR_GROUPS: hour and hour_tz, of
+which a brain learns one). A drive with a plate of hours on frames of train keeps its real clock: there the hour is part of
+the answer. Validation and test always have the real one.
 
 The night copies (night_copy). A plate of hours read outside them, with his speed above the number, says only that the
 number does not hold now. Nothing shows when it does, and drives after 22:00 are few. So such a drive goes through the epoch
@@ -173,8 +174,10 @@ same kind of road can have, so that no scene turns absurd. Only answers of train
 said the speed there. A passage with an answer off the number stays as it is: the sign was wrong there, or he drove another
 speed, and that too is for the brain to learn. A frame with no number in force keeps its answer, since the road alone says
 it there, and an end read keeps the answer after it. Besides the number, the single readings equal to it change, on the
-frames of the passage. Nothing of this reaches a measure, but brain_train's test_swapped and validation_swapped, which ask
-exactly this of their frames.
+frames of the passage, and so does the map's limit where it says that number (map_limit, of a brain trained with it): a
+map left at 50 beside a sign moved to 60 would be a disagreement made here, always settled for the sign. A map that says
+another number, or none, stays. Nothing of this reaches a measure, but brain_train's test_swapped and validation_swapped,
+which ask exactly this of their frames: of a brain with the map, the sign and the map that agreed with it changed together.
 
 What the training refuses (check_drives), so that nothing goes wrong without a word: a drive not read or read by another
 reader than the car's today, since an unread drive looks like a drive with no sign and then "no reading" is learned as a
@@ -1091,8 +1094,11 @@ def wet_in_train(drives: list[dict]) -> bool:
     return any(bool((_wet_plate(drive) & (loss_weights(drive, 'train')[0] > 0)).any()) for drive in drives)
 
 
+HOUR_GROUPS = ('hour', 'hour_tz')  # both a clock as (sin, cos, known): a brain learns one of the two
+
+
 def _with_hour(drive: dict, groups: tuple[str, ...], hours: float) -> dict:
-    inputs = {**drive['inputs'], 'hour': other_hour(drive['inputs']['hour'], hours)}
+    inputs = {**drive['inputs'], **{name: other_hour(drive['inputs'][name], hours) for name in HOUR_GROUPS}}
     return {**drive, 'inputs': inputs, 'extra': pack_inputs(inputs, groups)}
 
 
@@ -1158,16 +1164,20 @@ def swap_passages(drive: dict, partition: str = 'train') -> list[np.ndarray]:
 def swapped(drive: dict, passages: list[np.ndarray], groups: tuple[str, ...]) -> dict:
     """The drive with the number of these passages, and what says it, as the other of its family: see the module's text."""
     signs, speed, label = drive['inputs']['signs'].copy(), drive['speed'].copy(), class_kph(drive['speed'])
+    limit = drive['inputs']['map_limit'].copy()
     scale = BRAIN_INPUTS.SIGN_KPH_SCALE
     for passage in passages:
         number = int(sign_kph(signs[passage[:1]])[0])
         said = passage[(np.abs(label[passage] - number) <= SWAP_TOLERANCE_KPH) & (signs[passage, 6] == 0) &
                        (drive['speed'][passage] >= 0)]
         single = passage[np.rint(signs[passage, 8] * scale) == number]
-        signs[passage, 0] = signs[single, 8] = SWAPS[number] / scale
+        # The map that says the passage's number says the other one too: a copy with the sign at 60 and the map still
+        # at 50 would teach a disagreement nobody saw, always settled for the sign.
+        agreed = passage[(limit[passage, 1] > 0) & (np.rint(limit[passage, 0] * scale) == number)]
+        signs[passage, 0] = signs[single, 8] = limit[agreed, 0] = SWAPS[number] / scale
         # His speed off the number by as much as before: 52 past a 50 is 62 past a 60.
         speed[said] = speed_class(np.clip(label[said] + SWAPS[number] - number, 1, BRAIN_MAX_KPH))
-    inputs = {**drive['inputs'], 'signs': signs}
+    inputs = {**drive['inputs'], 'signs': signs, 'map_limit': limit}
     return {**drive, 'inputs': inputs, 'speed': speed, 'extra': pack_inputs(inputs, groups)}
 
 

@@ -42,6 +42,7 @@ from nnslr_tools.model_roles import (
     ModelIndex,
     _sha256,
     decider_weights,
+    reads_the_map,
     record_on_car,
     role_of,
     takes_the_driver,
@@ -68,6 +69,10 @@ DECIDER_FILE = 'decider.onnx'
 OLD_FILES = ('road-type.onnx',)
 # The brain's country (speed_limits/country.py): a first try, not validated on the road. Only a release with a brain has it.
 COUNTRY_POLICY = {'gps_max_age_s': 5, 'gps_max_accuracy_m': 50, 'border_margin_m': 200, 'confirm_s': 10, 'max_sample_gap_s': 5}
+# What gives a brain trained with the map's limit its input on the car (#85): the daemon of the pushed branch.
+CAR_BRANCH = 'origin/speed-limits'
+CAR_DAEMON = 'openpilot/sunnypilot/speed_limits/speedvisiond.py'
+CAR_MAP_SERVICE = 'liveMapDataSP'
 MANIFEST = 'speed_limits.json'
 MAX_VERSION = 40
 GIT_TIMEOUT = 180
@@ -110,12 +115,36 @@ def brain_refused(index: ModelIndex) -> str:
     speed, and a brain with them followed his speed on the road (10 Nov 2026, model_roles.takes_the_driver). For the
     panel, before Publish starts; choose() says the same."""
     entry, _ = index.in_use('brain')
-    return _driver_refused(entry) if entry is not None and takes_the_driver(entry) else ''
+    if entry is None:
+        return ''
+    return _driver_refused(entry) if takes_the_driver(entry) else _map_refused(entry)
 
 
 def _driver_refused(entry: dict) -> str:
     return (f'the brain in use, {entry["id"]}, takes your pedals and the car’s speed, so it follows your speed: choose '
             'one without them on the Models tab')
+
+
+def daemon_feeds_the_map(clone: Path | None = None) -> bool:
+    """Whether the comma's daemon gives the brain the map's limit: the daemon of the pushed speed-limits branch, which is
+    what the comma is built from, reads liveMapDataSP. False when the clone or its branch cannot be read."""
+    clone = Path(clone or os.environ.get(SUNNYPILOT_CLONE_ENV) or SUNNYPILOT_CLONE)
+    try:
+        shown = subprocess.run(['git', '-C', str(clone), 'show', f'{CAR_BRANCH}:{CAR_DAEMON}'], capture_output=True,
+                               text=True, timeout=GIT_TIMEOUT, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return shown.returncode == 0 and CAR_MAP_SERVICE in shown.stdout
+
+
+def _map_refused(entry: dict) -> str:
+    """Why a brain trained with the map's limit cannot go on the car, '' when it can or it has no such input. On a comma
+    whose daemon does not read the map such a brain gets "no map" on every step, without a word, and answers as it never
+    did in its training or in Models › Drive's replay."""
+    if not reads_the_map(entry) or daemon_feeds_the_map():
+        return ''
+    return (f'the brain in use, {entry["id"]}, reads the map’s limit, and the daemon of sunnypilot’s {CAR_BRANCH} does not '
+            'give it yet: push the daemon that reads liveMapDataSP first, or choose a brain trained without the map')
 
 
 def build_pending(root: Path) -> bool:
@@ -243,6 +272,8 @@ def _brain(root: Path, runs: RunsIndex, index: ModelIndex, on_car: bool = True) 
         raise ValueError(f'the brain {entry["id"]} has not finished its training')
     if on_car and takes_the_driver(entry):
         raise ValueError(_driver_refused(entry))
+    if on_car and _map_refused(entry):
+        raise ValueError(_map_refused(entry))
     run = runs._run_dir(entry['run'])
     weights = None if run is None else runs._file(run, BRAIN_WEIGHTS)
     if weights is None:
