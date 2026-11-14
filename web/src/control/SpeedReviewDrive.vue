@@ -57,7 +57,7 @@ import {clockOf, type ScanState, secondOf as frameSecondOf, type SyncSegment} fr
 import DriveReviewDrive from './DriveReviewDrive.vue';
 import {networksText, PROPOSER_LABELS} from './proposer-words';
 import Segmented from './Segmented.vue';
-import {aiRuns, isAiFrame, isOtherRoad, isSpeedSign, lightOf, type MarkRun, markRuns, nearestFrame, type OffRead, offReads, placeFrames, roadUserOf, type SignFrames, signRuns,
+import {aiRuns, isAiFrame, isOtherRoad, isSpeedSign, lastRead, lightOf, type MarkRun, markRuns, nearestFrame, type OffRead, offReads, placeFrames, roadUserOf, type SignFrames, signReads, signRuns,
   stepFrame} from './sign-frames';
 import {boxesAt, type Drawn, exactFrames, type VideoFrame, type VideoIndex} from './frame-boxes';
 import {type Block, blockAt, canEndWorks, clampKph, draggedEdge, heldAt, MIN_BLOCK_NS, ROAD_TYPE_LABELS, ROADWORKS, type RoadKind,
@@ -932,8 +932,15 @@ watch(drive, () => { drawn = null; });
 // -- the speed limit read on the signs against his speed ----------------------------------------------------------------
 // Where a speed limit read for our road (Sign review's boxes of the frame: confirmed, else the networks' proposals) is
 // far from his dashboard speed, a sign was read wrong or a sign of a side road was taken for ours (Cristian, 14 Nov
-// 2026): a red band on the Answer lane with the number read as a red line, the same band on the Signs lane, and the
-// arrows under the Signs lane's name go from one place to the next, to correct its signs in Signs. Nothing is saved here, and the answer stays his speed.
+// 2026): a red band on the Signs lane, and the arrows under its name go from one place to the next, to correct its
+// signs in Signs. Nothing on the Answer lane (he asked them off it the same day). Nothing is saved here, and the answer stays his speed.
+/** The speed sign last read for our road at the time shown (Sign review's boxes: confirmed, else the proposals): drawn
+ * as the sign itself in the picture's bottom right corner, a limit with its number or an end of limit (Cristian, 14 Nov
+ * 2026). It stays until the next sign read. */
+const reads = computed(() => signReads(placed.value));
+const signNow = computed(() => lastRead(reads.value, seconds.value + 0.05));
+const signNowTitle = computed(() => !signNow.value ? '' : (signNow.value.end ? 'End of limit' + (signNow.value.kph ? ' ' + signNow.value.kph : '')
+  : (signNow.value.zone ? 'Zone ' : 'Limit ') + signNow.value.kph) + ', read at ' + clockOf(signNow.value.at));
 const OFF_KPH = 30;
 /** Frames less than this many seconds apart are one stretch. */
 const OFF_JOIN_S = 2.5;
@@ -1026,9 +1033,23 @@ function worksIn(from: number, to: number) {
                 :font-size="pictureBoxes.height / 28" class="sr-sign-tag">{{ isOtherRoad(box) ? 'another · ' + shortName(box) : shortName(box) }}</text>
         </g>
       </svg>
+      <span v-if="showSigns && shown && !zoomed && signNow" class="sr-read" id="sr-sign-read" role="img" :aria-label="signNowTitle">
+        <svg viewBox="0 0 100 100">
+          <rect v-if="signNow.zone" x="3" y="3" width="94" height="94" rx="10" class="sr-read-plate"/>
+          <g :transform="signNow.zone ? 'translate(50 42) scale(.72) translate(-50 -50)' : undefined">
+            <circle cx="50" cy="50" r="42" :class="signNow.end ? 'sr-read-end' : 'sr-read-ring'"/>
+            <text v-if="signNow.kph" x="50" y="50" :class="['sr-read-number', {ended: signNow.end}]"
+                  :font-size="signNow.kph >= 100 ? 36 : 46">{{ signNow.kph }}</text>
+            <g v-if="signNow.end" class="sr-read-bars">
+              <line v-for="shift in [-10, -5, 0, 5, 10]" :key="shift" :x1="22 + shift" :y1="78 + shift" :x2="78 + shift" :y2="22 + shift"/>
+            </g>
+          </g>
+          <text v-if="signNow.zone" x="50" y="88" class="sr-read-zone">ZONE</text>
+        </svg>
+      </span>
     </template>
     <template #lane="{x, w, width, from, to, fits}">
-      <div class="dr-lane sr-lane" title="The answer the brain learns: the line is your dashboard speed; a box is a block of yours, its kph instead of your speed, grey left out, its ends dragged to move them; light grey band: openpilot or the cruise held the speed, not learnt; red band: a speed sign read for your road there is more than 30 km/h from your speed, the red line its number (the Signs lane has the arrows to them); bar: the marks picked, orange the roadworks, blue a kind of road; grey line: gone through for them">
+      <div class="dr-lane sr-lane" title="The answer the brain learns: the line is your dashboard speed; a box is a block of yours, its kph instead of your speed, grey left out, its ends dragged to move them; light grey band: openpilot or the cruise held the speed, not learnt; bar: the marks picked, orange the roadworks, blue a kind of road; grey line: gone through for them">
         <span class="dr-lane-name">Answer<small>km/h</small></span>
         <svg :width="width" :height="HEIGHT" :viewBox="`0 0 ${width} ${HEIGHT}`" aria-hidden="true">
           <g v-for="kph in ticks" :key="kph">
@@ -1038,13 +1059,6 @@ function worksIn(from: number, to: number) {
           <g v-for="run in heldIn(from, to)" :key="'held' + run.key">
             <rect :x="x(run.from)" y="1" :width="w(run.from, run.to)" :height="PLOT - 1" class="sr-held"/>
             <text v-if="fits(run.from, run.to, 'cruise')" :x="x(run.from) + w(run.from, run.to) / 2" :y="PLOT - 4" class="dr-run-text sr-held-text">cruise</text>
-          </g>
-          <g v-for="run in offIn(from, to, x)" :key="'off' + run.key" class="sr-off">
-            <rect :x="x(run.from)" y="1" :width="Math.max(4, w(run.from, run.to))" :height="PLOT - 1" class="sr-off-band"/>
-            <rect :x="x(run.from)" y="0" :width="Math.max(4, w(run.from, run.to))" height="3" class="sr-off-top"/>
-            <line :x1="x(run.from)" :x2="x(run.from) + Math.max(4, w(run.from, run.to))" :y1="y(run.read)" :y2="y(run.read)" class="sr-off-read"/>
-            <text v-if="run.text" :x="x(run.from) + 2" :y="y(run.read) - 3" class="sr-off-text">{{ run.text }}</text>
-            <title>{{ run.title }}</title>
           </g>
           <g v-for="run in blocksIn(from, to)" :key="run.key">
             <rect :x="x(run.from)" y="1" :width="w(run.from, run.to)" :height="PLOT - 1" rx="3"
@@ -1092,7 +1106,7 @@ function worksIn(from: number, to: number) {
       <div v-if="signs" class="dr-lane sr-sign-lane" title="The speed signs confirmed (their number, Z a zone, end an end of limit): a tap goes to the sign, its boxes on the picture. Red band: a speed sign read for your road there is more than 30 km/h from your speed. Violet on top: the frames the AI reviewed ([ and ] go from one to the next)">
         <span class="dr-lane-name">Signs<small>review</small>
           <span v-if="offRuns.length" class="sr-off-nav" id="sr-off-nav" @pointerdown.stop
-                :title="'Speed signs read for your road more than ' + OFF_KPH + ' km/h from your dashboard speed: ' + plural(offRuns.length, 'place', 'places') + ' on this drive, red here and on the Answer lane with the number read. A sign read wrong, or a sign of a side road taken for yours: correct it in Signs. The arrows go to the one before and the next'">
+                :title="'Speed signs read for your road more than ' + OFF_KPH + ' km/h from your dashboard speed: ' + plural(offRuns.length, 'place', 'places') + ' on this drive, red on this lane. A sign read wrong, or a sign of a side road taken for yours: correct it in Signs. The arrows go to the one before and the next'">
             <button type="button" id="sr-off-prev" :disabled="!offBefore" aria-label="The place before where a speed sign read is far from your speed" @click="goOff(offBefore)">‹</button>
             <b>{{ offRuns.length }} off</b>
             <button type="button" id="sr-off-next" :disabled="!offAfter" aria-label="The next place where a speed sign read is far from your speed" @click="goOff(offAfter)">›</button>

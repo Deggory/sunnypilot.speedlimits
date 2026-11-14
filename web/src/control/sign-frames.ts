@@ -79,6 +79,43 @@ export const isSpeedSign = (box: Detection): boolean => isSpeedFamily(box.family
  * the lane of our road's speed signs; the brain leaves it out too (brain_targets). */
 export const isOtherRoad = (box: Detection): boolean => box.applicability === 'other_road';
 
+/** A speed sign read for our road on a frame: a limit with its number, or an end of limit (with the number it ends,
+ * when it says one); zone: a zone's sign. */
+export interface SignRead {at: number; end: boolean; zone: boolean; kph: number | null}
+
+/** The speed sign each frame reads for our road (its confirmed boxes, else the proposals; never a sign of another
+ * road), in time order: a limit with its number before an end of limit, when a frame has both. */
+export function signReads(placed: readonly PlacedFrame[]): SignRead[] {
+  const out: SignRead[] = [];
+  for (const frame of placed) {
+    const ours = frame.boxes.filter((box) => isSpeedSign(box) && !isOtherRoad(box));
+    const limit = ours.find((box) => isSpeedFamily(box.family) && typeof box.value_kph === 'number' && box.value_kph > 0);
+    const end = limit ? undefined : ours.find((box) => box.family === 'cancellation' || box.family === 'zone_end');
+    const box = limit ?? end;
+    if (!box) continue;
+    out.push({at: frame.at, end: !limit, zone: box.family === 'zone' || box.family === 'zone_end',
+      kph: typeof box.value_kph === 'number' && box.value_kph > 0 ? box.value_kph : null});
+  }
+  return out;
+}
+
+/** The last sign read at or before a time, null before the first. */
+export function lastRead(reads: readonly SignRead[], s: number): SignRead | null {
+  let low = 0;
+  let high = reads.length - 1;
+  let found: SignRead | null = null;
+  while (low <= high) {
+    const middle = (low + high) >> 1;
+    if (reads[middle]!.at <= s) {
+      found = reads[middle]!;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+  return found;
+}
+
 /** A stretch of frames where a speed limit read for our road is far from the driver's speed: its first and last
  * frame, how many, and at its worst the number read, his speed and when. */
 export interface OffRead {from: number; to: number; frames: number; read: number; kph: number; at: number}

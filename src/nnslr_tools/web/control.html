@@ -1591,10 +1591,17 @@ button.rg-row{cursor:pointer}
 .dr-rate button{padding-left:10px;padding-right:10px}
 .sr-lane svg{overflow:hidden}
 .dr-lanes .sr-speed{stroke:var(--fg);stroke-width:2}
-.dr-lanes .sr-off-read{stroke:var(--bad);stroke-width:2}
-.dr-lanes .sr-off-text{font-size:10px;font-weight:700;fill:var(--bad)}
+.sr-read{position:absolute;right:12px;bottom:72px;width:72px;height:72px;pointer-events:none;filter:drop-shadow(0 2px 6px rgba(0,0,0,.45))}
+.sr-read svg{width:100%;height:100%;display:block}
+.sr-read-plate{fill:#fff;stroke:#1d1d1f;stroke-width:2}
+.sr-read-ring{fill:#fff;stroke:#d0021b;stroke-width:13}
+.sr-read-end{fill:#fff;stroke:#1d1d1f;stroke-width:3}
+.sr-read-number{fill:#1d1d1f;font-weight:800;text-anchor:middle;dominant-baseline:central;font-family:system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif}
+.sr-read-number.ended{fill:#8e8e93}
+.sr-read-bars line{stroke:#1d1d1f;stroke-width:2.6}
+.sr-read-zone{fill:#1d1d1f;font-size:13px;font-weight:800;text-anchor:middle;letter-spacing:.06em;font-family:system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif}
+@media (max-width:480px){.sr-read{width:52px;height:52px;right:8px;bottom:58px}}
 .dr-lanes rect.sr-off-band{fill:var(--bad);fill-opacity:.26;stroke:none}
-.dr-lanes rect.sr-off-top{fill:var(--bad);stroke:none}
 .sr-off-nav{display:inline-flex;align-items:center;gap:2px;margin-top:5px;font-size:10.5px;color:var(--bad);white-space:nowrap;cursor:default}
 .sr-off-nav b{font-weight:700}
 .sr-off-nav button{width:16px;height:16px;padding:0;border:1px solid currentColor;border-radius:5px;background:none;color:inherit;font:inherit;font-weight:700;line-height:1;cursor:pointer}
