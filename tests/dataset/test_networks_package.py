@@ -102,6 +102,23 @@ def test_a_package_with_a_network_that_learnt_mapillarys_pictures_has_their_lice
     assert '## Licence\n\nMIT. ' in plain and 'Mapillary' not in plain and 'drives in Switzerland and Germany, recorded' in plain
 
 
+def test_the_model_card_says_what_each_number_of_the_classifier_means(tmp_path):
+    """The classifier gives a number a class: without their names nobody else could read it."""
+    manifest = json.loads((_package(tmp_path / 'p') / 'networks.json').read_text())
+    assert '## What the classifier says' not in model_card(manifest)  # a manifest of before, without the classes
+    manifest['classes'] = ['cancellation', 'maximum_speed:100', 'maximum_speed:30', 'maximum_speed:unknown',
+                           'maximum_speed_hours:30', 'maximum_speed_hours:30:22-6', 'not_a_sign', 'other_sign',
+                           'other_sign:give_way', 'other_sign:roundabout']
+    card = model_card(manifest)
+    assert 'one score for each of its 10 classes' in card and '`output.classes` of `classifier.onnx.contract.json`' in card
+    assert '| `maximum_speed` | a speed limit, with the number written on the sign' in card
+    assert '| `30`, `100`, `unknown` |' in card and '| `30`, `30:22-6` |' in card
+    assert '| `other_sign` | another traffic sign or a traffic light, with its kind; alone, one of no kind in the list | ' \
+           '`give_way`, `roundabout` |' in card
+    assert '| `cancellation` | the end of a speed limit |  |' in card
+    assert card.index('## What the classifier says') < card.index('## Measured')
+
+
 def test_the_countries_of_a_package_are_those_its_drives_were_driven_in(tmp_path):
     for drive, codes in (('a', ['CH', 'CH', 'DE']), ('b', ['CH', None]), ('c', [])):
         folder = tmp_path / 'derived' / 'gps' / drive

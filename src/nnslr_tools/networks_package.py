@@ -204,6 +204,48 @@ def _where(countries: Any) -> str:
     return ' in ' + _listed([COUNTRY_NAMES.get(code, code) for code in codes])
 
 
+# What each family of the classifier's classes is, for the model card: a class is "<family>" or "<family>:<what the sign
+# says>" (sign_types.class_parts).
+FAMILY_WORDS = {
+    'maximum_speed': 'a speed limit, with the number written on the sign (km/h, or mph where the country uses them)',
+    'maximum_speed_hours': 'a speed limit with a plate of hours under it, and the hours when they are read (`30:22-6`)',
+    'maximum_speed_wet': 'a speed limit with a plate for wet roads under it',
+    'variable_display': 'a speed limit on a variable display',
+    'zone': 'the sign of a zone with a speed limit',
+    'road_marking': 'a speed limit painted on the road',
+    'cancellation': 'the end of a speed limit',
+    'other_sign': 'another traffic sign or a traffic light, with its kind; alone, one of no kind in the list',
+    'unreadable': 'a sign too far or too blurred to read',
+    'not_a_sign': 'no sign in the box',
+}
+
+
+def _classes_section(classes: Any) -> list[str]:
+    """The classifier's classes by family, for the model card: what a number of its output means. Nothing without them
+    (a manifest of before 15 Nov 2026)."""
+    if not isinstance(classes, list) or not all(isinstance(name, str) for name in classes) or not classes:
+        return []
+    families: dict[str, list[str]] = {}
+    for name in classes:
+        family, _, value = name.partition(':')
+        families.setdefault(family, []).append(value)
+
+    def order(value: str):
+        number = value.partition(':')[0]
+        return (0, int(number), value) if number.isdigit() else (1, 0, value)
+
+    lines = ['', '## What the classifier says', '',
+             f'`logits` has one score for each of its {len(classes)} classes; the highest is the answer, and its name is at '
+             'the same place in `output.classes` of `classifier.onnx.contract.json`. A name is a family, then what the '
+             'sign says: `maximum_speed:50` is a limit of 50. `unknown` is a sign of that family whose number cannot be '
+             'read yet, usually a far one.', '',
+             '| Family | What it is | What it can say |', '|---|---|---|']
+    for family, values in families.items():
+        said = ', '.join(f'`{value}`' for value in sorted((value for value in values if value), key=order))
+        lines.append(f'| `{family}` | {FAMILY_WORDS.get(family, "")} | {said} |')
+    return lines
+
+
 def model_card(manifest: dict) -> str:
     """README.md of the package."""
     networks, numbers, data = manifest['networks'], manifest.get('measured', {}), manifest.get('training_data', {})
@@ -241,8 +283,9 @@ def model_card(manifest: dict) -> str:
     ]
     for number, step in enumerate(manifest['pipeline']['steps'], 1):
         lines.append(f'{number}. **{step["network"].capitalize()}**: {step["input"]}. {step["then"]}.')
-    lines += ['', 'Each `*.contract.json` gives the exact inputs, outputs and classes of its network.', '',
-              '## Measured', '', 'On test drives kept apart by place (never trained on):', '']
+    lines += ['', 'Each `*.contract.json` gives the exact inputs, outputs and classes of its network.']
+    lines += _classes_section(manifest.get('classes'))
+    lines += ['', '## Measured', '', 'On test drives kept apart by place (never trained on):', '']
     if cutter:
         found = _share(cutter.get('found'), cutter.get('signs'))
         speed = cutter.get('ms_per_frame')
@@ -477,6 +520,8 @@ def prepare_package(root: Path, name: str, *, log: Callable[[str], None] = print
             'created': datetime.now(timezone.utc).isoformat(timespec='seconds').replace('+00:00', 'Z'),
             'license': package_license(networks), 'experimental': True,
             'networks': networks,
+            # The classifier's classes in the order of its output, for the model card (its contract has them too).
+            'classes': (contracts['classifier'].get('output') or {}).get('classes'),
             'pipeline': pipeline(contracts['decider'], CAR_MIN_SCORE if signnet else CUTTER_SCORE,
                                  None if signnet else MAX_SIGN_SIDE, classifier_size, contracts['cutter']),
             'measured': measured(entries),
