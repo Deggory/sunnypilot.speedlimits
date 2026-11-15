@@ -443,6 +443,26 @@ def test_a_brain_that_takes_the_drivers_inputs_never_goes_on_the_car(tmp_path):
     assert car_release.choose(data, 's1')['brain']['id'] == 'brain:b2/brain'
 
 
+def test_a_brain_whose_signs_an_applicability_network_filtered_is_refused_before_publish_starts(tmp_path):
+    """#90: the car takes every sign since 15 Nov 2026; a brain of before that learnt from the signs an applicability
+    network filtered. The panel says so before Publish starts (brain_refused), not only its job."""
+    data = tmp_path / 'data'
+    servers_runs(data)
+    model_id = brain_run(data, 'b1', result={
+        'groups': ['signs', 'lead'], 'seed': 1, 'works': True, 'history': [{}], 'test': {}, 'validation': {},
+        'sign_networks': {'cutter': 'cutter:a/signnet', 'classifier': 'classifier:b/classifier',
+                          'decider': 'decider:d1/experiment-b/full'}})
+    use_brain(data, model_id)
+    index = ModelIndex(RunsIndex(data))
+    assert car_release.brain_refused(index) == (
+        'the brain in use, brain:b1/brain, learnt from signs the applicability network decider:d1/experiment-b/full '
+        'filtered, and the car takes every sign since 15 Nov 2026: train a brain again, it reads every sign')
+    with pytest.raises(ValueError, match='the applicability network decider:d1/experiment-b/full filtered'):
+        car_release.choose(data, 's1')
+    use_brain(data, brain_run(data, 'b2'))
+    assert car_release.brain_refused(index) == ''
+
+
 def test_the_brain_part_is_the_brains_alone():
     assert role_of('brain:b1/brain') == 'brain'
     assert role_of('cutter:b1/brain') is None

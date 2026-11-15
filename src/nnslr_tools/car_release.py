@@ -121,7 +121,19 @@ def brain_refused(index: ModelIndex) -> str:
     entry, _ = index.in_use('brain')
     if entry is None:
         return ''
-    return _driver_refused(entry) if takes_the_driver(entry) else _map_refused(entry) or _boxes_refused(entry)
+    return (_driver_refused(entry) if takes_the_driver(entry) else
+            _filtered_refused(entry) or _map_refused(entry) or _boxes_refused(entry))
+
+
+def _filtered_refused(entry: dict) -> str:
+    """Why a brain whose signs an applicability network filtered (10 to 15 Nov 2026) cannot go on the car, '' when it
+    can: the car takes every sign since #90, so it would get signs it never learnt from. Said before Publish starts, not
+    only by its job (_check_sign_networks)."""
+    decider = (entry.get('sign_networks') or {}).get('decider')
+    if not decider:
+        return ''
+    return (f'the brain in use, {entry["id"]}, learnt from signs the applicability network {decider} filtered, and the '
+            'car takes every sign since 15 Nov 2026: train a brain again, it reads every sign')
 
 
 def _driver_refused(entry: dict) -> str:
@@ -303,6 +315,8 @@ def _brain(root: Path, runs: RunsIndex, index: ModelIndex, on_car: bool = True) 
         raise ValueError(f'the brain {entry["id"]} has not finished its training')
     if on_car and takes_the_driver(entry):
         raise ValueError(_driver_refused(entry))
+    if on_car and _filtered_refused(entry):
+        raise ValueError(_filtered_refused(entry))
     if on_car and _map_refused(entry):
         raise ValueError(_map_refused(entry))
     if on_car and _boxes_refused(entry):
