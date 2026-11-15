@@ -292,38 +292,23 @@ def fake_export_with_decider(content: bytes, onnx: bytes):
     return exporter
 
 
-def test_the_applicability_network_in_use_goes_on_the_car_and_goes_away_with_it(tmp_path):
+def test_the_applicability_network_in_use_never_goes_on_the_car_and_one_published_goes_away(tmp_path):
+    """#90: the car takes every sign read, the brain learns whose road each is of: Publish sends no applicability
+    network, even one in use, and takes away the one a publication of before left in the models repository."""
     data = tmp_path / 'data'
     servers_runs(data)
     _, clone = models_clone(tmp_path)
-    assert car_release.choose(data, 's1')['decider'] is None
     model_id = use_decider(data)
-    chosen = car_release.choose(data, 's1')
+    assert car_release.choose(data, 's1')['decider'] is None
+    # A publication of before, with its applicability network
+    chosen = car_release.choose(data, 's1', decider=model_id)
     assert chosen['decider'] == {'id': model_id, 'run': 'd1',
                                  'weights': (data / 'runs/d1/experiment-b/full/full-best.pt').resolve()}
-    lines = []
-    first = car_release.send_to_car(data, 's1', models=clone, today=TODAY, say=lines.append,
-                                    exporter=fake_export_with_decider(b'v1', b'decider v1'))
-    manifest = json.loads((clone / 'speed_limits.json').read_text())
-    assert first['changed'] and manifest == car_release.manifest_of('2026-10-28', car_settings.DEFAULTS, decider=True)
-    assert manifest['decider'] == {'file': 'decider.onnx', 'contract': 'decider.onnx.contract.json'}
-    assert 'country_policy' not in manifest['settings']  # the brain's only
-    assert (clone / 'decider.onnx').read_bytes() == b'decider v1'
-    assert json.loads((clone / 'decider.onnx.contract.json').read_text())['checkpoint'] == model_id
-    assert git(clone, 'log', '-1', '--format=%s') == (
-        'speed limits 2026-10-28: SignNet s1, classifier r1, applicability d1/experiment-b/full')
-    assert lines[0] == ('== 1/3 Export the SignNet of s1 and the classifier classifier:r1/reader, the applicability '
-                        f'network {model_id}')
-    assert json.loads((data / 'models/on-car.json').read_text())['decider']['id'] == model_id
-    assert lines[-1].startswith(f'on the car: cutter:s1/signnet and classifier:r1/reader, {model_id}, commit ')
-    again = car_release.send_to_car(data, 's1', models=clone, today=TODAY,
-                                    exporter=fake_export_with_decider(b'v1', b'decider v1'))
-    assert not again['changed']
-
-    path = data / 'models/active.json'
-    value = json.loads(path.read_text())
-    value.pop('decider')
-    path.write_text(json.dumps(value))
+    folder = tmp_path / 'before'
+    folder.mkdir()
+    files = fake_export_with_decider(b'v1', b'decider v1')(chosen, folder)
+    car_release.publish(clone, chosen, folder, files, today=TODAY)
+    assert (clone / 'decider.onnx').exists()
     third = car_release.send_to_car(data, 's1', models=clone, today=TODAY, exporter=fake_export(b'v1'))
     manifest = json.loads((clone / 'speed_limits.json').read_text())
     assert third['changed'] and 'decider' not in manifest and not (clone / 'decider.onnx').exists()
@@ -331,13 +316,13 @@ def test_the_applicability_network_in_use_goes_on_the_car_and_goes_away_with_it(
     assert 'decider' not in json.loads((data / 'models/on-car.json').read_text())
 
 
-def test_an_applicability_network_goes_only_finished_with_its_weights(tmp_path):
+def test_an_applicability_network_given_goes_only_finished_with_its_weights(tmp_path):
     data = tmp_path / 'data'
     servers_runs(data)
-    use_decider(data)
+    model_id = use_decider(data)
     (data / 'runs/d1/experiment-b/full/full-best.pt').unlink()
-    with pytest.raises(ValueError, match='the decider in use is no longer on this server'):
-        car_release.choose(data, 's1')
+    with pytest.raises(ValueError, match='is not on this server'):
+        car_release.choose(data, 's1', decider=model_id)
 
 
 def test_a_brain_goes_only_finished_and_its_dry_run_is_not_a_version(tmp_path):
@@ -393,28 +378,17 @@ def test_a_brain_given_every_sign_s_box_goes_on_the_car_only_when_the_pushed_bra
     data = tmp_path / 'data'
     servers_runs(data)
     told = {'true_positive': 3, 'false_positive': 1, 'false_negative': 1, 'precision': .75, 'recall': .75}
-    whose = {'ours': 20, 'another': 4, 'head': told, 'network': {**told, 'true_positive': 2, 'recall': .5},
-             'agrees': .875, 'where_network_wrong': {'columns': 3, 'head_right': 2},
-             'where_network_right': {'columns': 21, 'head_right': 20}}
-    bare = {'speed': {'frames': 100, 'right': .25, 'mean_error_kph': 9.5, 'more': 1},
-            'applicability': {'ours': 20, 'another': 4, 'head': {**told, 'true_positive': 1, 'recall': .25}, 'network': told}}
+    whose = {'ours': 20, 'another': 4, 'head': told}
     model_id = brain_run(data, 'b1', result={'groups': ['signs', 'sign_boxes'], 'seed': 0, 'history': [{}], 'validation': {},
                                              'applicability': True, 'other_road_boxes': True,
-                                             'test': {'applicability': whose}, 'test_no_network': bare})
+                                             'test': {'applicability': whose}})
     use_brain(data, model_id)
     index = ModelIndex(RunsIndex(data))
     entry = index.in_use('brain')[0]
-    # Models shows the head beside the network on the same reviewed signs, and says what the brain learns
+    # Models shows the head measured against the reviewed signs only (#90), and says what the brain learns
     found = {'precision': .75, 'recall': .75, 'found': 3, 'wrong': 1}
-    assert entry['applicability'] == {'learned': True, 'other_road_boxes': True, 'validation': None, 'test': {
-        'ours': 20, 'another': 4, 'head': found, 'network': {**found, 'recall': .5, 'found': 2},
-        # What the head adds over the network, whose verdict it can read in its inputs
-        'agrees': .875, 'network_wrong': {'columns': 3, 'head_right': 2}},
-        # With every sign taken, as with no applicability network: the speed, and the head on its own
-        'no_network': {'validation': None, 'test': {
-            'speed': {'frames': 100, 'right': .25, 'mean_error_kph': 9.5},
-            'applicability': {'ours': 20, 'another': 4, 'head': {**found, 'recall': .25, 'found': 1}, 'network': found,
-                              'agrees': None, 'network_wrong': None}}}}
+    assert entry['applicability'] == {'learned': True, 'other_road_boxes': True, 'validation': None,
+                                      'test': {'ours': 20, 'another': 4, 'head': found}}
     assert entry['detail'] == 'says the speed to hold · learns whose road a sign is of'
     clone = tmp_path / 'sunnypilot'
     monkeypatch.setenv(car_release.SUNNYPILOT_CLONE_ENV, str(clone))
@@ -443,8 +417,7 @@ def test_a_brain_given_every_sign_s_box_goes_on_the_car_only_when_the_pushed_bra
     monkeypatch.setenv(car_release.SUNNYPILOT_CLONE_ENV, str(tmp_path / 'none'))
     assert car_release.brain_refused(index) == ''
     before = index.in_use('brain')[0]['applicability']
-    assert before == {'learned': None, 'other_road_boxes': False, 'validation': None, 'test': None,
-                      'no_network': {'validation': None, 'test': None}}
+    assert before == {'learned': None, 'other_road_boxes': False, 'validation': None, 'test': None}
 
 
 def test_a_brain_that_takes_the_drivers_inputs_never_goes_on_the_car(tmp_path):
@@ -1011,13 +984,16 @@ def test_publish_gives_the_export_a_card_and_does_not_hide_them():
 
 
 def test_a_brain_goes_on_the_car_only_with_the_networks_that_read_its_signs():
-    """#31: a brain learnt from the signs read by its three networks; a release with another one is refused, a brain from
-    before 10 Nov 2026 (none recorded) is not checked."""
+    """#31: a brain learnt from the signs read by its networks; a release with another one is refused, a brain from
+    before 10 Nov 2026 (none recorded) is not checked. #90: one whose signs an applicability network filtered is refused,
+    the car takes every sign."""
     from nnslr_tools import car_release
-    found = {'finder': {'id': 'cutter:a/signnet'}, 'classifier': {'id': 'classifier:b/classifier'},
-             'decider': {'id': 'decider:c/crop_geom'},
+    found = {'finder': {'id': 'cutter:a/signnet'}, 'classifier': {'id': 'classifier:b/classifier'}, 'decider': None,
              'brain': {'id': 'brain:d', 'sign_networks': {'cutter': 'cutter:a/signnet', 'classifier': 'classifier:b/classifier',
                                                           'decider': 'decider:c/crop_geom'}}}
+    with pytest.raises(ValueError, match='train a brain again, it reads every sign'):
+        car_release._check_sign_networks(found)
+    del found['brain']['sign_networks']['decider']
     car_release._check_sign_networks(found)
     found['classifier'] = {'id': 'classifier:e/classifier'}
     with pytest.raises(ValueError, match='classifier:b/classifier; this release reads them with classifier:e/classifier'):

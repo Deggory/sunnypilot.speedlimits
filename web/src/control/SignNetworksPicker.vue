@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // The networks that read the brain's signs (sign-networks.ts) in one row, in Train › Brain and in its step of
-// Train › Pipeline: the cutter, the classifier and the applicability network, those in use first; in a pipeline, none
+// Train › Pipeline: the cutter and the classifier (no applicability network since #90), those in use first; in a pipeline, none
 // for a part it trains before the brain (trained, #71).
 import PickerSheet from '../components/PickerSheet.vue';
 import {SIGN_PARTS, type SignNetworksChoice, type SignPart} from './sign-networks';

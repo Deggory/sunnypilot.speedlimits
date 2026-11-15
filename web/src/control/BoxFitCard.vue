@@ -74,71 +74,49 @@ const refinerFacts = computed(() => {
 });
 const measureText = (measure: BoxFitMeasure): string => 'rough ' + iou(measure.rough) + ' · rankers ' + iou(measure.rankers)
   + ' · refiner ' + iou(measure.refiner);
-const beats = (measure: BoxFitMeasure): boolean => typeof measure.refiner === 'number' && typeof measure.rankers === 'number'
-  && measure.refiner > measure.rankers;
-const rows = computed(() => {
-  const item = refiner.value;
-  if (!item) return [];
-  const out: {key: string; name: string; measure: BoxFitMeasure}[] = [];
-  if (item.all) out.push({key: 'all', name: 'All boxes', measure: item.all});
-  if (item.small) out.push({key: 'small', name: 'Small signs', measure: item.small});
-  // A box Fit box placed and the reviewer accepted favours the refiner in use: these were placed otherwise.
-  if (item.fair) out.push({key: 'fair', name: 'Not placed by Fit box', measure: item.fair});
-  return out;
+/** What key C does, in the title's tooltip. */
+const what = 'Key C of the review page fits a rough box to its sign on this server: two rankers (colour trees and edge '
+  + 'networks), then the box refiner where it beat them. They learn from the boxes people drew; the review page uses new '
+  + 'models after the site restarts. Trained on a V100.';
+/** One line: the mean IoU with the person's box on drives left out, all three on the same boxes, and whether the refiner
+ * was written. */
+const summary = computed(() => {
+  const all = refiner.value?.all;
+  if (all) return 'IoU ' + measureText(all) + (refiner.value?.written ? ' · refiner written' : ' · refiner kept');
+  return rankers.value ? 'IoU rough ' + iou(rankers.value.rough) + ' · rankers ' + iou(rankers.value.fit) : '';
 });
-const writtenText = computed(() => {
+/** The details of the last training, in the tooltip. */
+const trainedTitle = computed(() => {
+  const lines = [rankers.value ? 'Rankers: ' + rankersFacts.value : '', refiner.value ? 'Refiner: ' + refinerFacts.value : ''];
   const item = refiner.value;
-  if (!item) return '';
-  return item.written ? 'refiner.onnx written: Fit box uses it after the site restarts.'
-    : 'Not better than the rankers in all and on the small signs: refiner.onnx was left as it was.';
+  if (item?.small) lines.push('Small signs: ' + measureText(item.small));
+  // A box Fit box placed and the reviewer accepted favours the refiner in use: these were placed otherwise.
+  if (item?.fair) lines.push('Not placed by Fit box: ' + measureText(item.fair));
+  return lines.filter(Boolean).join('\n');
 });
 </script>
 
 <template>
   <section v-if="shown" class="card import-card labeler-card" id="box-fit" aria-labelledby="bf-title">
-    <h2 id="bf-title" class="rl-title">Fit box</h2>
-    <p class="rl-what">Key C of the review page fits a rough box to its sign on this server: two rankers (colour trees and
-      edge networks), then the box refiner, a small network, where it beat them. They learn from the boxes people drew. The
-      review page uses new models after the site restarts.</p>
+    <h2 id="bf-title" class="rl-title" :title="what">Fit box</h2>
     <JobProgress v-if="bigJob" :job="bigJob" @details="emit('details', $event)" @stop="emit('stop', $event)"/>
     <TerminalActivity v-for="activity in activities" :key="activity.pid + activity.label" :activity="activity" :preparation="null"/>
     <div v-if="idle" class="import-row">
       <span class="import-icon" :class="{fresh: !rankers}" aria-hidden="true"><Icon name="train"/></span>
-      <div class="import-what">
-        <strong>{{ rankers ? 'Last trained on ' + (rankers.boxes !== null ? plural(rankers.boxes, 'box', 'boxes') : 'the boxes')
-          : 'Not trained here yet' }}</strong>
-        <span>On a V100: the candidates cut on the CPU (about 2 minutes), then the rankers{{ withoutRefiner ? '' : ' and the refiner' }} trained on the GPU.</span>
+      <div class="import-what" :title="trainedTitle">
+        <strong>{{ rankers ? (rankers.boxes !== null ? plural(rankers.boxes, 'box', 'boxes') : 'Trained') : 'Not trained yet' }}</strong>
+        <span v-if="summary" id="box-fit-summaries">{{ summary }}</span>
       </div>
       <div class="rl-buttons">
-        <button type="button" class="btn" id="box-fit-dry" :disabled="!state?.allowed" @click="start(true)">Dry run</button>
+        <button type="button" class="btn" id="box-fit-dry" :disabled="!state?.allowed" title="Only counts the boxes"
+                @click="start(true)">Dry run</button>
         <button type="button" class="btn primary" id="box-fit-train" :disabled="!state?.allowed"
                 @click="start(false)">Train</button>
       </div>
     </div>
     <p v-if="idle && state && !state.allowed" class="import-why">{{ sentence(state.reason) }}</p>
-    <label v-if="idle" class="rl-marks"><input type="checkbox" id="box-fit-no-refiner" v-model="withoutRefiner"> Without the
-      refiner (the rankers only)</label>
+    <label v-if="idle" class="rl-marks"><input type="checkbox" id="box-fit-no-refiner" v-model="withoutRefiner"> Rankers only</label>
     <p v-if="job && !bigJob" class="import-last">Last run {{ startedWhen(job) }} · {{ job.state === 'interrupted' ? 'stopped' : JOB_STATE[job.state][0] }} ·
       <button type="button" class="link-button" @click="emit('details', job)">Details</button></p>
-
-    <ul v-if="rankers || refiner" class="rl-runs" id="box-fit-summaries">
-      <li v-if="rankers" class="rl-run" data-part="rankers">
-        <div class="rl-run-head"><b>Rankers</b><small>{{ rankersFacts }}</small></div>
-        <p class="rl-types">Mean IoU with the person's box on drives left out: rough box {{ iou(rankers.rough) }}, after the
-          rankers {{ iou(rankers.fit) }}.</p>
-      </li>
-      <li v-if="refiner" class="rl-run" data-part="refiner">
-        <div class="rl-run-head"><b>Refiner</b><small>{{ refinerFacts }}</small><small v-if="refiner.written"
-          class="rl-current">written</small></div>
-        <ul v-if="rows.length" class="rl-heads">
-          <li v-for="row in rows" :key="row.key" class="rl-head" :class="{writes: beats(row.measure)}">
-            <span class="rl-head-name" style="text-transform: none">{{ row.name }}</span>
-            <span class="rl-head-num">{{ measureText(row.measure) }}</span>
-            <span class="rl-head-writes">{{ beats(row.measure) ? 'refiner better' : 'rankers better' }}</span>
-          </li>
-        </ul>
-        <p class="rl-types">{{ writtenText }}</p>
-      </li>
-    </ul>
   </section>
 </template>

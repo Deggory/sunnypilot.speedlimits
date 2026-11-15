@@ -35,8 +35,8 @@ const STEPS: {action: PipelineAction; label: string; text: string}[] = [
   {action: 'dataset', label: 'Import the sign reviews', text: 'The Sign review frames not imported yet join the dataset, and its split is made again.'},
   {action: 'train_cutter', label: 'Cutter', text: 'A new SignNet. About 80 minutes.'},
   {action: 'train_classifier', label: 'Classifier', text: 'Learns the signs and the cutter’s mistakes. A few hours.'},
-  {action: 'train_decider', label: 'Applicability', text: 'Three versions, compared. About 15 minutes.'},
-  {action: 'train_brain', label: 'Brain', text: 'One seed, or three, from your speed on every drive with sunnypilot off and its logs read, with the signs read by the networks trained before it or chosen below, those of another road never the number in force. About 5 minutes (15 for three), and about 40 s for each drive they have not read yet.'},
+  {action: 'train_decider', label: 'Applicability', text: 'Three versions, compared, for the road Sign review proposes (ours or another); never on the car or in the brain. About 15 minutes.'},
+  {action: 'train_brain', label: 'Brain', text: 'One seed, or three, from your speed on every drive with sunnypilot off and its logs read, with every sign read by the networks trained before it or chosen below. About 5 minutes (15 for three), and about 40 s for each drive they have not read yet.'},
 ];
 const LABEL = Object.fromEntries(STEPS.map((step) => [step.action, step.label])) as Record<PipelineAction, string>;
 
@@ -49,7 +49,7 @@ function toggle(action: PipelineAction, value: boolean): void {
 const chosen = computed(() => STEPS.filter((step) => on(step.action)));
 const withCutter = computed(() => on('train_cutter'));
 /** The networks that read the brain's signs which the pipeline trains before it: those, not a choice (#71). */
-const TRAINS: Record<SignPart, PipelineAction> = {cutter: 'train_cutter', classifier: 'train_classifier', decider: 'train_decider'};
+const TRAINS: Record<SignPart, PipelineAction> = {cutter: 'train_cutter', classifier: 'train_classifier'};
 const trained = computed((): SignPart[] => SIGN_PARTS.map(({part}) => part).filter((part) => on(TRAINS[part])));
 
 function optionsOf(action: PipelineAction): ActionOptions {

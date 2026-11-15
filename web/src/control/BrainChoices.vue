@@ -15,7 +15,7 @@ const SWITCHES: {key: Switch; label: string; title: string}[] = [
   {key: 'road', label: 'Road conditions', title: 'The brain also learns the road conditions you mark in Speed review: narrow, country, gravel, potholes…'},
   {key: 'types', label: 'Road type (map)', title: 'The brain also learns the road type of the map (motorway, rural, town…), corrected in Speed review; only the seconds that have one count'},
   {key: 'users', label: 'Road users', title: 'The brain also learns where the persons, the two-wheelers and the vehicles that cross our path are (the crossings you confirm), a head only the training has; read first with a detector on the GPU'},
-  {key: 'applicability', label: 'Applicability', title: 'The brain also learns whose road a speed sign is of, ours or another, from the boxes you reviewed in Sign review: a head only the training has for now. It is then given the box of every speed sign read, also of those the applicability network gives to another road. Off: only the signs that network takes, as the brains before'},
+  {key: 'applicability', label: 'Applicability', title: 'The brain also learns whose road a speed sign is of, ours or another, from the boxes you reviewed in Sign review: a head only the training has for now, measured only against your reviews. Off: no such head'},
   // An input, not a head: off unless turned on (#85). The one brain that reads the map.
   {key: 'map', label: 'Map’s limit', title: 'The limit the comma’s map had goes into the brain as one more input (80 % of your drives’ time has one). Off: the brain never reads the map, as until now. On the car such a brain reads the map’s limit too'},
 ];

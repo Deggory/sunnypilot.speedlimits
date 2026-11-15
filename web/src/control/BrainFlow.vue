@@ -36,10 +36,8 @@ const inputs = computed<Block[]>(() => [
   {id: 'signs', title: 'Signs read, plates, sign boxes, traffic lights', sub: 'what our sign networks read, mistakes included', kind: 'input',
     facts: facts(SIGN_GROUPS.filter((name) => carGroups.includes(name))),
     note: 'As the car reads them, never the signs you confirmed in Sign review. A drive not read yet has them unknown. '
-      + 'No metres to a sign: the brain gets the box of each sign, where it is in the picture and how big.'
-      + (learns.value.applicability ? ' With Applicability on, the box of every speed sign read, also of those the '
-        + 'applicability network gives to another road; the number in force still comes from the signs that network takes.'
-        : ' Only the signs the applicability network takes: one it gives to another road is left out.')},
+      + 'No metres to a sign: the brain gets the box of each sign, where it is in the picture and how big. Every sign '
+      + 'read, of another road too: no network leaves any out, the brain itself sees where we turn.'},
   {id: 'place', title: 'Hour, country, car ahead', sub: 'from the car', kind: 'input', facts: facts(placeGroups),
     note: 'Never your pedals nor the car’s speed: the answer is your own speed, and a brain that had them followed it.'},
   // Only with the switch on (#85): the one brain that reads the map.

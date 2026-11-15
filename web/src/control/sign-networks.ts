@@ -1,36 +1,35 @@
 // The networks that read the signs the next brain learns from (#31), kept once for Train › Brain and for its step of
-// Train › Pipeline (the same choice in both): the cutter (a SignNet the comma runs), the classifier and the applicability
-// network, which leaves out the signs of another road as the car does. Those in use until others are chosen; the same
-// three read the brain's inputs (as the car, nnslr_tools.road_type_signs), and its result records them (Models).
+// Train › Pipeline (the same choice in both): the cutter (a SignNet the comma runs) and the classifier. No applicability
+// network since 15 Nov 2026 (#90): every sign read goes to the brain, which learns whose road it is of from the reviews.
+// Those in use until others are chosen; the same two read the brain's inputs (as the car, nnslr_tools.road_type_signs),
+// and its result records them (Models).
 import {computed, reactive, ref} from 'vue';
 import {isoWhen} from '../common/format';
 import type {ActionOptions, ModelRole, ModelVersion} from '../common/panel-types';
 import type {PickerOption} from '../components/PickerSheet.vue';
 
-export type SignPart = 'cutter' | 'classifier' | 'decider';
-export const SIGN_PARTS: {part: SignPart; label: string; option: 'sign_cutter' | 'sign_classifier' | 'sign_decider'}[] = [
+export type SignPart = 'cutter' | 'classifier';
+export const SIGN_PARTS: {part: SignPart; label: string; option: 'sign_cutter' | 'sign_classifier'}[] = [
   {part: 'cutter', label: 'Cutter', option: 'sign_cutter'},
   {part: 'classifier', label: 'Classifier', option: 'sign_classifier'},
-  {part: 'decider', label: 'Applicability', option: 'sign_decider'},
 ];
-const WORD: Record<SignPart, string> = {cutter: 'cutter', classifier: 'classifier', decider: 'applicability network'};
+const WORD: Record<SignPart, string> = {cutter: 'cutter', classifier: 'classifier'};
 /** "a", "a and b", "a, b and c". */
 const listed = (items: string[]): string => items.length > 1 ? items.slice(0, -1).join(', ') + ' and ' + items.at(-1) : items[0] ?? '';
 
 export function useSignNetworks(versionsOf: (role: ModelRole) => readonly ModelVersion[] | undefined) {
   /** A finished version that can read the signs as the comma does: a SignNet of its band and grid, a classifier with
-   * “not a sign” (not an old Reader), a whole applicability training (not a smoke run). */
+   * “not a sign” (not an old Reader). */
   const usable = (version: ModelVersion): boolean => version.finished
     && (version.role !== 'cutter' || (version.kind === 'signnet' && version.fits_the_car === true))
-    && (version.role !== 'classifier' || version.part === 'classifier')
-    && (version.role !== 'decider' || !version.smoke_limit);
+    && (version.role !== 'classifier' || version.part === 'classifier');
   /** Each part's versions, the one in use first. */
   const versions = (part: SignPart): ModelVersion[] => [...versionsOf(part) ?? []].filter(usable)
     .sort((a, b) => Number(b.in_use) - Number(a.in_use));
-  /** "SignNet 896 × 288 29 Oct 14:02", "Applicability, Crop + geometry 10 Nov 01:11". */
-  const titleOf = (version: ModelVersion): string => (version.role === 'decider' ? 'Applicability, ' + version.label
-    : version.label) + ' ' + (version.trained_at ? isoWhen(version.trained_at) : version.run);
-  /** On the button, under its label ("Signs: Applicability"): "Crop + geometry 10 Nov 01:11". */
+  /** "SignNet 896 × 288 29 Oct 14:02". */
+  const titleOf = (version: ModelVersion): string => version.label + ' '
+    + (version.trained_at ? isoWhen(version.trained_at) : version.run);
+  /** On the button, under its label ("Signs: Classifier"): "Classifier 10 Nov 01:11". */
   const shortOf = (version: ModelVersion): string => version.label + ' ' + (version.trained_at ? isoWhen(version.trained_at) : version.run);
   const options = computed(() => Object.fromEntries(SIGN_PARTS.map(({part}) => [part, versions(part).map(
     (version): PickerOption => ({key: version.id, title: titleOf(version), short: shortOf(version),
@@ -45,14 +44,13 @@ export function useSignNetworks(versionsOf: (role: ModelRole) => readonly ModelV
   const keys = reactive({
     cutter: computed({get: () => keyOf('cutter'), set: (value: string) => { picked.value = {...picked.value, cutter: value}; }}),
     classifier: computed({get: () => keyOf('classifier'), set: (value: string) => { picked.value = {...picked.value, classifier: value}; }}),
-    decider: computed({get: () => keyOf('decider'), set: (value: string) => { picked.value = {...picked.value, decider: value}; }}),
   });
   const versionOf = (part: SignPart): ModelVersion | null => versions(part).find((version) => version.id === keys[part]) ?? null;
   /** In a pipeline, the parts it trains before the brain (#71): those read its signs, not a choice made here; [] in
    * Train › Brain. */
   const own = (trained: readonly SignPart[]) => SIGN_PARTS.filter(({part}) => !trained.includes(part));
   /** The parts with none to choose, once Models answered (none while it loads): the training is refused without them
-   * (no applicability, no brain). */
+   * (no classifier, no brain). */
   const missingOf = (trained: readonly SignPart[] = []): string[] => SIGN_PARTS.some(({part}) => versionsOf(part) === undefined) ? []
     : own(trained).filter(({part}) => versionOf(part) === null).map(({label}) => label.toLowerCase());
   /** The options of its training, all those chosen here named (a network put in use meanwhile changes nothing). */
@@ -76,9 +74,9 @@ export function useSignNetworks(versionsOf: (role: ModelRole) => readonly ModelV
     if (missed.length) return {text: 'No ' + missed.join(', no ') + ' to read the signs with: train one, or the brain cannot start.', warn: true};
     const before = SIGN_PARTS.filter(({part}) => trained.includes(part)).map(({part}) => WORD[part]);
     return {text: (before.length ? 'Its signs are read with the ' + listed(before) + ' trained just before. ' : '')
-      + 'The signs the brain learns from are read as the car reads them: a sign the applicability network gives to '
-      + 'another road (an exit, a side road) never becomes the number in force; with Applicability on, its box still '
-      + 'reaches the brain. A drive not read by these three is read again first.', warn: false};
+      + 'The signs the brain learns from are read as the car reads them, every one of them: no applicability network '
+      + 'leaves out those of another road, the brain learns whose road a sign is of from your reviews (Applicability). '
+      + 'A drive not read by these two is read again first.', warn: false};
   };
   const missing = computed(() => missingOf());
   const option = computed(() => optionOf());

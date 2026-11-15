@@ -92,11 +92,11 @@ export interface ActionOptions {
   /** The brain's applicability head (train_brain, #89; on when not given; off: --no-applicability, the signs taken). */
   applicability?: 'on' | 'off';
   routes_from?: string;
-  /** The networks that read the brain's signs (train_brain, sign-networks.ts): ids of Models, a SignNet the comma runs,
-   * a classifier with “not a sign”, an applicability network; the server takes the one in use for one not given. */
+  /** The networks that read the brain's signs (train_brain, sign-networks.ts): ids of Models, a SignNet the comma runs
+   * and a classifier with “not a sign”; the server takes the one in use for one not given. No applicability network
+   * (#90): every sign read goes to the brain. */
   sign_cutter?: string;
   sign_classifier?: string;
-  sign_decider?: string;
   /** The models of a regression (regression), separated by commas: the driving models' specs, the brains' runs. */
   openpilot?: string;
   brains?: string;
@@ -1542,22 +1542,11 @@ export interface AnotherRoadNumbers {
   wrong: number | null;
 }
 /** Whose road a speed sign is of, on one partition of a brain: the reviewed signs of our road and of another, and how
- * the brain's head (null: it has none) and the applicability network tell them, on the same signs. With the head: how
- * often it says what the network said (agrees, 0 to 1), and of the signs the network ruled wrongly, on how many the head
- * is right: the head can read the network's verdict in its inputs, so only these show what it adds. */
+ * the brain's head (null: it has none) tells them. Only against the reviews (#90). */
 export interface BrainApplicabilityNumbers {
   ours: number | null;
   another: number | null;
   head: AnotherRoadNumbers | null;
-  network: AnotherRoadNumbers | null;
-  agrees?: number | null;
-  network_wrong?: {columns: number | null; head_right: number | null} | null;
-}
-/** A partition of a brain with every sign read taken, as with no applicability network in the release: the speed, and
- * the head where nothing tells it what that network decided. */
-export interface BrainNoNetwork {
-  speed: BrainNumbers;
-  applicability: BrainApplicabilityNumbers | null;
 }
 export interface BrainModel extends ModelBase {
   role: 'brain';
@@ -1590,18 +1579,17 @@ export interface BrainModel extends ModelBase {
    * ImageNet). */
   split_sha256?: string | null;
   start?: NetworkStart | null;
-  /** The networks its signs were read with (ids of Models); null for a brain of before 10 Nov 2026, whose signs no
-   * applicability network filtered. */
-  sign_networks?: {cutter: string; classifier: string; decider: string} | null;
+  /** The networks its signs were read with (ids of Models); null for a brain of before 10 Nov 2026. A decider only in a
+   * brain trained from 10 to 15 Nov 2026, whose signs an applicability network filtered: the car cannot take it (#90). */
+  sign_networks?: {cutter: string; classifier: string; decider?: string | null} | null;
   validation: BrainNumbers | null;
   test: BrainNumbers | null;
   /** Of a brain that learns the map’s limit: the test frames with no map at all. */
   test_no_map?: BrainNumbers | null;
   /** Whose road a sign is of (#89): whether its head learnt it (null: a brain of before 15 Nov 2026), whether it was given
-   * the boxes of every sign read (the car gives such a brain the same), and the two measured on validation and test. */
+   * the boxes of every sign read, and the head measured on validation and test against the reviews. */
   applicability?: {learned: boolean | null; other_road_boxes: boolean;
-    validation: BrainApplicabilityNumbers | null; test: BrainApplicabilityNumbers | null;
-    no_network?: {validation: BrainNoNetwork | null; test: BrainNoNetwork | null}} | null;
+    validation: BrainApplicabilityNumbers | null; test: BrainApplicabilityNumbers | null} | null;
 }
 
 /** UserNet on one partition at its score (0.5, what the brain will read; nnslr_tools.usernet.digest): the frames, the road

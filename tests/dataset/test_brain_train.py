@@ -390,30 +390,25 @@ def test_a_drive_nobody_read_for_road_users_lifts_and_measures_nothing():
     assert found['with_users']['frames'] == 0 and found['others']['frames'] == 2
 
 
-def roaded(drive, cells, given_away=()):
+def roaded(drive, cells):
     """The drive with whose road its speed signs are of, as drive_targets gives it: cells, {(frame, column): of another
-    road}, the columns of sign_boxes a reviewed box answers; given_away: those the applicability network gave to another
-    road when the drive was read."""
+    road}, the columns of sign_boxes a reviewed box answers."""
     import numpy
     shape = (len(drive['partitions']), 8)
-    drive['applicability'], drive['applicability_weight'], drive['applicability_network'] = (
-        numpy.zeros(shape, dtype=numpy.float32) for _ in range(3))
+    drive['applicability'], drive['applicability_weight'] = (numpy.zeros(shape, dtype=numpy.float32) for _ in range(2))
     for (frame, column), another in cells.items():
         drive['applicability'][frame, column], drive['applicability_weight'][frame, column] = another, 1
-    for frame, column in given_away:
-        drive['applicability_network'][frame, column] = 1
     return drive
 
 
-def test_the_head_and_the_applicability_network_are_measured_on_the_same_reviewed_signs():
-    """#89: of the signs a reviewed box gives to another road, how many each finds (recall), and of those each calls so,
-    how many are (precision); every frame with a reviewed sign, not one a second."""
+def test_the_head_is_measured_only_against_the_reviewed_signs():
+    """#89, #90: of the signs a reviewed box gives to another road, how many the head finds (recall), and of those it
+    calls so, how many are (precision); every frame with a reviewed sign, not one a second. No network beside it."""
     import numpy
     from nnslr_tools.brain_train import measure
     # Test: frame 0 a sign of another road in column 0 and one of ours in column 6; frame 1 one of another road in
     # column 2; frame 2 one of ours in column 5. Frame 3 is of train.
-    drive = roaded(fake_drive(['test'] * 3 + ['train']), {(0, 0): True, (0, 6): False, (1, 2): True, (2, 5): False, (3, 0): True},
-                   given_away=[(0, 0), (2, 5)])
+    drive = roaded(fake_drive(['test'] * 3 + ['train']), {(0, 0): True, (0, 6): False, (1, 2): True, (2, 5): False, (3, 0): True})
     drive['measured'] = numpy.array([True, False, False, True])  # a measure a second for the speed: not for these
     answer = said([100] * 4)
     answer['applicability'] = numpy.zeros((4, 8), dtype=numpy.float32)
@@ -422,27 +417,23 @@ def test_the_head_and_the_applicability_network_are_measured_on_the_same_reviewe
     found = measure([drive], [answer], 'test')['applicability']
     assert (found['ours'], found['another']) == (2, 2)
     assert found['head']['recall'] == 1.0 and found['head']['precision'] == 1.0 and found['head']['false_positive'] == 0
-    # The network found one of the two, and gave one of ours away
-    assert found['network']['true_positive'] == 1 and found['network']['false_negative'] == 1
-    assert found['network']['recall'] == 0.5 and found['network']['precision'] == 0.5
-    # What the head adds: it says what the network said on 2 of the 4 signs, and is right on both the network got wrong
-    assert found['agrees'] == 0.5
-    assert found['where_network_wrong'] == {'columns': 2, 'head_right': 2}
-    assert found['where_network_right'] == {'columns': 2, 'head_right': 2}
-    # A head that only says back what the network decided adds nothing there, however good its recall looks
-    copied = said([100] * 4)
-    copied['applicability'] = drive['applicability_network'].copy()
-    echo = measure([drive], [copied], 'test')['applicability']
-    assert echo['agrees'] == 1.0 and echo['where_network_wrong'] == {'columns': 2, 'head_right': 0}
-    assert echo['head']['recall'] == echo['network']['recall'] == 0.5
+    assert set(found) == {'ours', 'another', 'head'}
+    # One of the two missed, one of ours called another's
+    missed = said([100] * 4)
+    missed['applicability'] = numpy.zeros((4, 8), dtype=numpy.float32)
+    missed['applicability'][0, 0] = missed['applicability'][2, 5] = .9
+    worse = measure([drive], [missed], 'test')['applicability']['head']
+    assert worse['recall'] == 0.5 and worse['precision'] == 0.5 and worse['false_negative'] == 1
     assert measure([drive], [answer], 'train')['applicability']['another'] == 1
-    # A network without the head: the applicability network is measured all the same
+    # A network without the head: the reviewed signs are counted, nothing measured
     plain = measure([drive], [said([100] * 4)], 'test')['applicability']
-    assert plain['head'] is None and plain['network']['recall'] == 0.5
-    assert 'agrees' not in plain and 'where_network_wrong' not in plain
+    assert plain == {'ours': 2, 'another': 2, 'head': None}
     # No sign of another road in the partition: no recall to show; a drive without those answers: no measure
-    ours = measure([roaded(fake_drive(['test'] * 2), {(0, 3): False})], [said([100] * 2)], 'test')['applicability']
-    assert ours['network']['recall'] is None and ours['network']['precision'] == 0.0 and ours['another'] == 0
+    ours = roaded(fake_drive(['test'] * 2), {(0, 3): False})
+    told = said([100] * 2)
+    told['applicability'] = numpy.zeros((2, 8), dtype=numpy.float32)
+    found = measure([ours], [told], 'test')['applicability']
+    assert found['head']['recall'] is None and found['head']['precision'] == 0.0 and found['another'] == 0
     assert measure([fake_drive(['test'] * 2)], [said([100] * 2)], 'test')['applicability'] is None
 
 
@@ -906,18 +897,18 @@ def test_the_log_says_the_road_users_on_every_drive_before_the_dry_run_cut_and_t
 
 def test_a_brain_learns_whose_road_a_sign_is_of_with_every_sign_s_box_unless_asked_not_to(tmp_path, monkeypatch):
     """#89: on by default: the head, the drives made with the boxes of every sign read, and the checkpoint says so for
-    the export; --no-applicability, the brain of before: the signs taken, no head, the network alone measured."""
+    the export; --no-applicability: no head, the reviewed signs only counted."""
     torch = torch_or_skip()
     from nnslr_tools import brain_train
     lines = []
     cells = {(0, 6): False, (1, 6): False, (2, 0): True, (4, 0): True, (6, 6): False}
     result, saved, _model = run_training(torch, tmp_path, monkeypatch, [1.0], log=lines.append,
-                                         change=lambda drive: roaded(drive, cells, given_away=[(4, 0)]))
+                                         change=lambda drive: roaded(drive, cells))
     assert ASKED[0]['other_road_boxes'] is True and BUILT[0]['applicability'] is True
     assert saved['applicability'] is True and saved['other_road_boxes'] is True
     assert result['applicability'] is True and result['other_road_boxes'] is True and result['applicability_pos_weight'] == 2.0
     assert result['applicability_answers']['partitions']['train'] == {'ours': 2, 'another': 1}
-    assert result['validation']['applicability']['network']['recall'] == 1.0 and result['test']['applicability']['ours'] == 1
+    assert result['validation']['applicability']['another'] == 1 and result['test']['applicability']['ours'] == 1
     assert result['history'][0]['applicability']['another'] == 1
     assert any(line.startswith('Whose road a sign is of: ') and 'every speed sign read' in line for line in lines), lines
     assert any('weighs 2.0 times one of ours' in line for line in lines)
@@ -927,32 +918,8 @@ def test_a_brain_learns_whose_road_a_sign_is_of_with_every_sign_s_box_unless_ask
     assert ASKED[0]['other_road_boxes'] is False and BUILT[0]['applicability'] is False
     assert saved['applicability'] is False and saved['other_road_boxes'] is False
     assert result['applicability'] is False and result['applicability_pos_weight'] is None
-    assert result['test']['applicability']['head'] is None and result['test']['applicability']['network'] is not None
+    assert result['test']['applicability']['head'] is None and result['test']['applicability']['ours'] == 1
     assert any('applicability_head off (--no-applicability)' in line for line in lines)
-    assert 'test_no_network' not in result  # these drives have no signs made as with no applicability network
-
-
-def test_a_brain_is_also_measured_with_no_applicability_network(tmp_path, monkeypatch):
-    """validation_no_network and test_no_network: the same frames with every sign read taken, where nothing the brain
-    is given says what the applicability network decided (the head could read it in the number in force)."""
-    torch = torch_or_skip()
-    import numpy
-
-    def unruled(drive):
-        from nnslr_tools.brain_targets import BRAIN_INPUTS, SIGN_GROUPS
-        roaded(drive, {(4, 0): True, (6, 6): False})
-        drive['inputs_unruled'] = {name: drive['inputs'][name].copy() for name in SIGN_GROUPS}
-        drive['inputs_unruled']['signs'][:, 0], drive['inputs_unruled']['signs'][:, 1] = 60 / BRAIN_INPUTS.SIGN_KPH_SCALE, 1
-
-    result, _saved, _model = run_training(torch, tmp_path, monkeypatch, [1.0], change=unruled)
-    for part, real in (('validation_no_network', 'validation'), ('test_no_network', 'test')):
-        assert result[part]['speed']['frames'] == result[real]['speed']['frames'] > 0
-        assert result[part]['applicability']['another'] == result[real]['applicability']['another']
-    # The number in force is the unfiltered one there: the sign the network would not have taken
-    assert result['test_no_network']['follow_the_sign']['sign']['frames'] == 2
-    assert result['test']['follow_the_sign']['sign']['frames'] == 0
-    # A dry run measures no such thing
-    result, _saved, _model = run_training(torch, tmp_path / 'dry', monkeypatch, [1.0], change=unruled, dry_run=True)
     assert 'test_no_network' not in result
 
 

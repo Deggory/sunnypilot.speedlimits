@@ -124,9 +124,9 @@ function signnetText(version: ModelVersion): string {
     version.train_share ? Math.round(version.train_share * 100) + ' % of the drives' : ''].filter(Boolean).join(' · ');
 }
 /** Whether the comma runs the version in use of a role, in words. Two versions often have the same name: the time
- * of the one on the car tells them apart. The comma runs the cutter, the classifier, the applicability network and the
- * brain (Publish puts the ones in use there); a trial replaces the first two until its next software update. UserNet is
- * not on the car: no line. */
+ * of the one on the car tells them apart. The comma runs the cutter, the classifier and the brain (Publish puts the ones
+ * in use there); a trial replaces the first two until its next software update. UserNet is not on the car: no line. The
+ * applicability network never goes since #90: one an older publication left is taken away by the next. */
 interface CarLine {tone: 'same' | 'other' | 'none'; text: string; more?: string}
 function carLine(role: RoleModels): CarLine | null {
   if (payload.value?.on_car_problem || role.role === 'users') return null;
@@ -135,6 +135,9 @@ function carLine(role: RoleModels): CarLine | null {
   const tried = role.role === 'cutter' ? trial.value?.signnet.run : role.role === 'classifier' ? trial.value?.classifier.run : null;
   if (tried) return used?.run === tried ? {tone: 'same', text: 'On the comma: this one, as a trial'}
     : {tone: 'other', text: 'On the comma: a trial of ' + tried};
+  if (role.role === 'decider') return car === null ? {tone: 'none', text: 'Not on the car: only for Sign review'}
+    : {tone: 'other', text: 'In the branch: an old one, ' + (car.trained_at ? isoWhen(car.trained_at) : car.run),
+      more: 'The next Publish takes it away: the car takes every sign.'};
   const more = 'Publish, on the Publish tab, puts it there.';
   if (car === null) return used ? {tone: 'other', text: 'In the branch: none yet', more} : {tone: 'none', text: 'In the branch: none'};
   const when = car.trained_at ? isoWhen(car.trained_at) : car.run;

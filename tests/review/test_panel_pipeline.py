@@ -111,9 +111,8 @@ def test_the_networks_train_one_after_the_other_each_on_those_before_and_all_go_
     # The classifier learns the false boxes of the SignNet trained just before, not of the one in use.
     assert f'cutter=cutter:{cutter}/signnet mapillary=0' in full_log(real, done['steps'][1]['job'])
     assert classifier.endswith('-classifier') and decider.endswith('-decider') and brain.endswith('-brain')
-    # The brain reads its signs with the three networks trained before it (#71), the applicability network of the
-    # variant in use, full when none is.
-    assert (f'signs: cutter:{cutter}/signnet classifier:{classifier}/classifier decider:{decider}/experiment-b/full'
+    # The brain reads its signs with the two networks trained before it (#71); no applicability network (#90).
+    assert (f'signs: cutter:{cutter}/signnet classifier:{classifier}/classifier unset'
             in full_log(real, done['steps'][3]['job']).splitlines())
     # Each is a job of its own, with its own log and run.
     assert {job['action'] for job in real.jobs()} == {'train_cutter', 'train_classifier', 'train_decider', 'train_brain'}
@@ -131,8 +130,7 @@ def test_the_networks_train_one_after_the_other_each_on_those_before_and_all_go_
 
 def test_the_brain_of_a_pipeline_takes_no_other_network_for_one_it_trains(real, root):
     make_signnet(root, 'c9')
-    for steps in ([{'action': 'train_cutter'}, {'action': 'train_brain', 'options': {'sign_cutter': 'cutter:c9/signnet'}}],
-                  [{'action': 'train_decider'}, {'action': 'train_brain', 'options': {'sign_decider': ''}}]):
+    for steps in ([{'action': 'train_cutter'}, {'action': 'train_brain', 'options': {'sign_cutter': 'cutter:c9/signnet'}}],):
         with pytest.raises(PanelError) as error:
             real.start_pipeline({'steps': steps}, None)
         assert error.value.status == 400 and 'trained before it' in error.value.message
@@ -149,7 +147,9 @@ def test_the_applicability_network_put_in_use_is_of_the_variant_in_use(real, roo
     assert done['reason'] == f'Put in use: applicability {run} (crop_geom).'
 
 
-def test_the_applicability_network_put_in_use_is_the_one_the_brain_read_with(real, root, monkeypatch):
+def test_the_brain_of_a_pipeline_reads_with_no_applicability_network(real, root, monkeypatch):
+    """#90: the brain reads every sign; the applicability network the pipeline trains (only for Sign review) is put in use
+    in the variant in use when it ends, whatever the brain did."""
     for role, model_id in (('cutter', 'cutter:made-cutter/signnet'), ('classifier', 'classifier:made-classifier/classifier'),
                            ('decider', 'decider:made-decider/experiment-b/crop_geom')):
         real.models_index.set_active(role, model_id, who=None, via='local')
@@ -158,13 +158,13 @@ def test_the_applicability_network_put_in_use_is_the_one_the_brain_read_with(rea
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline and real.pipeline_view()['steps'][1]['state'] != 'running':
         time.sleep(0.05)
-    # Another variant chosen by hand while the brain trains: the brain read its signs with crop_geom.
+    # Another variant chosen by hand while the brain trains: that one is put in use.
     real.models_index.set_active('decider', 'decider:made-decider/experiment-b/crop', who=None, via='local')
     done = ended(real)
     run = done['steps'][0]['run']
     assert view['state'] == 'running' and done['state'] == 'done'
-    assert done['steps'][1]['options']['sign_decider'] == f'decider:{run}/experiment-b/crop_geom'
-    assert in_use(root)['decider'] == f'decider:{run}/experiment-b/crop_geom'
+    assert 'sign_decider' not in done['steps'][1]['options']
+    assert in_use(root)['decider'] == f'decider:{run}/experiment-b/crop'
 
 
 def test_a_pipeline_that_did_not_end_well_puts_nothing_in_use(real, root, monkeypatch):

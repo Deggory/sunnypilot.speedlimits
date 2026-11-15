@@ -211,16 +211,16 @@ CUTTER_FAMILY = 'all'
 # _REGION and _SHARE): the classifier's crops (helpers/mapillary.sh), the cutter's windows (helpers/mapillary_windows.sh).
 MAPILLARY_ENV = {'train_classifier': 'NNSLR_CLASSIFIER_MAPILLARY', 'train_cutter': 'NNSLR_CUTTER_MAPILLARY'}
 # The networks that read the signs a brain learns from (sign_networks, #31): its option, the Models role it is a version
-# of, the variable of scripts/run_brain.sh. None given: those in use.
+# of, the variable of scripts/run_brain.sh. None given: those in use. No applicability network since 15 Nov 2026 (#90):
+# every sign read goes to the brain.
 BRAIN_SIGN_NETWORKS = {'sign_cutter': ('cutter', 'NNSLR_BRAIN_CUTTER'),
-                       'sign_classifier': ('classifier', 'NNSLR_BRAIN_CLASSIFIER'),
-                       'sign_decider': ('decider', 'NNSLR_BRAIN_DECIDER')}
+                       'sign_classifier': ('classifier', 'NNSLR_BRAIN_CLASSIFIER')}
 # The options an action takes, besides a training's start and the run to resume (checked by Panel.start).
 # The GPU memory Qwen3-VL-8B takes in float16 (scripts/setup_vlm.sh: 17.5 GB), with a margin for one frame.
 QWEN_GPU_MB = 18 * 1024
 ACTION_OPTIONS = {'train_cutter': ('families', 'start', 'mapillary', 'region', 'share'), 'train_decider': ('start',),
                   'train_brain': ('works', 'road', 'types', 'driver', 'pool', 'seeds', 'start', 'sign_cutter',
-                                  'sign_classifier', 'sign_decider', 'users', 'routes_from', 'map', 'applicability'),
+                                  'sign_classifier', 'users', 'routes_from', 'map', 'applicability'),
                   'train_users': ('stage', 'start'),
                   'regression': ('openpilot', 'brains'),
                   'simulate': ('route', 'set', 'certified', 'map'),
@@ -2495,10 +2495,8 @@ class Panel:
 
     def _brain_sign_networks(self, options: dict, check_only: bool = False) -> dict:
         """The variables of the networks that read the brain's signs (BRAIN_SIGN_NETWORKS): a finished version of
-        Models for each one chosen (a SignNet the comma runs, a classifier, an applicability network that is not a smoke
-        run), nothing for one not chosen (scripts/run_brain.sh takes the one in use). Refused when no applicability
-        network is in use nor chosen: the brain would learn from the signs of other roads, which the car leaves out.
-        check_only: a pipeline only checked, whose trainings before the brain make some of them (PIPELINE_NETWORK)."""
+        Models for each one chosen (a SignNet the comma runs, a classifier), nothing for one not chosen
+        (scripts/run_brain.sh takes the one in use). Refused when one is neither in use nor chosen. check_only: a pipeline only checked, whose trainings before the brain make some of them (PIPELINE_NETWORK)."""
         from nnslr_tools.preannotate import networks_in_use
         found = {}
         for key, (role, variable) in BRAIN_SIGN_NETWORKS.items():
@@ -2517,13 +2515,9 @@ class Panel:
                 raise PanelError(400, 'bad_option', 'The comma reads its signs with a SignNet of its band and grid.')
             if role == 'classifier' and entry.get('part') != 'classifier':
                 raise PanelError(400, 'bad_option', 'The comma reads its signs with a classifier with “not a sign”.')
-            if role == 'decider' and entry.get('smoke_limit'):
-                raise PanelError(400, 'bad_option', 'A smoke run learnt on a few frames: choose a whole applicability '
-                                                    'training.')
             found[variable] = chosen
         used = networks_in_use(self.root)
-        missing = [word for key, word in (('cutter', 'cutter'), ('classifier', 'classifier'),
-                                          ('decider', 'applicability network'))
+        missing = [key for key in ('cutter', 'classifier')
                    if BRAIN_SIGN_NETWORKS['sign_' + key][1] not in found and key not in used]
         if missing:
             raise PanelError(409, 'no_sign_networks', 'The brain reads its signs as the car does: no '
@@ -3108,7 +3102,6 @@ class Panel:
                     if any(PIPELINE_ROLES.get(step['action']) == role for step in steps):
                         # A training of the pipeline whose run cannot be told: refused by start(), never the one in use.
                         options[key] = trained.get(role, '')
-                # Kept in the plan: the applicability network put in use at the end is the one it read with.
                 following['options'] = options
             try:
                 # A busy GPU (no card free) is start()'s 'busy', as a busy train group: the pipeline waits for it.
@@ -3127,8 +3120,8 @@ class Panel:
 
     def _pipeline_trained(self, steps: list[dict]) -> dict[str, str]:
         """The networks a pipeline's trainings that ended well have made, by role, as Models names them (#71): the
-        cutter's SignNet, the classifier, the applicability network the brain read its signs with, else of the variant in
-        use (PIPELINE_DECIDER_VARIANT when none is), the brain of its one seed or, of three, the one with the smallest
+        cutter's SignNet, the classifier, the applicability network of the variant in use (PIPELINE_DECIDER_VARIANT when
+        none is; only for Sign review's proposals since #90), the brain of its one seed or, of three, the one with the smallest
         mean speed error on validation."""
         from nnslr_tools.preannotate import networks_in_use
         from nnslr_tools.runs import EXPERIMENT_DIR
@@ -3145,12 +3138,9 @@ class Panel:
             elif role == 'classifier':
                 found[role] = f'classifier:{run}/classifier'
             elif role == 'decider':
-                read = next((item['options'].get('sign_decider') for item in steps
-                             if item['action'] == 'train_brain' and item.get('job')), None)
                 in_use = networks_in_use(self.root).get('decider', '')
                 variant = in_use.rsplit('/', 1)[-1] if in_use.startswith('decider:') else PIPELINE_DECIDER_VARIANT
-                found[role] = read if isinstance(read, str) and read.startswith(f'decider:{run}/') \
-                    else f'decider:{run}/{EXPERIMENT_DIR}/{variant}'
+                found[role] = f'decider:{run}/{EXPERIMENT_DIR}/{variant}'
             else:
                 seeds = [entry for entry in self.models_index.artifacts(('brain',))['brain']
                          if entry['finished'] and re.fullmatch(re.escape(run) + r'-s[0-9]', entry['run'])]

@@ -207,7 +207,7 @@ const BRAIN_ACTIONS = computed((): [ActionName, string][] => {
     + starts.brain.words + signNetworks.words
     + (one ? ', about 3 minutes on the GPU' : ', one after the other, about 3 minutes each on the GPU')
     + ', after reading the signs of the drives as the car does '
-    + '(the applicability network keeps those of another road out of the number in force). Then you ' + (one ? 'find it' : 'choose one') + ' in Models and Publish it.']];
+    + '(every sign read, of another road too). Then you ' + (one ? 'find it' : 'choose one') + ' in Models and Publish it.']];
 });
 /** UserNet's stage: BDD100K's pictures first, then the road users of your drives, usually from a BDD100K one
  * (scripts/run_usernet.sh, NNSLR_USERNET_STAGE). */
@@ -391,7 +391,7 @@ const numbers = computed(() => {
         <NetworkStartPicker :start="starts.decider" id="train-decider-start"/>
         <ActionList :items="DECIDER_ACTIONS" :actions="status?.actions ?? null" :tip="gpuTip"
                     @run="(name, state) => emit('run', name, state, undefined, starts.decider.option)"/>
-        <p class="latest-none" id="train-decider-note">The one in use (Models) sets OURS or another on the speed signs Our networks propose.</p>
+        <p class="latest-none" id="train-decider-note">Only for Sign review: the one in use (Models) proposes OURS or another on the speed signs Our networks propose. Never on the car nor in the brain, which learns whose road a sign is of from your reviews.</p>
       </template>
       <template v-else-if="section === 'brain'">
         <NetworkStartPicker :start="starts.brain" id="train-brain-start"/>
@@ -417,7 +417,7 @@ const numbers = computed(() => {
           <strong>{{ thousands(brainLabels.applicability.partitions.validation.another) }}</strong> to watch it on,
           <strong>{{ thousands(brainLabels.applicability.partitions.test.ours) }}</strong> and
           <strong>{{ thousands(brainLabels.applicability.partitions.test.another) }}</strong> for the test<template
-          v-if="brainLabels.applicability.unread"> ({{ plural(brainLabels.applicability.unread, 'drive') }} still to be read with the boxes of the signs of another road: they count nothing until then)</template>.</template><template
+          v-if="brainLabels.applicability.unread"> ({{ plural(brainLabels.applicability.unread, 'drive') }} still to be read: they count nothing until then)</template>.</template><template
           v-if="brainLabels.types"> With Road type (map) on, only the seconds with a road type (the map’s, from Read the map in Data › Prepare, with your corrections over it) count:
           <strong>{{ thousands(brainUntyped.seconds) }}</strong> seconds with your speed and none stay out<template
           v-if="brainUntyped.drives">, {{ plural(brainUntyped.drives, 'drive') }} without any</template>.</template><template

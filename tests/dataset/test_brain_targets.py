@@ -1414,7 +1414,7 @@ def reading_frames():
 
 def test_whose_road_a_sign_is_of_comes_from_the_reviewed_boxes(tmp_path):
     """#89: a reviewed box of a speed family says whose road the sign of its column is of, at the reading nearest to its
-    frame, beside what the applicability network said of the same sign."""
+    frame. Only the reviews: no applicability network's verdict beside it (#90)."""
     numpy = _np()
     targets = _targets()
     write_reviews(tmp_path, [
@@ -1429,11 +1429,11 @@ def test_whose_road_a_sign_is_of_comes_from_the_reviewed_boxes(tmp_path):
         reviewed(10, OURS, 'other_road', route_id='another--drive'),
     ])
     found = targets.applicability_answers(tmp_path, ROUTE, reading_frames(), read_record())
-    answered = {(int(row), int(column)): (float(found['target'][row, column]), float(found['network'][row, column]))
+    answered = {(int(row), int(column)): float(found['target'][row, column])
                 for row, column in zip(*numpy.nonzero(found['weight']))}
-    # At 0.5 s the 80 is ours and the 40 another's, as the network said too; at 0.75 s the 80 is on a vehicle: another's,
-    # which the network took for ours
-    assert answered == {(2, 6): (0.0, 0.0), (2, 0): (1.0, 1.0), (3, 6): (1.0, 0.0)}
+    # At 0.5 s the 80 is ours and the 40 another's; at 0.75 s the 80 is on a vehicle: another's
+    assert answered == {(2, 6): 0.0, (2, 0): 1.0, (3, 6): 1.0}
+    assert 'network' not in found
     assert found['reviewed'] == 5 and found['matched'] == 3 and found['target'].shape == (5, 8)
     # A drive read before the boxes of the signs of another road were kept, or not read, answers nothing
     old = {key: value for key, value in read_record().items() if key != 'other_boxes'}
@@ -1463,32 +1463,6 @@ def test_the_last_frames_of_a_minute_go_to_the_first_reading_of_the_next(tmp_pat
     write_reviews(tmp_path, [reviewed(1199, OURS, 'other_road')])
     targets._REVIEWED.clear()
     assert not targets.applicability_answers(tmp_path, ROUTE, frames[:1], record)['weight'].any()
-
-
-def test_with_no_applicability_network_every_sign_read_is_taken():
-    """The groups made from the signs as with no such network in the release (stage 2 of #89): the 40 the network gave
-    to another road becomes a reading like any other. Only for a measure: nothing there says what the network decided."""
-    numpy = _np()
-    targets = _targets()
-    frames = [{'segment': 0, 'index': second, 'seconds': second} for second in (0.25, 0.5, 0.75)]
-    ns = (numpy.array([frame['seconds'] for frame in frames]) * NS).astype(numpy.int64)
-    record = read_record()
-    every = targets.unruled_inputs(frames, record)
-    assert set(every) == set(targets.SIGN_GROUPS)
-    taken = targets.drive_inputs(frames, ns, {}, record['readings'], None, record['boxes'], targets.all_readings(record))
-    # Ruled: the single reading at 0.5 s is the 80 the network took. Unruled: the surer 40 it gave away.
-    assert taken['signs'][1, 8] == pytest.approx(80 / 130) and every['signs'][1, 8] == pytest.approx(40 / 130)
-    assert numpy.array_equal(every['sign_boxes'], taken['sign_boxes'])  # a head brain has every box either way
-    drive = {'inputs': taken, 'inputs_unruled': every, 'route': 'r'}
-    groups = ('signs', 'sign_boxes', 'lead')
-    blind = targets.without_network(drive, groups)
-    assert numpy.array_equal(blind['inputs']['signs'], every['signs']) and blind['inputs']['lead'] is taken['lead']
-    assert numpy.array_equal(blind['extra'], targets.pack_inputs({**taken, **every}, groups)) and drive['inputs'] is taken
-    # A drive read before the boxes of the signs of another road were kept, or not read: no such measure
-    old = {key: value for key, value in record.items() if key != 'other_boxes'}
-    assert targets.unruled_inputs(frames, old) is None and targets.unruled_inputs(frames, None) is None
-    assert targets.without_network({'inputs': taken, 'inputs_unruled': None}, groups) is None
-    assert targets.without_network({'inputs': taken}, groups) is None
 
 
 def test_the_reviewed_boxes_are_read_again_when_the_dataset_changes(tmp_path):

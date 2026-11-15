@@ -1719,8 +1719,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_brain_networks.add_argument("--run-dir", required=True, help="the folder of the brain's run")
     p_brain_networks.add_argument("--cutter", default=None, help="a SignNet's id of the Models tab (default: in use)")
     p_brain_networks.add_argument("--classifier", default=None, help="a classifier's id (default: in use)")
-    p_brain_networks.add_argument("--decider", default=None,
-                                  help="an applicability network's id (default: in use; one is required)")
     p_brain_networks.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_brain_networks.set_defaults(func=_cmd_brain_networks)
     p_borrow = sub.add_parser("borrow-cards", help="scripts/run_brain.sh, step 3 (#36): prints the cards its reading "
@@ -2903,7 +2901,7 @@ def _cmd_brain_networks(args: argparse.Namespace) -> int:
     from nnslr_tools.preannotate import resolve_data_root
     root = resolve_data_root(Path(args.data_root) if args.data_root else None)
     chosen = sign_networks.prepare(root, Path(args.run_dir), cutter=args.cutter or None,
-                                   classifier=args.classifier or None, decider=args.decider or None,
+                                   classifier=args.classifier or None,
                                    log=lambda line: print(line, flush=True))
     print(json.dumps({part: chosen[part] for part in sign_networks.PARTS}), flush=True)
     return 0
@@ -2978,10 +2976,7 @@ def _cmd_train_brain(args: argparse.Namespace) -> int:
                          for part in ('train', 'validation', 'test')},
                       **{part: result[part] for part in ('validation_swapped', 'test_swapped')},
                       **{part: {'speed': result[part]['speed']} for part in ('validation_no_map', 'test_no_map')
-                         if part in result},
-                      # With every sign taken, as with no applicability network: the speed and the head on their own.
-                      **{part: {'speed': result[part]['speed'], 'applicability': result[part].get('applicability')}
-                         for part in ('validation_no_network', 'test_no_network') if part in result}}, indent=2))
+                         if part in result}}, indent=2))
     return 0
 
 

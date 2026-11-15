@@ -253,15 +253,15 @@ def test_a_dry_run_that_does_not_say_its_drives_stops_the_run(tmp_path):
 
 def test_the_networks_that_read_the_signs_are_chosen_once_and_reach_every_reader(tmp_path):
     """Step 3 writes the run's networks of the signs (nnslr brain-networks: those of Train › Brain, else those in use, with
-    the applicability network), and the reading as the car, the labels and every seed take that file."""
+    no applicability network since #90), and the reading as the car, the labels and every seed take that file."""
     chosen = {'NNSLR_BRAIN_CUTTER': 'cutter:c2/signnet', 'NNSLR_BRAIN_DECIDER': 'decider:d2/experiment-b/crop_geom'}
     process = run_script(tmp_path, env=chosen)
     assert process.returncode == 0, process.stderr + process.stdout
     run = tmp_path / 'data' / 'runs' / 'n1'
     calls = [line for line in (run / 'brain.log').read_text().splitlines() if line.startswith('args: ')]
     networks = [line for line in calls if line.startswith('args: brain-networks')]
-    assert networks == [f'args: brain-networks --run-dir {run} --data-root {tmp_path / "data"} --cutter cutter:c2/signnet '
-                        '--decider decider:d2/experiment-b/crop_geom']
+    # An applicability network left in the environment is not passed on: the brain reads every sign
+    assert networks == [f'args: brain-networks --run-dir {run} --data-root {tmp_path / "data"} --cutter cutter:c2/signnet']
     first = calls.index(networks[0])
     readers = [line for line in calls[first + 1:] if line.startswith(('args: road-type-signs', 'args: brain-targets',
                                                                       'args: train-brain'))]

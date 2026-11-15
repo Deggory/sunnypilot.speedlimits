@@ -31,31 +31,18 @@ const classifier = computed(() => props.version.role === 'classifier' ? props.ve
 const decider = computed(() => props.version.role === 'decider' ? props.version : null);
 const brain = computed(() => props.version.role === 'brain' ? props.version : null);
 const users = computed(() => props.version.role === 'users' ? props.version : null);
-/** Whose road a sign is of (#89), of a brain measured on it: on each partition with a reviewed sign, how many signs of
- * another road its head and the applicability network find, and how many of ours each calls another's. */
+/** Whose road a sign is of (#89, #90), of a brain measured on it: on each partition with a reviewed sign, how many signs
+ * of another road its head finds, and how many of ours it calls another's. Only against the reviews. */
 const anotherRoad = computed(() => {
   const found = brain.value?.applicability;
   if (!found) return null;
   const parts = ([['test', found.test], ['validation', found.validation]] as const)
     .filter(([, numbers]) => numbers && (numbers.ours ?? 0) + (numbers.another ?? 0) > 0);
   if (!parts.length) return null;
-  const said = (who: 'head' | 'network') => parts.filter(([, numbers]) => numbers![who])
-    .map(([name, numbers]) => `${name} ${numbers![who]!.found ?? 0} of ${numbers!.another ?? 0}, ${numbers![who]!.wrong ?? 0} wrong`)
-    .join(' · ');
-  // What the head adds: the signs the network ruled wrongly, and on how many of them the head is right.
-  const adds = found.learned ? parts.filter(([, numbers]) => numbers!.network_wrong?.columns)
-    .map(([name, numbers]) => `${name} ${numbers!.network_wrong!.head_right ?? 0} of ${numbers!.network_wrong!.columns} right`)
+  const head = found.learned ? parts.filter(([, numbers]) => numbers!.head)
+    .map(([name, numbers]) => `${name} ${numbers!.head!.found ?? 0} of ${numbers!.another ?? 0}, ${numbers!.head!.wrong ?? 0} wrong`)
     .join(' · ') : '';
-  const same = found.learned ? parts.filter(([, numbers]) => numbers!.agrees != null)
-    .map(([name, numbers]) => `${name} ${pct(numbers!.agrees)}`).join(', ') : '';
-  // With every sign taken, as with no applicability network: the speed on the test, and the head on its own there.
-  const bare = found.no_network?.test ?? null;
-  const alone = bare?.applicability?.head && found.learned
-    ? ` · its head ${bare.applicability.head.found ?? 0} of ${bare.applicability.another ?? 0}, ${bare.applicability.head.wrong ?? 0} wrong` : '';
-  const noNetwork = bare && bare.speed.mean_error_kph != null
-    ? `${bare.speed.mean_error_kph.toFixed(1)} km/h off on the test${alone}` : '';
-  return {head: found.learned ? said('head') : '', network: said('network'), adds, same, noNetwork,
-    signs: parts.map(([name, numbers]) => `${name} ${(numbers!.ours ?? 0) + (numbers!.another ?? 0)}`).join(', ')};
+  return {head, signs: parts.map(([name, numbers]) => `${name} ${(numbers!.ours ?? 0) + (numbers!.another ?? 0)}`).join(', ')};
 });
 /** UserNet's numbers: on the test, else on validation (the test has no ticked frame yet). */
 const usersFound = computed(() => users.value?.test?.frames ? {numbers: users.value.test, on: 'test'}
@@ -267,15 +254,13 @@ const noOtherOnTest = computed(() => decider.value?.test?.other_road_support ===
           <div><dt>On validation</dt><dd>{{ pct(brain.validation?.right) }}</dd></div>
           <div v-if="brain.test_no_map"><dt title="The same test frames with no map at all, as past a border with no map downloaded: what is left of it without the map">Off without the map</dt><dd>{{ brain.test_no_map.mean_error_kph?.toFixed(1) ?? '–' }} km/h</dd></div>
           <div v-if="anotherRoad?.head"><dt :title="'Of the speed signs a reviewed box gives to another road (reviewed speed signs it is given: ' + anotherRoad.signs + '): how many its applicability head finds, and how many signs of our road it calls another’s'">Another road, its head</dt><dd>{{ anotherRoad.head }}</dd></div>
-          <div v-if="anotherRoad?.network"><dt title="The same signs as the applicability network ruled them when the drives were read. It learnt on its own split: some of these signs may have been in its training">Another road, the network</dt><dd>{{ anotherRoad.network }}</dd></div>
-          <div v-if="anotherRoad?.adds"><dt :title="'The reviewed signs the applicability network ruled wrongly, and on how many of them the head is right. The head can read the network’s verdict in what it is given (the number in force comes from the signs the network takes), so only these show what it adds' + (anotherRoad.same ? '; it says what the network said on ' + anotherRoad.same + ' of the signs' : '')">Where the network was wrong</dt><dd>{{ anotherRoad.adds }}</dd></div>
-          <div v-if="anotherRoad?.noNetwork"><dt title="The same test frames with every sign read taken, as with no applicability network in the release: what the brain says without its filter, and what its head finds of the signs of another road when nothing tells it what the network decided">With no applicability network</dt><dd>{{ anotherRoad.noNetwork }}</dd></div>
           <div><dt title="What it reads each second beside the picture; the map only when map_limit is among them">Inputs</dt><dd>{{ brain.groups?.join(', ') ?? '–' }}</dd></div>
           <div><dt title="Whether the frames it trained on had a limit with a plate of hours">Hours plates</dt><dd>{{ brain.hours ? 'Reads them and their hours' : brain.plates ? 'Reads them' : 'Does not read them' }}</dd></div>
           <div><dt title="Whether the frames it trained on had a limit valid only on a wet road">Wet plates</dt><dd>{{ brain.wet ? 'Reads them' : 'Does not read them' }}</dd></div>
-          <div><dt title="The cutter, the classifier and the applicability network that read the signs it learnt from">Signs read by</dt><dd>{{
-            brain.sign_networks ? brain.sign_networks.cutter + ', ' + brain.sign_networks.classifier + ', ' + brain.sign_networks.decider
-            : 'Not recorded: no applicability network left out the signs of other roads' }}</dd></div>
+          <div><dt title="The cutter and the classifier that read the signs it learnt from; an applicability network only in a brain trained before 15 Nov 2026, which left out the signs it gave to another road">Signs read by</dt><dd>{{
+            brain.sign_networks ? [brain.sign_networks.cutter, brain.sign_networks.classifier, brain.sign_networks.decider].filter(Boolean).join(', ')
+              + (brain.sign_networks.decider ? ' (applicability network: the car cannot take this brain)' : '')
+            : 'Not recorded' }}</dd></div>
           <div><dt>Seed</dt><dd>{{ brain.seed ?? '–' }}</dd></div>
         </dl>
         </details>

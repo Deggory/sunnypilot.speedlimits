@@ -1,18 +1,18 @@
 """``nnslr send-to-car``: the first three steps of Publish to the car (the Publish tab), the networks the
-comma downloads replaced by a SignNet of this server, the classifier in use, the applicability network in use and
-the brain in use.
+comma downloads replaced by a SignNet of this server, the classifier in use and the brain in use.
 
 1. Export: the SignNet of a run (or the cutter in use) and the classifier in use (models/active.json, or one given)
    to ONNX on the CPU, each
-   checked against PyTorch with onnxruntime; the brain in use, when one is chosen, is exported here too, and so is the
-   applicability network in use (the decider: whom each sign applies to; speedvisiond leaves out the signs it gives to
-   another road), as the car runs it (exporting.export_decider_car_onnx, checked with the comma's applicability.py).
-   Each contract names its network by its id of the Models tab.
+   checked against PyTorch with onnxruntime; the brain in use, when one is chosen, is exported here too. No
+   applicability network goes to the car since 15 Nov 2026 (#90): the car takes every sign read and the brain learns
+   whose road a sign is of; an applicability network goes only when one is given (decider=, a brain's sign reading of
+   10 to 15 Nov 2026), as the car runs it (exporting.export_decider_car_onnx). Each contract names its network by its
+   id of the Models tab.
 2. Publish: the ONNX, their contracts and speed_limits.json (format 2: finder, classifier, and decider and brain when
    there is one in use) in the clone of the models repository the comma downloads (cristianku/speed-limits-models), one
    commit pushed to its main. The export is the same byte for byte each time: when every ONNX is already the one there,
    nothing changes and nothing is pushed. Without a brain in use the published one is removed: speedvisiond then
-   runs its rules again; without an applicability network in use its file goes too, and the car takes every sign. The
+   runs its rules again; the applicability network's file goes too, and the car takes every sign. The
    scene network of older releases (road-type.onnx) is removed too: nothing here makes it.
 3. Record: models/on-car.json (record_on_car, what ``nnslr on-car`` writes), the "On the car" of the Models tab.
 
@@ -185,7 +185,7 @@ def choose(root: Path, signnet: Any = None, classifier: Any = None, *, brain_on_
            brain: bool = True) -> dict:
     """The SignNet of a run listed on the Models tab (None: the cutter in use, which must be a SignNet), finished and
     of the car's band and grid, and the classifier: the one given (an id of the Models tab) or the one in use; the
-    applicability network (decider): the one given (an id) or the one in use, None when none is; the brain in use, None
+    applicability network (decider) only when one is given (an id), never the one in use (#90); the brain in use, None
     when none is chosen or brain is False (the networks that read the signs the brain learns from, sign_networks).
     Each with its id and its weights on this server. A brain that takes the driver's inputs never goes on the car
     (brain_refused); brain_on_car False, where the brain in use does not go on the car (Models › Drive's replay, a
@@ -243,15 +243,18 @@ def choose(root: Path, signnet: Any = None, classifier: Any = None, *, brain_on_
 
 
 def _check_sign_networks(found: dict) -> None:
-    """A brain learnt from the signs its three networks read (sign_networks, #31): it goes on the car only with them,
-    else the car gives it signs read by others. A brain from before 10 Nov 2026 has none recorded and is not checked."""
+    """A brain learnt from the signs its networks read (sign_networks, #31): it goes on the car only with them, else the
+    car gives it signs read by others. A brain from before 10 Nov 2026 has none recorded and is not checked. One whose
+    signs an applicability network filtered (10 to 15 Nov 2026) never goes: the car takes every sign since #90."""
     brain = found.get('brain')
     read = brain.get('sign_networks') if brain else None
     if not read:
         return
-    used = {'cutter': found['finder']['id'], 'classifier': found['classifier']['id'],
-            'decider': (found.get('decider') or {}).get('id')}
-    other = [part for part in ('cutter', 'classifier', 'decider') if read.get(part) != used[part]]
+    if read.get('decider'):
+        raise ValueError(f"the brain {brain['id']} learnt from signs the applicability network {read['decider']} filtered, "
+                         'and the car takes every sign since 15 Nov 2026: train a brain again, it reads every sign')
+    used = {'cutter': found['finder']['id'], 'classifier': found['classifier']['id']}
+    other = [part for part in ('cutter', 'classifier') if read.get(part) != used[part]]
     if other:
         raise ValueError(f"the brain {brain['id']} learnt from the signs read by " + ', '.join(read[part] for part in other)
                          + '; this release reads them with ' + ', '.join(str(used[part]) for part in other)
@@ -313,21 +316,15 @@ def _brain(root: Path, runs: RunsIndex, index: ModelIndex, on_car: bool = True) 
 
 
 def _decider(runs: RunsIndex, index: ModelIndex, chosen: Any = None) -> dict | None:
-    """The applicability network given (an id of the Models tab), else the one in use, or None when none is chosen
-    (the car then takes every sign)."""
-    if chosen is not None:
-        if role_of(chosen) != 'decider':
-            raise ValueError(f'{chosen!r} is not the id of an applicability network')
-        entry = next((item for item in index.artifacts(('decider',))['decider'] if item['id'] == chosen), None)
-        if entry is None:
-            raise ValueError(f'the applicability network {chosen} is not on this server')
-    else:
-        active, problem = index.read_active()
-        if problem is not None or active.get('decider') is None:
-            return None
-        entry, why = index.in_use('decider')
-        if entry is None:
-            raise ValueError(why)
+    """The applicability network given (an id of the Models tab), None when none is: the car takes every sign. The one
+    in use is never taken (#90): it only proposes whose road a sign is of in Sign review."""
+    if chosen is None:
+        return None
+    if role_of(chosen) != 'decider':
+        raise ValueError(f'{chosen!r} is not the id of an applicability network')
+    entry = next((item for item in index.artifacts(('decider',))['decider'] if item['id'] == chosen), None)
+    if entry is None:
+        raise ValueError(f'the applicability network {chosen} is not on this server')
     if not entry['finished']:
         raise ValueError(f'the applicability network {entry["id"]} has not finished its training')
     run = runs._run_dir(entry['run'])

@@ -13,12 +13,11 @@ set -euo pipefail
 #      drives as"), it takes the drives that run kept (runs/<NAME>/routes.json, or one of its seeds'), those of them
 #      still dashcam drives;
 #   2. a CUDA smoke test;
-#   3. the networks its signs are read with (nnslr brain-networks): the cutter, the classifier and the applicability
-#      network chosen in Train › Brain (NNSLR_BRAIN_CUTTER, _CLASSIFIER, _DECIDER; those in use by default), exported
-#      as Publish exports them and written into runs/NAME/networks.json, kept when the run is started again (#31, 10 Nov
-#      2026); then reads the signs of every drive it learns from (every dashcam drive) as the car does: its vision.py
-#      and applicability.py with those networks, the car's speed from the logs, a sign of another road left out (its
-#      box kept apart: a brain that learns whose road a sign is of, NNSLR_BRAIN_APPLICABILITY, is given it too)
+#   3. the networks its signs are read with (nnslr brain-networks): the cutter and the classifier chosen in Train ›
+#      Brain (NNSLR_BRAIN_CUTTER, _CLASSIFIER; those in use by default), exported as Publish exports them and written
+#      into runs/NAME/networks.json, kept when the run is started again (#31, 10 Nov 2026); then reads the signs of every
+#      drive it learns from (every dashcam drive) as the car does: its vision.py with those networks, every sign read,
+#      of another road too (no applicability network since 15 Nov 2026, #90: the brain learns whose road a sign is of)
 #      (nnslr road-type-signs --labelled --sign-networks; a drive already read by them is not read again: a new
 #      vision.py or a new choice reads them all again, and the training refuses anything else), the signs it is given;
 #      then says what the labels give (nnslr brain-targets). The
@@ -51,15 +50,14 @@ set -euo pipefail
 # one; 0: not, every second), NNSLR_BRAIN_USERS (1: step 4 reads the road users and it learns them; 0: not),
 # NNSLR_BRAIN_MAP (1: the map's limit the comma had, liveMapDataSP, is one more input of the brain, #85; 0, the default:
 # not, the brain never reads the map), NNSLR_BRAIN_APPLICABILITY (1, the default: it also learns whose road a speed sign
-# is of from the reviewed boxes, a head only the training has, and is given the boxes of every sign read, those the
-# applicability network gives to another road too, #89; 0: not, it gets the signs taken as the brains before),
+# is of from the reviewed boxes, a head only the training has, #89, #90; 0: not),
 # NNSLR_BRAIN_ROUTES_FROM (an earlier brain run's NAME: its drives instead of every dashcam drive; a run started again
 # keeps its own),
 # NNSLR_BRAIN_POOL (grid: the picture's features keep where they are; mean: not), NNSLR_BRAIN_INIT_FROM (an earlier
 # brain's brain-last.pt every seed goes on from, instead of ImageNet and random weights: Train › Brain's "Start from";
 # the dry run of step 1 refuses one stepped otherwise or learnt on another split), NNSLR_BRAIN_CUTTER,
-# NNSLR_BRAIN_CLASSIFIER, NNSLR_BRAIN_DECIDER (the networks its signs are read with, ids of the Models tab: a SignNet,
-# a classifier, an applicability network; empty: the one in use), NNSLR_BRAIN_SEEDS (the seeds it trains: "0 1 2", or
+# NNSLR_BRAIN_CLASSIFIER (the networks its signs are read with, ids of the Models tab: a SignNet, a classifier; empty:
+# the one in use), NNSLR_BRAIN_SEEDS (the seeds it trains: "0 1 2", or
 # "0" alone; Train › Brain's Seeds), NNSLR_SUNNYPILOT_CLONE
 # (/root/sunnypilot, on the speed-limits branch), NNSLR_ALLOW_BUSY_GPU=1 to share a GPU that already has compute processes.
 
@@ -84,7 +82,6 @@ POOL="${NNSLR_BRAIN_POOL:-grid}"
 INIT_FROM="${NNSLR_BRAIN_INIT_FROM:-}"
 SIGN_CUTTER="${NNSLR_BRAIN_CUTTER:-}"
 SIGN_CLASSIFIER="${NNSLR_BRAIN_CLASSIFIER:-}"
-SIGN_DECIDER="${NNSLR_BRAIN_DECIDER:-}"
 read -r -a SEEDS <<< "${NNSLR_BRAIN_SEEDS:-0 1 2}"
 
 if [[ -z "$RUN_ID" || $# -ne 1 ]]; then
@@ -162,8 +159,8 @@ if [[ "$POOL" != "mean" && "$POOL" != "grid" ]]; then
   exit 2
 fi
 
-for setting in SIGN_CUTTER SIGN_CLASSIFIER SIGN_DECIDER; do
-  if [[ -n "${!setting}" && ! "${!setting}" =~ ^(cutter|classifier|decider):[A-Za-z0-9][A-Za-z0-9._/-]*$ ]]; then
+for setting in SIGN_CUTTER SIGN_CLASSIFIER; do
+  if [[ -n "${!setting}" && ! "${!setting}" =~ ^(cutter|classifier):[A-Za-z0-9][A-Za-z0-9._/-]*$ ]]; then
     echo "error: NNSLR_BRAIN_${setting#SIGN_} must be an id of the Models tab: ${!setting}" >&2
     exit 2
   fi
@@ -318,7 +315,6 @@ NETWORKS_FILE="$RUN_ROOT/networks.json"
 NETWORK_ARGS=()
 if [[ -n "$SIGN_CUTTER" ]]; then NETWORK_ARGS+=(--cutter "$SIGN_CUTTER"); fi
 if [[ -n "$SIGN_CLASSIFIER" ]]; then NETWORK_ARGS+=(--classifier "$SIGN_CLASSIFIER"); fi
-if [[ -n "$SIGN_DECIDER" ]]; then NETWORK_ARGS+=(--decider "$SIGN_DECIDER"); fi
 "$NN" brain-networks --run-dir "$RUN_ROOT" --data-root "$DATA_ROOT" "${NETWORK_ARGS[@]}"
 SIGN_ARGS=(--sign-networks "$NETWORKS_FILE")
 # The signs on the GPU: .venv has onnxruntime-gpu, .venv-gpu only the CPU's (torch brings its own CUDA).

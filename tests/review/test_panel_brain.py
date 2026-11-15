@@ -554,7 +554,7 @@ def test_the_labels_say_the_drives_to_read_again_and_a_problem_is_words(root, ch
     seen = []
     monkeypatch.setattr(sign_networks, 'exported', lambda root, ids: seen.append(ids) or root / 'set')
     labels = panel.brain_labels()
-    assert labels['to_read'] == 1 and seen == [IN_USE]
+    assert labels['to_read'] == 1 and seen == [{part: IN_USE[part] for part in ("cutter", "classifier")}]
     assert labels['training'] == {'drives': 0, 'hours': 0.0, 'sunnypilot_on': 0}
     # The names of the kinds of road, the first ones while Speed review has no file yet.
     assert labels['road_labels'] == {'narrow': 'Narrow road', 'country': 'Country road', 'gravel': 'Gravel road',
@@ -640,8 +640,9 @@ def sign_network_entries(panel, monkeypatch):
 
 
 def test_the_networks_that_read_its_signs_are_chosen_and_reach_the_script(root, checkout, monkeypatch, sign_networks_in_use):
-    """Train › Brain's Signs: the cutter, the classifier and the applicability network that read the signs it learns from
-    (#31), those in use when none is given (the script takes them), else finished versions of Models the comma runs."""
+    """Train › Brain's Signs: the cutter and the classifier that read the signs it learns from (#31), those in use when
+    none is given (the script takes them), else finished versions of Models the comma runs. No applicability network
+    since #90: the brain reads every sign."""
     panel = Panel(root, repo=checkout)
     brain_script(checkout)
     scanned(root)
@@ -659,34 +660,25 @@ def test_the_networks_that_read_its_signs_are_chosen_and_reach_the_script(root, 
         return re.search(r'^signs: (.*)$', full_log(panel, job['id']), re.M).group(1)
 
     assert signs_of({}) == 'unset unset unset'
-    chosen = {'sign_cutter': 'cutter:c2/signnet', 'sign_classifier': 'classifier:k2/classifier',
-              'sign_decider': 'decider:d2/experiment-b/crop_geom'}
-    assert signs_of(chosen) == 'cutter:c2/signnet classifier:k2/classifier decider:d2/experiment-b/crop_geom'
-    assert signs_of({'sign_decider': 'decider:d2/experiment-b/crop_geom'}, pipeline=True) == \
-        'unset unset decider:d2/experiment-b/crop_geom'
+    chosen = {'sign_cutter': 'cutter:c2/signnet', 'sign_classifier': 'classifier:k2/classifier'}
+    assert signs_of(chosen) == 'cutter:c2/signnet classifier:k2/classifier unset'
+    assert signs_of({'sign_classifier': 'classifier:k2/classifier'}, pipeline=True) == 'unset classifier:k2/classifier unset'
     refused = {('sign_cutter', 'cutter:c0/detector'): 'The comma reads its signs with a SignNet of its band and grid.',
                ('sign_classifier', 'classifier:k0/reader'): 'The comma reads its signs with a classifier with “not a sign”.',
                ('sign_classifier', 'classifier:k3/classifier'): 'That network has not finished its training: choose a finished one.',
-               ('sign_decider', 'decider:d3/experiment-b/crop_geom'): 'A smoke run learnt on a few frames: choose a whole '
-                                                                      'applicability training.',
-               ('sign_decider', '/etc/passwd'): 'Unknown network to read the signs with: choose one of Models.',
                ('sign_cutter', 'decider:d2/experiment-b/crop_geom'): 'Unknown network to read the signs with: choose one of Models.'}
     for (key, value), message in refused.items():
         with pytest.raises(PanelError) as error:
             panel.start('train_brain', {key: value})
         assert (error.value.status, error.value.message) == (400, message), (key, value)
-    # Without an applicability network in use the brain is refused, unless one is chosen.
+    # Without an applicability network in use the brain goes all the same: it needs none.
     del sign_networks_in_use['decider']
-    with pytest.raises(PanelError) as error:
-        panel.start('train_brain', {})
-    assert (error.value.status, error.value.reason) == (409, 'no_sign_networks')
-    assert 'no applicability network' in error.value.message
-    with pytest.raises(PanelError):
-        panel.start_pipeline({'steps': [{'action': 'train_brain', 'options': {}}]}, None)
-    assert signs_of({'sign_decider': 'decider:d2/experiment-b/crop_geom'}) == 'unset unset decider:d2/experiment-b/crop_geom'
+    assert signs_of({}) == 'unset unset unset'
+    # An applicability network sent as before never reaches the script.
+    assert signs_of({'sign_decider': 'decider:d2/experiment-b/crop_geom'}) == 'unset unset unset'
     # Only the brain takes them.
     with pytest.raises(PanelError) as error:
-        panel.start('train_decider', {'sign_decider': 'decider:d2/experiment-b/crop_geom'})
+        panel.start('train_decider', {'sign_cutter': 'cutter:c2/signnet'})
     assert error.value.status == 400
 
 
