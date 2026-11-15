@@ -126,6 +126,13 @@ TRY_STEPS = (('check', 'Check the comma', 3), ('export', 'Export the SignNet and
 # scripts/try_on_comma.sh --restore: "== 1/2 Check the comma", "== 2/2 Put back the build's networks".
 RESTORE_STEPS = (('check', 'Check the comma', 50), ('restore', "Put back the build's networks", 50))
 FETCH_STEPS = (('fetch', 'Download the drives from the comma', 100),)
+# scripts/save_networks_github.sh and scripts/restore_networks_github.sh (nnslr networks-github, #92): "== 1/4 The
+# repository ..." to "== 4/4 Push to GitHub", "== 1/3 The copy of ..." to "== 3/3 Put back ..."; the first clone and
+# the push of a new network take the time.
+GITHUB_SAVE_STEPS = (('repository', 'Check the repository on GitHub', 5), ('clone', 'Bring its copy here up to date', 30),
+                     ('copy', 'Copy the networks new or changed', 25), ('push', 'Push to GitHub', 40))
+GITHUB_RESTORE_STEPS = (('clone', 'Bring the copy of GitHub here up to date', 60), ('verify', 'Check the saved files', 15),
+                        ('put_back', 'Put back what is missing here', 25))
 # helpers/road_types.sh: openpilot.distill's localizer on the segments new to it (about 20 s of a core each, 6 side by
 # side: some 20 minutes the first time) and the GPS of the drives prepared without it or localized since, the maps the
 # drives need (seconds, a minute or two for each map downloaded), the car's speed from the logs (a minute for each new
@@ -141,17 +148,23 @@ UPDATE_STEPS = (('update', 'Update the code and restart the site', 100),)
 ROAD_LABELER_TRAIN_STEPS = (('checks', 'Check the GPU', 2), ('features', 'Read the drives and their pictures', 58),
                             ('road_labeler', 'Train and measure', 40))
 ROAD_LABELER_PREDICT_STEPS = (('checks', 'Check the GPU', 3), ('predict', 'Prepare Speed review drive by drive', 97))
-# scripts/train_box_fit.sh: "1/3 The boxes drawn by people (dry run)", "2/3 Measure on routes left out, then train on
-# every box (...)" (the trees and MLPs on the GPU), "3/3 The box refiner: ..." (on the GPU, its epochs "epoch 3/40 loss ..."); with
-# --no-refiner the first two out of 2; a dry run counts the boxes only (its command line says --dry-run).
+# scripts/train_box_fit.sh: "1/3 The boxes drawn by people (dry run)", "2/3 The two rankers: ..." (the trees and MLPs on
+# the GPU), "3/3 The box refiner: ..." (on the GPU, its epochs "epoch 3/40 loss ...", then the new version and the one in
+# use measured on the same boxes); with --no-refiner step 3 only measures (#94); a dry run counts the boxes only (its
+# command line says --dry-run). Before #94 --no-refiner had two steps ("1/2 ").
 BOX_FIT_STEPS = (('boxes', 'Count the boxes drawn by people', 2), ('rankers', 'Measure and train the two rankers', 20),
-                 ('refiner', 'Train and measure the box refiner', 78))
-BOX_FIT_RANKERS_STEPS = (('boxes', 'Count the boxes drawn by people', 10),
-                         ('rankers', 'Measure and train the two rankers', 90))
+                 ('refiner', 'Train the box refiner, measure against the version in use', 78))
+BOX_FIT_RANKERS_STEPS = (('boxes', 'Count the boxes drawn by people', 5),
+                         ('rankers', 'Measure and train the two rankers', 60),
+                         ('refiner', 'Measure against the version in use', 35))
+# The script of before #94 numbered --no-refiner's steps out of 2 ("1/2 "): its two steps.
+BOX_FIT_OLD_RANKERS_STEPS = (('boxes', 'Count the boxes drawn by people', 10),
+                             ('rankers', 'Measure and train the two rankers', 90))
 BOX_FIT_DRY_STEPS = (('boxes', 'Count the boxes drawn by people', 100),)
 BOX_FIT_STEP = re.compile(r'^([1-3])/([23]) ')
 BOX_FIT_DRY = re.compile(r'^== scripts/train_box_fit\.sh(?: \S+)* --dry-run\b', re.M)
-BOX_FIT_RANKERS_ONLY = re.compile(r'^(?:== scripts/train_box_fit\.sh(?: \S+)* --no-refiner\b|1/2 )', re.M)
+BOX_FIT_RANKERS_ONLY = re.compile(r'^== scripts/train_box_fit\.sh(?: \S+)* --no-refiner\b', re.M)
+BOX_FIT_TWO_STEPS = re.compile(r'^1/2 ', re.M)
 # nnslr_tools.box_fit.refiner_train: "epoch 3/40 loss 0.1234 61 s, mean IoU left out 0.8123".
 BOX_FIT_EPOCH = re.compile(r'^epoch (\d+)/(\d+) loss ')
 # [ai-reviewer] - START
@@ -169,13 +182,14 @@ STEPS = {'fetch': FETCH_STEPS, 'prepare': PREPARE_STEPS, 'dataset': DATASET_STEP
          'networks_publish': NETWORKS_PUBLISH_STEPS, 'road_types': ROAD_TYPES_STEPS, 'send_to_car': CAR_STEPS,
          'try_on_comma': TRY_STEPS, 'comma_restore': RESTORE_STEPS,
          'road_labeler_train': ROAD_LABELER_TRAIN_STEPS, 'road_labeler_predict': ROAD_LABELER_PREDICT_STEPS,
-         'box_fit_train': BOX_FIT_STEPS}
+         'box_fit_train': BOX_FIT_STEPS, 'networks_github_save': GITHUB_SAVE_STEPS,
+         'networks_github_restore': GITHUB_RESTORE_STEPS}
 # The actions whose percent is the weighted sum of their steps (the AI's: its frames done, from its reports).
 WEIGHTED = ('train', 'train_continue', 'train_resume', 'train_classifier', 'train_cutter', 'train_decider',
             'train_brain', 'train_users', 'regression', 'simulate', 'dataset', 'ai_review',
             'measure_ai_reviewer', 'networks_prepare', 'networks_publish', 'road_types', 'send_to_car',
             'try_on_comma', 'comma_restore', 'road_labeler_train', 'road_labeler_predict',
-            'box_fit_train')
+            'box_fit_train', 'networks_github_save', 'networks_github_restore')
 
 # The sub-steps of scripts/run_v100_baseline.sh ("== 4/10 ...") and the step they belong to.
 PIPELINE = {1: 'checks', 2: 'checks', 3: 'checks', 4: 'detector', 5: 'reader', 6: 'evaluate', 7: 'export',
@@ -203,6 +217,8 @@ SUBSTEPS = {'train_classifier': (7, CLASSIFIER_PIPELINE), 'train_cutter': (None,
             'send_to_car': (5, {1: 'export', 2: 'publish', 3: 'record', 4: 'move', 5: 'build'}),
             'try_on_comma': (5, {1: 'check', 2: 'export', 3: 'verify', 4: 'copy', 5: 'prepare'}),
             'comma_restore': (2, {1: 'check', 2: 'restore'}),
+            'networks_github_save': (4, {1: 'repository', 2: 'clone', 3: 'copy', 4: 'push'}),
+            'networks_github_restore': (3, {1: 'clone', 2: 'verify', 3: 'put_back'}),
             'road_labeler_train': (2, {1: 'checks', 2: 'features'}),
             'road_labeler_predict': (2, {1: 'checks', 2: 'predict'})}
 TITLES = {'train_cutter': CUTTER_TITLES}
@@ -306,6 +322,23 @@ FAILURES = (
      'More reviewed drives are needed before the dataset can be split.'),
     (re.compile(r'modifiche locali|local changes'),
      'The code on this server has changes of its own: the update leaves them alone.'),
+    # nnslr networks-github (#92), before the comma's: git and GitHub's API say these, over SSH too.
+    (re.compile(r'is public on GitHub: nothing is pushed'),
+     'The repository on GitHub is public: nothing was pushed. Make it private in its settings on GitHub, then save '
+     'again.'),
+    (re.compile(r'GitHub refuses the token of this server'),
+     'GitHub refused the token of this server: renew it, then try again. Nothing changed.'),
+    (re.compile(r'GitHub cannot be reached|GitHub answered \d+ for|GitHub did not create'),
+     'GitHub did not answer as it should: nothing changed. Try again in a while; Details has the log.'),
+    (re.compile(r'^error: git (?:clone|fetch|push|remote)\b', re.M),
+     'GitHub refused this server\'s SSH key, or did not answer: nothing changed on GitHub nor here. Details has the '
+     'log.'),
+    (re.compile(r'GitHub takes files up to 100 MB'),
+     'A network is larger than GitHub takes (100 MB): nothing was pushed.'),
+    (re.compile(r'has no manifest\.json this module wrote'),
+     'Nothing is saved on GitHub yet: save the networks first.'),
+    (re.compile(r'is not the file saved|is in manifest\.json but not a file of the clone|not a path of data/ or code/'),
+     'A file on GitHub is not the one saved: nothing was put back. Details has the log.'),
     (re.compile(r'Connection refused|Connection timed out|No route to host|Could not resolve hostname|'
                 r'Permission denied \(publickey'),
      'The comma did not answer, or refused this server: is it on, and on the same network?'),
@@ -330,9 +363,9 @@ FAILURES = (
     (re.compile(r'^Too few boxes drawn by people to train the box fit', re.M),
      'Too few boxes drawn by people to train Fit box yet: nothing changed.'),
     (re.compile(r'^The PyTorch environment \(\.venv-gpu', re.M),
-     'The PyTorch of .venv-gpu is missing (scripts/setup_v100_training_env.sh): the refiner is unchanged.'),
+     'The PyTorch of .venv-gpu is missing (scripts/setup_v100_training_env.sh): no new version, nothing changed.'),
     (re.compile(r'too few for the refiner'),
-     'Too few confirmed boxes to train the box refiner: the rankers are trained, the refiner is unchanged.'),
+     'Too few confirmed boxes to train the box refiner: no new version, nothing changed.'),
 )
 # How far back from the end of a failed log a known failure is looked for.
 FAILURE_LINES = 60
@@ -671,9 +704,12 @@ NET_NAMES = {'pretrain': 'Mapillary', 'signnet': 'SignNet', 'signnet_pretrain': 
 
 def box_fit_steps(text: str) -> tuple:
     """The steps of a training of Fit box from its log: a dry run counts the boxes only, --no-refiner trains the two
-    rankers alone (its steps out of 2), else the refiner too."""
+    rankers and then only measures, else the refiner too; a log of the script of before #94 with its steps out of 2,
+    those two."""
     if BOX_FIT_DRY.search(text):
         return BOX_FIT_DRY_STEPS
+    if BOX_FIT_TWO_STEPS.search(text):
+        return BOX_FIT_OLD_RANKERS_STEPS
     return BOX_FIT_RANKERS_STEPS if BOX_FIT_RANKERS_ONLY.search(text) else BOX_FIT_STEPS
 
 

@@ -14,7 +14,8 @@ export const RESUME_JOB: InjectionKey<(job: Job) => Promise<void>> = Symbol('res
 export const RETRY_JOB: InjectionKey<{can: (job: Job) => boolean; run: (job: Job) => void}> = Symbol('retry-job');
 /** The actions whose failed job can simply run again: no option but the proposer (a training has Resume). */
 export const RETRY_ACTIONS: ActionName[] = ['fetch', 'prepare', 'prepare_again', 'setup_vlm', 'dataset', 'measure_proposer',
-  'networks_prepare', 'road_types', 'mapillary_locations', 'mapillary_windows', 'review_box'];
+  'networks_prepare', 'road_types', 'mapillary_locations', 'mapillary_windows', 'review_box', 'networks_github_save',
+  'networks_github_restore'];
 
 /** The question before an action; null: it starts at the click (preparing, importing the reviews, the road types). */
 /** The proposer as the Prepare tab names it. */
@@ -107,6 +108,14 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
         + 'Hugging Face, public: anyone can download them, and a copy may stay even if you delete it later. No frame '
         + 'or dataset is uploaded.' + (options?.license ? ' Its licence: ' + options.license + '.' : '')};
   }
+  if (name === 'networks_github_restore') {
+    return {title: 'Restore the networks from GitHub?', action: 'Restore',
+      text: 'Brings the copy of the private repository here up to date, checks every saved file, then puts back in the data '
+        + 'root each one missing here, with the records of the networks in use and on the car when they are missing. A '
+        + 'file already here is never overwritten: one that differs stays as it is and is listed. The versions of Fit '
+        + 'box come back as the other networks, and the choice of the one in use when it is missing; only its files in '
+        + 'the code are compared, they come with the code. A few minutes.'};
+  }
   if (name === 'setup_vlm') {
     return {title: 'Install Qwen3-VL?', action: 'Install',
       text: 'Downloads the model (17.5 GB, the files already copied here are kept), installs what it needs and tries it on the GPU. '
@@ -182,12 +191,12 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
   if (name === 'box_fit_train') {
     const refiner = options?.refiner !== 'off';
     return {title: refiner ? 'Train Fit box and its refiner?' : 'Train the rankers of Fit box?', action: 'Start training',
-      text: 'On the CPU, the GPU is not used. First the two rankers (colour trees and edge networks) are measured on '
-        + 'drives left out, then trained on every box people drew: about 15 minutes; they replace colour.npz and edges.npz.'
-        + (refiner ? ' Then the box refiner, a small network, trains for about an hour and replaces refiner.onnx only '
-          + 'if it beats the rankers on the drives left out.' : '')
-        + ' The review page uses the new models after the site restarts. The models are files of the checkout: '
-        + 'commit them, or Update the site stops on the local changes.'};
+      text: 'A new version of Fit box, on a V100. First the two rankers (colour trees and edge networks) are measured on '
+        + 'drives left out, then trained on every box people drew: about 15 minutes.'
+        + (refiner ? ' Then the box refiner, a small network, trains for about half an hour.'
+          : ' No refiner is trained: the version carries the refiner of the version in use.')
+        + ' Last, this version and the version in use fit the same boxes of the drives left out. Nothing is replaced: '
+        + 'the version appears in the list with its measures, and you choose with Use this one.'};
   }
   // send_to_car, try_on_comma, comma_restore: the Publish and Models tabs ask themselves (models.ts publishQuestion,
   // tryQuestion, restoreQuestion), naming the SignNet and the classifier in use.
@@ -226,9 +235,11 @@ const STOP_TEXT: Partial<Record<ActionName, string>> = {
   road_labeler_train: 'The pictures of the drives already read stay: training again reads only the others, then starts '
     + 'over on a new run.',
   road_labeler_predict: 'The drives done keep what it wrote; preparing again does every drive again.',
-  box_fit_train: 'Models already written stay (the rankers once their step is over); the refiner is written only at '
-    + 'its end. Training again starts over.',
+  box_fit_train: 'The new version appears only at the end: stopped, nothing of it is kept and the version in use stays. '
+    + 'Training again starts over.',
   simulate: 'The drives already replayed keep their result: replaying again skips them.',
+  networks_github_save: 'Nothing is pushed until the end: GitHub keeps the last save, and saving again starts over.',
+  networks_github_restore: 'The files already put back stay; restoring again puts back only those still missing.',
 };
 
 /** run() and stop() for the buttons; refresh reads /api/panel/status again. */

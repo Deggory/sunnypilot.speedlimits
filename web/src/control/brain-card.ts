@@ -65,7 +65,7 @@ export const BRAIN_ANSWERS: BrainFact[] = [
   {name: 'speed', what: 'your dashboard speed, driver_speed (vEgoCluster, or vEgo + the car’s offset), on every second of the dashcam '
     + 'drives; the kph of your blocks of Speed review where you set one'},
   {name: 'works_head', what: 'the roadworks on the road, where they are marked in Speed review (Roadworks on)'},
-  {name: 'road_head', what: 'the kinds of road (narrow, country, gravel, potholes…), where they are marked in Speed review (Road conditions on)'},
+  {name: 'road_head', what: 'the kinds of road (narrow, country, gravel, potholes, speed bumps…), where they are marked in Speed review (Road conditions on)'},
   {name: 'type_head', what: 'the road type of the map (Read the map in Data › Prepare), corrected in Speed review where it is wrong (Road type (map) on)'},
   {name: 'users_head', what: 'where the persons and two-wheelers are (a detector, nnslr road-users) and the vehicles you confirmed crossing our path, in 8 columns, with their height (Road users on)'},
   {name: 'applicability_head', what: 'whose road the speed sign in each of the 8 columns of sign_boxes is of, ours or another, where a box you reviewed in Sign review says it (Applicability on)'},

@@ -255,7 +255,8 @@ Day-to-day work happens on the site, whose buttons run a few helper scripts and 
 - `scripts/send_to_car.sh` and `scripts/try_on_comma.sh`: Publish (to the car) and Try on the comma now.
 - `helpers/ai_review.sh` and `helpers/measure_ai_reviewer.sh`: the AI reviewer. Its providers and keys stay on the server.
 - `helpers/mapillary.sh`, `helpers/mapillary_windows.sh`, `helpers/mapillary_locations.sh`: the Mapillary Traffic Sign Dataset, as crops for the classifier, as windows for the cutter, and where its photos were taken (CPU; the last one asks the Mapillary API).
-- `scripts/train_box_fit.sh`: trains the review page's **Fit box** on the boxes people drew: the candidates cut on the CPU, the trees, networks and refiner trained on a V100 ([#65](https://github.com/cristianku/sunnypilot.smartspeed/issues/65)).
+- `scripts/train_box_fit.sh`: trains the review page's **Fit box** on the boxes people drew into a new version, `data/runs/<run>-box-fit/`, measured against the one in use and chosen in Models › Review helpers › Fit box ([#94](https://github.com/cristianku/sunnypilot.smartspeed/issues/94)): the candidates cut on the CPU, the trees, networks and refiner trained on a V100 ([#65](https://github.com/cristianku/sunnypilot.smartspeed/issues/65)).
+- `scripts/save_networks_github.sh` and `scripts/restore_networks_github.sh`: our networks saved in, and put back from, the private repository `cristianku/smartspeed-networks`, Fit box's versions too; the portal marks what GitHub has (Models › Publish › GitHub, [#92](https://github.com/cristianku/sunnypilot.smartspeed/issues/92)).
 - `scripts/setup_guest_access.sh`: opens the portal to reviewers from outside, who work only on the drives given to them in Data › Reviewers.
 
 ## More

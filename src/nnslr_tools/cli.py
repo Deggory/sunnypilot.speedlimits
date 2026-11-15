@@ -1390,6 +1390,22 @@ def _cmd_networks_published(args: argparse.Namespace) -> int:
 
     print(json.dumps(mark_published(Path(args.package), args.repo, args.url), indent=2, sort_keys=True))
     return 0
+
+
+def _cmd_networks_github(args: argparse.Namespace) -> int:
+    from nnslr_tools import networks_github
+
+    root = _resolve_data_root(args.data_root)
+    clone = Path(args.clone) if args.clone else None
+    log = lambda text: print(text, flush=True)  # noqa: E731
+    if args.mode == 'plan':
+        report = networks_github.plan_summary(networks_github.plan(root))
+    elif args.mode == 'save':
+        report = networks_github.save(root, clone=clone, log=log)
+    else:
+        report = networks_github.restore(root, clone=clone, log=log)
+    print(json.dumps(report, indent=2, sort_keys=True, allow_nan=False, default=str))
+    return 0
 # [networks-package] - END
 
 
@@ -1961,7 +1977,9 @@ def build_parser() -> argparse.ArgumentParser:
                                                      "colour.npz and edges.npz trained on every box")
     p_box_fit.add_argument("--out", default=None,
                            help="folder for colour.npz and edges.npz (default: the package's own, "
-                                "src/nnslr_tools/box_fit, which the review site loads)")
+                                "src/nnslr_tools/box_fit, the version box_fit:code); in any other folder also the pair "
+                                "without the routes left out of the measure, in measure/ (scripts/train_box_fit.sh "
+                                "passes the new version's folder)")
     p_box_fit.add_argument("--dataset", default=None, help="default: <data root>/annotations/objects.jsonl")
     p_box_fit.add_argument("--folds", type=int, default=4,
                            help="route groups of the honest measure before the final training (default 4; 0 or 1: "
@@ -2610,6 +2628,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_networks_published.add_argument("--repo", required=True)
     p_networks_published.add_argument("--url", required=True)
     p_networks_published.set_defaults(func=_cmd_networks_published)
+    p_networks_github = sub.add_parser(
+        "networks-github",
+        help="our networks saved on GitHub, in the private repository cristianku/smartspeed-networks (#92): plan (what "
+             "a save copies, nothing done), save (check the repository, private, copy, commit, push over SSH), restore "
+             "(put back in the data root every saved file missing there, never overwriting one)")
+    p_networks_github.add_argument("mode", choices=("plan", "save", "restore"))
+    p_networks_github.add_argument("--data-root")
+    p_networks_github.add_argument("--clone", help="the clone of the repository (default NNSLR_NETWORKS_CLONE or "
+                                                   "/root/smartspeed-networks)")
+    p_networks_github.set_defaults(func=_cmd_networks_github)
     # [networks-package] - END
 
     # [core-export] - START

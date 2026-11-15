@@ -18,7 +18,8 @@
 // review page trained again on a V100, with its last measures).
 import {computed, nextTick, ref, watch} from 'vue';
 import {isoWhen} from '../common/format';
-import type {ActionName, ActionOptions, ActionState, Job, ModelRole, ModelVersion, PanelStatus, RoleModels} from '../common/panel-types';
+import type {ActionName, ActionOptions, ActionState, GitHubFileState, Job, ModelRole, ModelVersion, PanelStatus,
+  RoleModels} from '../common/panel-types';
 import {askConfirm} from '../composables/confirm';
 import ApplicabilityCard from './ApplicabilityCard.vue';
 import {pct} from './evaluate';
@@ -39,6 +40,12 @@ const {payload, error, refresh} = useModels();
 const roles = computed((): RoleModels[] => payload.value?.roles ?? []);
 /** Read-only server: the choice is off, as the buttons of the other tabs. */
 const readOnly = computed(() => (props.status !== null && !props.status.actions_enabled) || Boolean(payload.value?.active_problem));
+/** Whether GitHub has each version a save copies as it is here (#92, the status's networks.github.freshness); null on
+ * a server that does not tell. */
+const github = computed(() => props.status?.networks?.github?.freshness?.versions ?? null);
+const githubOf = (id: string | undefined): GitHubFileState | null => (id && github.value?.[id]) || null;
+const GITHUB_WORDS: Record<GitHubFileState, string> = {saved: 'on GitHub', changed: 'changed since the GitHub save',
+  missing: 'not on GitHub'};
 /** The version being put in use, so its button waits for the answer. */
 const busy = ref<string | null>(null);
 
@@ -226,7 +233,9 @@ async function choose(version: ModelVersion): Promise<void> {
         <template v-if="inUseOf(role)">
           <strong class="inuse-name">{{ inUseOf(role)?.label }}</strong>
           <span class="inuse-when">{{ inUseOf(role)?.trained_at ? isoWhen(inUseOf(role)?.trained_at ?? null) : inUseOf(role)?.run }}<span
-            v-if="role.active" class="inuse-chosen"> · {{ chosenText(role.active) }}</span></span>
+            v-if="role.active" class="inuse-chosen"> · {{ chosenText(role.active) }}</span><span
+            v-if="githubOf(inUseOf(role)?.id)" class="inuse-github" :class="githubOf(inUseOf(role)?.id) === 'saved' ? 'vt-use' : 'vt-wait'"> · {{
+              GITHUB_WORDS[githubOf(inUseOf(role)?.id)!] }}</span></span>
           <span class="inuse-figs">
             <span v-for="metric in metricsOf(inUseOf(role) as ModelVersion).slice(0, 2)" :key="metric.key" class="inuse-fig">
               <b>{{ metric.value === null ? '–' : pct(metric.value) }}</b><small v-if="metric.short"><span class="fig-long">{{ metric.label }}</span><span
@@ -264,7 +273,7 @@ async function choose(version: ModelVersion): Promise<void> {
 
     <!-- The versions of one network, to compare and to choose. -->
     <VersionsCard v-if="pickedRole" :key="pickedRole.role" :role="pickedRole" :recent="recent[pickedRole.role] ?? pickedRole.versions"
-                  :payload="payload" :read-only="readOnly" :busy="busy" :car="car" :trial="trial"
+                  :payload="payload" :read-only="readOnly" :busy="busy" :car="car" :trial="trial" :github="github"
                   :open-id="linkedVersion" @use="choose" @try="tryOnComma">
       <Segmented v-model="picked" :options="roleOptions" label="Network" class="versions-seg"/>
       <template #foot>
@@ -293,7 +302,7 @@ async function choose(version: ModelVersion): Promise<void> {
                          :versions-open="fromHash === 'decider'"
                          @run="(...args) => emit('run', ...args)" @stop="emit('stop', $event)" @details="emit('details', $event)">
         <VersionsCard v-if="deciderRole" bare :role="deciderRole" :recent="recent.decider ?? deciderRole.versions" :payload="payload"
-                      :read-only="readOnly" :busy="busy" :car="car" :trial="trial"
+                      :read-only="readOnly" :busy="busy" :car="car" :trial="trial" :github="github"
                       :open-id="fromHash === 'decider' ? fromHashVersion : ''" @use="choose" @try="tryOnComma"/>
       </ApplicabilityCard>
       <!-- The road labeler: an offline network that prepares Speed review, never on the car. -->

@@ -1,6 +1,7 @@
 """Training of the box refiner (:mod:`.refiner`) on the boxes people confirmed, on the GPU (PyTorch of .venv-gpu, the
-card CUDA_VISIBLE_DEVICES gives; without one it stops, never the CPU), then the comparison with the colour and edge rankers on routes left out, and ``refiner.onnx`` written only
-when the refiner wins there.
+card CUDA_VISIBLE_DEVICES gives; without one it stops, never the CPU), written as ``refiner.onnx`` into the folder of a new
+version of Fit box (:mod:`.versions`, ``--out``), then the measure of that version against the version in use on the routes
+left out. Nothing in use is replaced: a person chooses the version (#94).
 
 The boxes: every sign box of the frames a person confirmed in the review (``annotations/review.sqlite``, a reviewer
 that is not ``ai/...``), not ``not_a_sign``, at least 4 px a side, on a frame whose picture is on the server; they
@@ -21,21 +22,24 @@ the JPEG. The network also answers how right the rough box already is (its IoU w
 Fit box uses to leave a good box to the rankers (``refiner.KEEP``). The loss: smooth L1 on the sides plus GIoU, plus
 L1 on that IoU. The epoch with the best mean IoU after ``STEPS`` passes on the routes left out is kept.
 
-Then the measure the decision rests on, on the full frames of the routes left out with the rough boxes of the
-rankers' benchmark (:func:`.train.make_cases`): the rough box, the rankers (:func:`nnslr_tools.box_fit.fit_image`
-without the refiner) and Fit box as the site runs it with the new refiner (under ``refiner.GATE`` pixels the refiner,
-then the rankers). ``refiner.onnx`` is written (replaced in one step) only when that mean IoU is higher than the
-rankers', in all and on the small signs, and than Fit box with the refiner in use (when there is one) in all;
-otherwise nothing changes. The summary is printed
-as JSON on the last line.
+Then the measure, on the full frames of the routes left out with the rough boxes of the rankers' benchmark
+(:func:`.train.make_cases`), each box fitted four ways: the rough box itself, the new version's rankers alone
+(:func:`nnslr_tools.box_fit.fit_image` without the refiner), the new version as the review page runs it (under
+``refiner.GATE`` pixels its refiner, then its rankers) and the version in use as the review page runs it (its own
+rankers and refiner), on the same boxes. Each version is run from its ``measure/`` folder when it has one, the rankers
+trained without these routes (:func:`.versions.measure_folder`); the new version's refiner is copied there first. The
+summary says which of the two were clean (``clean``). ``--measure-only`` trains nothing and measures the version in
+``--out`` (its rankers, and the refiner it holds, if any) the same way. ``--in-use ID`` names the version in use the
+script read at its start, so that both measures and its last line speak of the same one. The summary is printed as JSON
+on the last line.
 
-usage: .venv-gpu/bin/python -m nnslr_tools.box_fit.refiner_train [--epochs 40] [--out DIR] [--dry-run]
+usage: .venv-gpu/bin/python -m nnslr_tools.box_fit.refiner_train --out DIR [--epochs 40] [--in-use ID]
+       [--dry-run | --measure-only]
 """
 from __future__ import annotations
 
 import argparse
 import collections
-import hashlib
 import json
 import math
 import os
@@ -47,7 +51,8 @@ from pathlib import Path
 
 import numpy as np
 
-from nnslr_tools.box_fit import refiner
+from nnslr_tools.box_fit import refiner, versions
+from nnslr_tools.box_fit.versions import held_out
 
 REGION, MAX_REGION = 6.0, 384     # the neighbourhood cut around each box: its longer side times REGION, at most px
 PER_BOX = 4                       # rough boxes of each box per epoch
@@ -103,11 +108,6 @@ def box_source(det: dict, proposed: dict) -> str:
     if det.get('detection_id') in proposed and proposed[det.get('detection_id')] == det.get('bbox_xyxy'):
         return 'model'
     return 'unknown'
-
-
-def held_out(route: str) -> bool:
-    """About a quarter of the routes, the same every time."""
-    return int(hashlib.sha1(route.encode()).hexdigest(), 16) % 4 == 0
 
 
 def iou(a, b) -> float:
@@ -249,33 +249,47 @@ def validate(model, val) -> float:
     return float(np.mean([iou(b, c['truth']) for (_, _, c), b in zip(val, rough)]))
 
 
+# The two versions a worker of compare fits with: {'new': folder, 'in_use': folder or None}.
+_FOLDERS: dict[str, Path | None] = {}
+# What compare measures, each the mean IoU with the person's box and the share at 0.8 or more: the rough box, the new
+# version's rankers alone, the new version as the review page runs it, the version in use as the review page runs it.
+MEASURES = ('rough', 'rankers', 'version', 'in_use')
+
+
 def _compare_one(case):
     import cv2
     from nnslr_tools import box_fit
     cv2.setNumThreads(1)
-    img = box_fit.read_image(case['image_path'])
+    try:
+        img = box_fit.read_image(case['image_path'])
+    except OSError:
+        return None
     rough = box_fit.clip_box(case['rough'], img.shape[1], img.shape[0])
     if rough is None:
         return None
-    rankers = box_fit.fit_image(img, rough, use_refiner=False) or rough
-    # Fit box as the site runs it with this refiner: under refiner.GATE the refiner, then the rankers.
-    refined = box_fit.fit_image(img, rough) or rough
-    return {'size': case['size'], 'kind': case['kind'], 'family': case['family'], 'source': case.get('source', 'unknown'),
-            'rough': iou(rough, case['truth']),
-            'rankers': iou(rankers, case['truth']), 'refiner': iou(refined, case['truth'])}
+    new, in_use = _FOLDERS['new'], _FOLDERS.get('in_use')
+    rankers = box_fit.fit_image(img, rough, use_refiner=False, folder=new) or rough
+    # Each version as the review page runs it: under refiner.GATE its refiner (when it has one), then its rankers.
+    version = box_fit.fit_image(img, rough, folder=new) or rough
+    row = {'size': case['size'], 'kind': case['kind'], 'family': case['family'], 'source': case.get('source', 'unknown'),
+           'rough': iou(rough, case['truth']), 'rankers': iou(rankers, case['truth']), 'version': iou(version, case['truth'])}
+    if in_use is not None:
+        row['in_use'] = iou(box_fit.fit_image(img, rough, folder=in_use) or rough, case['truth'])
+    return row
 
 
-def _use_refiner(path: str) -> None:
-    """A worker of compare: Fit box with the refiner at this path (the parent's refiner.MODEL)."""
-    refiner.MODEL = Path(path)
-    refiner._session = None
+def _use_folders(new: str, in_use: str | None) -> None:
+    """A worker of compare: the folders of the new version and of the version in use."""
+    _FOLDERS.update(new=Path(new), in_use=Path(in_use) if in_use else None)
 
 
-def compare(cases, workers: int) -> dict:
-    """Mean IoU and share >= 0.8 of the rough box, the rankers and the refiner, in all, by size and by kind."""
+def compare(cases, workers: int, new: Path, in_use: Path | None) -> dict:
+    """MEASURES (mean IoU and share >= 0.8) of the version in ``new`` and of the one in ``in_use`` (None: not measured)
+    on the same rough boxes, in all, by size, by kind and by source, and on the boxes Fit box did not place (fair)."""
     # Spawned, not forked: after the training the parent holds the threads of CUDA and torch, and a worker forked from it
     # can wait forever on a lock one of them held (11 Nov 2026, #65: the measure stood still for over an hour).
-    with get_context('spawn').Pool(workers, initializer=_use_refiner, initargs=(str(refiner.MODEL),)) as pool:
+    with get_context('spawn').Pool(workers, initializer=_use_folders,
+                                   initargs=(str(new), str(in_use) if in_use is not None else None)) as pool:
         rows = [r for r in pool.map(_compare_one, cases, chunksize=16) if r]
     groups = collections.defaultdict(list)
     for r in rows:
@@ -283,16 +297,52 @@ def compare(cases, workers: int) -> dict:
             groups[g].append(r)
         if r['source'] not in FIT_SOURCES:
             groups['fair'].append(r)
-    return {g: {'cases': len(rs), **{k: round(float(np.mean([r[k] for r in rs])), 4) for k in ('rough', 'rankers', 'refiner')},
-                **{k + '>=0.8': round(float(np.mean([r[k] >= 0.8 for r in rs])), 4) for k in ('rankers', 'refiner')}}
+    keys = [k for k in MEASURES if k != 'in_use' or in_use is not None]
+    return {g: {'cases': len(rs), **{k: round(float(np.mean([r[k] for r in rs])), 4) for k in keys},
+                **{k + '>=0.8': round(float(np.mean([r[k] >= 0.8 for r in rs])), 4) for k in keys if k != 'rough'}}
             for g, rs in sorted(groups.items())}
 
 
-def run(data_root: Path, out_dir: Path, *, epochs: int, workers: int, dry_run: bool = False, log=print,
-        device: str = 'cuda') -> dict:
-    import torch
-    import torch.nn.functional as F
+def _version_in_use(data_root: Path, in_use_id: str | None) -> dict:
+    """The version in use: the one named by ``in_use_id`` (the script read it at its start) while its folder is here,
+    else the one in use now."""
+    folder = versions.folder_of(data_root, in_use_id) if in_use_id else None
+    if folder is not None:
+        return {'id': in_use_id, 'folder': folder, 'problem': None}
+    used = versions.in_use(data_root)
+    return {'id': used['id'], 'folder': used['folder'], 'problem': used['problem']}
 
+
+def measure_version(data_root: Path, out_dir: Path, cases, workers: int, summary: dict, log=print,
+                    in_use_id: str | None = None) -> dict:
+    """The version in ``out_dir`` against the version in use, on the same rough boxes left out: summary's 'in_use' (its
+    id, and why the chosen one is not used, if so), 'left_out' (compare), 'clean' (which of the two ran from rankers
+    trained without these routes) and 'better_than_in_use'."""
+    used = _version_in_use(data_root, in_use_id)
+    summary['in_use'] = {'id': used['id'], 'problem': used['problem']}
+    measure_dir = out_dir / versions.MEASURE
+    if (out_dir / refiner.MODEL.name).is_file() and measure_dir.is_dir():
+        tmp = measure_dir / f'.{refiner.MODEL.name}.tmp'
+        tmp.write_bytes((out_dir / refiner.MODEL.name).read_bytes())
+        os.replace(tmp, measure_dir / refiner.MODEL.name)
+    new, new_clean = versions.measure_folder(out_dir)
+    old, old_clean = versions.measure_folder(used['folder'])
+    summary['clean'] = {'version': new_clean, 'in_use': old_clean}
+    log(f'measuring this version and the version in use ({used["id"]}) on the full frames left out'
+        + ('' if new_clean and old_clean else ': ' + ' and '.join(
+            name for name, clean in (('this version', new_clean), ('the version in use', old_clean)) if not clean)
+           + ' trained on these routes too'))
+    measure = compare(cases, workers, new, old)
+    summary['left_out'] = measure
+    summary['better_than_in_use'] = measure['all']['version'] > measure['all']['in_use']
+    log(verdict(measure, used['id']))
+    return summary
+
+
+def run(data_root: Path, out_dir: Path, *, epochs: int, workers: int, dry_run: bool = False, log=print,
+        device: str = 'cuda', measure_only: bool = False, in_use_id: str | None = None) -> dict:
+    """Train the refiner into ``out_dir`` (a new version's folder, which already holds its rankers) and measure that
+    version against the version in use; with ``measure_only`` only the measure."""
     from nnslr_tools.box_fit import train as rankers_train
     items = confirmed_boxes(data_root / 'annotations' / 'review.sqlite', data_root)
     train_items = [it for it in items if not held_out(it['route'])]
@@ -302,9 +352,21 @@ def run(data_root: Path, out_dir: Path, *, epochs: int, workers: int, dry_run: b
                'by_size': dict(sorted(collections.Counter(it['size'] for it in items).items())),
                'by_source': dict(sorted(collections.Counter(it['source'] for it in items).items())),
                'hand_weight': HAND_WEIGHT,
-               'min_boxes': MIN_BOXES, 'epochs': epochs, 'out': str(out_dir / refiner.MODEL.name)}
+               'min_boxes': MIN_BOXES, 'epochs': epochs, 'out': str(out_dir)}
     if dry_run:
         return {'dry_run': True, **summary}
+    if not all((out_dir / name).is_file() for name in ('colour.npz', 'edges.npz')):
+        raise ValueError(f'{out_dir} has no colour.npz and edges.npz: the rankers of the version are trained first')
+    if measure_only:
+        if not val_items:
+            raise ValueError('no confirmed box on the routes left out: nothing to measure on')
+        summary['refiner'] = 'carried' if (out_dir / refiner.MODEL.name).is_file() else 'none'
+        started = time.time()
+        measure_version(data_root, out_dir, rankers_train.make_cases(val_items), workers, summary, log, in_use_id)
+        summary['minutes'] = round((time.time() - started) / 60, 1)
+        return summary
+    import torch
+    import torch.nn.functional as F
     if len(train_items) < MIN_BOXES or not val_items:
         raise ValueError(f'only {len(train_items)} boxes to train on: too few for the refiner')
     torch.manual_seed(SEED)
@@ -370,60 +432,24 @@ def run(data_root: Path, out_dir: Path, *, epochs: int, workers: int, dry_run: b
     summary['best_epoch'] = scores.index(max(scores)) + 1
 
     left_out = [c for c in cases if region_of[c['annotation_id']] is not None]
-    # Fit box with the refiner in use, when there is one: the new one must beat it too.
-    current = None
-    if (out_dir / refiner.MODEL.name).is_file():
-        refiner.MODEL, saved_model = out_dir / refiner.MODEL.name, refiner.MODEL
-        refiner._session = None
-        try:
-            log('measuring Fit box with the refiner in use on the full frames left out')
-            current = compare(left_out, workers)
-        finally:
-            refiner.MODEL = saved_model
-            refiner._session = None
-        summary['current'] = current
-    # The refiner as the site would run it, from a file next to the target, then the measure on the full frames.
-    out_dir.mkdir(parents=True, exist_ok=True)
+    # The refiner goes into the new version's folder in one step: the version is the rankers and this refiner together.
     tmp = out_dir / f'.{refiner.MODEL.name}.tmp'
     export(model, tmp)
-    refiner.MODEL, saved_model = tmp, refiner.MODEL
-    refiner._session = None
-    try:
-        log('comparing the refiner with the rankers on the full frames left out')
-        measure = compare(left_out, workers)
-    finally:
-        refiner.MODEL = saved_model
-        refiner._session = None
-    summary['left_out'] = measure
-    small = measure.get('size:small', measure['all'])
-    wins = (measure['all']['refiner'] > measure['all']['rankers'] and small['refiner'] > small['rankers']
-            and (current is None or measure['all']['refiner'] > current['all']['refiner']))
-    summary['refiner_wins'] = wins
-    if wins:
-        os.replace(tmp, out_dir / refiner.MODEL.name)
-        summary['written'] = str(out_dir / refiner.MODEL.name)
-    else:
-        tmp.unlink(missing_ok=True)
-        summary['written'] = None
-    log(verdict(measure, current, wins))
+    os.replace(tmp, out_dir / refiner.MODEL.name)
+    summary['refiner'] = 'trained'
+    measure_version(data_root, out_dir, left_out, workers, summary, log, in_use_id)
     summary['minutes'] = round((time.time() - started) / 60, 1)
     return summary
 
 
-def verdict(measure: dict, current: dict | None, wins: bool) -> str:
-    """The outcome in one sentence for the log: the new refiner's mean IoU on the boxes left out against the one in
-    use and the rankers, and whether refiner.onnx was replaced or kept."""
-    new, rankers = measure['all']['refiner'], measure['all']['rankers']
-    small = measure.get('size:small', measure['all'])
-    in_use = current['all']['refiner'] if current else None
-    against = (f'the one in use {in_use:.3f}, ' if in_use is not None else '') + f'the rankers {rankers:.3f}'
-    if wins:
-        return f'The new refiner is better: mean IoU {new:.3f} on the boxes left out ({against}): refiner.onnx replaced.'
-    why = ('it does not beat the one in use' if in_use is not None and new <= in_use else
-           'it does not beat the rankers' if new <= rankers else 'it does not beat the rankers on the small signs '
-           f'({small["refiner"]:.3f} against {small["rankers"]:.3f})')
-    return (f'The new refiner is not better: mean IoU {new:.3f} on the boxes left out ({against}), {why}: '
-            'refiner.onnx kept as it was.')
+def verdict(measure: dict, in_use_id: str) -> str:
+    """The outcome in one sentence for the log: the new version's mean IoU on the boxes left out as the review page runs
+    it, against the version in use on the same boxes and its own rankers alone. Nothing is replaced either way."""
+    new, used, rankers = measure['all']['version'], measure['all']['in_use'], measure['all']['rankers']
+    word = 'better than' if new > used else 'as good as' if new == used else 'worse than'
+    return (f'This version: mean IoU {new:.4f} on the {measure["all"]["cases"]} boxes left out as the review page runs it, '
+            f'{word} the version in use ({in_use_id}) {used:.4f} on the same boxes; its rankers alone {rankers:.4f}. '
+            'Nothing replaced: the version in use is chosen in Models › Review helpers › Fit box.')
 
 
 def export(model, path: Path) -> None:
@@ -441,21 +467,26 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog='python -m nnslr_tools.box_fit.refiner_train',
                                      description='train the box refiner of Fit box on the boxes people confirmed')
     parser.add_argument('--data-root', help='default: NNSLR_DATA_ROOT or <repo>/data')
-    parser.add_argument('--out', default=None, help='folder of refiner.onnx (default: the package, which the site loads)')
+    parser.add_argument('--out', required=True,
+                        help='the folder of the new version, which holds its rankers (colour.npz, edges.npz)')
     parser.add_argument('--epochs', type=int, default=40)
     parser.add_argument('--workers', type=int, default=max(1, min(12, (os.cpu_count() or 2) // 2)))
     parser.add_argument('--device', default='cuda',
                         help='the card (default cuda, the one CUDA_VISIBLE_DEVICES gives); never the CPU')
     parser.add_argument('--dry-run', action='store_true', help='only count the boxes and the routes left out')
+    parser.add_argument('--measure-only', action='store_true',
+                        help='train nothing: measure the version in --out against the version in use')
+    parser.add_argument('--in-use', help='the version in use the training started with (box_fit:...); default: the one '
+                                         'in use now')
     args = parser.parse_args(argv)
-    if not args.dry_run:
+    if not args.dry_run and not args.measure_only:
         import torch
         if not args.device.startswith('cuda') or not torch.cuda.is_available():
             print(f'No CUDA card for {args.device!r} (CUDA_VISIBLE_DEVICES, nvidia-smi): the refiner trains on the GPU '
                   'only. Nothing changed.', file=sys.stderr)
             return 1
-    summary = run(resolve_data_root(args.data_root), Path(args.out) if args.out else refiner.HERE,
-                  epochs=args.epochs, workers=args.workers, dry_run=args.dry_run, device=args.device,
+    summary = run(resolve_data_root(args.data_root), Path(args.out), epochs=args.epochs, workers=args.workers,
+                  dry_run=args.dry_run, device=args.device, measure_only=args.measure_only, in_use_id=args.in_use,
                   log=lambda line: print(line, file=sys.stderr, flush=True))
     print(json.dumps(summary))
     return 0

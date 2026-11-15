@@ -9,12 +9,15 @@ Two rankers look at the same decoded frame:
 
 The answer is the mean of the two boxes, pulled back toward the rough box when it already agrees with it
 (``a = clip((IoU(fit, rough) - LO) / (1 - LO))``, ``box = (1 - a) * fit + a * rough``), so a well drawn box is
-barely moved. The weights are ``colour.npz`` and ``edges.npz`` next to this file, made by ``nnslr train-box-fit``
-from the boxes people drew (:mod:`.train`). numpy and OpenCV only, one OpenCV thread per process.
+barely moved. The weights are ``colour.npz`` and ``edges.npz`` of a version (:mod:`.versions`: a training's run
+folder in the data root, or the files next to this file, the code's), made by ``nnslr train-box-fit`` from the boxes
+people drew (:mod:`.train`). numpy and OpenCV only, one OpenCV thread per process.
 
-When ``refiner.onnx`` is next to this file the answer is the refiner's instead (:mod:`.refiner`, a small CNN trained
-on the boxes people confirmed by :mod:`.refiner_train`, written only when it beat the two rankers on routes left
-out): it also fits the signs the colour rules miss, such as the white ring on the black plate of a gantry display.
+When the version has a ``refiner.onnx`` the answer on a small box is the refiner's (:mod:`.refiner`, a small CNN
+trained on the boxes people confirmed by :mod:`.refiner_train`): it also fits the signs the colour rules miss, such as
+the white ring on the black plate of a gantry display. The review page fits with the version in use
+(``fit_image(..., folder=versions.folder_in_use(root))``); the models of each folder are loaded once and again when
+their files change.
 """
 from __future__ import annotations
 
@@ -31,22 +34,41 @@ LO = 0.65          # the pull-back toward the rough box starts when IoU(fit, rou
 W_COLOUR = 0.5     # the weight of the colour box in the mean
 MIN_SIDE = 3.0     # a rough box with a shorter side is kept as it is
 
-_models: tuple | None = None
+# The models of each folder: {folder: ((mtime_ns, size) of both files, (colour model, edges model))}.
+_models: dict[str, tuple[tuple, tuple]] = {}
 _lock = threading.Lock()
 
 
-def models() -> tuple:
-    """(colour model, edges model), loaded once per process."""
-    global _models
-    if _models is None:
-        with _lock:
-            if _models is None:
-                import cv2
+def _stamp(*paths: Path) -> tuple:
+    out = []
+    for path in paths:
+        try:
+            stat = path.stat()
+            out.append((stat.st_mtime_ns, stat.st_size))
+        except OSError:
+            out.append(None)
+    return tuple(out)
 
-                from nnslr_tools.box_fit import edges, gbdt
-                cv2.setNumThreads(1)
-                _models = (gbdt.load(COLOUR_MODEL), edges.load(EDGES_MODEL))
-    return _models
+
+def models(folder: Path | None = None) -> tuple:
+    """(colour model, edges model) of a version's folder (None: the code's files, COLOUR_MODEL and EDGES_MODEL),
+    loaded once per process and again when a file changes."""
+    colour_path, edges_path = ((COLOUR_MODEL, EDGES_MODEL) if folder is None else
+                               (Path(folder) / COLOUR_MODEL.name, Path(folder) / EDGES_MODEL.name))
+    key, stamp = str(colour_path.parent), _stamp(colour_path, edges_path)
+    cached = _models.get(key)
+    if cached is not None and cached[0] == stamp:
+        return cached[1]
+    with _lock:
+        cached = _models.get(key)
+        if cached is None or cached[0] != stamp:
+            import cv2
+
+            from nnslr_tools.box_fit import edges, gbdt
+            cv2.setNumThreads(1)
+            cached = (stamp, (gbdt.load(colour_path), edges.load(edges_path)))
+            _models[key] = cached
+    return cached[1]
 
 
 def _iou(a, b) -> float:
@@ -79,28 +101,31 @@ def combine(by_colour, by_edges, rough) -> list[float] | None:
     return out if out[2] - out[0] >= 1 and out[3] - out[1] >= 1 else None
 
 
-def fit_image(img, box, *, colour_model=None, edges_model=None, use_refiner=True) -> list[float] | None:
-    """The fitted box of ``box`` ([x1, y1, x2, y2] in pixels of the decoded BGR image ``img``), or None to keep it.
+def fit_image(img, box, *, colour_model=None, edges_model=None, use_refiner=True,
+              folder: Path | None = None) -> list[float] | None:
+    """The fitted box of ``box`` ([x1, y1, x2, y2] in pixels of the decoded BGR image ``img``), or None to keep it,
+    with the version in ``folder`` (None: the code's files).
 
     None means no better box was found: the sign is not there, or the box is already right. The two rankers' answer;
-    on a box under ``refiner.GATE`` pixels with ``refiner.onnx`` there (and ``use_refiner``) that the refiner does not
-    judge already right (``refiner.KEEP``), the rankers' answer on the box the refiner moved it to, or that box when
-    they keep it."""
+    on a box under ``refiner.GATE`` pixels with the version's ``refiner.onnx`` there (and ``use_refiner``) that the
+    refiner does not judge already right (``refiner.KEEP``), the rankers' answer on the box the refiner moved it to, or
+    that box when they keep it."""
     from nnslr_tools.box_fit import colour, edges, refiner
-    if use_refiner and colour_model is None and edges_model is None and refiner.available():
+    model = refiner.model_path(folder)
+    if use_refiner and colour_model is None and edges_model is None and refiner.available(model):
         rough = clip_box(box, img.shape[1], img.shape[0])
         if rough is None:
             return None
-        right = refiner.judge(img, rough) if min(rough[2] - rough[0], rough[3] - rough[1]) < refiner.GATE else 1.0
+        right = refiner.judge(img, rough, model) if min(rough[2] - rough[0], rough[3] - rough[1]) < refiner.GATE else 1.0
         # A small box the network judges already right is left to the rankers, as a big one.
         if right is None or right < refiner.KEEP:
-            moved = refiner.refine(img, rough)
+            moved = refiner.refine(img, rough, path=model)
             if moved is not None:
-                fitted = fit_image(img, moved, use_refiner=False) or moved
+                fitted = fit_image(img, moved, use_refiner=False, folder=folder) or moved
                 # No side moved by half a pixel: the box was already right.
                 return None if max(abs(f - r) for f, r in zip(fitted, rough)) < 0.5 else fitted
     if colour_model is None or edges_model is None:
-        loaded = models()
+        loaded = models(folder)
         colour_model = loaded[0] if colour_model is None else colour_model
         edges_model = loaded[1] if edges_model is None else edges_model
     rough = clip_box(box, img.shape[1], img.shape[0])
@@ -121,8 +146,8 @@ def read_image(path):
     return img
 
 
-def fit_many(path, boxes) -> list[list[float] | None]:
-    """:func:`fit_image` of each box on the image at ``path``, decoded once."""
+def fit_many(path, boxes, folder: Path | None = None) -> list[list[float] | None]:
+    """:func:`fit_image` of each box on the image at ``path``, decoded once, with the version in ``folder``."""
     img = read_image(path)
-    models()
-    return [fit_image(img, box) for box in boxes]
+    models(folder)
+    return [fit_image(img, box, folder=folder) for box in boxes]

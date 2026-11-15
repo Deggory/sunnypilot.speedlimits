@@ -4,7 +4,8 @@ import type {AiState} from './ai-types';
 export type ActionName = 'fetch' | 'prepare' | 'prepare_again' | 'measure_proposer' | 'setup_vlm' | 'dataset' | 'train' | 'train_continue' | 'train_resume' | 'train_classifier'
   | 'train_cutter' | 'train_decider' | 'train_brain' | 'train_users' | 'regression' | 'update' | 'ai_review' | 'measure_ai_reviewer' | 'networks_prepare' | 'networks_publish'
   | 'road_types' | 'send_to_car' | 'try_on_comma' | 'comma_restore' | 'mapillary_locations' | 'mapillary_windows' | 'review_box'
-  | 'road_labeler_train' | 'road_labeler_predict' | 'box_fit_train' | 'simulate';
+  | 'road_labeler_train' | 'road_labeler_predict' | 'box_fit_train' | 'simulate' | 'networks_github_save'
+  | 'networks_github_restore';
 /** What a cutter learns to find: every sign (the speed signs and the other signs) or the speed signs only. */
 export type CutterFamilies = 'all' | 'speed';
 /** The options of “Train the cutter” (POST /api/panel/run/train_cutter {"families"}): a SignNet at the car's band. */
@@ -117,57 +118,50 @@ export interface ActionOptions {
 }
 /** The two stages of UserNet (scripts/run_usernet.sh, NNSLR_USERNET_STAGE). */
 export type UserNetStage = 'bdd' | 'drives';
-/** GET /api/panel/box-fit (nnslr_tools.panel.Panel.box_fit): the last summary of each part of Fit box, null before the
- * first training. The mean IoU is with the person's box on routes left out, from 0 to 1. */
-export interface BoxFitRankers {
-  file: string;
-  at: string | null;
-  boxes: number | null;
-  routes: number | null;
-  folds: number | null;
-  /** The rough box as drawn, and the box after Fit box's two rankers. */
-  rough: number | null;
-  fit: number | null;
-  written: boolean;
-  /** The rankers' training before this one (they are replaced by every run): its time, boxes and mean IoU; null when
-   * there is none. A server not restarted since 15 Nov 2026 does not send it. */
-  before?: {at: string | null; boxes: number | null; fit: number | null} | null;
-}
+/** GET /api/panel/box-fit (nnslr_tools.panel.Panel.box_fit, #94): every version of Fit box on this server, newest
+ * first, the code's files last, and the one the review page fits with. A mean IoU is with the person's box on the
+ * drives left out, from 0 to 1. */
 export interface BoxFitMeasure {
   cases: number | null;
+  /** The rough box as drawn, this version's two rankers alone, this version as the review page runs it, and the
+   * version in use then as the review page runs it, on the same boxes. */
   rough: number | null;
   rankers: number | null;
-  refiner: number | null;
+  version: number | null;
+  in_use: number | null;
 }
-export interface BoxFitRefiner {
-  file: string;
+export interface BoxFitVersion {
+  /** 'box_fit:<YYYY-MM-DD_HHMM>-box-fit', or 'box_fit:code' for the files of the checkout. */
+  id: string;
+  run: string | null;
   at: string | null;
+  files: string[];
+  in_use: boolean;
+  /** Whether the training wrote its record (box-fit.json): the code's files and a version moved by hand have none. */
+  record: boolean;
   boxes: number | null;
-  held_out_boxes: number | null;
-  best_epoch: number | null;
-  epochs: number | null;
-  minutes: number | null;
+  routes: number | null;
+  /** The rankers' mean IoU on the groups of drives left out by their training, the rough box's on the same. */
+  rankers_fit: number | null;
+  rankers_rough: number | null;
+  /** Where its refiner comes from: trained by it, carried from refiner_from, none; 'present' without a record. */
+  refiner: 'trained' | 'carried' | 'none' | 'present';
+  refiner_from: string | null;
+  refiner_boxes: number | null;
+  in_use_then: string | null;
+  better_than_in_use: boolean | null;
   all: BoxFitMeasure | null;
   small: BoxFitMeasure | null;
-  /** The boxes Fit box did not place (box_source, #80): the measure that does not favour the refiner in use. */
+  /** The boxes Fit box did not place (box_source, #80): the measure that does not favour the version in use. */
   fair: BoxFitMeasure | null;
-  /** Boxes a person placed by hand, weighed more in training; null in a summary from before #80. */
-  hand: number | null;
-  /** Better than the rankers in all and on the small signs; written: refiner.onnx replaced. */
-  wins: boolean;
-  written: boolean;
-  /** The refiner in use when this one was measured, its mean IoU on the same boxes (null: there was none), and why
-   * this one was not written: no better than it, than the rankers, or than the rankers on the small signs. A server
-   * not restarted since 15 Nov 2026 sends neither. */
-  in_use?: number | null;
-  kept_because?: 'in_use' | 'rankers' | 'small' | null;
+  /** Whether each was measured with rankers that never saw the drives of the measure; false: they did; null: not said. */
+  measured_clean: {version: boolean | null; in_use: boolean | null};
 }
 export interface BoxFitPayload {
-  rankers: BoxFitRankers | null;
-  refiner: BoxFitRefiner | null;
+  versions: BoxFitVersion[];
   folder: string;
-  /** Whether a refiner.onnx is in the checkout (the site uses it after its restart). */
-  refiner_model: boolean;
+  /** The version in use (models/box-fit.json), who chose it, and why the one chosen is not used (its files gone). */
+  in_use: {id: string; found: boolean; problem: string | null; who: string | null; via: string | null; at: string | null};
 }
 /** GET /api/panel/road-labeler (nnslr_tools.labeler_runs): a head of a road labeler run, a kind of road or the
  * roadworks, measured on validation, and whether it writes into Speed review (or why not). */
@@ -636,7 +630,76 @@ export interface PanelStatus {
      * license null when the three are not all in use. A server not restarted since 15 Nov 2026 does not send it. */
     in_use?: {license: string | null; mapillary: ('cutter' | 'classifier' | 'decider')[]};
     /** The Hugging Face account publishing uses (nnslr_tools.hf_account.public_state; never the token). */
-    account?: {connected: boolean; source: 'portal' | 'server' | null; user: string | null; can_write: boolean | null}};
+    account?: {connected: boolean; source: 'portal' | 'server' | null; user: string | null; can_write: boolean | null};
+    /** The private repository of GitHub our networks are saved to, and the last save and restore of this data root
+     * (nnslr_tools.networks_github.status). A server not restarted since 15 Nov 2026 does not send it. */
+    github?: GitHubNetworks};
+}
+
+/** The networks saved on GitHub (#92): the repository, its copy on this server, whether the token file is there (never
+ * the token), the last save and the last restore (<data root>/publish/github/saved.json, restored.json). */
+export interface GitHubNetworks {
+  repo: string;
+  url: string;
+  clone: string;
+  token: boolean;
+  saved: GitHubSave | null;
+  restored: GitHubRestore | null;
+  /** Whether GitHub has what is here now (networks_github.freshness), compared by size and time with the files of the
+   * last save. A server not restarted since 16 Nov 2026 does not send it. */
+  freshness?: GitHubFreshness;
+}
+
+/** What GitHub has of this data root (#92): up_to_date null before the first save; each version and record to save,
+ * by id or path: saved as it is here, changed since the save, or not on GitHub; the first 50 that are not saved. */
+export interface GitHubFreshness {
+  up_to_date: boolean | null;
+  versions: Record<string, GitHubFileState>;
+  records: Record<string, GitHubFileState>;
+  unsaved: string[];
+  unsaved_count: number;
+  /** The save it compares with: its time and commit (null before the first save); after a restore, the one restored. */
+  saved_at: string | null;
+  commit: string | null;
+  /** What a save would leave out now, and why (networks_github.plan). */
+  warnings?: string[];
+}
+export type GitHubFileState = 'saved' | 'changed' | 'missing';
+
+/** A save on GitHub (networks_github.save): its commit, whether it pushed one (false: nothing new), the files new,
+ * changed and already there, and the networks in use and on the car it saved, by role and id. */
+export interface GitHubSave {
+  at: string;
+  repo: string;
+  url: string;
+  commit: string;
+  commit_url: string;
+  pushed: boolean;
+  new: number;
+  updated: number;
+  same: number;
+  files: number;
+  bytes: number;
+  versions: number;
+  in_use: Record<string, string>;
+  on_car: Record<string, string>;
+  road_labeler: string | null;
+  warnings: string[];
+}
+
+/** A restore from GitHub (networks_github.restore): the files put back, those already here, those here and different
+ * (kept as they are, the first 50 named), and Fit box compared with the checkout, file by file. */
+export interface GitHubRestore {
+  at: string;
+  repo: string;
+  commit: string;
+  saved_at: string | null;
+  copied: number;
+  same: number;
+  versions: number;
+  box_fit: Record<string, 'same' | 'differs' | 'missing'>;
+  kept: string[];
+  kept_count: number;
 }
 
 /** The networks the car runs: in use here (models/active.json) and in the comma's software (models/on-car.json, null

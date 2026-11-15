@@ -109,13 +109,13 @@ def test_the_refiner_moves_only_small_boxes_and_the_rankers_finish_its_box(monke
     from nnslr_tools.box_fit import refiner
     calls = []
 
-    def refine(img, box):
+    def refine(img, box, path=None):
         calls.append(box)
         return [box[0] + 2, box[1] + 2, box[2] - 2, box[3] - 2]
 
-    monkeypatch.setattr(refiner, 'available', lambda: True)
+    monkeypatch.setattr(refiner, 'available', lambda path=None: True)
     monkeypatch.setattr(refiner, 'refine', refine)
-    monkeypatch.setattr(refiner, 'judge', lambda img, box: None)
+    monkeypatch.setattr(refiner, 'judge', lambda img, box, path=None: None)
     img = ring_image()
     big = [10, 10, 10 + refiner.GATE + 10, 10 + refiner.GATE + 10]
     assert box_fit.fit_image(img, big) == box_fit.fit_image(img, big, use_refiner=False) and not calls
@@ -328,9 +328,87 @@ def test_on_the_lan_fit_needs_a_session_not_the_token(lan):
 def test_a_small_box_the_refiner_judges_right_is_left_to_the_rankers(monkeypatch):
     from nnslr_tools.box_fit import refiner
     calls = []
-    monkeypatch.setattr(refiner, 'available', lambda: True)
-    monkeypatch.setattr(refiner, 'refine', lambda img, box: calls.append(box))
-    monkeypatch.setattr(refiner, 'judge', lambda img, box: refiner.KEEP + 0.05)
+    monkeypatch.setattr(refiner, 'available', lambda path=None: True)
+    monkeypatch.setattr(refiner, 'refine', lambda img, box, path=None: calls.append(box))
+    monkeypatch.setattr(refiner, 'judge', lambda img, box, path=None: refiner.KEEP + 0.05)
     img = ring_image()
     small = [90, 65, 112, 87]
     assert box_fit.fit_image(img, small) == box_fit.fit_image(img, small, use_refiner=False) and not calls
+
+
+# ---------- the measure of a version (#94): on drives none of its rankers saw ----------
+
+def _stand_in_training(monkeypatch, routes):
+    """train.run without images or a card: one row per route, the trainings named by the routes they saw."""
+    items = [{'route': route, 'annotation_id': f'{route}/0', 'family': 'maximum_speed', 'size': 'mid',
+              'truth': [10, 10, 40, 40], 'width': 200, 'height': 150} for route in routes]
+    monkeypatch.setattr(train, 'MIN_BOXES', 1)
+    monkeypatch.setattr(train, 'human_boxes', lambda *_: items)
+    monkeypatch.setattr(train.gpu, 'device', lambda _device: 'cuda:0')
+    monkeypatch.setattr(train, '_card_name', lambda _dev: 'stand-in')
+    monkeypatch.setattr(train, 'extract_all', lambda cases, _workers: [dict(case, ms=1.0) for case in cases])
+    monkeypatch.setattr(train, 'train_colour', lambda rows, *_: sorted({row['route'] for row in rows}))
+    monkeypatch.setattr(train, 'train_edges', lambda rows, *_: [])
+    monkeypatch.setattr(train, 'fit_row', lambda *_: None)
+    monkeypatch.setattr(train, 'measures', lambda *_: {})
+    saved = {}
+    monkeypatch.setattr(train, 'save', lambda out, colour_model, _edges: saved.setdefault(str(out), colour_model))
+    return saved
+
+
+def test_a_version_also_gets_rankers_without_the_routes_its_measure_leaves_out(tmp_path, monkeypatch):
+    from nnslr_tools.box_fit import versions
+    routes = [f'{n:016x}--{n:010x}' for n in range(12)]
+    left_out = {route for route in routes if versions.held_out(route)}
+    assert left_out and len(left_out) < len(routes)
+    saved = _stand_in_training(monkeypatch, routes)
+    out = tmp_path / 'runs' / '2026-11-16_0900-box-fit'
+    summary = train.run(tmp_path, out, folds=0, workers=1)
+    assert saved[str(out)] == sorted(routes)
+    assert saved[str(out / versions.MEASURE)] == sorted(set(routes) - left_out)
+    assert summary['measure_rankers']['left_out_routes'] == len(left_out)
+    # The code's own folder: no measure folder.
+    saved.clear()
+    assert 'measure_rankers' not in train.run(tmp_path, box_fit.HERE, folds=0, workers=1)
+    assert list(saved) == [str(box_fit.HERE)]
+
+
+def test_the_measure_runs_both_versions_clean_when_they_can_and_names_the_version_in_use_read_at_the_start(
+        tmp_path, monkeypatch):
+    from nnslr_tools.box_fit import refiner_train, versions
+    versions._in_use_cache.clear()
+
+    def version(run, *, measure):
+        folder = tmp_path / 'runs' / run
+        (folder / (versions.MEASURE if measure else '')).mkdir(parents=True, exist_ok=True)
+        for name in (*versions.RANKERS, versions.REFINER):
+            (folder / name).write_bytes(b'v')
+            if measure:
+                (folder / versions.MEASURE / name).write_bytes(b'm')
+        return folder
+
+    old = version('2026-11-15_0900-box-fit', measure=True)
+    other = version('2026-11-15_1000-box-fit', measure=False)
+    new = tmp_path / 'runs' / '.2026-11-16_0900-box-fit.partial'
+    (new / versions.MEASURE).mkdir(parents=True)
+    for name in versions.RANKERS:
+        (new / name).write_bytes(b'n')
+        (new / versions.MEASURE / name).write_bytes(b'nm')
+    (new / versions.REFINER).write_bytes(b'refiner')
+    seen = []
+    monkeypatch.setattr(refiner_train, 'compare', lambda cases, workers, a, b: seen.append((a, b)) or {
+        'all': {'cases': 1, 'version': 0.9, 'in_use': 0.8, 'rankers': 0.7}})
+    # Chosen during the training: the measure still speaks of the one read at the start.
+    versions.choose(tmp_path, 'box_fit:2026-11-15_1000-box-fit', who=None, via='local')
+    summary = refiner_train.measure_version(tmp_path, new, [], 1, {}, log=lambda _: None,
+                                            in_use_id='box_fit:2026-11-15_0900-box-fit')
+    assert (new / versions.MEASURE / versions.REFINER).read_bytes() == b'refiner'
+    assert seen == [(new / versions.MEASURE, old / versions.MEASURE)]
+    assert summary['clean'] == {'version': True, 'in_use': True} and summary['in_use']['id'].endswith('0900-box-fit')
+    # A version of before the measure folders: measured from its own, and said.
+    summary = refiner_train.measure_version(tmp_path, new, [], 1, {}, log=lambda _: None)
+    assert seen[-1] == (new / versions.MEASURE, other) and summary['clean'] == {'version': True, 'in_use': False}
+    # The one named is gone: the one in use now.
+    summary = refiner_train.measure_version(tmp_path, new, [], 1, {}, log=lambda _: None,
+                                            in_use_id='box_fit:2026-11-14_0900-box-fit')
+    assert summary['in_use']['id'] == 'box_fit:2026-11-15_1000-box-fit'

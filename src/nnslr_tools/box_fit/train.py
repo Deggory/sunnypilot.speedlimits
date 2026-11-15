@@ -16,7 +16,9 @@ rough box are extracted once (in ``workers`` processes) and labelled with their 
 ``folds`` > 1 first measures the whole fit on routes left out: the routes are split into that many groups, and the
 boxes of each group are fitted by models trained on the other groups only (the weights are held out; the two blend
 constants of :mod:`nnslr_tools.box_fit`, chosen once on the benchmark, are not). The models written to ``colour.npz`` and
-``edges.npz`` are then trained on every box. The candidates are extracted on the CPU (OpenCV, ``workers`` processes);
+``edges.npz`` are then trained on every box. Written into a version's folder (``--out``, not the code's own), a second
+pair trained without the routes the measure of the version leaves out goes into its ``measure/`` folder
+(:func:`nnslr_tools.box_fit.versions.measure_folder`). The candidates are extracted on the CPU (OpenCV, ``workers`` processes);
 the trees and the MLPs train on the GPU (:mod:`.gpu`, PyTorch: the environment of .venv-gpu), never on the CPU. The
 runtime reads the files with numpy alone.
 """
@@ -34,7 +36,7 @@ from pathlib import Path
 import numpy as np
 
 from nnslr_tools import box_fit
-from nnslr_tools.box_fit import colour, edges, gbdt, gpu
+from nnslr_tools.box_fit import colour, edges, gbdt, gpu, versions
 
 CASE_SEED = 20261030      # the rough boxes of each person's box (the benchmark's)
 KINDS = ('loose', 'shifted', 'tight')
@@ -252,7 +254,8 @@ def save(out_dir: Path, colour_model: dict, edges_model: list) -> dict:
 def run(data_root: Path, out_dir: Path, *, objects: Path | None = None, seed: int = 0,
         workers: int = DEFAULT_WORKERS, folds: int = 4, dry_run: bool = False, device: str = 'cuda',
         log=print) -> dict:
-    """Select the boxes, measure with ``folds`` route groups (when > 1), train on every box and save the models."""
+    """Select the boxes, measure with ``folds`` route groups (when > 1), train on every box and save the models; in a
+    version's folder also the pair without the routes left out of its measure, in ``measure/``."""
     items = human_boxes(objects or data_root / 'annotations' / 'objects.jsonl', data_root)
     groups = route_folds(items, folds) if folds > 1 else {}
     summary = {'boxes': len(items), 'cases': len(items) * len(KINDS), 'routes': len({i['route'] for i in items}),
@@ -281,4 +284,15 @@ def run(data_root: Path, out_dir: Path, *, objects: Path | None = None, seed: in
     log(f'trained on every box in {time.time() - t:.0f} s')
     summary['in_sample'] = measures(rows, [fit_row(row, colour_model, edges_model) for row in rows])
     summary['written'] = save(out_dir, colour_model, edges_model)
+    if Path(out_dir).resolve() != box_fit.HERE:
+        # A version (#94): a second pair without the routes the measure leaves out, for refiner_train to measure it on
+        # drives it never saw (versions.measure_folder). Not for the code's own folder, which is not measured.
+        kept = [row for row in rows if not versions.held_out(row['route'])]
+        if kept and len(kept) < len(rows):
+            t = time.time()
+            measure = save(Path(out_dir) / versions.MEASURE, train_colour(kept, seed, dev), train_edges(kept, seed, dev))
+            summary['measure_rankers'] = {'boxes': len({row['annotation_id'] for row in kept}),
+                                          'left_out_routes': len({row['route'] for row in rows} - {row['route'] for row in kept}),
+                                          'written': measure}
+            log(f'trained again without the routes left out of the measure in {time.time() - t:.0f} s')
     return summary

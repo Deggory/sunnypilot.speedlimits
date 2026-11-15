@@ -1035,9 +1035,12 @@ def make_handler(app: ReviewApp):
                 from nnslr_tools import labeler_runs
                 self._json(200, labeler_runs.summary(app.root))
                 return
-            # The last summaries of Train Fit box (scripts/train_box_fit.sh): the Fit box card of Models.
+            # The versions of Fit box and the one in use (nnslr_tools.box_fit.versions, #94): the Fit box card of Models.
             if path == '/api/panel/box-fit':
                 self._json(200, app.panel.box_fit())
+                return
+            if path == '/api/panel/box-fit/use':
+                self._problem(405, 'method_not_allowed', 'Use POST, with {"id"}.', True)
                 return
             if path == '/api/panel/models/active':
                 self._problem(405, 'method_not_allowed', 'Use POST, with {"role", "id"}.', True)
@@ -2080,6 +2083,8 @@ def make_handler(app: ReviewApp):
             run = re.fullmatch(r'/api/panel/run/([a-z_]+)', path)
             stop = re.fullmatch(r'/api/panel/job/([0-9a-z_-]+)/stop', path)
             active = path == '/api/panel/models/active'
+            # The version of Fit box the review page uses ({"id"}, #94).
+            box_fit_use = path == '/api/panel/box-fit/use'
             # Who proposes the signs in Prepare ({"proposer"}), kept for every browser.
             chosen = path == '/api/panel/proposer'
             # The settings of the comma's vision limit ({"values": {setting: number or null}}).
@@ -2089,7 +2094,7 @@ def make_handler(app: ReviewApp):
             # Train › Pipeline: our networks one after the other ({"steps": [{"action", "options"}]}), or /stop: the
             # next ones do not start.
             pipeline = re.fullmatch(r'/api/panel/pipeline(/stop)?', path)
-            if run or stop or active or chosen or settings or trainings or pipeline:
+            if run or stop or active or box_fit_use or chosen or settings or trainings or pipeline:
                 # Same protections as saving a frame: same origin, JSON only (no form can send it).
                 if not self._same_origin():
                     self._problem(403, 'cross_origin', 'Request from another origin refused.', True)
@@ -2158,6 +2163,12 @@ def make_handler(app: ReviewApp):
                     role = body['role']
                     print(f'Panel: {role} in use {entry["id"]} ({terminal_text(who or via)})', flush=True)
                     self._json(200, {'ok': True, 'role': role, 'active': entry})
+                elif box_fit_use:
+                    # Only an id of a version on this server is written, never a path.
+                    who, via = self._who()
+                    entry = app.panel.set_box_fit(body, who=who, via=via)
+                    print(f'Panel: Fit box in use {entry["id"]} ({terminal_text(who or via)})', flush=True)
+                    self._json(200, {'ok': True, 'in_use': entry})
                 elif chosen:
                     self._json(200, {'ok': True, **app.panel.set_proposer(body)})
                 elif settings:
@@ -2506,6 +2517,9 @@ def make_handler(app: ReviewApp):
             try:
                 started = time.perf_counter()
                 from nnslr_tools import box_fit
+                from nnslr_tools.box_fit import versions as box_versions
+                # The version in use (models/box-fit.json, #94), read again only when the choice changes.
+                folder = box_versions.folder_in_use(app.root)
                 try:
                     path = video or app.image_file(route, frame_key, 'original')[0]
                 except (ReviewRejected, OSError):
@@ -2518,7 +2532,7 @@ def make_handler(app: ReviewApp):
                 sx, sy = img.shape[1] / width, img.shape[0] / height
                 fitted = []
                 for x1, y1, x2, y2 in boxes:
-                    box = box_fit.fit_image(img, [x1 * sx, y1 * sy, x2 * sx, y2 * sy])
+                    box = box_fit.fit_image(img, [x1 * sx, y1 * sy, x2 * sx, y2 * sy], folder=folder)
                     fitted.append(None if box is None else
                                   [round(box[0] / sx, 1), round(box[1] / sy, 1), round(box[2] / sx, 1),
                                    round(box[3] / sy, 1)])

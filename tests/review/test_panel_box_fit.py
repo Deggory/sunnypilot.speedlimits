@@ -138,7 +138,7 @@ def test_the_steps_come_from_the_panels_own_log(ready):
         return [step['key'] for step in progress('box_fit_train', 'ok', full_log(ready, job['id']))['steps']]
     assert steps({'dry': 'on'}) == ['boxes']
     assert steps({'dry': 'on', 'refiner': 'off'}) == ['boxes']
-    assert steps({'refiner': 'off'}) == ['boxes', 'rankers']
+    assert steps({'refiner': 'off'}) == ['boxes', 'rankers', 'refiner']
     assert steps(None) == ['boxes', 'rankers', 'refiner']
 
 
@@ -186,78 +186,102 @@ def test_a_second_one_waits_for_the_first(root, checkout, monkeypatch):
     finished(panel, job['id'])
 
 
-# -- what the card shows --------------------------------------------------------------------------------------------
-def summaries(root):
-    folder = root / 'evaluations' / 'box_fit'
+# -- the versions the card shows (#94) --------------------------------------------------------------------------------
+RUN = '2026-11-16_0900-box-fit'
+RECORD = {'schema_version': 1, 'run': RUN, 'at': '2026-11-16T09:40:00+00:00', 'boxes': 4100, 'routes': 31, 'folds': 4,
+          'rankers': {'mean_iou': 0.8123, 'rough_mean_iou': 0.6012}, 'refiner': 'trained', 'refiner_from': None,
+          'refiner_boxes': 3000, 'held_out_boxes': 900, 'in_use_then': 'box_fit:code',
+          'left_out': {'all': {'cases': 2700, 'rough': 0.6, 'rankers': 0.81, 'version': 0.84, 'in_use': 0.83,
+                               'rankers>=0.8': 0.7},
+                       'size:small': {'cases': 800, 'rough': 0.5, 'rankers': 0.7, 'version': 0.74, 'in_use': 0.75}},
+          'measured_clean': {'version': True, 'in_use': False}, 'better_than_in_use': True}
+
+
+def a_version(root, run=RUN, *, record=RECORD, refiner=True):
+    """A version of Fit box in the data root: its run folder with its files (stand-ins) and its record."""
+    folder = root / 'runs' / run
     folder.mkdir(parents=True)
-    rankers = {'boxes': 4100, 'routes': 31, 'folds': 4, 'written': {'colour.npz': 'x', 'edges.npz': 'y'},
-               'cross_validation': {'overall': {'cases': 12300, 'mean_iou': 0.8123, 'rough_mean_iou': 0.6012}}}
-    (folder / '20261108T100000Z.json').write_text(json.dumps({**rankers, 'boxes': 3000}))
-    (folder / '20261109T100000Z.json').write_text(json.dumps(rankers))
-    # The newest, half written: skipped.
-    (folder / '20261109T120000Z.json').write_text('{"boxes": ')
-    refiner = {'train_boxes': 3000, 'held_out_boxes': 900, 'best_epoch': 31, 'epochs': 40, 'minutes': 58.2,
-               'left_out': {'all': {'cases': 2700, 'rough': 0.6, 'rankers': 0.81, 'refiner': 0.84},
-                            'size:small': {'cases': 800, 'rough': 0.5, 'rankers': 0.7, 'refiner': 0.69}},
-               'refiner_wins': False, 'written': None}
-    (folder / 'refiner-20261108T110000Z.json').write_text(json.dumps(refiner))
+    for name in ('colour.npz', 'edges.npz', *(('refiner.onnx',) if refiner else ())):
+        (folder / name).write_bytes(b'x')
+    if record is not None:
+        (folder / 'box-fit.json').write_text(json.dumps(record))
     return folder
 
 
-def test_the_last_summary_of_each_part(root, checkout):
+def test_the_card_lists_every_version_newest_first_and_the_one_in_use(root, checkout):
     panel = Panel(root, repo=checkout)
-    assert panel.box_fit() == {'rankers': None, 'refiner': None, 'folder': 'evaluations/box_fit',
-                               'refiner_model': False}
-    summaries(root)
     view = panel.box_fit()
-    assert view['rankers'] == {'file': '20261109T100000Z.json', 'at': '2026-11-09T10:00:00+00:00', 'boxes': 4100,
-                               'routes': 31, 'folds': 4, 'rough': 0.6012, 'fit': 0.8123, 'written': True,
-                               'before': {'at': '2026-11-08T10:00:00+00:00', 'boxes': 3000, 'fit': 0.8123}}
-    assert view['refiner'] == {
-        'file': 'refiner-20261108T110000Z.json', 'at': '2026-11-08T11:00:00+00:00', 'boxes': 3000,
-        'held_out_boxes': 900, 'best_epoch': 31, 'epochs': 40, 'minutes': 58.2,
-        'all': {'cases': 2700, 'rough': 0.6, 'rankers': 0.81, 'refiner': 0.84},
-        'small': {'cases': 800, 'rough': 0.5, 'rankers': 0.7, 'refiner': 0.69}, 'fair': None, 'hand': None,
-        'wins': False, 'written': False, 'in_use': None, 'kept_because': 'small'}
+    assert [version['id'] for version in view['versions']] == ['box_fit:code'] and view['versions'][0]['in_use']
+    assert view['in_use'] == {'id': 'box_fit:code', 'found': True, 'problem': None, 'who': None, 'via': None, 'at': None}
+    a_version(root)
+    a_version(root, '2026-11-15_1026-box-fit', record=None, refiner=False)
+    # A training still running, a folder without the rankers, a link: not versions.
+    (root / 'runs' / f'.{RUN}.partial').mkdir()
+    (root / 'runs' / '2026-11-16_1100-box-fit').mkdir()
+    (root / 'runs' / '2026-11-16_1200-box-fit').symlink_to(root / 'runs' / RUN)
+    view = panel.box_fit()
+    assert [version['id'] for version in view['versions']] == [
+        'box_fit:' + RUN, 'box_fit:2026-11-15_1026-box-fit', 'box_fit:code']
+    assert view['versions'][0] == {
+        'id': 'box_fit:' + RUN, 'run': RUN, 'at': '2026-11-16T09:40:00+00:00',
+        'files': ['colour.npz', 'edges.npz', 'refiner.onnx'], 'in_use': False, 'record': True, 'boxes': 4100,
+        'routes': 31, 'rankers_fit': 0.8123, 'rankers_rough': 0.6012, 'refiner': 'trained', 'refiner_from': None,
+        'refiner_boxes': 3000, 'in_use_then': 'box_fit:code', 'better_than_in_use': True,
+        'all': {'cases': 2700, 'rough': 0.6, 'rankers': 0.81, 'version': 0.84, 'in_use': 0.83},
+        'small': {'cases': 800, 'rough': 0.5, 'rankers': 0.7, 'version': 0.74, 'in_use': 0.75}, 'fair': None,
+        'measured_clean': {'version': True, 'in_use': False}}
+    older = view['versions'][1]
+    assert (older['record'], older['refiner'], older['all'], older['files']) == (False, 'none', None,
+                                                                                 ['colour.npz', 'edges.npz'])
+    assert older['measured_clean'] == {'version': None, 'in_use': None}
+    assert [version['in_use'] for version in view['versions']] == [False, False, True]
 
 
-def test_the_card_says_why_a_new_refiner_was_kept_out(root, checkout):
-    # 15 Nov 2026: a new refiner a little worse than the one in use is not written, and the card says so.
-    folder = summaries(root)
-    data = json.loads((folder / 'refiner-20261108T110000Z.json').read_text())
-    data['current'] = {'all': {'cases': 2700, 'rough': 0.6, 'rankers': 0.81, 'refiner': 0.845}}
-    (folder / 'refiner-20261109T110000Z.json').write_text(json.dumps(data))
-    refiner = Panel(root, repo=checkout).box_fit()['refiner']
-    assert (refiner['in_use'], refiner['kept_because'], refiner['written']) == (0.845, 'in_use', False)
-    data['left_out']['all']['refiner'] = 0.8
-    del data['current']
-    (folder / 'refiner-20261110T110000Z.json').write_text(json.dumps(data))
-    assert Panel(root, repo=checkout).box_fit()['refiner']['kept_because'] == 'rankers'
-    data['left_out']['all']['refiner'], data['refiner_wins'], data['written'] = 0.86, True, '/x/refiner.onnx'
-    data['left_out']['size:small']['refiner'] = 0.75
-    (folder / 'refiner-20261111T110000Z.json').write_text(json.dumps(data))
-    refiner = Panel(root, repo=checkout).box_fit()['refiner']
-    assert (refiner['written'], refiner['kept_because']) == (True, None)
+def test_a_version_is_chosen_by_its_id_and_nothing_else(root, checkout):
+    panel = Panel(root, repo=checkout)
+    a_version(root)
+    entry = panel.set_box_fit({'id': 'box_fit:' + RUN}, who='cristianku', via='sign-in')
+    assert (entry['id'], entry['who'], entry['via']) == ('box_fit:' + RUN, 'cristianku', 'sign-in')
+    saved = json.loads((root / 'models' / 'box-fit.json').read_text())
+    assert saved['id'] == 'box_fit:' + RUN and saved['schema_version'] == 1
+    view = panel.box_fit()
+    assert view['in_use']['id'] == 'box_fit:' + RUN and view['in_use']['who'] == 'cristianku'
+    assert [version['in_use'] for version in view['versions']] == [True, False]
+    for body, status, reason in (([], 400, 'invalid_json'), ({'id': '../../etc'}, 400, 'bad_id'), ({'id': 5}, 400, 'bad_id'),
+                                 ({'id': 'box_fit:2026-11-17_0000-box-fit'}, 404, 'unknown_version'),
+                                 ({'id': 'cutter:' + RUN}, 400, 'bad_id')):
+        with pytest.raises(PanelError) as refused:
+            panel.set_box_fit(body, who=None, via='local')
+        assert (refused.value.status, refused.value.reason) == (status, reason), body
+    with pytest.raises(PanelError) as refused:
+        panel.set_box_fit({'id': 'box_fit:code'}, who='guest:x', via='reviewer')
+    assert refused.value.status == 403
+    with pytest.raises(PanelError) as refused:
+        Panel(root, repo=checkout, actions_enabled=False).set_box_fit({'id': 'box_fit:code'}, who=None, via='local')
+    assert refused.value.reason == 'actions_disabled'
+    assert json.loads((root / 'models' / 'box-fit.json').read_text())['id'] == 'box_fit:' + RUN
 
 
-def test_the_card_shows_the_fair_measure_and_the_boxes_placed_by_hand(root, checkout):
-    # #80: a summary that knows each box's source gives the measure on the boxes Fit box did not place.
-    folder = summaries(root)
-    data = json.loads((folder / 'refiner-20261108T110000Z.json').read_text())
-    data['by_source'] = {'fit': 2000, 'hand': 120, 'model': 880}
-    data['left_out']['fair'] = {'cases': 300, 'rough': 0.55, 'rankers': 0.78, 'refiner': 0.8}
-    (folder / 'refiner-20261109T110000Z.json').write_text(json.dumps(data))
-    refiner = Panel(root, repo=checkout).box_fit()['refiner']
-    assert refiner['fair'] == {'cases': 300, 'rough': 0.55, 'rankers': 0.78, 'refiner': 0.8}
-    assert refiner['hand'] == 120
-    data['by_source'] = {'fit': 2000}
-    (folder / 'refiner-20261110T110000Z.json').write_text(json.dumps(data))
-    assert Panel(root, repo=checkout).box_fit()['refiner']['hand'] == 0
+def test_a_chosen_version_that_is_gone_falls_back_to_the_code_and_says_so(root, checkout):
+    import shutil
+    panel = Panel(root, repo=checkout)
+    a_version(root)
+    panel.set_box_fit({'id': 'box_fit:' + RUN}, who=None, via='local')
+    shutil.rmtree(root / 'runs' / RUN)
+    used = panel.box_fit()['in_use']
+    assert used['id'] == 'box_fit:code' and used['found'] is False and 'no longer on this server' in used['problem']
+    # A choice that cannot be read is never overwritten.
+    (root / 'models' / 'box-fit.json').write_text('{"id": ')
+    with pytest.raises(PanelError) as refused:
+        panel.set_box_fit({'id': 'box_fit:code'}, who=None, via='local')
+    assert (refused.value.status, refused.value.reason) == (409, 'choice_unreadable')
+    assert (root / 'models' / 'box-fit.json').read_text() == '{"id": '
+    assert 'cannot be read' in panel.box_fit()['in_use']['problem']
 
 
-def test_the_review_server_serves_the_card_and_refuses_a_refiner_that_is_not_a_string(root, checkout):
+def test_the_review_server_serves_the_versions_and_takes_a_choice(root, checkout):
     box_fit_script(checkout)
-    summaries(root)
+    a_version(root)
     server = RunningServer(root)
     server.app.panel = Panel(root, repo=checkout)
     server.app.panel.activities = list
@@ -270,7 +294,21 @@ def test_the_review_server_serves_the_card_and_refuses_a_refiner_that_is_not_a_s
         assert status == 200, data
         assert arguments(server.app.panel, json_of(data)) == 'arguments: --dry-run --no-refiner'
         status, _, data = server.request('GET', '/api/panel/box-fit')
-        assert status == 200 and json_of(data)['rankers']['boxes'] == 4100
+        assert status == 200 and json_of(data)['versions'][0]['boxes'] == 4100
+        assert server.request('GET', '/api/panel/box-fit/use')[0] == 405
+        use = '/api/panel/box-fit/use'
+        status, _, data = server.request('POST', use, body={'id': 'box_fit:' + RUN},
+                                         headers={'Origin': 'http://evil.example'})
+        assert status == 403 and json_of(data)['error'] == 'cross_origin'
+        status, _, data = server.request('POST', use, body=b'{}', headers={'Content-Type': 'text/plain'})
+        assert status == 415
+        status, _, data = server.request('POST', use, body={'id': 'box_fit:nope'})
+        assert status == 400 and json_of(data)['error'] == 'bad_id'
+        assert not (root / 'models' / 'box-fit.json').exists()
+        status, _, data = server.request('POST', use, body={'id': 'box_fit:' + RUN})
+        assert status == 200 and json_of(data)['in_use']['id'] == 'box_fit:' + RUN
+        status, _, data = server.request('GET', '/api/panel/box-fit')
+        assert json_of(data)['in_use']['id'] == 'box_fit:' + RUN
     finally:
         server.close()
 
@@ -308,11 +346,16 @@ def test_it_goes_step_by_step_then_epoch_by_epoch():
 
 
 def test_without_the_refiner_or_dry_it_has_fewer_steps():
-    log = HEAD.replace('== scripts/train_box_fit.sh', '== scripts/train_box_fit.sh --no-refiner').replace('/3 ', '/2 ')
+    # #94: without the refiner, step 3 only measures the new version against the one in use.
+    log = HEAD.replace('== scripts/train_box_fit.sh', '== scripts/train_box_fit.sh --no-refiner')
     result = progress('box_fit_train', 'running', log)
-    assert [(step['key'], step['state']) for step in result['steps']] == [('boxes', 'done'), ('rankers', 'current')]
-    assert result['percent'] == pytest.approx(10.0)
-    # The script of before the refiner numbers its steps out of 2 too.
+    assert [(step['key'], step['state']) for step in result['steps']] == [
+        ('boxes', 'done'), ('rankers', 'current'), ('refiner', 'todo')]
+    assert result['steps'][2]['label'] == 'Measure against the version in use'
+    assert result['percent'] == pytest.approx(5.0)
+    # The script of before #94 numbered the steps of --no-refiner out of 2: those two.
+    old = log.replace('/3 ', '/2 ')
+    assert [step['key'] for step in progress('box_fit_train', 'running', old)['steps']] == ['boxes', 'rankers']
     assert len(progress('box_fit_train', 'running', HEAD.replace('/3 ', '/2 '))['steps']) == 2
     dry = '== scripts/train_box_fit.sh --dry-run\n1/3 The boxes drawn by people (dry run)\n'
     assert [step['key'] for step in progress('box_fit_train', 'running', dry)['steps']] == ['boxes']
@@ -325,9 +368,9 @@ def test_without_the_refiner_or_dry_it_has_fewer_steps():
      'Too few boxes drawn by people to train Fit box yet: nothing changed.'),
     ('The PyTorch environment (.venv-gpu with torch, onnx and opencv) is missing: run '
      'scripts/setup_v100_training_env.sh. The refiner is unchanged.',
-     'The PyTorch of .venv-gpu is missing (scripts/setup_v100_training_env.sh): the refiner is unchanged.'),
+     'The PyTorch of .venv-gpu is missing (scripts/setup_v100_training_env.sh): no new version, nothing changed.'),
     ('ValueError: only 12 boxes to train on: too few for the refiner',
-     'Too few confirmed boxes to train the box refiner: the rankers are trained, the refiner is unchanged.'),
+     'Too few confirmed boxes to train the box refiner: no new version, nothing changed.'),
 ])
 def test_a_known_failure_says_so(line, text):
     assert progress('box_fit_train', 'failed', HEAD + line + '\n')['failure'] == text

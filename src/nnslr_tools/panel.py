@@ -143,9 +143,11 @@ ROAD_LABELER_OPTIONS = ('dry', 'labeler', 'marks')
 # A drive's id.
 ROUTE_ID = re.compile(r'^[0-9a-f]{8}--[0-9a-f]{10}$')
 # Fit box of the review page (key C, nnslr_tools.box_fit) trained again on the boxes people drew (Models, the Fit box
-# card): the two rankers (colour trees, edge MLPs), then the box refiner, a small CNN with the PyTorch of .venv-gpu, all on
-# the CPU; refiner.onnx is replaced only when it beats the rankers on routes left out. Its options: {'dry': 'on'} only
-# counts the boxes; {'refiner': 'off'} the rankers alone (--no-refiner). Its summaries: BOX_FIT_SUMMARIES of the data root.
+# card): the two rankers (colour trees, edge MLPs), then the box refiner, a small CNN, with the PyTorch of .venv-gpu on a
+# V100, into a new version (runs/<YYYY-MM-DD_HHMM>-box-fit/, #94) measured against the version in use; nothing in use is
+# replaced: a person chooses the version (models/box-fit.json). Its options: {'dry': 'on'} only counts the boxes;
+# {'refiner': 'off'} trains no refiner (--no-refiner: the version carries the one in use). BOX_FIT_SUMMARIES: where the
+# summaries of the trainings before #94 are.
 BOX_FIT_SCRIPT = 'scripts/train_box_fit.sh'
 BOX_FIT_PYTHON = '.venv-gpu/bin/python'
 BOX_FIT_OPTIONS = ('refiner',)
@@ -160,6 +162,9 @@ WINDOWS_SCRIPT = 'helpers/mapillary_windows.sh'
 NETWORKS_SCRIPT = 'scripts/publish_networks.sh'
 NETWORKS_REPO = os.environ.get('HF_REPO', 'cristianku/sunnypilot-speedlimits-models')
 NETWORK_PACKAGES_SHOWN = 5
+# Our networks saved in a private repository of GitHub, and put back from it (#92, nnslr_tools.networks_github).
+GITHUB_SAVE_SCRIPT = 'scripts/save_networks_github.sh'
+GITHUB_RESTORE_SCRIPT = 'scripts/restore_networks_github.sh'
 # The drives' table of the status (helpers/route_status.route_rows) stats every video and counts the lines of every
 # frames.jsonl on the share: about 9 s on 1 800 segments. On the site it is read in a thread (Panel.background_rows) and
 # read again once it is older than this, or once a job began or ended since.
@@ -486,6 +491,11 @@ ACTIONS = {
     # The networks in use on Hugging Face, public, for other people: a new package of them prepared and uploaded in
     # one job, or a package prepared here before ({'package': name}) uploaded as it is.
     'networks_publish': {'label': 'Publish on Hugging Face', 'group': 'publish', 'command': [NETWORKS_SCRIPT, '--upload']},
+    # Every network we use saved in the private repository cristianku/smartspeed-networks (#92), and the ones missing
+    # in the data root put back from it (never overwriting one): a lost data root starts again from networks that work.
+    'networks_github_save': {'label': 'Save the networks on GitHub', 'group': 'backup', 'command': [GITHUB_SAVE_SCRIPT]},
+    'networks_github_restore': {'label': 'Restore the networks from GitHub', 'group': 'restore',
+                                'command': [GITHUB_RESTORE_SCRIPT]},
     # Publish (Publish tab): the SignNet in use ({'signnet': run}), the classifier and the road type in use put into the
     # comma's software: exported, published in cristianku/speed-limits-models, recorded on the car, the sunnypilot
     # speed-limits branch moved to them and psa-torque-sunny-testing built again (nnslr_tools.car_release). Then the
@@ -513,6 +523,8 @@ ACTIONS = {
                             'command': ['helpers/measure_ai_reviewer.sh']},
     # [ai-reviewer] - END
 }
+# The actions of the private copy on GitHub and their script.
+GITHUB_ACTIONS = {'networks_github_save': GITHUB_SAVE_SCRIPT, 'networks_github_restore': GITHUB_RESTORE_SCRIPT}
 # The same work started from a terminal: (group, label, fragment of the command line).
 ACTIVITIES = (
     # Also the copy in openpilot.distill: both write the shared folder of the comma videos.
@@ -546,6 +558,10 @@ ACTIVITIES = (
     ('publish', 'package of the networks', 'publish_networks.sh'),
     ('publish', 'publish to the car', 'send_to_car.sh'),
     ('publish', 'networks on the comma', 'try_on_comma.sh'),
+    ('backup', 'networks saved on GitHub', 'save_networks_github.sh'),
+    ('backup', 'networks saved on GitHub', 'nnslr networks-github save'),
+    ('restore', 'networks restored from GitHub', 'restore_networks_github.sh'),
+    ('restore', 'networks restored from GitHub', 'nnslr networks-github restore'),
     # [ai-reviewer] - START
     ('ai', 'AI review', 'nnslr ai-review'),
     ('ai', 'AI reviewer measure', 'nnslr measure-ai-reviewer'),
@@ -554,11 +570,12 @@ ACTIVITIES = (
     ('other', 'openpilot.distill training', 'supervised.train'),
 )
 # The groups of this checkout's own helpers (see Panel._ours).
-OWN_GROUPS = ('prepare', 'train', 'update', 'ai', 'publish', 'mapillary', 'box_fit')
+OWN_GROUPS = ('prepare', 'train', 'update', 'ai', 'publish', 'mapillary', 'box_fit', 'backup', 'restore')
 GROUP_NAMES = {'fetch': 'a download from the comma', 'prepare': 'a preparation',
                'train': 'an import or a training', 'update': 'a code update', 'ai': 'an AI review',
                'publish': 'a package of the networks', 'mapillary': 'a search for the Mapillary positions',
-               'box_fit': 'a training of Fit box'}
+               'box_fit': 'a training of Fit box', 'backup': 'a save of the networks on GitHub',
+               'restore': 'a restore of the networks from GitHub'}
 # What runs, in the reason of an action that must wait ("A proposer measurement is running"): the job of the site by
 # its action, the work from a terminal by its label (ACTIVITIES); GROUP_NAMES when neither is known.
 RUNNING_NAMES = {'fetch': 'a download from the comma', 'prepare': 'a preparation', 'prepare_again': 'a preparation',
@@ -574,6 +591,8 @@ RUNNING_NAMES = {'fetch': 'a download from the comma', 'prepare': 'a preparation
                  'networks_prepare': 'the preparation of a package', 'networks_publish': 'a publication',
                  'send_to_car': 'a publication to the car', 'try_on_comma': 'a trial on the comma',
                  'comma_restore': "a return to the build's networks",
+                 'networks_github_save': 'a save of the networks on GitHub',
+                 'networks_github_restore': 'a restore of the networks from GitHub',
                  'ai_review': 'an AI review',
                  'measure_ai_reviewer': 'an AI reviewer measurement', 'road_types': 'a reading of the map',
                  'mapillary_locations': 'a search for the Mapillary positions',
@@ -590,6 +609,8 @@ ACTIVITY_NAMES = {'download from the comma': 'a download from the comma', 'prepa
                   'code update': 'a code update', 'AI review': 'an AI review',
                   'package of the networks': 'a package of the networks', 'publish to the car': 'a publication to the car',
                   'networks on the comma': 'a copy onto the comma',
+                  'networks saved on GitHub': 'a save of the networks on GitHub',
+                  'networks restored from GitHub': 'a restore of the networks from GitHub',
                   'AI reviewer measure': 'an AI reviewer measurement', 'map reading': 'a reading of the map',
                   'Mapillary positions': 'a search for the Mapillary positions',
                   'Mapillary windows': 'the cut of the Mapillary windows',
@@ -599,10 +620,17 @@ ACTIVITY_NAMES = {'download from the comma': 'a download from the comma', 'prepa
 # and restarts this server; a preparation replaces the report an AI review is working on. The search for the
 # Mapillary positions writes a file of its own only (a classifier started meanwhile records the positions it read). The
 # training of Fit box runs on the CPU beside the others, never under an update (it rewrites the models in the checkout).
-CONFLICTS = {'fetch': ('prepare', 'update'), 'prepare': ('fetch', 'update', 'ai'), 'train': ('update',),
-             'update': ('fetch', 'prepare', 'train', 'ai', 'publish', 'mapillary', 'review_box', 'box_fit'),
-             'ai': ('prepare', 'update'), 'publish': ('update',), 'mapillary': ('update',), 'review_box': ('update',),
-             'box_fit': ('update',)}
+# A save on GitHub (#92) copies the networks and Fit box's files: never while Fit box rewrites them, nor beside a
+# restore. A restore puts back runs, records and sign networks that a training, a publication and a preparation read
+# or write: never beside them.
+CONFLICTS = {'fetch': ('prepare', 'update'), 'prepare': ('fetch', 'update', 'ai', 'restore'),
+             'train': ('update', 'restore'),
+             'update': ('fetch', 'prepare', 'train', 'ai', 'publish', 'mapillary', 'review_box', 'box_fit', 'backup',
+                        'restore'),
+             'ai': ('prepare', 'update'), 'publish': ('update', 'restore'), 'mapillary': ('update',),
+             'review_box': ('update',), 'box_fit': ('update', 'backup', 'restore'),
+             'backup': ('update', 'restore', 'box_fit'),
+             'restore': ('backup', 'update', 'train', 'publish', 'prepare', 'box_fit')}
 # The two V100s (issue #29): one GPU job per card, so two trainings can run at once. The groups whose actions may run
 # side by side, pair by pair (_pair_apart), instead of one at a time.
 PAIRED_GROUPS = ('train',)
@@ -1246,6 +1274,10 @@ class Panel:
         # in_use: the licence a package of the networks in use now would have, for the question before it is published.
         payload['networks'] = {'packages': packages(self.root)[:NETWORK_PACKAGES_SHOWN], 'repo': NETWORKS_REPO,
                                'account': hf_account.public_state(self.root), 'in_use': in_use_license(self.root)}
+        # The private copy on GitHub (#92): its repository, the last save and restore of this data root (files read,
+        # no network).
+        from nnslr_tools import networks_github
+        payload['networks']['github'] = networks_github.status(self.root)
         # [ai-reviewer] - START
         # The AI reviewer of Settings (a read of its file, no network): whether a route can be reviewed with AI.
         payload['ai_reviewer'], ai_providers = self._ai_settings()
@@ -1549,6 +1581,12 @@ class Panel:
                 reason = payload['proposers']['ours']
             elif name == 'networks_publish' and not (payload.get('networks', {}).get('account') or {}).get('connected'):
                 reason = 'connect Hugging Face first: Settings, Hugging Face'
+            elif name in GITHUB_ACTIONS and not (self.repo / GITHUB_ACTIONS[name]).is_file():
+                reason = GITHUB_ACTIONS[name] + ' is missing in this installation'
+            elif name in GITHUB_ACTIONS:
+                # Files and GitHub only, no GPU: a restore is for an empty data root too (no confirmed frame, no
+                # network in use), a save says by itself when nothing is in use. Whether GitHub answers the job says.
+                pass
             elif name == 'send_to_car':
                 # The SignNet is chosen on the Models tab (start() checks it); the classifier is the one in use, and
                 # the brain in use never one that takes the driver's inputs.
@@ -1666,89 +1704,72 @@ class Panel:
         return arguments
 
     def box_fit(self) -> dict:
-        """The Fit box card of Models (GET /api/panel/box-fit): the last summary of each part, as
-        scripts/train_box_fit.sh keeps them in evaluations/box_fit of the data root, or None. The rankers
-        (<time>.json): the boxes, the routes and the mean IoU with the person's box on routes left out, the rough box's
-        and the fit's. The refiner (refiner-<time>.json): the rough box's, the rankers' and the refiner's mean IoU on the
-        full frames of the routes left out, in all, on the small signs and on the boxes Fit box did not place (fair, #80),
-        the boxes placed by hand, and whether refiner.onnx was written. So that the card can say what changed: the
-        rankers' training before (before: its time, boxes and mean IoU; the rankers are always replaced), the refiner
-        in use when the new one was measured (in_use: its mean IoU on the same boxes) and why a new refiner was not
-        written (kept_because: 'in_use', 'rankers', 'small' or None). A file that cannot be read is skipped."""
-        folder = self.root / BOX_FIT_SUMMARIES
-
-        def readable(pattern: str, count: int) -> list[tuple[str, dict]]:
-            found = []
-            for path in sorted(folder.glob(pattern), reverse=True):
-                data = _read_json(path)
-                if isinstance(data, dict):
-                    found.append((path.name, data))
-                    if len(found) == count:
-                        break
-            return found
-
-        def newest(pattern: str) -> tuple[str, dict] | None:
-            found = readable(pattern, 1)
-            return found[0] if found else None
+        """The Fit box card of Models (GET /api/panel/box-fit, #94): every version of Fit box on this server, newest
+        first, the code's files last (nnslr_tools.box_fit.versions), each with its record: when, on how many boxes,
+        the rankers' mean IoU on drives left out (rough box and fit), where its refiner comes from ('trained',
+        'carried' from refiner_from, 'none'), and its measure on the full frames of the drives left out, in all, on
+        the small signs and on the boxes Fit box did not place (fair, #80): the rough box, its rankers alone, the
+        version as the review page runs it and the version in use then (in_use_then) on the same boxes. The code's
+        files have no record. in_use: the version the review page fits with (models/box-fit.json), who chose it, and
+        why the chosen one is not used, if so."""
+        from nnslr_tools.box_fit import versions as box_versions
 
         def number(value):
             return value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
 
-        def when(name: str) -> str | None:
-            match = re.search(r'(\d{8}T\d{6}Z)\.json$', name)
-            if not match:
-                return None
-            return datetime.strptime(match.group(1), '%Y%m%dT%H%M%SZ').replace(tzinfo=timezone.utc).isoformat()
+        def text(value, limit: int = 120):
+            return value if isinstance(value, str) and len(value) <= limit else None
 
-        def overall(data: dict) -> dict:
-            return (data.get('cross_validation') or {}).get('overall') or {}
-
-        rankers = None
-        found = readable('[0-9]*.json', 2)
-        if found:
-            name, data = found[0]
-            before = None
-            if len(found) > 1:
-                before_name, before_data = found[1]
-                before = {'at': when(before_name), 'boxes': number(before_data.get('boxes')),
-                          'fit': number(overall(before_data).get('mean_iou'))}
-            rankers = {'file': name, 'at': when(name), 'boxes': number(data.get('boxes')),
-                       'routes': number(data.get('routes')), 'folds': number(data.get('folds')),
-                       'rough': number(overall(data).get('rough_mean_iou')), 'fit': number(overall(data).get('mean_iou')),
-                       'written': bool(data.get('written')), 'before': before}
-        refiner = None
-        found = newest('refiner-*.json')
-        if found is not None:
-            name, data = found
-            left_out = data.get('left_out') or {}
+        used = box_versions.in_use(self.root)
+        found = []
+        for version in box_versions.versions(self.root):
+            record = version['record'] if isinstance(version['record'], dict) else {}
+            left_out = record.get('left_out') if isinstance(record.get('left_out'), dict) else {}
+            rankers = record.get('rankers') if isinstance(record.get('rankers'), dict) else {}
 
             def measure(group: str) -> dict | None:
                 values = left_out.get(group)
                 if not isinstance(values, dict):
                     return None
-                return {key: number(values.get(key)) for key in ('cases', 'rough', 'rankers', 'refiner')}
+                return {key: number(values.get(key)) for key in ('cases', 'rough', 'rankers', 'version', 'in_use')}
 
-            in_use = number(((data.get('current') or {}).get('all') or {}).get('refiner'))
-            new, small = measure('all') or {}, measure('size:small') or measure('all') or {}
+            refiner = record.get('refiner') if record.get('refiner') in ('trained', 'carried', 'none') else None
+            clean = record.get('measured_clean') if isinstance(record.get('measured_clean'), dict) else {}
+            found.append({
+                'id': version['id'], 'run': version['run'], 'at': text(version['at'], 40), 'files': version['files'],
+                'in_use': version['id'] == used['id'], 'record': bool(record),
+                'boxes': number(record.get('boxes')), 'routes': number(record.get('routes')),
+                'rankers_fit': number(rankers.get('mean_iou')), 'rankers_rough': number(rankers.get('rough_mean_iou')),
+                'refiner': refiner if refiner is not None else ('present' if box_versions.REFINER in version['files']
+                                                                else 'none'),
+                'refiner_from': text(record.get('refiner_from'), 80), 'refiner_boxes': number(record.get('refiner_boxes')),
+                'in_use_then': text(record.get('in_use_then'), 80),
+                'better_than_in_use': record.get('better_than_in_use')
+                if isinstance(record.get('better_than_in_use'), bool) else None,
+                'all': measure('all'), 'small': measure('size:small'), 'fair': measure('fair'),
+                # Whether each was measured with rankers that never saw the drives of the measure (False: they did).
+                'measured_clean': {arm: clean.get(arm) if isinstance(clean.get(arm), bool) else None
+                                   for arm in ('version', 'in_use')}})
+        chosen = used['chosen']
+        return {'versions': found, 'folder': 'runs',
+                'in_use': {'id': used['id'], 'found': used['found'], 'problem': used['problem'],
+                           'who': chosen.get('who') if chosen else None, 'via': chosen.get('via') if chosen else None,
+                           'at': chosen.get('at') if chosen else None}}
 
-            def worse(mine, theirs) -> bool:
-                return mine is not None and theirs is not None and mine <= theirs
-
-            # As refiner_train.run decides: better than the rankers in all and on the small signs, and than the one in use.
-            kept_because = (None if data.get('written') else
-                            'in_use' if worse(new.get('refiner'), in_use) else
-                            'rankers' if worse(new.get('refiner'), new.get('rankers')) else
-                            'small' if worse(small.get('refiner'), small.get('rankers')) else None)
-            refiner = {'file': name, 'at': when(name), 'boxes': number(data.get('train_boxes')),
-                       'held_out_boxes': number(data.get('held_out_boxes')), 'best_epoch': number(data.get('best_epoch')),
-                       'epochs': number(data.get('epochs')), 'minutes': number(data.get('minutes')),
-                       'all': measure('all'), 'small': measure('size:small'), 'fair': measure('fair'),
-                       # Boxes placed by hand (box_source, #80); None in a summary from before.
-                       'hand': number((data.get('by_source') or {}).get('hand', 0 if 'by_source' in data else None)),
-                       'wins': bool(data.get('refiner_wins')), 'written': bool(data.get('written')),
-                       'in_use': in_use, 'kept_because': kept_because}
-        return {'rankers': rankers, 'refiner': refiner, 'folder': str(BOX_FIT_SUMMARIES),
-                'refiner_model': (self.repo / 'src' / 'nnslr_tools' / 'box_fit' / 'refiner.onnx').is_file()}
+    def set_box_fit(self, body, *, who: str | None, via: str) -> dict:
+        """The version of Fit box the review page uses from its next fit ({"id"}, POST /api/panel/box-fit/use), written
+        to <root>/models/box-fit.json; only a version on this server, never a path. A read-only panel refuses it."""
+        from nnslr_tools.box_fit import versions as box_versions
+        if not self.actions_enabled:
+            raise PanelError(403, 'actions_disabled', 'The panel is read-only on this server.')
+        if not isinstance(body, dict):
+            raise PanelError(400, 'invalid_json', 'A JSON object is required.')
+        if via not in box_versions.VIA:
+            raise PanelError(403, 'not_allowed', 'Only the owner of this server chooses the version of Fit box.')
+        try:
+            return box_versions.choose(self.root, body.get('id'), who=who, via=via)
+        except box_versions.ChoiceError as exc:
+            raise PanelError(exc.status, exc.reason, exc.message) from exc
 
     def _locations_missing(self) -> str:
         """Why the Mapillary positions cannot be fetched now, or ''."""
@@ -2859,6 +2880,8 @@ class Panel:
             raise PanelError(403, 'actions_disabled', REGRESSION_SCRIPT + ' is missing in this installation.')
         if action in ('networks_prepare', 'networks_publish') and not (self.repo / NETWORKS_SCRIPT).is_file():
             raise PanelError(403, 'actions_disabled', NETWORKS_SCRIPT + ' is missing in this installation.')
+        if action in GITHUB_ACTIONS and not (self.repo / GITHUB_ACTIONS[action]).is_file():
+            raise PanelError(403, 'actions_disabled', GITHUB_ACTIONS[action] + ' is missing in this installation.')
         if action == 'road_types' and not (self.repo / ROAD_TYPES_SCRIPT).is_file():
             raise PanelError(403, 'actions_disabled', ROAD_TYPES_SCRIPT + ' is missing in this installation.')
         if action == 'mapillary_windows' and not (self.repo / WINDOWS_SCRIPT).is_file():
