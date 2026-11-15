@@ -18,26 +18,42 @@ export class SaveError extends Error {
 /** What the page says when a frame was saved elsewhere meanwhile (another tab, another person): it shows that save. */
 export const CONFLICT_TEXT = 'Changed elsewhere meanwhile: this frame now shows what is saved. Check it, then confirm again.';
 
+/** How long a call waits for the server's answer. A save that never came back used to leave the frame on "Saving…"
+ * and every later retry waiting behind it, the button too (15 Nov 2026): now it fails as one to try again. */
+export const CALL_TIMEOUT_MS = 60000;
+
 // Not common/api.ts: a signed-out page must keep its unsaved confirmations on screen (no jump to the sign-in
 // page), and the messages say whether the save is retried.
 export async function call<T>(method: 'GET' | 'POST', url: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = {'Accept': 'application/json'};
-  const options: RequestInit = {method, headers, credentials: 'same-origin', cache: 'no-store'};
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), CALL_TIMEOUT_MS);
+  const options: RequestInit = {method, headers, credentials: 'same-origin', cache: 'no-store',
+    signal: controller.signal};
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json';
     options.body = JSON.stringify(body);
   }
   let response: Response;
-  try {
-    response = await fetch(url, options);
-  } catch {
-    throw new SaveError('server unreachable.', true);
-  }
   let result: unknown = null;
   try {
-    result = await response.json();
-  } catch {
-    result = null;
+    try {
+      response = await fetch(url, options);
+    } catch {
+      throw new SaveError(controller.signal.aborted ? 'no answer from the server in '
+        + CALL_TIMEOUT_MS / 1000 + ' s.' : 'server unreachable.', true);
+    }
+    try {
+      result = await response.json();
+    } catch {
+      // The answer cut off by the time limit: the call failed, whatever its status said.
+      if (controller.signal.aborted) {
+        throw new SaveError('no answer from the server in ' + CALL_TIMEOUT_MS / 1000 + ' s.', true);
+      }
+      result = null;
+    }
+  } finally {
+    window.clearTimeout(timer);
   }
   if (!response.ok) {
     const problem = result as Problem | null;

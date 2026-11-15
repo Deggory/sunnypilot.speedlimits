@@ -40,6 +40,7 @@ import re
 import secrets
 import socket
 import threading
+import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlsplit
@@ -713,6 +714,11 @@ def make_handler(app: ReviewApp):
             except PanelError as exc:
                 self._problem(exc.status, exc.reason, exc.message, True)
             except Exception as exc:
+                # In the log with where it happened: the page shows only the type (15 Nov 2026, a save lost
+                # without a trace).
+                trace = ''.join(c if c.isprintable() or c == '\n' else '?'
+                                for c in traceback.format_exc(limit=8)[-4000:])
+                print(f'Errore del server: {method} {terminal_text(urlsplit(self.path).path)}\n{trace}', flush=True)
                 self._problem(500, 'server_error', 'Internal server error: ' + type(exc).__name__ + '.',
                               self.path.startswith('/api/') or self.path.startswith('/mcp'))
 
@@ -2618,6 +2624,10 @@ def make_handler(app: ReviewApp):
             self._send(status, 'application/json; charset=utf-8', body, DEFAULT_CSP, extra)
 
         def _problem(self, status, reason, message, api):
+            # A confirmation the server refuses is in the log, with why: the page alone knew (15 Nov 2026).
+            if self.command == 'POST' and re.search(r'/frame/\d+/\d+$', urlsplit(self.path).path):
+                print(f'Non salvato: {terminal_text(urlsplit(self.path).path)} {status} {reason}: '
+                      f'{terminal_text(message)}', flush=True)
             if api:
                 self._json(status, {'ok': False, 'error': reason, 'message': message})
             else:

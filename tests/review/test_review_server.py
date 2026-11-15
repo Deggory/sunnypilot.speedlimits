@@ -286,6 +286,24 @@ def test_stale_report_and_concurrent_edit_conflicts(loopback):
     assert status == 409 and json_of(data)['error'] == 'revision_conflict'
 
 
+def test_a_refused_save_and_a_server_error_are_in_the_log(loopback, capfd, monkeypatch):
+    server, root, rows = loopback
+    capfd.readouterr()
+    assert server.post_frame(ROUTE, '0/0', page_body(rows[0], base_revision=3))[0] == 409
+    out = capfd.readouterr().out
+    assert re.search(r'^Non salvato: \S*/frame/0/0 409 revision_conflict: ', out, re.M), out
+
+    def broken(*args, **kwargs):
+        raise RuntimeError('the disk said no')
+
+    monkeypatch.setattr('nnslr_tools.review_service.ReviewService.report', broken)
+    status, response, data = server.post_frame(ROUTE, '0/0', page_body(rows[0], base_revision=0))
+    assert status == 500 and json_of(data)['error'] == 'server_error'
+    out = capfd.readouterr().out
+    assert 'Errore del server: POST ' in out and 'RuntimeError: the disk said no' in out
+    assert re.search(r'^Non salvato: \S*/frame/0/0 500 server_error: ', out, re.M), out
+
+
 def test_withdraw_keeps_payload_and_is_not_confirmed(loopback):
     server, root, rows = loopback
     status, response, data = server.post_frame(ROUTE, '0/0', page_body(rows[0], confirmed=False))
