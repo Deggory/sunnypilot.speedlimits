@@ -78,12 +78,31 @@ const measureText = (measure: BoxFitMeasure): string => 'rough ' + iou(measure.r
 const what = 'Key C of the review page fits a rough box to its sign on this server: two rankers (colour trees and edge '
   + 'networks), then the box refiner where it beat them. They learn from the boxes people drew; the review page uses new '
   + 'models after the site restarts. Trained on a V100.';
-/** One line: the mean IoU with the person's box on drives left out, all three on the same boxes, and whether the refiner
- * was written. */
-const summary = computed(() => {
-  const all = refiner.value?.all;
-  if (all) return 'IoU ' + measureText(all) + (refiner.value?.written ? ' · refiner written' : ' · refiner kept');
-  return rankers.value ? 'IoU rough ' + iou(rankers.value.rough) + ' · rankers ' + iou(rankers.value.fit) : '';
+/** What the last training did to the rankers, in words: replaced (always), their mean IoU with the person's box on
+ * drives left out, and the training before's. */
+const rankersLine = computed(() => {
+  const item = rankers.value;
+  if (!item) return '';
+  const before = item.before;
+  return 'Rankers replaced ' + isoWhen(item.at) + ' · IoU ' + iou(item.fit) + ' on drives left out'
+    + (before ? ' (the training before: ' + iou(before.fit) + (before.boxes !== null ? ', ' + plural(before.boxes, 'box', 'boxes') : '') + ')' : '');
+});
+/** What the last training of the refiner did: replaced, or kept the one in use, and why, the new one against what it
+ * had to beat on the same boxes. */
+const refinerLine = computed(() => {
+  const item = refiner.value;
+  const all = item?.all;
+  if (!item || !all) return '';
+  const when = isoWhen(item.at);
+  if (item.written) {
+    return 'Refiner replaced ' + when + ' · IoU ' + iou(all.refiner)
+      + (typeof item.in_use === 'number' ? ', the one before ' + iou(item.in_use) : '') + ', the rankers ' + iou(all.rankers);
+  }
+  const why = item.kept_because === 'in_use' ? 'the one in use ' + iou(item.in_use)
+    : item.kept_because === 'small' ? 'the rankers on the small signs ' + iou(item.small?.rankers)
+      + ' (it ' + iou(item.small?.refiner) + ')'
+    : 'the rankers ' + iou(all.rankers);
+  return 'Refiner kept, the new one not better ' + when + ' · IoU ' + iou(all.refiner) + ' against ' + why;
 });
 /** The details of the last training, in the tooltip. */
 const trainedTitle = computed(() => {
@@ -105,7 +124,8 @@ const trainedTitle = computed(() => {
       <span class="import-icon" :class="{fresh: !rankers}" aria-hidden="true"><Icon name="train"/></span>
       <div class="import-what" :title="trainedTitle">
         <strong>{{ rankers ? (rankers.boxes !== null ? plural(rankers.boxes, 'box', 'boxes') : 'Trained') : 'Not trained yet' }}</strong>
-        <span v-if="summary" id="box-fit-summaries">{{ summary }}</span>
+        <span v-if="rankersLine" id="box-fit-rankers">{{ rankersLine }}</span>
+        <span v-if="refinerLine" id="box-fit-refiner">{{ refinerLine }}</span>
       </div>
       <div class="rl-buttons">
         <button type="button" class="btn" id="box-fit-dry" :disabled="!state?.allowed" title="Only counts the boxes"

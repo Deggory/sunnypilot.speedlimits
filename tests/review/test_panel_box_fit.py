@@ -211,13 +211,33 @@ def test_the_last_summary_of_each_part(root, checkout):
     summaries(root)
     view = panel.box_fit()
     assert view['rankers'] == {'file': '20261109T100000Z.json', 'at': '2026-11-09T10:00:00+00:00', 'boxes': 4100,
-                               'routes': 31, 'folds': 4, 'rough': 0.6012, 'fit': 0.8123, 'written': True}
+                               'routes': 31, 'folds': 4, 'rough': 0.6012, 'fit': 0.8123, 'written': True,
+                               'before': {'at': '2026-11-08T10:00:00+00:00', 'boxes': 3000, 'fit': 0.8123}}
     assert view['refiner'] == {
         'file': 'refiner-20261108T110000Z.json', 'at': '2026-11-08T11:00:00+00:00', 'boxes': 3000,
         'held_out_boxes': 900, 'best_epoch': 31, 'epochs': 40, 'minutes': 58.2,
         'all': {'cases': 2700, 'rough': 0.6, 'rankers': 0.81, 'refiner': 0.84},
         'small': {'cases': 800, 'rough': 0.5, 'rankers': 0.7, 'refiner': 0.69}, 'fair': None, 'hand': None,
-        'wins': False, 'written': False}
+        'wins': False, 'written': False, 'in_use': None, 'kept_because': 'small'}
+
+
+def test_the_card_says_why_a_new_refiner_was_kept_out(root, checkout):
+    # 15 Nov 2026: a new refiner a little worse than the one in use is not written, and the card says so.
+    folder = summaries(root)
+    data = json.loads((folder / 'refiner-20261108T110000Z.json').read_text())
+    data['current'] = {'all': {'cases': 2700, 'rough': 0.6, 'rankers': 0.81, 'refiner': 0.845}}
+    (folder / 'refiner-20261109T110000Z.json').write_text(json.dumps(data))
+    refiner = Panel(root, repo=checkout).box_fit()['refiner']
+    assert (refiner['in_use'], refiner['kept_because'], refiner['written']) == (0.845, 'in_use', False)
+    data['left_out']['all']['refiner'] = 0.8
+    del data['current']
+    (folder / 'refiner-20261110T110000Z.json').write_text(json.dumps(data))
+    assert Panel(root, repo=checkout).box_fit()['refiner']['kept_because'] == 'rankers'
+    data['left_out']['all']['refiner'], data['refiner_wins'], data['written'] = 0.86, True, '/x/refiner.onnx'
+    data['left_out']['size:small']['refiner'] = 0.75
+    (folder / 'refiner-20261111T110000Z.json').write_text(json.dumps(data))
+    refiner = Panel(root, repo=checkout).box_fit()['refiner']
+    assert (refiner['written'], refiner['kept_because']) == (True, None)
 
 
 def test_the_card_shows_the_fair_measure_and_the_boxes_placed_by_hand(root, checkout):

@@ -78,6 +78,25 @@ trap 'rm -f "$summary.tmp" "$refined.tmp"' EXIT
 mv "$summary.tmp" "$summary"
 cat "$summary"
 echo "Summary in $summary."
+# The rankers are replaced by every real run: their mean IoU on the routes left out against the training before.
+"$PYTHON" - "$summary" <<'PY' || true
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+fit = lambda data: ((data.get('cross_validation') or {}).get('overall') or {}).get('mean_iou')
+new = json.loads(path.read_text())
+before = None
+for older in sorted(path.parent.glob('[0-9]*.json'), reverse=True):
+    if older.name < path.name:
+        try:
+            before = json.loads(older.read_text())
+            break
+        except (OSError, ValueError):
+            continue
+line = f'The rankers replaced (colour.npz, edges.npz): mean IoU {fit(new)} on the routes left out, {new.get("boxes")} boxes'
+if isinstance(before, dict):
+    line += f'; the training before: {fit(before)}, {before.get("boxes")} boxes'
+print(line + '.')
+PY
 
 if [ "$REFINER" = 1 ]; then
   echo "3/$STEPS The box refiner: train on the GPU, measure against the rankers on routes left out ($WORKERS processes reading the crops)"
@@ -87,4 +106,4 @@ if [ "$REFINER" = 1 ]; then
   cat "$refined"
   echo "Summary in $refined."
 fi
-echo "The site uses the new models after its next restart."
+echo "The review page uses what was replaced after the site's next restart."

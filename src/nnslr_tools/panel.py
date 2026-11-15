@@ -1671,16 +1671,25 @@ class Panel:
         (<time>.json): the boxes, the routes and the mean IoU with the person's box on routes left out, the rough box's
         and the fit's. The refiner (refiner-<time>.json): the rough box's, the rankers' and the refiner's mean IoU on the
         full frames of the routes left out, in all, on the small signs and on the boxes Fit box did not place (fair, #80),
-        the boxes placed by hand, and whether refiner.onnx was written. A file
-        that cannot be read is skipped."""
+        the boxes placed by hand, and whether refiner.onnx was written. So that the card can say what changed: the
+        rankers' training before (before: its time, boxes and mean IoU; the rankers are always replaced), the refiner
+        in use when the new one was measured (in_use: its mean IoU on the same boxes) and why a new refiner was not
+        written (kept_because: 'in_use', 'rankers', 'small' or None). A file that cannot be read is skipped."""
         folder = self.root / BOX_FIT_SUMMARIES
 
-        def newest(pattern: str) -> tuple[str, dict] | None:
+        def readable(pattern: str, count: int) -> list[tuple[str, dict]]:
+            found = []
             for path in sorted(folder.glob(pattern), reverse=True):
                 data = _read_json(path)
                 if isinstance(data, dict):
-                    return path.name, data
-            return None
+                    found.append((path.name, data))
+                    if len(found) == count:
+                        break
+            return found
+
+        def newest(pattern: str) -> tuple[str, dict] | None:
+            found = readable(pattern, 1)
+            return found[0] if found else None
 
         def number(value):
             return value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
@@ -1692,14 +1701,18 @@ class Panel:
             return datetime.strptime(match.group(1), '%Y%m%dT%H%M%SZ').replace(tzinfo=timezone.utc).isoformat()
 
         rankers = None
-        found = newest('[0-9]*.json')
-        if found is not None:
-            name, data = found
-            overall = (data.get('cross_validation') or {}).get('overall') or {}
+        found = readable('[0-9]*.json', 2)
+        if found:
+            name, data = found[0]
+            before = None
+            if len(found) > 1:
+                before_name, before_data = found[1]
+                before = {'at': when(before_name), 'boxes': number(before_data.get('boxes')),
+                          'fit': number(overall(before_data).get('mean_iou'))}
             rankers = {'file': name, 'at': when(name), 'boxes': number(data.get('boxes')),
                        'routes': number(data.get('routes')), 'folds': number(data.get('folds')),
-                       'rough': number(overall.get('rough_mean_iou')), 'fit': number(overall.get('mean_iou')),
-                       'written': bool(data.get('written'))}
+                       'rough': number(overall(data).get('rough_mean_iou')), 'fit': number(overall(data).get('mean_iou')),
+                       'written': bool(data.get('written')), 'before': before}
         refiner = None
         found = newest('refiner-*.json')
         if found is not None:
@@ -1718,7 +1731,8 @@ class Panel:
                        'all': measure('all'), 'small': measure('size:small'), 'fair': measure('fair'),
                        # Boxes placed by hand (box_source, #80); None in a summary from before.
                        'hand': number((data.get('by_source') or {}).get('hand', 0 if 'by_source' in data else None)),
-                       'wins': bool(data.get('refiner_wins')), 'written': bool(data.get('written'))}
+                       'wins': bool(data.get('refiner_wins')), 'written': bool(data.get('written')),
+                       'in_use': in_use, 'kept_because': kept_because}
         return {'rankers': rankers, 'refiner': refiner, 'folder': str(BOX_FIT_SUMMARIES),
                 'refiner_model': (self.repo / 'src' / 'nnslr_tools' / 'box_fit' / 'refiner.onnx').is_file()}
 
@@ -1727,6 +1741,9 @@ class Panel:
         from nnslr_tools.mapillary import token_ready
         if not (self.repo / LOCATIONS_SCRIPT).is_file():
             return LOCATIONS_SCRIPT + ' is missing in this installation'
+        def overall(data: dict) -> dict:
+            return (data.get('cross_validation') or {}).get('overall') or {}
+
         if not token_ready(self.repo):
             return "no Mapillary token: add MAPILLARY_TOKEN to the server's .env"
         return ''
@@ -1748,6 +1765,17 @@ class Panel:
             return (f'no drive to learn from: sunnypilot was on in every drive with its logs read ({len(left_out)}); '
                     'drive with sunnylink › Toggles › Enable sunnypilot off')
         return 'no drive to learn from yet: prepare one, then Read the logs on Data › Speed review'
+            in_use = number(((data.get('current') or {}).get('all') or {}).get('refiner'))
+            new, small = measure('all') or {}, measure('size:small') or measure('all') or {}
+
+            def worse(mine, theirs) -> bool:
+                return mine is not None and theirs is not None and mine <= theirs
+
+            # As refiner_train.run decides: better than the rankers in all and on the small signs, and than the one in use.
+            kept_because = (None if data.get('written') else
+                            'in_use' if worse(new.get('refiner'), in_use) else
+                            'rankers' if worse(new.get('refiner'), new.get('rankers')) else
+                            'small' if worse(small.get('refiner'), small.get('rankers')) else None)
 
     def brain_labels(self) -> dict:
         """Train › Brain, what a training gets today from every drive it learns from (training_routes: every dashcam

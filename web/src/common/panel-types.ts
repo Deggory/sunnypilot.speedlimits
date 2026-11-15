@@ -130,6 +130,9 @@ export interface BoxFitRankers {
   fit: number | null;
   written: boolean;
 }
+  /** The rankers' training before this one (they are replaced by every run): its time, boxes and mean IoU; null when
+   * there is none. A server not restarted since 15 Nov 2026 does not send it. */
+  before?: {at: string | null; boxes: number | null; fit: number | null} | null;
 export interface BoxFitMeasure {
   cases: number | null;
   rough: number | null;
@@ -154,6 +157,11 @@ export interface BoxFitRefiner {
   wins: boolean;
   written: boolean;
 }
+  /** The refiner in use when this one was measured, its mean IoU on the same boxes (null: there was none), and why
+   * this one was not written: no better than it, than the rankers, or than the rankers on the small signs. A server
+   * not restarted since 15 Nov 2026 sends neither. */
+  in_use?: number | null;
+  kept_because?: 'in_use' | 'rankers' | 'small' | null;
 export interface BoxFitPayload {
   rankers: BoxFitRankers | null;
   refiner: BoxFitRefiner | null;

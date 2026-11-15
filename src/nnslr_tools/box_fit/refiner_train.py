@@ -405,8 +405,25 @@ def run(data_root: Path, out_dir: Path, *, epochs: int, workers: int, dry_run: b
     else:
         tmp.unlink(missing_ok=True)
         summary['written'] = None
+    log(verdict(measure, current, wins))
     summary['minutes'] = round((time.time() - started) / 60, 1)
     return summary
+
+
+def verdict(measure: dict, current: dict | None, wins: bool) -> str:
+    """The outcome in one sentence for the log: the new refiner's mean IoU on the boxes left out against the one in
+    use and the rankers, and whether refiner.onnx was replaced or kept."""
+    new, rankers = measure['all']['refiner'], measure['all']['rankers']
+    small = measure.get('size:small', measure['all'])
+    in_use = current['all']['refiner'] if current else None
+    against = (f'the one in use {in_use:.3f}, ' if in_use is not None else '') + f'the rankers {rankers:.3f}'
+    if wins:
+        return f'The new refiner is better: mean IoU {new:.3f} on the boxes left out ({against}): refiner.onnx replaced.'
+    why = ('it does not beat the one in use' if in_use is not None and new <= in_use else
+           'it does not beat the rankers' if new <= rankers else 'it does not beat the rankers on the small signs '
+           f'({small["refiner"]:.3f} against {small["rankers"]:.3f})')
+    return (f'The new refiner is not better: mean IoU {new:.3f} on the boxes left out ({against}), {why}: '
+            'refiner.onnx kept as it was.')
 
 
 def export(model, path: Path) -> None:
