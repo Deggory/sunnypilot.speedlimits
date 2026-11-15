@@ -390,6 +390,80 @@ def test_a_drive_nobody_read_for_road_users_lifts_and_measures_nothing():
     assert found['with_users']['frames'] == 0 and found['others']['frames'] == 2
 
 
+def roaded(drive, cells, given_away=()):
+    """The drive with whose road its speed signs are of, as drive_targets gives it: cells, {(frame, column): of another
+    road}, the columns of sign_boxes a reviewed box answers; given_away: those the applicability network gave to another
+    road when the drive was read."""
+    import numpy
+    shape = (len(drive['partitions']), 8)
+    drive['applicability'], drive['applicability_weight'], drive['applicability_network'] = (
+        numpy.zeros(shape, dtype=numpy.float32) for _ in range(3))
+    for (frame, column), another in cells.items():
+        drive['applicability'][frame, column], drive['applicability_weight'][frame, column] = another, 1
+    for frame, column in given_away:
+        drive['applicability_network'][frame, column] = 1
+    return drive
+
+
+def test_the_head_and_the_applicability_network_are_measured_on_the_same_reviewed_signs():
+    """#89: of the signs a reviewed box gives to another road, how many each finds (recall), and of those each calls so,
+    how many are (precision); every frame with a reviewed sign, not one a second."""
+    import numpy
+    from nnslr_tools.brain_train import measure
+    # Test: frame 0 a sign of another road in column 0 and one of ours in column 6; frame 1 one of another road in
+    # column 2; frame 2 one of ours in column 5. Frame 3 is of train.
+    drive = roaded(fake_drive(['test'] * 3 + ['train']), {(0, 0): True, (0, 6): False, (1, 2): True, (2, 5): False, (3, 0): True},
+                   given_away=[(0, 0), (2, 5)])
+    drive['measured'] = numpy.array([True, False, False, True])  # a measure a second for the speed: not for these
+    answer = said([100] * 4)
+    answer['applicability'] = numpy.zeros((4, 8), dtype=numpy.float32)
+    answer['applicability'][0, 0] = answer['applicability'][1, 2] = .9  # finds both, calls none wrongly
+    answer['applicability'][1, 7] = .9  # a column nobody reviewed: not counted
+    found = measure([drive], [answer], 'test')['applicability']
+    assert (found['ours'], found['another']) == (2, 2)
+    assert found['head']['recall'] == 1.0 and found['head']['precision'] == 1.0 and found['head']['false_positive'] == 0
+    # The network found one of the two, and gave one of ours away
+    assert found['network']['true_positive'] == 1 and found['network']['false_negative'] == 1
+    assert found['network']['recall'] == 0.5 and found['network']['precision'] == 0.5
+    assert measure([drive], [answer], 'train')['applicability']['another'] == 1
+    # A network without the head: the applicability network is measured all the same
+    plain = measure([drive], [said([100] * 4)], 'test')['applicability']
+    assert plain['head'] is None and plain['network']['recall'] == 0.5
+    # No sign of another road in the partition: no recall to show; a drive without those answers: no measure
+    ours = measure([roaded(fake_drive(['test'] * 2), {(0, 3): False})], [said([100] * 2)], 'test')['applicability']
+    assert ours['network']['recall'] is None and ours['network']['precision'] == 0.0 and ours['another'] == 0
+    assert measure([fake_drive(['test'] * 2)], [said([100] * 2)], 'test')['applicability'] is None
+
+
+def test_a_sign_of_another_road_is_lifted_by_how_rare_it_is_and_one_side_alone_teaches_nothing():
+    from nnslr_tools.brain_train import _applicability_needs_both, applicability_pos_weight
+    cells = {(frame, 6): False for frame in range(6)} | {(0, 0): True, (1, 0): True, (7, 3): True}
+    drive = roaded(fake_drive(['train'] * 7 + ['test']), cells)
+    assert applicability_pos_weight([drive, fake_drive(['train'])]) == 3.0  # 6 of ours, 2 of another in train
+    rare = roaded(fake_drive(['train'] * 40), {(frame, 6): False for frame in range(39)} | {(39, 0): True})
+    assert applicability_pos_weight([rare]) == 10.0
+    lines = []
+    _applicability_needs_both([drive], lines.append)
+    assert not lines and drive['applicability_weight'][:7].sum() == 8
+    # Only signs of our road in train: the task leaves its loss, the test's answers stay for the measure
+    alone = roaded(fake_drive(['train'] * 3 + ['test']), {(0, 6): False, (1, 6): False, (3, 0): True})
+    assert applicability_pos_weight([alone]) is None
+    _applicability_needs_both([alone], lines.append)
+    assert '2 of our road and 0 of another' in lines[0] and not alone['applicability_weight'][:3].any()
+    assert alone['applicability_weight'][3, 0] == 1
+    _applicability_needs_both([fake_drive(['train'])], lines.append)
+    assert lines[1].startswith('No reviewed speed sign in train')
+
+
+def test_the_epoch_line_says_the_signs_of_another_road_the_head_finds():
+    from nnslr_tools.brain_train import _applicability_words
+    told = {'ours': 5, 'another': 4, 'network': {}, 'head': {'precision': .6, 'recall': .75}}
+    assert _applicability_words(told) == ' val_another_road_recall 0.7500 val_another_road_precision 0.6000 (4 signs)'
+    assert _applicability_words({**told, 'another': 1, 'head': {'precision': None, 'recall': 1.0}}).endswith('precision - (1 sign)')
+    assert _applicability_words(None) == '' and _applicability_words({**told, 'head': None}) == ''
+    assert _applicability_words({**told, 'head': {'precision': .5, 'recall': None}}) == ''
+
+
 def test_a_site_of_another_partition_is_not_here():
     from nnslr_tools.brain_train import measure
     drive = fake_drive(['train'] * 10, marks=[{'start_ns': 2 * NS, 'end_ns': 6 * NS}])
@@ -581,6 +655,34 @@ def test_a_road_user_alone_is_a_step_of_its_head_and_the_prediction_says_each_ki
     assert all(torch.equal(a, b) for a, b in zip(before, model.parameters()))
 
 
+BOXED = (*GROUPS, 'sign_boxes')
+
+
+def test_a_reviewed_sign_alone_is_a_step_of_its_head_and_the_prediction_says_each_column():
+    torch = torch_or_skip()
+    from nnslr_tools.brain_targets import pack_inputs
+    from nnslr_tools.brain_train import predict
+    from nnslr_tools.road_type_net import FrameStore
+    drive = roaded(fake_drive(['train'] * T), {(1, 6): False, (2, 0): True})
+    drive['extra'] = pack_inputs(drive['inputs'], BOXED)
+    drive['speed_weight'][:], drive['works_weight'][:] = 0, 0
+    model = tiny(torch, groups=BOXED, applicability=True)
+    before = {name: value.clone() for name, value in model.named_parameters()}
+    array = pictures(drive)
+    assert one_epoch(torch, model, drive, array) > 0
+    assert not torch.equal(before['applicability_head.weight'], model.applicability_head.weight)
+    store = FrameStore({drive['route']: array}, torch.device('cpu'))
+    said = predict(model, drive, store, chunk=3, device=torch.device('cpu'))
+    assert said['applicability'].shape == (T, 8) and ((said['applicability'] >= 0) & (said['applicability'] <= 1)).all()
+    assert predict(tiny(torch, groups=BOXED), drive, store, chunk=3, device=torch.device('cpu'))['applicability'] is None
+    # No reviewed sign: no answer, no step, nothing moves.
+    drive['applicability_weight'][:] = 0
+    model = tiny(torch, groups=BOXED, applicability=True)
+    before = [value.clone() for value in model.parameters()]
+    assert one_epoch(torch, model, drive, array) == 0
+    assert all(torch.equal(a, b) for a, b in zip(before, model.parameters()))
+
+
 def numpy_sum_is_one(chances):
     return bool((abs(chances.sum(axis=-1) - 1) < 1e-4).all())
 
@@ -667,13 +769,21 @@ def test_cold_starts_the_memory_again_where_a_stretch_out_of_train_begins():
 BUILT = []  # what the last run_training asked of build_brain_net
 
 
-def run_training(torch, tmp_path, monkeypatch, scores, change=lambda _drive: None, map_limit=False):
-    """Every epoch's validation scores what scores says: nothing may follow from it."""
+ASKED = []  # the options the last training asked its drives with (brain_targets.dataset)
+
+
+def run_training(torch, tmp_path, monkeypatch, scores, change=lambda _drive: None, map_limit=False, **training):
+    """Every epoch's validation scores what scores says: nothing may follow from it. training: more options of
+    train_brain."""
     from nnslr_tools import brain_train
     drive = fake_drive(['train'] * 4 + ['validation'] * 2 + ['test'] * 2)
     change(drive)
     drive['reader'], drive['reader_current'], drive['signs_read'] = {'vision': 'abc'}, True, True
-    monkeypatch.setattr(brain_train, 'dataset', lambda *_args, **_options: [drive])
+    def dataset(*_args, **options):
+        ASKED[:] = [options]
+        return [drive]
+
+    monkeypatch.setattr(brain_train, 'dataset', dataset)
     monkeypatch.setattr(brain_train, 'read_split', lambda _root: {'sha256': 'split'})
     monkeypatch.setattr(brain_train, '_pictures', lambda *_args, **_options: {drive['route']: pictures(drive)})
     model = tiny(torch, groups=brain_train.learned_inputs(map_limit))
@@ -693,7 +803,7 @@ def run_training(torch, tmp_path, monkeypatch, scores, change=lambda _drive: Non
 
     monkeypatch.setattr(brain_train, 'measure', scripted)
     result = brain_train.train_brain(tmp_path, tmp_path / 'run', None, epochs=len(scores), chunk=4, device='cpu',
-                                     log=lambda _text: None, map_limit=map_limit)
+                                     **{'log': lambda _text: None, 'map_limit': map_limit, **training})
     return result, torch.load(tmp_path / 'run' / 'brain-last.pt', weights_only=False), model
 
 
@@ -781,6 +891,33 @@ def test_the_log_says_the_road_users_on_every_drive_before_the_dry_run_cut_and_t
     assert BUILT[0]['users'] is True and saved['users'] is True and saved['user_kinds'] == ['person', 'two_wheeler', 'vehicle']
     assert result['users'] is True and len(result['users_pos_weight']) == 3 and result['users_answers']['drives'] == 1
     assert 'users_speed' in result['test'] and result['test']['users'] is None  # the tiny model has no head here
+
+
+def test_a_brain_learns_whose_road_a_sign_is_of_with_every_sign_s_box_unless_asked_not_to(tmp_path, monkeypatch):
+    """#89: on by default: the head, the drives made with the boxes of every sign read, and the checkpoint says so for
+    the export; --no-applicability, the brain of before: the signs taken, no head, the network alone measured."""
+    torch = torch_or_skip()
+    from nnslr_tools import brain_train
+    lines = []
+    cells = {(0, 6): False, (1, 6): False, (2, 0): True, (4, 0): True, (6, 6): False}
+    result, saved, _model = run_training(torch, tmp_path, monkeypatch, [1.0], log=lines.append,
+                                         change=lambda drive: roaded(drive, cells, given_away=[(4, 0)]))
+    assert ASKED[0]['other_road_boxes'] is True and BUILT[0]['applicability'] is True
+    assert saved['applicability'] is True and saved['other_road_boxes'] is True
+    assert result['applicability'] is True and result['other_road_boxes'] is True and result['applicability_pos_weight'] == 2.0
+    assert result['applicability_answers']['partitions']['train'] == {'ours': 2, 'another': 1}
+    assert result['validation']['applicability']['network']['recall'] == 1.0 and result['test']['applicability']['ours'] == 1
+    assert result['history'][0]['applicability']['another'] == 1
+    assert any(line.startswith('Whose road a sign is of: ') and 'every speed sign read' in line for line in lines), lines
+    assert any('weighs 2.0 times one of ours' in line for line in lines)
+    lines.clear()
+    result, saved, _model = run_training(torch, tmp_path / 'without', monkeypatch, [1.0], log=lines.append, applicability=False,
+                                         change=lambda drive: roaded(drive, cells))
+    assert ASKED[0]['other_road_boxes'] is False and BUILT[0]['applicability'] is False
+    assert saved['applicability'] is False and saved['other_road_boxes'] is False
+    assert result['applicability'] is False and result['applicability_pos_weight'] is None
+    assert result['test']['applicability']['head'] is None and result['test']['applicability']['network'] is not None
+    assert any('applicability_head off (--no-applicability)' in line for line in lines)
 
 
 def test_the_epoch_line_says_the_road_type_on_all_and_on_each_type_with_frames():
@@ -1116,8 +1253,11 @@ def test_the_export_checks_the_brain_along_a_drive_it_learnt_from_with_its_pictu
     asked = []
     found = [{'route': 'r1', 'partitions': ['test'], 'inputs': None, 'pictures': True}]
 
-    def dataset(_root, _merged_of, routes, *, rate, networks=None):
+    every = []
+
+    def dataset(_root, _merged_of, routes, *, rate, networks=None, other_road_boxes=False):
         asked.append(routes)
+        every.append(other_road_boxes)
         return [dict(drive) for drive in found]
 
     monkeypatch.setattr(brain_export, 'dataset', dataset)
@@ -1125,8 +1265,10 @@ def test_the_export_checks_the_brain_along_a_drive_it_learnt_from_with_its_pictu
     monkeypatch.setattr(brain_export, '_pictures', lambda *_args, **_options: None)
     monkeypatch.setattr(brain_export, 'FrameStore', lambda pictures, device: (pictures, device))
     assert brain_export.rollout_drive(tmp_path, None, ())[0]['route'] == 'r1'
-    brain_export.rollout_drive(tmp_path, None, (), 'r1')
+    brain_export.rollout_drive(tmp_path, None, (), 'r1', other_road_boxes=True)
     assert asked == [None, ['r1']]
+    # #89: a brain that learnt with the boxes of every sign read is checked along a drive made so
+    assert every == [False, True]
     # r1 driven after the training (more seconds in test, no pictures yet) is passed by: Publish still checks along r2.
     found[:] = [{'route': 'r1', 'partitions': ['test'] * 3, 'inputs': None, 'pictures': False},
                 {'route': 'r2', 'partitions': ['test'], 'inputs': None, 'pictures': True}]

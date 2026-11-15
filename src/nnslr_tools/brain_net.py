@@ -11,6 +11,8 @@ The network, per frame: encoder (MobileNetV3-small, as the road-type network) ->
     type   = type_head(h)                        the road type, a logit a type of road_types.ROAD_TYPES: only in training
     users  = users_head(h)                       who is on the road and where, a presence and a size a kind and column:
                                                  only in training
+    whose  = applicability_head(h)               whose road the speed sign of each column of sign_boxes is of, a logit a
+                                                 column (above 0: of another road): only in training, for now
 
 The table is the network's own (build_brain_net's kph, the class_kph buffer, kept in every checkpoint): a class a km/h from
 1 to 200 since 8 Nov 2026 (brain_targets.SPEED_CLASSES), a class every 5 km/h before. A brain of before keeps its own: its
@@ -41,6 +43,23 @@ them to answer here; no road user ever reaches the network's inputs, nor the car
 Its design limits: 8 stripes of 168 pixels say left, centre and right, not the lane; one size a stripe, the tallest;
 nothing of how far ahead but the size; the detector misses what is under COMPLETE_HEIGHT pixels, and the rule
 proposes only vehicles that move across our path faster than road_users.CROSSING_MPS while we drive straight.
+
+Whose road a sign is of (applicability=True, since 15 Nov 2026, #89: Cristian's "applicability is a head of the brain,
+trained on our reviews"). Until now a small network of its own (the applicability network, one box at a time, no memory)
+gave each speed sign to our road or to another, and the brain never saw a sign given to another road. The brain has what
+that network has not: its memory, the turn signals, the steering wheel, the whole scene. So applicability_head is one
+layer on h with a logit for each of the BOX_COLUMNS columns of sign_boxes: the speed sign the brain is given in that
+column is of another road (above 0) or of ours. loss += APPLICABILITY_LOSS * binary cross entropy on the columns a
+reviewed box answers (brain_targets.applicability_answers: the reviews of the gold dataset, our road or another), a
+sum over those columns divided by the frames of the piece: a reviewed sign weighs as a frame of his speed, since few
+frames have one and each is a person's word. pos_weight (brain_train.applicability_pos_weight) lifts the rare side,
+another road, by the columns of our road over those of another in train, at most APPLICABILITY_POS_WEIGHT_MAX times. A
+brain that learns it is given the boxes of every speed sign read, those of another road too (the checkpoint's
+other_road_boxes; the car gives the same, brain.BrainReader), since it can only judge what it sees. The head is
+TRAINING_ONLY for now (stage 1): on the car the applicability network still decides which signs are taken, and the head
+is measured beside it on the same signs. Its design limits: a column, not a sign (two speed signs in one column get one
+answer); the picture is 256 x 144, where a sign is a few pixels, so it judges by where the box is and how big, the
+scene, the motion and what it remembers, not by the face of the sign; it answers only of a sign SignNet found.
 
 The road type (town, rural, motorway... of the map, with a person's corrections in Speed review: brain_targets.type_answers)
 teaches the memory as well: type_head is one layer with a logit a type, loss += TYPE_LOSS * cross entropy of the type on
@@ -104,13 +123,16 @@ TYPE_LOSS = 0.3  # the road type
 USERS_LOSS = 0.3  # each kind of road user: its presence and size over the columns
 USERS_POS_WEIGHT_MAX = 10.0  # the most a presence of a rare kind and column is lifted (brain_train.users_pos_weight)
 USERS_MIN_HEIGHT = 1e-3  # the size's floor before its log: a present one has at least this height over the frame's
+APPLICABILITY_LOSS = 1.0  # whose road a sign is of: a reviewed sign weighs as a frame of his speed
+APPLICABILITY_POS_WEIGHT_MAX = 10.0  # the most a sign of another road is lifted (brain_train.applicability_pos_weight)
+APPLICABILITY_COLUMNS = BRAIN_INPUTS.BOX_COLUMNS  # applicability_head's outputs: the columns of sign_boxes
 SPEED_SIGMA_KPH = 2.0  # the width of the bell around his speed (speed_targets)
 POOLS = ('mean', 'grid')
 GRID_CHANNELS = 32
 GRID_CELLS = 8 * 5  # the encoder's map of a 256 x 144 frame
 BACKBONE_CHANNELS = 576
 # Out of the car's network.
-TRAINING_ONLY = ('works_head.', 'road_head.', 'type_head.', 'users_head.')
+TRAINING_ONLY = ('works_head.', 'road_head.', 'type_head.', 'users_head.', 'applicability_head.')
 # users_head's layout: (presence, size) x kinds x columns.
 USER_KINDS = _USER_KINDS
 USER_COLUMNS = _USER_COLUMNS
@@ -134,7 +156,7 @@ def _table(kph) -> list[float]:
 
 def build_brain_net(groups: tuple[str, ...], *, pool: str = 'grid', works: bool = True, ahead: bool = False,
                     pretrained: bool = True, features: int = FEATURES, hidden: int = HIDDEN, kph=None, road_kinds: int = 0,
-                    road_types: int = 0, users: bool = False, map_path: bool = False):
+                    road_types: int = 0, users: bool = False, map_path: bool = False, applicability: bool = False):
     """The network (torch.nn.Module): forward(images (B, T, 3, H, W) float 0..1, extra (B, T, inputs of the groups), state
     (B, hidden) or None) -> (speed logits (B, T, classes), works logit (B, T) or None, state); with ahead=True asked of
     forward (a network built with ahead: only for a checkpoint of 7 to 11 Nov 2026 that has those heads, never for a
@@ -142,11 +164,14 @@ def build_brain_net(groups: tuple[str, ...], *, pool: str = 'grid', works: bool 
     forward, then the logits of the kinds of road (B, T, road_kinds), or None for a network built without them; with
     types=True, the logits of the road type (B, T, road_types), or None for a network built without them; with users=True,
     last, users_head's (B, T, 2, kinds, columns): presence logits ([:, :, 0]) and log sizes ([:, :, 1]) of the road
-    users, or None for a network built without it (outputs reads them by name).
+    users, or None for a network built without it; with applicability=True, last, applicability_head's logits (B, T,
+    BOX_COLUMNS), above 0 where the speed sign of that column of sign_boxes is of another road, or None for a network
+    built without it (outputs reads them by name).
     kph: the km/h of each class, in order (a list, or the class_kph buffer of a checkpoint): the heads have as many classes,
     and a number in force falls on the class within half the table's step of it. None: the table of today's training.
     map_path: the map's limit goes straight to the answer too (trust_map; the module's text): only with map_limit among
-    the groups. A checkpoint has it when it has trust_map's weights."""
+    the groups. A checkpoint has it when it has trust_map's weights. applicability: with applicability_head, whose
+    road the speed sign of each column of sign_boxes is of (the module's text): only with sign_boxes among the groups."""
     torch = _torch()
     from torch import nn
     from torchvision.models import MobileNet_V3_Small_Weights, mobilenet_v3_small
@@ -164,6 +189,8 @@ def build_brain_net(groups: tuple[str, ...], *, pool: str = 'grid', works: bool 
     if map_path and MAP_GROUP not in groups:
         raise ValueError(f'the map’s limit has a path to the answer only when {MAP_GROUP} is among the groups')
     map_at = sum(INPUT_SIZES[name] for name in groups[:groups.index(MAP_GROUP)]) if map_path else None
+    if applicability and 'sign_boxes' not in groups:
+        raise ValueError('whose road a sign is of is asked of the columns of sign_boxes: it must be among the groups')
 
     class BrainNet(nn.Module):
         def __init__(self):
@@ -189,6 +216,7 @@ def build_brain_net(groups: tuple[str, ...], *, pool: str = 'grid', works: bool 
             self.road_head = nn.Linear(hidden, road_kinds) if road_kinds else None
             self.type_head = nn.Linear(hidden, road_types) if road_types else None
             self.users_head = nn.Linear(hidden, USER_OUTPUTS) if users else None
+            self.applicability_head = nn.Linear(hidden, APPLICABILITY_COLUMNS) if applicability else None
             self.ahead = ahead
             if ahead:
                 self.next_head = nn.Linear(hidden, classes + 1)
@@ -240,7 +268,7 @@ def build_brain_net(groups: tuple[str, ...], *, pool: str = 'grid', works: bool 
             return extra_input[..., distance_at]
 
         def forward(self, images, extra_input, state=None, ahead: bool = False, road: bool = False, types: bool = False,
-                    users: bool = False):
+                    users: bool = False, applicability: bool = False):
             b, t = images.shape[:2]
             extra_input = extra_input.to(images.dtype)
             x = torch.cat([self.encode(images.flatten(0, 1)).view(b, t, -1), extra_input], dim=-1)
@@ -260,13 +288,17 @@ def build_brain_net(groups: tuple[str, ...], *, pool: str = 'grid', works: bool 
             if users:
                 found += (None if self.users_head is None else
                           self.users_head(out).view(b, t, 2, len(USER_KINDS), USER_COLUMNS),)
+            if applicability:
+                found += (None if self.applicability_head is None else self.applicability_head(out),)
             return found
 
     return BrainNet()
 
 
-def outputs(said: tuple, *, ahead: bool = False, road: bool = False, types: bool = False, users: bool = False) -> dict:
-    """What forward gave, asked so, by name: speed, works, state, and next, metres, road, types, users where asked."""
+def outputs(said: tuple, *, ahead: bool = False, road: bool = False, types: bool = False, users: bool = False,
+            applicability: bool = False) -> dict:
+    """What forward gave, asked so, by name: speed, works, state, and next, metres, road, types, users, applicability
+    where asked."""
     found = dict(zip(('speed', 'works', 'state'), said[:3]))
     rest = list(said[3:])
     if ahead:
@@ -277,6 +309,8 @@ def outputs(said: tuple, *, ahead: bool = False, road: bool = False, types: bool
         found['types'] = rest.pop(0)
     if users:
         found['users'] = rest.pop(0)
+    if applicability:
+        found['applicability'] = rest.pop(0)
     return found
 
 
@@ -294,7 +328,7 @@ def speed_targets(speed, kph=None, sigma_kph: float = SPEED_SIGMA_KPH):
 
 def brain_loss(speed_logits, works_logit, speed, speed_weight, works, works_weight, *, works_share: float = WORKS_LOSS,
                frames: int | None = None, kph=None, road: tuple | None = None, types: tuple | None = None,
-               users: tuple | None = None):
+               users: tuple | None = None, applicability: tuple | None = None):
     """The error of a batch, (B, T) answers and weights of brain_targets: each task a mean over its own frames, 0 with none.
     A frame of weight 0 gives no gradient: not examined is not an answer, and an unmarked stretch is not "no works".
     The speed's answer is speed_targets' bell over the table kph (the network's class_kph; None: today's training's).
@@ -304,7 +338,11 @@ def brain_loss(speed_logits, works_logit, speed, speed_weight, works, works_weig
     users: (users_head's (B, T, 2, kinds, columns), presence, height over the frame's, weight, each (B, T, kinds, columns),
     pos_weight (kinds, columns) or None), of a network with the road users: USERS_LOSS a kind, the presence's binary cross
     entropy over its answered cells and the log size's smooth L1 over those with one there; with frames, each kind is
-    divided by frames x columns, so that a frame with every column answered weighs as a frame of a kind of road."""
+    divided by frames x columns, so that a frame with every column answered weighs as a frame of a kind of road.
+    applicability: (applicability_head's logits, the answers, 1 of another road, their weight, each (B, T, columns),
+    pos_weight (a scalar tensor) or None), of a network that learns whose road a sign is of: APPLICABILITY_LOSS times
+    the binary cross entropy over the answered columns; with frames, their sum over frames, so that a reviewed sign
+    weighs as a frame of his speed."""
     torch = _torch()
     from torch.nn import functional
 
@@ -340,10 +378,14 @@ def brain_loss(speed_logits, works_logit, speed, speed_weight, works, works_weig
         for kind in range(said.shape[3]):
             total = total + USERS_LOSS * (cells(found[..., kind, :], user_weight[..., kind, :])
                                           + cells(size[..., kind, :], there[..., kind, :]))
+    if applicability is not None and applicability[0] is not None:
+        said, answers, sign_weight, pos_weight = applicability
+        errors = functional.binary_cross_entropy_with_logits(said, answers, pos_weight=pos_weight, reduction='none')
+        total = total + APPLICABILITY_LOSS * mean(errors, sign_weight)
     return total
 
 
 def car_weights(model) -> dict:
-    """The weights that go to the car: all but works_head, road_head, type_head and users_head (the heads of the limit
-    ahead, of a brain that has them, go too)."""
+    """The weights that go to the car: all but works_head, road_head, type_head, users_head and applicability_head (the
+    heads of the limit ahead, of a brain that has them, go too)."""
     return {name: value for name, value in model.state_dict().items() if not name.startswith(TRAINING_ONLY)}

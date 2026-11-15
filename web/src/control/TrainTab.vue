@@ -409,6 +409,15 @@ const numbers = computed(() => {
           <strong>{{ thousands(brainLabels.partitions.validation.speed) }}</strong> to watch it on,
           <strong>{{ thousands(brainLabels.partitions.test.speed) }}</strong> for the test.<template
           v-if="brainLabels.to_read"> First it reads the signs of {{ plural(brainLabels.to_read, 'drive') }} as the car does today.</template><template
+          v-if="brainChoices.applicability === 'on' && brainLabels.applicability"> With Applicability on, the speed signs you reviewed
+          ({{ thousands(brainLabels.applicability.reviewed) }} boxes) that it is given, of our road and of another:
+          <strong>{{ thousands(brainLabels.applicability.partitions.train.ours) }}</strong> and
+          <strong>{{ thousands(brainLabels.applicability.partitions.train.another) }}</strong> to learn from,
+          <strong>{{ thousands(brainLabels.applicability.partitions.validation.ours) }}</strong> and
+          <strong>{{ thousands(brainLabels.applicability.partitions.validation.another) }}</strong> to watch it on,
+          <strong>{{ thousands(brainLabels.applicability.partitions.test.ours) }}</strong> and
+          <strong>{{ thousands(brainLabels.applicability.partitions.test.another) }}</strong> for the test<template
+          v-if="brainLabels.applicability.unread"> ({{ plural(brainLabels.applicability.unread, 'drive') }} still to be read with the boxes of the signs of another road: they count nothing until then)</template>.</template><template
           v-if="brainLabels.types"> With Road type (map) on, only the seconds with a road type (the map’s, from Read the map in Data › Prepare, with your corrections over it) count:
           <strong>{{ thousands(brainUntyped.seconds) }}</strong> seconds with your speed and none stay out<template
           v-if="brainUntyped.drives">, {{ plural(brainUntyped.drives, 'drive') }} without any</template>.</template><template

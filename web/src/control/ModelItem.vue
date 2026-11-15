@@ -31,6 +31,20 @@ const classifier = computed(() => props.version.role === 'classifier' ? props.ve
 const decider = computed(() => props.version.role === 'decider' ? props.version : null);
 const brain = computed(() => props.version.role === 'brain' ? props.version : null);
 const users = computed(() => props.version.role === 'users' ? props.version : null);
+/** Whose road a sign is of (#89), of a brain measured on it: on each partition with a reviewed sign, how many signs of
+ * another road its head and the applicability network find, and how many of ours each calls another's. */
+const anotherRoad = computed(() => {
+  const found = brain.value?.applicability;
+  if (!found) return null;
+  const parts = ([['test', found.test], ['validation', found.validation]] as const)
+    .filter(([, numbers]) => numbers && (numbers.ours ?? 0) + (numbers.another ?? 0) > 0);
+  if (!parts.length) return null;
+  const said = (who: 'head' | 'network') => parts.filter(([, numbers]) => numbers![who])
+    .map(([name, numbers]) => `${name} ${numbers![who]!.found ?? 0} of ${numbers!.another ?? 0}, ${numbers![who]!.wrong ?? 0} wrong`)
+    .join(' · ');
+  return {head: found.learned ? said('head') : '', network: said('network'),
+    signs: parts.map(([name, numbers]) => `${name} ${(numbers!.ours ?? 0) + (numbers!.another ?? 0)}`).join(', ')};
+});
 /** UserNet's numbers: on the test, else on validation (the test has no ticked frame yet). */
 const usersFound = computed(() => users.value?.test?.frames ? {numbers: users.value.test, on: 'test'}
   : users.value?.validation ? {numbers: users.value.validation, on: 'validation'} : null);
@@ -240,6 +254,8 @@ const noOtherOnTest = computed(() => decider.value?.test?.other_road_support ===
           <div><dt>Off on average</dt><dd>{{ brain.test.mean_error_kph?.toFixed(1) ?? '–' }} km/h</dd></div>
           <div><dt>On validation</dt><dd>{{ pct(brain.validation?.right) }}</dd></div>
           <div v-if="brain.test_no_map"><dt title="The same test frames with no map at all, as past a border with no map downloaded: what is left of it without the map">Off without the map</dt><dd>{{ brain.test_no_map.mean_error_kph?.toFixed(1) ?? '–' }} km/h</dd></div>
+          <div v-if="anotherRoad?.head"><dt :title="'Of the speed signs a reviewed box gives to another road (reviewed speed signs it is given: ' + anotherRoad.signs + '): how many its applicability head finds, and how many signs of our road it calls another’s'">Another road, its head</dt><dd>{{ anotherRoad.head }}</dd></div>
+          <div v-if="anotherRoad?.network"><dt title="The same signs as the applicability network ruled them when the drives were read. It learnt on its own split: some of these signs may have been in its training">Another road, the network</dt><dd>{{ anotherRoad.network }}</dd></div>
           <div><dt title="What it reads each second beside the picture; the map only when map_limit is among them">Inputs</dt><dd>{{ brain.groups?.join(', ') ?? '–' }}</dd></div>
           <div><dt title="Whether the frames it trained on had a limit with a plate of hours">Hours plates</dt><dd>{{ brain.hours ? 'Reads them and their hours' : brain.plates ? 'Reads them' : 'Does not read them' }}</dd></div>
           <div><dt title="Whether the frames it trained on had a limit valid only on a wet road">Wet plates</dt><dd>{{ brain.wet ? 'Reads them' : 'Does not read them' }}</dd></div>

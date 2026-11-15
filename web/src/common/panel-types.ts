@@ -89,6 +89,8 @@ export interface ActionOptions {
   users?: 'on' | 'off';
   /** The map's limit as an input of the brain (train_brain, #85): off when not given. */
   map?: 'on' | 'off';
+  /** The brain's applicability head (train_brain, #89; on when not given; off: --no-applicability, the signs taken). */
+  applicability?: 'on' | 'off';
   routes_from?: string;
   /** The networks that read the brain's signs (train_brain, sign-networks.ts): ids of Models, a SignNet the comma runs,
    * a classifier with “not a sign”, an applicability network; the server takes the one in use for one not given. */
@@ -1531,6 +1533,22 @@ export interface BrainNumbers {
 }
 
 /** The brain of a run of nnslr train-brain: it says the speed to hold, and on the car it is the vision limit. */
+/** "Of another road" on the speed signs a reviewed box answers (model_roles._brain_applicability): of those it says
+ * so, the share that are (precision); of those that are, the share it finds (recall); how many it finds and calls wrongly. */
+export interface AnotherRoadNumbers {
+  precision: number | null;
+  recall: number | null;
+  found: number | null;
+  wrong: number | null;
+}
+/** Whose road a speed sign is of, on one partition of a brain: the reviewed signs of our road and of another, and how
+ * the brain's head (null: it has none) and the applicability network tell them, on the same signs. */
+export interface BrainApplicabilityNumbers {
+  ours: number | null;
+  another: number | null;
+  head: AnotherRoadNumbers | null;
+  network: AnotherRoadNumbers | null;
+}
 export interface BrainModel extends ModelBase {
   role: 'brain';
   /** What it is given beside the picture (signs, plate, plate_hours, plate_wet, hour, lead, country). */
@@ -1569,6 +1587,10 @@ export interface BrainModel extends ModelBase {
   test: BrainNumbers | null;
   /** Of a brain that learns the map’s limit: the test frames with no map at all. */
   test_no_map?: BrainNumbers | null;
+  /** Whose road a sign is of (#89): whether its head learnt it (null: a brain of before 15 Nov 2026), whether it was given
+   * the boxes of every sign read (the car gives such a brain the same), and the two measured on validation and test. */
+  applicability?: {learned: boolean | null; other_road_boxes: boolean;
+    validation: BrainApplicabilityNumbers | null; test: BrainApplicabilityNumbers | null} | null;
 }
 
 /** UserNet on one partition at its score (0.5, what the brain will read; nnslr_tools.usernet.digest): the frames, the road
@@ -1783,6 +1805,11 @@ export interface BrainLabels {
   road_kinds?: string[];
   road_labels?: Record<string, string>;
   to_read?: number;
+  /** Whose road a sign is of (#89, brain_targets.applicability_counts): the reviewed speed signs with a label on these
+   * drives, the columns of sign_boxes they answer on each partition (of our road, of another), and the drives not read
+   * yet with the boxes of the signs of another road, which answer nothing until the training reads them. */
+  applicability?: {reviewed: number; unread: number;
+    partitions: Record<'train' | 'validation' | 'test' | 'buffer', {ours: number; another: number}>};
   /** Missing from a server older than 9 Nov 2026. */
   training?: BrainTraining;
   /** The earlier brain runs whose drives the next one can take (Drives); missing from a server older than 12 Nov 2026. */

@@ -668,3 +668,103 @@ def test_the_maps_path_needs_the_map_among_the_groups_and_goes_to_the_car():
         build_brain_net(GROUPS, pretrained=False, map_path=True)
     assert 'trust_map.weight' in car_weights(map_net())
     assert build_brain_net(MAP_GROUPS, pretrained=False).trust_map is None  # the brain of 14 Nov 20:23: the input alone
+
+
+# -- whose road a sign is of (#89): applicability_head, a logit a column of sign_boxes ------------------------------------
+BOX_GROUPS = (*GROUPS, 'sign_boxes')
+
+
+def box_net(**options):
+    from nnslr_tools.brain_net import build_brain_net
+    torch.manual_seed(0)
+    model = build_brain_net(BOX_GROUPS, pretrained=False, **options)
+    model.train()
+    for layer in model.modules():
+        if isinstance(layer, torch.nn.Dropout):
+            layer.p = 0.0
+    return model
+
+
+def box_batch(t=T):
+    from nnslr_tools.brain_targets import INPUT_SIZES
+    torch.manual_seed(1)
+    return torch.rand(1, t, 3, 144, 256), torch.rand(1, t, SIZE + INPUT_SIZES['sign_boxes'])
+
+
+def whose_answers(ours=(), another=()):
+    """(answers, weight) (1, T, 8): 1 of another road, on the (frame, column) cells a reviewed box answers."""
+    answer, weight = torch.zeros(1, T, 8), torch.zeros(1, T, 8)
+    for frame, column in (*ours, *another):
+        weight[0, frame, column] = 1
+    for frame, column in another:
+        answer[0, frame, column] = 1
+    return answer, weight
+
+
+def test_whose_road_a_sign_is_of_is_a_logit_a_column_of_the_sign_boxes_last_only_when_asked():
+    from nnslr_tools.brain_net import APPLICABILITY_COLUMNS, build_brain_net, outputs
+    from nnslr_tools.brain_targets import BRAIN_INPUTS
+    model = box_net(users=True, applicability=True)
+    said = model(*box_batch(), users=True, applicability=True)
+    assert len(said) == 5 and said[4].shape == (1, T, APPLICABILITY_COLUMNS) and APPLICABILITY_COLUMNS == BRAIN_INPUTS.BOX_COLUMNS == 8
+    found = outputs(said, users=True, applicability=True)
+    assert found['applicability'] is said[4] and found['users'] is said[3]
+    assert len(model(*box_batch())) == 3 and box_net()(*box_batch(), applicability=True)[3] is None
+    # It answers of the columns of sign_boxes: a brain without them cannot learn it
+    with pytest.raises(ValueError, match='sign_boxes'):
+        build_brain_net(GROUPS, pretrained=False, applicability=True)
+
+
+def test_a_reviewed_sign_reaches_the_memory_and_not_the_speed_head_and_a_column_nobody_reviewed_adds_nothing():
+    from nnslr_tools.brain_net import APPLICABILITY_LOSS, brain_loss
+    model = box_net(applicability=True)
+    model.zero_grad()
+    speed_logits, works_logit, _state, whose = model(*box_batch(), applicability=True)
+    speed, speed_weight, works, works_weight = answers()
+    alone = brain_loss(speed_logits, works_logit, speed, speed_weight, works, works_weight)
+    # No reviewed box anywhere: the same loss as without the head, whatever the answers say.
+    nothing = brain_loss(speed_logits, works_logit, speed, speed_weight, works, works_weight,
+                         applicability=(whose, torch.ones(1, T, 8), torch.zeros(1, T, 8), None))
+    assert float(nothing) == pytest.approx(float(alone))
+    labels = whose_answers(ours=[(1, 6)], another=[(3, 0)])
+    loss = brain_loss(speed_logits, works_logit, speed, speed_weight, works, works_weight, applicability=(whose, *labels, None))
+    assert float(loss) > float(alone)
+    # With the frames of a piece given, a reviewed sign weighs as a frame of his speed: the sum of its errors over them.
+    errors = torch.nn.functional.binary_cross_entropy_with_logits(whose, labels[0], reduction='none')
+    by_frames = brain_loss(speed_logits, works_logit, speed, speed_weight, works, works_weight, frames=10,
+                           applicability=(whose, *labels, None))
+    alone_by_frames = brain_loss(speed_logits, works_logit, speed, speed_weight, works, works_weight, frames=10)
+    assert float(by_frames - alone_by_frames) == pytest.approx(APPLICABILITY_LOSS * float((errors * labels[1]).sum()) / 10, rel=1e-5)
+    loss.backward()
+    assert gradient_of(model, 'applicability_head') > 0 and gradient_of(model, 'gru') > 0 and gradient_of(model, 'project') > 0
+    assert gradient_of(model, 'speed_head') == 0 and gradient_of(model, 'works_head') == 0
+    # Only the answered columns learn.
+    grad = model.applicability_head.weight.grad
+    assert float(grad[6].abs().sum()) > 0 and float(grad[0].abs().sum()) > 0 and float(grad[3].abs().sum()) == 0
+
+
+def test_a_sign_of_another_road_weighs_more_with_its_pos_weight_and_one_of_ours_the_same():
+    from nnslr_tools.brain_net import brain_loss
+    speed_logits, works_logit, _state, whose = box_net(applicability=True)(*box_batch(), applicability=True)
+    speed, speed_weight, works, works_weight = answers()
+
+    def loss(labels, lift):
+        return float(brain_loss(speed_logits, works_logit, speed, speed_weight, works, works_weight,
+                                applicability=(whose, *labels, lift)))
+
+    another, ours = whose_answers(another=[(3, 0)]), whose_answers(ours=[(1, 6)])
+    assert loss(another, torch.tensor(5.0)) > loss(another, None)
+    assert loss(ours, torch.tensor(5.0)) == pytest.approx(loss(ours, None))
+
+
+def test_the_speed_does_not_depend_on_the_applicability_head_and_the_car_does_not_get_it():
+    from nnslr_tools.brain_net import TRAINING_ONLY, build_brain_net, car_weights
+    model = box_net(applicability=True)
+    images, extra = box_batch()
+    with torch.no_grad():
+        speed = model(images, extra)[0]
+        model.applicability_head.weight.mul_(100).add_(1)
+        again = model(images, extra, applicability=True)[0]
+    assert torch.equal(speed, again) and 'applicability_head.' in TRAINING_ONLY
+    without = build_brain_net(BOX_GROUPS, pretrained=False, works=False)
+    assert set(car_weights(model)) == set(without.state_dict())

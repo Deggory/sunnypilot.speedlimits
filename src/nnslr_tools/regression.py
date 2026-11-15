@@ -379,24 +379,31 @@ def route_view(root: Path, route: str, merged: dict | None, models: list[dict], 
 
 
 # -- the brain along a drive (.venv-gpu) ----------------------------------------------------------------------------------
-def brain_drive(root: Path, route: str, merged: dict, rate: float = 1.0, models: Path | None = None) -> dict:
+def brain_drive(root: Path, route: str, merged: dict, rate: float = 1.0, models: Path | None = None,
+                other_road_boxes: bool = False) -> dict:
     """A drive for brain_train.predict at a brain's rate, in the split or not: brain_targets.dataset() makes the answers
     too, needs the split and leaves out a drive whose frames changed since it was frozen. Whatever the brain's table of
     the speeds, predict says them in km/h. models: the folder of the networks the brain's signs were read with
-    (sign_networks.of_brain), None for the car's release of the sunnypilot clone."""
+    (sign_networks.of_brain), None for the car's release of the sunnypilot clone. other_road_boxes: the brain learnt
+    with the boxes of every sign read in sign_boxes, those of another road too (its checkpoint's): a drive read before
+    they were kept is refused."""
     import numpy as np
 
-    from nnslr_tools.brain_targets import RATE_HZ, brain_frames, drive_frames, drive_inputs, memory_cuts
+    from nnslr_tools.brain_targets import RATE_HZ, all_readings, brain_frames, drive_frames, drive_inputs, memory_cuts
     from nnslr_tools.road_type_signs import load_signs, pictures_ready
     frames = drive_frames(root, route, merged)
     record = load_signs(root, route, models)
     if rate == RATE_HZ:
         frames, _, _ = brain_frames(root, frames, ['train'] * len(frames), [None] * len(frames), merged, record)
     ns = np.array([-1 if frame['ns'] is None else frame['ns'] for frame in frames], dtype=np.int64)
+    if other_road_boxes and record is not None and 'other_boxes' not in record:
+        raise ValueError('its signs were read before the boxes of the signs of another road were kept, which this brain '
+                         'gets: nnslr road-type-signs --certified')
     return {'route': route, 'rate': rate, 'frames': frames, 'ns': ns, 'cuts': memory_cuts(ns),
             'partitions': ['train'] * len(frames),
             'inputs': drive_inputs(frames, ns, merged, record['readings'] if record else None, root,
-                                   record.get('boxes') if record else None),
+                                   record.get('boxes') if record else None,
+                                   all_readings(record) if other_road_boxes else None),
             'reader': record.get('fingerprint') if record else None, 'signs_read': record is not None,
             'pictures': rate == 1.0 or pictures_ready(root, record)}
 
@@ -460,9 +467,10 @@ def run_brains(root: Path, runs: list[str], merged_of, *, device, log=print) -> 
                 if saved['inputs_sha256'] not in accepted:
                     raise ValueError('made with other inputs than the car has today: train it again')
                 rate = float(saved.get('rate_hz', 1.0))
-                key = (rate, folders[run])
+                every = bool(saved.get('other_road_boxes', False))
+                key = (rate, folders[run], every)
                 if key not in drives:
-                    found = brain_drive(root, route, merged, rate, folders[run])
+                    found = brain_drive(root, route, merged, rate, folders[run], every)
                     if not found['pictures']:
                         raise ValueError("the brain's pictures were not made: nnslr road-type-signs --certified")
                     stores[key] = FrameStore(_pictures(root, [found], dry_run=False, log=log), device)

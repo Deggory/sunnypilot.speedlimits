@@ -14,7 +14,10 @@ and output.road_types as well (below), so its file and contract are no longer th
 step says how the car steps it: rate_hz, clock ("schedule": on the grid of the rate, as the training's frames) and picture
 ("brain": vision.BrainInput; "road_type": the PIL picture).
 
-works_head, road_head and users_head stay out (brain_net.car_weights). A brain that learnt the road type also gives road_type (1,
+works_head, road_head, users_head and applicability_head stay out (brain_net.car_weights). A brain that learnt whose
+road a sign is of was given the boxes of every speed sign read, those of another road too: the contract's
+step.other_road_boxes says so (the checkpoint's), and the car gives it the same (brain.BrainReader); the check along a
+drive makes its inputs so too. A brain that learnt the road type also gives road_type (1,
 types), the logits of output.road_types: the car only shows it on the screen, the speed is the same with or without it. What comes out of the export is checked twice: against PyTorch
 with onnxruntime on random inputs, and along a whole real drive against what training measured (brain_train.predict), the
 memory fed back as on the car. The contract keeps the hash of the car's file of the inputs: the car refuses a network made with another.
@@ -167,13 +170,15 @@ def drive_rollout(model, step_run, drive: dict, store: FrameStore, device: str =
 
 
 def rollout_drive(root: Path, merged_of, groups: tuple[str, ...], route: str | None = None, device: str = 'cpu',
-                  rate: float = 1.0, networks: dict | None = None) -> tuple[dict, FrameStore]:
+                  rate: float = 1.0, networks: dict | None = None, other_road_boxes: bool = False) -> tuple[dict, FrameStore]:
     """A drive of the labels at the brain's rate, with its pictures: route, or the one with the most frames in test. With
     no route, among the drives the brain learns from (training_routes), the ones with their pictures (a drive added after
     the training has none until the next one: it is passed by). A drive without the brain's pictures is refused: the
     check would run on black pictures and say nothing. networks: the ones the brain's signs were read with
-    (sign_networks.of_brain), None for the car's release of the sunnypilot clone."""
-    drives = dataset(root, merged_of, [route] if route else None, rate=rate, networks=networks)
+    (sign_networks.of_brain), None for the car's release of the sunnypilot clone. other_road_boxes: the brain learnt
+    with the boxes of every sign read in sign_boxes (its checkpoint's)."""
+    drives = dataset(root, merged_of, [route] if route else None, rate=rate, networks=networks,
+                     other_road_boxes=other_road_boxes)
     if not drives:
         raise ValueError(f'{route or "no drive"}: not a drive the brain can run along (brain_targets.training_routes)')
     pictured = [drive for drive in drives if drive.get('pictures', True)]
@@ -252,7 +257,7 @@ def export_brain_onnx(checkpoint: Path, output: Path, *, data_root: Path | None 
         raise ValueError(f'brain ONNX differs from PyTorch: max abs error {worst}')
     if data_root is not None:
         drive, store = rollout_drive(Path(data_root), merged_of, groups, route, device=device, rate=rate,
-                                     networks=networks)
+                                     networks=networks, other_road_boxes=bool(saved.get('other_road_boxes', False)))
         verification['rollout'] = drive_rollout(model, run, drive, store, device=device, log=log)
         if verification['rollout']['other_speed'] or verification['rollout'].get('other_ahead'):
             raise ValueError(f'brain ONNX says another speed than PyTorch along a drive: {verification["rollout"]}')
@@ -292,7 +297,9 @@ def export_brain_onnx(checkpoint: Path, output: Path, *, data_root: Path | None 
                  'picture': 'brain' if brain_picture else 'road_type', 'groups': list(groups),
                  'memory_gap_seconds': BRAIN_INPUTS.MEMORY_GAP_SECONDS,
                  'inputs': INPUT_NAMES, 'outputs': names, 'plates': bool(saved.get('plates', False)),
-                 'hours': bool(saved.get('hours', False)), 'wet': bool(saved.get('wet', False))},
+                 'hours': bool(saved.get('hours', False)), 'wet': bool(saved.get('wet', False)),
+                 # sign_boxes held every sign read, those the applicability network gives to another road too
+                 'other_road_boxes': bool(saved.get('other_road_boxes', False))},
         'verification': verification,
     }
     contract_path = output.with_name(output.name + '.contract.json')

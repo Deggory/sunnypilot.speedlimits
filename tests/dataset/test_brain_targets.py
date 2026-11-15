@@ -1383,3 +1383,149 @@ def test_the_brain_takes_the_labeler_s_road_types_over_the_map_and_a_person_s_ov
     # The labeler's mark of a kind of road is an answer with no "checked to here" of a person.
     column = drive['road_kinds'].index('narrow')
     assert drive['road'][5, column] == 1 and drive['road_weight'][5, column] == 1
+
+
+# -- whose road a sign is of (#89): the reviewed boxes as an answer, and every sign's box as an input ---------------------
+OURS, THEIRS = [1008.0, 190.0, 1050.0, 232.0], [100.0, 300.0, 160.0, 360.0]  # columns 6 and 0 of sign_boxes
+
+
+def reviewed(decoded, box, road, **changes):
+    return {'route_id': ROUTE, 'segment_index': 0, 'decoded_frame_index': decoded, 'bbox_xyxy': box, 'width': 1344,
+            'height': 760, 'review_state': 'corrected', 'sign_family': 'maximum_speed', 'applicability': road, **changes}
+
+
+def write_reviews(root, rows):
+    path = root / 'annotations' / 'objects.jsonl'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('\n'.join(json.dumps(row) for row in rows) + '\n', encoding='utf-8')
+
+
+def read_record():
+    """A drive read by the three networks: an 80 of our road at 0.5 s and 0.75 s (with a stop sign), and at 0.5 s a 40
+    the applicability network gave to another road."""
+    return {'readings': [[0.5, [['maximum_speed:80', .9]]], [0.75, [['maximum_speed:80', .9], ['other_sign:stop', .9]]]],
+            'boxes': [[OURS], [[1010.0, 188.0, 1054.0, 232.0], [84.0, 304.0, 168.0, 380.0]]],
+            'other_road': [[0.5, [['maximum_speed:40', .95]]]], 'other_boxes': [[THEIRS]]}
+
+
+def reading_frames():
+    return [{'segment': 0, 'decoded': decoded, 'seconds': decoded / 20} for decoded in (0, 5, 10, 15, 20)]
+
+
+def test_whose_road_a_sign_is_of_comes_from_the_reviewed_boxes(tmp_path):
+    """#89: a reviewed box of a speed family says whose road the sign of its column is of, at the reading nearest to its
+    frame, beside what the applicability network said of the same sign."""
+    numpy = _np()
+    targets = _targets()
+    write_reviews(tmp_path, [
+        reviewed(10, [1006.0, 188.0, 1052.0, 234.0], 'own_road'),
+        reviewed(10, [98.0, 298.0, 162.0, 362.0], 'other_road'),
+        reviewed(10, [600.0, 100.0, 640.0, 140.0], 'own_road'),  # SignNet found nothing there: it teaches nothing
+        reviewed(12, [1006.0, 188.0, 1052.0, 234.0], 'other_road'),  # further from the reading than frame 10: not read
+        reviewed(14, [1010.0, 188.0, 1054.0, 232.0], 'unresolved'),  # no label
+        reviewed(16, [1010.0, 188.0, 1054.0, 232.0], 'own_road', sign_family='not_a_sign', sign_type='on_vehicle'),
+        reviewed(16, [84.0, 304.0, 168.0, 380.0], 'other_road', sign_family='other_sign'),  # not a speed sign
+        reviewed(10, OURS, 'other_road', review_state='proposed'),  # nobody reviewed it
+        reviewed(10, OURS, 'other_road', route_id='another--drive'),
+    ])
+    found = targets.applicability_answers(tmp_path, ROUTE, reading_frames(), read_record())
+    answered = {(int(row), int(column)): (float(found['target'][row, column]), float(found['network'][row, column]))
+                for row, column in zip(*numpy.nonzero(found['weight']))}
+    # At 0.5 s the 80 is ours and the 40 another's, as the network said too; at 0.75 s the 80 is on a vehicle: another's,
+    # which the network took for ours
+    assert answered == {(2, 6): (0.0, 0.0), (2, 0): (1.0, 1.0), (3, 6): (1.0, 0.0)}
+    assert found['reviewed'] == 5 and found['matched'] == 3 and found['target'].shape == (5, 8)
+    # A drive read before the boxes of the signs of another road were kept, or not read, answers nothing
+    old = {key: value for key, value in read_record().items() if key != 'other_boxes'}
+    assert not targets.applicability_answers(tmp_path, ROUTE, reading_frames(), old)['weight'].any()
+    assert not targets.applicability_answers(tmp_path, ROUTE, reading_frames(), None)['weight'].any()
+    assert not targets.applicability_answers(tmp_path, 'no--reviews', reading_frames(), read_record())['weight'].any()
+
+
+def test_the_reviewed_boxes_are_read_again_when_the_dataset_changes(tmp_path):
+    import os
+    targets = _targets()
+    assert targets.reviewed_roads(tmp_path) == {}  # no dataset yet
+    write_reviews(tmp_path, [reviewed(10, OURS, 'own_road', width=2688, height=1520)])
+    # A box of a frame at full definition is brought to the pixels of the brain's frame
+    assert targets.reviewed_roads(tmp_path) == {ROUTE: [(0, 10, (504.0, 95.0, 525.0, 116.0), False)]}
+    write_reviews(tmp_path, [reviewed(10, OURS, 'other_road'), reviewed(30, THEIRS, 'own_road')])
+    path = tmp_path / 'annotations' / 'objects.jsonl'
+    os.utime(path, ns=(path.stat().st_atime_ns, path.stat().st_mtime_ns + 1_000_000))
+    assert [row[3] for row in targets.reviewed_roads(tmp_path)[ROUTE]] == [True, False]
+
+
+def test_a_column_holds_the_sign_the_cars_own_boxes_keep():
+    """The label goes to the sign the brain is given in a column: the tallest speed sign of it, by BoxInputs' own rule."""
+    targets = _targets()
+    signs = [('maximum_speed:80', .9, tuple(OURS), False), ('maximum_speed:60', .9, (1020.0, 300.0, 1090.0, 370.0), True),
+             ('other_sign:stop', .9, (84.0, 304.0, 168.0, 380.0), False), ('maximum_speed:30', .4, tuple(THEIRS), True),
+             ('cancellation', .9, (-30.0, 100.0, 50.0, 180.0), False), ('zone:30', .9, (700.0, 10.0, 700.0, 50.0), False)]
+    columns = targets._speed_columns(signs)
+    memory = targets._box_memory('sign_boxes')
+    memory.add(0.0, [(name, confidence, box) for name, confidence, box, _other in signs], *targets.FRAME_SIZE)
+    cells = memory.row(0.0)[:-2].reshape(2, 8, 3)[0]
+    assert sorted(columns) == [column for column in range(8) if cells[column].any()] == [0, 6]
+    for column, (box, _other) in columns.items():
+        assert cells[column] == pytest.approx([(box[2] - box[0]) / 1344, (box[3] - box[1]) / 760, (box[1] + box[3]) / 2 / 760])
+    # The taller 60 of the same column wins, and it was given to another road; the end of a limit is clipped to the frame
+    assert columns[6] == ((1020.0, 300.0, 1090.0, 370.0), True) and columns[0] == ((0.0, 100.0, 50.0, 180.0), False)
+
+
+def test_a_brain_that_learns_whose_road_a_sign_is_of_gets_the_box_of_every_sign_read():
+    """The signs the applicability network gives to another road reach sign_boxes only; the number in force and every
+    other group still come from the signs taken."""
+    numpy = _np()
+    targets = _targets()
+    frames = [{'segment': 0, 'index': second, 'seconds': second} for second in (0.25, 0.5, 0.75)]
+    ns = (numpy.array([frame['seconds'] for frame in frames]) * NS).astype(numpy.int64)
+    record = read_record()
+    every = targets.all_readings(record)
+    assert every[0][0] == [0.5, [['maximum_speed:80', .9], ['maximum_speed:40', .95]]] and every[1][0] == [OURS, THEIRS]
+    assert every[0][1] == record['readings'][1] and every[1][1] == record['boxes'][1]
+    taken = targets.drive_inputs(frames, ns, {}, record['readings'], None, record['boxes'])
+    seen = targets.drive_inputs(frames, ns, {}, record['readings'], None, record['boxes'], every)
+
+    def speed_columns(inputs, row):
+        return [column for column in range(8) if inputs['sign_boxes'][row, :-2].reshape(2, 8, 3)[0, column].any()]
+
+    assert [speed_columns(taken, row) for row in range(3)] == [[], [6], [6]]
+    assert [speed_columns(seen, row) for row in range(3)] == [[], [0, 6], [6]]
+    for group in taken:
+        if group != 'sign_boxes':
+            assert numpy.array_equal(taken[group], seen[group]), group
+    assert seen['signs'][2, 0] == pytest.approx(80 / 130)  # the 40 of the other road is never the number in force
+    # A drive read before those boxes were kept gives the signs taken (and check_drives refuses it for such a brain)
+    old = {key: value for key, value in record.items() if key != 'other_boxes'}
+    assert targets.all_readings(old) == (record['readings'], record['boxes']) and targets.all_readings(None) == (None, None)
+
+
+def test_a_brain_given_every_box_refuses_a_drive_read_before_they_were_kept():
+    targets = _targets()
+    targets.check_drives([checked(other_road_boxes=True, other_boxes_read=True), checked(other_boxes_read=False)])
+    with pytest.raises(ValueError, match='boxes of the signs of another road') as found:
+        targets.check_drives([checked(), checked(route='r2', other_road_boxes=True, other_boxes_read=False)])
+    assert 'r2' in str(found.value) and targets.READ_COMMAND in str(found.value)
+
+
+def test_the_answers_of_whose_road_count_by_partition_and_a_night_copy_has_none():
+    numpy = _np()
+    targets = _targets()
+    target = numpy.zeros((3, 8), dtype=numpy.float32)
+    weight = numpy.zeros((3, 8), dtype=numpy.float32)
+    weight[0, 6] = weight[0, 0] = weight[1, 3] = weight[2, 3] = 1
+    target[0, 0] = target[2, 3] = 1
+    drive = checked(applicability=target, applicability_weight=weight, applicability_reviewed=9)
+    assert targets.applicability_weights(drive, 'validation').sum() == 1 and targets.applicability_weights({}, 'train') is None
+    counts = targets.applicability_counts([drive, checked()])
+    assert counts == {'reviewed': 9, 'unread': 0,
+                      'partitions': {'train': {'ours': 1, 'another': 1}, 'validation': {'ours': 1, 'another': 0},
+                                     'test': {'ours': 0, 'another': 1}, 'buffer': {'ours': 0, 'another': 0}}}
+    assert targets.applicability_counts_text(counts).startswith('Whose road a sign is of: 9 reviewed speed signs')
+    assert 'not read yet' not in targets.applicability_counts_text(counts)
+    # A drive read before the boxes of the signs of another road were kept answers nothing until it is read again
+    unread = targets.applicability_counts([drive, checked(other_boxes_read=False)])
+    assert unread['unread'] == 1 and '(1 drive not read yet' in targets.applicability_counts_text(unread)
+    copy = targets.night_copy({**plated(), 'applicability_weight': numpy.ones((3, 8), dtype=numpy.float32)}, GROUPS,
+                              __import__('random').Random(0))
+    assert copy is not None and not copy['applicability_weight'].any()

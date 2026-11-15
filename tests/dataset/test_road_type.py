@@ -548,7 +548,7 @@ def test_a_chosen_classifier_is_part_of_the_readings_fingerprint(tmp_path):
     other.write_bytes(b'another classifier')
     assert signs.network_paths(package, other)['classifier'] == other
     assert signs.fingerprint(package) != signs.fingerprint(package, other)
-    assert signs.fingerprint(package)["version"] == signs.CACHE_VERSION == 4
+    assert signs.fingerprint(package)["version"] == signs.CACHE_VERSION == 5
 
 
 def test_the_readings_go_by_the_settings_of_the_release(tmp_path):
@@ -1340,6 +1340,8 @@ def test_the_applicability_network_leaves_out_a_sign_of_another_road_as_on_the_c
     assert [classes for _, classes in read['signs']] == [[['maximum_speed:120', 0.9]]] * 4
     assert [t for t, _ in read['other_road']] == [0.0, 0.25, 0.5, 0.75]
     assert read['other_road'][0][1] == [['maximum_speed:60', 0.8]] and read['gpu']
+    # #89: its box is kept, as the boxes of the signs taken: a brain that learns whose road a sign is of gets it.
+    assert read['other_boxes'] == [[[20.0, 1.0, 30.0, 10.0]]] * 4 and read['boxes'] == [[[1.0, 1.0, 10.0, 10.0]]] * 4
     # The decider on the CPU is the reading on the CPU: on the cards given it stops (build_signs).
     signs._WORKER['decider'] = SimpleNamespace(gpu=False)
     assert not signs.read_segment((str(video), 3, None))['gpu']
@@ -1347,6 +1349,7 @@ def test_the_applicability_network_leaves_out_a_sign_of_another_road_as_on_the_c
     signs._WORKER.update(decider=None, rulers={})
     read = signs.read_segment((str(video), 3, None))
     assert read['other_road'] == [] and read['signs'][0][1] == [['maximum_speed:120', 0.9], ['maximum_speed:60', 0.8]]
+    assert read['other_boxes'] == []
 
 
 def test_the_speed_of_each_frame_read_is_the_last_carstate_before_it(monkeypatch):

@@ -90,6 +90,8 @@ function brainBlocks(version: BrainModel): FlowBlock[] {
     if (!names.length) continue;
     inputs.push({id, title, sub: names.join(' · '), kind: 'input', column: 0, facts: names.map(group), to: ['memory'],
       ...(id === 'signs' ? {note: 'What SignNet and the classifier read on this car, mistakes included.'
+        + (version.applicability?.other_road_boxes ? ' Its sign_boxes hold every speed sign read, also those the '
+          + 'applicability network gives to another road.' : '')
         + (version.plates ? '' : ' This version did not learn the plates: the car gives it plate unknown and no hours.')} : {}),
       ...(id === 'map' ? {note: 'The limit the comma’s map has for this road. Only a version trained with the switch '
         + '“Map’s limit” gets it: the signs are read without the map.'} : {})});
@@ -114,6 +116,11 @@ function brainBlocks(version: BrainModel): FlowBlock[] {
       what: 'whether the car is inside roadworks', answer: 'Roadworks', where: 'your marks in Speed review'},
     {on: version.road_kinds.length > 0, id: 'road', title: 'Road conditions', sub: version.road_kinds.join(', '),
       what: 'the kinds of road it sees', answer: 'Road conditions', where: 'your marks in Speed review'},
+    {on: version.applicability?.learned === true, id: 'applicability', title: 'Applicability', sub: 'our road or another',
+      what: 'whose road the speed sign in each column of sign_boxes is of', answer: 'Reviewed signs',
+      where: 'your reviews in Sign review',
+      note: 'It was given the box of every speed sign read, also of those the applicability network gives to another '
+        + 'road. On the car that network still decides which signs are taken.'},
   ].filter((extra) => extra.on);
   const trained: FlowBlock[] = [];
   if (extras.length) {

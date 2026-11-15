@@ -45,6 +45,7 @@ from nnslr_tools.model_roles import (
     reads_the_map,
     record_on_car,
     role_of,
+    takes_every_box,
     takes_the_driver,
 )
 from nnslr_tools.runs import RUN_NAME, RunsIndex
@@ -73,6 +74,9 @@ COUNTRY_POLICY = {'gps_max_age_s': 5, 'gps_max_accuracy_m': 50, 'border_margin_m
 CAR_BRANCH = 'origin/speed-limits'
 CAR_DAEMON = 'openpilot/sunnypilot/speed_limits/speedvisiond.py'
 CAR_MAP_SERVICE = 'liveMapDataSP'
+# The car's reader of the brain, and the word of its contract that tells it to give the boxes of every sign read.
+CAR_BRAIN = 'openpilot/sunnypilot/speed_limits/brain.py'
+CAR_EVERY_BOX = 'other_road_boxes'
 MANIFEST = 'speed_limits.json'
 MAX_VERSION = 40
 GIT_TIMEOUT = 180
@@ -117,7 +121,7 @@ def brain_refused(index: ModelIndex) -> str:
     entry, _ = index.in_use('brain')
     if entry is None:
         return ''
-    return _driver_refused(entry) if takes_the_driver(entry) else _map_refused(entry)
+    return _driver_refused(entry) if takes_the_driver(entry) else _map_refused(entry) or _boxes_refused(entry)
 
 
 def _driver_refused(entry: dict) -> str:
@@ -145,6 +149,30 @@ def _map_refused(entry: dict) -> str:
         return ''
     return (f'the brain in use, {entry["id"]}, reads the map’s limit, and the daemon of sunnypilot’s {CAR_BRANCH} does not '
             'give it yet: push the daemon that reads liveMapDataSP first, or choose a brain trained without the map')
+
+
+def car_gives_every_box(clone: Path | None = None) -> bool:
+    """Whether the comma gives a brain the boxes of every sign read, those of another road too, when its contract asks
+    (step.other_road_boxes): the brain.py of the pushed speed-limits branch, which is what the comma is built from,
+    knows the word. False when the clone or its branch cannot be read."""
+    clone = Path(clone or os.environ.get(SUNNYPILOT_CLONE_ENV) or SUNNYPILOT_CLONE)
+    try:
+        shown = subprocess.run(['git', '-C', str(clone), 'show', f'{CAR_BRANCH}:{CAR_BRAIN}'], capture_output=True,
+                               text=True, timeout=GIT_TIMEOUT, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return shown.returncode == 0 and CAR_EVERY_BOX in shown.stdout
+
+
+def _boxes_refused(entry: dict) -> str:
+    """Why a brain trained with the boxes of every sign read cannot go on the car, '' when it can or it was trained
+    with the signs taken. On a comma whose brain.py does not know the contract's word such a brain gets only the signs
+    taken, without a word: not what it learnt on."""
+    if not takes_every_box(entry) or car_gives_every_box():
+        return ''
+    return (f'the brain in use, {entry["id"]}, was trained with the boxes of every sign read, those of another road too, '
+            f'and the brain.py of sunnypilot’s {CAR_BRANCH} does not give them yet: push the one that does first, or '
+            'choose a brain trained without the applicability head')
 
 
 def build_pending(root: Path) -> bool:
@@ -274,6 +302,8 @@ def _brain(root: Path, runs: RunsIndex, index: ModelIndex, on_car: bool = True) 
         raise ValueError(_driver_refused(entry))
     if on_car and _map_refused(entry):
         raise ValueError(_map_refused(entry))
+    if on_car and _boxes_refused(entry):
+        raise ValueError(_boxes_refused(entry))
     run = runs._run_dir(entry['run'])
     weights = None if run is None else runs._file(run, BRAIN_WEIGHTS)
     if weights is None:

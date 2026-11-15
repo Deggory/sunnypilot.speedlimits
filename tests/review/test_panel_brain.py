@@ -67,6 +67,7 @@ def brain_script(checkout):
                       'echo "signs: ${NNSLR_BRAIN_CUTTER-unset} ${NNSLR_BRAIN_CLASSIFIER-unset} ${NNSLR_BRAIN_DECIDER-unset}"\n'
                       'echo "users: ${NNSLR_BRAIN_USERS-unset}"\n'
                       'echo "map: ${NNSLR_BRAIN_MAP-unset}"\n'
+                      'echo "applicability: ${NNSLR_BRAIN_APPLICABILITY-unset}"\n'
                       'echo "routes from: ${NNSLR_BRAIN_ROUTES_FROM-unset}"\n')
     script.chmod(0o755)
     return script
@@ -263,6 +264,8 @@ def test_what_it_learns_reaches_the_script_and_is_shown_on_the_job(root, checkou
     assert _settings_of(log, 'train_brain') == ['40 epochs']
     log.write_text('== scripts/run_brain.sh r\nrun:          r\nsettings:     --epochs 40 --pool grid --map-limit\n')
     assert _settings_of(log, 'train_brain') == ['40 epochs', 'map’s limit']
+    log.write_text('== scripts/run_brain.sh r\nrun:          r\nsettings:     --epochs 40 --pool grid --no-applicability\n')
+    assert _settings_of(log, 'train_brain') == ['40 epochs', 'no applicability head']
 
 
 def kept_drives(root, name, routes, *, seed=None, at=None):
@@ -297,6 +300,30 @@ def test_the_map_limit_is_an_input_only_when_turned_on(root, checkout, monkeypat
             panel.start('train_brain', {'map': wrong})
     with pytest.raises(PanelError) as refused:
         panel.start('train_decider', {'map': 'on'})
+    assert refused.value.status == 400
+
+
+def test_the_applicability_head_is_on_unless_turned_off(root, checkout, monkeypatch):
+    """#89, 15 Nov 2026: Train › Brain's switch "Applicability": the brain learns whose road a speed sign is of, on unless
+    turned off (the script's NNSLR_BRAIN_APPLICABILITY), and only the brain takes it."""
+    panel = Panel(root, repo=checkout)
+    brain_script(checkout)
+    scanned(root)
+    monkeypatch.setattr(panel, 'activities', lambda: [])
+
+    def told(options):
+        job = panel.start('train_brain', options)
+        finished(panel, job['id'])
+        time.sleep(1.1)  # a job's log is named by its second
+        return {line for line in full_log(panel, job['id']).splitlines() if line.startswith('applicability:')}
+
+    assert told({}) == {'applicability: 1'} and told({'applicability': 'on'}) == {'applicability: 1'}
+    assert told({'applicability': 'off'}) == {'applicability: 0'}
+    for wrong in ('no', False):
+        with pytest.raises(PanelError):
+            panel.start('train_brain', {'applicability': wrong})
+    with pytest.raises(PanelError) as refused:
+        panel.start('train_decider', {'applicability': 'off'})
     assert refused.value.status == 400
 
 

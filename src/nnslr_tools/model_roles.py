@@ -430,6 +430,30 @@ def _brain_users(result: dict) -> dict:
             if isinstance(near, dict) else None}
 
 
+def _brain_applicability(result: dict) -> dict:
+    """Whose road a sign is of, of a brain's result.json (brain_train, since 15 Nov 2026, #89): whether
+    applicability_head learned it, whether the brain was given the boxes of every sign read (other_road_boxes: the car
+    must give it the same), and on validation and test the speed signs a reviewed box answers (ours, another) with the
+    precision and recall of "of another road" of the head and, on the same signs, of the applicability network. Every
+    part None for a brain of before."""
+    def told(part: Any) -> dict | None:
+        if not isinstance(part, dict):
+            return None
+        return {'precision': _num(part.get('precision')), 'recall': _num(part.get('recall')),
+                'found': _int(part.get('true_positive')), 'wrong': _int(part.get('false_positive'))}
+
+    def partition(name: str) -> dict | None:
+        found = _dig(result, (name, 'applicability'))
+        if not isinstance(found, dict):
+            return None
+        return {'ours': _int(found.get('ours')), 'another': _int(found.get('another')), 'head': told(found.get('head')),
+                'network': told(found.get('network'))}
+
+    return {'learned': None if 'applicability' not in result else bool(result.get('applicability')),
+            'other_road_boxes': bool(result.get('other_road_boxes')),
+            'validation': partition('validation'), 'test': partition('test')}
+
+
 def brain_digest(result: Any) -> dict:
     """result.json of ``nnslr train-brain``: what it was given and how it did on validation and test, the speed it says
     against the labels of Speed review (nnslr_tools.brain_train)."""
@@ -447,7 +471,7 @@ def brain_digest(result: Any) -> dict:
             'kph': {key: _int(kph.get(key)) for key in ('from', 'to', 'step')},
             'road_kinds': list(result.get('road_kinds') or []), 'road_types': list(result.get('road_types') or []),
             'plates': bool(result.get('plates')), 'hours': bool(result.get('hours')), 'wet': bool(result.get('wet')), 'dry_run': bool(result.get('dry_run')), 'epochs': len(result.get('history') or []),
-            'users': _brain_users(result),
+            'users': _brain_users(result), 'applicability': _brain_applicability(result),
             'validation': speed('validation'), 'test': speed('test'),
             # Of a brain that learns the map's limit: the test frames with no map at all (brain_train, test_no_map).
             'test_no_map': speed('test_no_map'),
@@ -571,6 +595,12 @@ MAP_GROUP = 'map_limit'
 def reads_the_map(entry: dict) -> bool:
     """Whether a brain of the index was trained with the map's limit as an input (Train › Brain's switch, #85)."""
     return MAP_GROUP in _group_names(entry)
+
+
+def takes_every_box(entry: dict) -> bool:
+    """Whether a brain of the index was trained with the boxes of every sign read, those the applicability network gives
+    to another road too (it learns whose road a sign is of, #89): the car must give it the same."""
+    return bool((entry.get('applicability') or {}).get('other_road_boxes'))
 
 
 def _active_entry(role: str, value: Any) -> dict | None:
@@ -948,7 +978,8 @@ class ModelIndex:
             return None
         entry = self._base('brain', name, BRAIN_PART, checkpoint, result, problems)
         seed = trained.get('seed')
-        detail = 'says the speed to hold' + (' · reads the map’s limit' if reads_the_map(trained) else '')
+        detail = ('says the speed to hold' + (' · reads the map’s limit' if reads_the_map(trained) else '')
+                  + (' · learns whose road a sign is of' if (trained.get('applicability') or {}).get('learned') else ''))
         entry.update({'label': 'Brain' if seed is None else f'Brain, seed {seed}', 'detail': detail,
                       'groups': trained.get('groups'),
                       'architecture': 'mobilenet_v3_small+gru',
@@ -958,7 +989,7 @@ class ModelIndex:
                       'hours': bool(trained.get('hours')), 'wet': bool(trained.get('wet')),
                       # How the car steps it and what it says (Models › How it works, model-flow.ts).
                       **{key: trained.get(key) for key in ('rate_hz', 'ahead', 'hidden', 'kph', 'road_kinds', 'road_types',
-                                                           'pool', 'sign_networks', 'users')},
+                                                           'pool', 'sign_networks', 'users', 'applicability')},
                       'epochs': trained.get('epochs'), 'epochs_run': trained.get('epochs'),
                       'validation': trained.get('validation'), 'test': trained.get('test'),
                       'test_no_map': trained.get('test_no_map')})

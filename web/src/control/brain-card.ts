@@ -35,7 +35,8 @@ export const BRAIN_GROUPS: BrainGroup[] = [
   {name: 'sign_boxes', size: 50, use: 'car', what: 'where the signs of the last frame read are in the picture and how big, as SignNet’s '
     + 'boxes say, with no metres worked out: the picture in 8 columns and, for the speed signs and for the other signs, the tallest '
     + 'box of each column (its width, its height and the height of its centre, over the frame’s); then whether a sign was ever seen '
-    + 'and the age of the last one (brain_inputs.BoxInputs)'},
+    + 'and the age of the last one (brain_inputs.BoxInputs). With Applicability on, every speed sign read, also those the '
+    + 'applicability network gives to another road'},
   {name: 'road_signs', size: 98, use: 'car', what: 'every other kind the classifier reads: the other signs (give way, stop, pedestrian '
     + 'crossing, roundabout…), the traffic light by what is lit (red, amber, green, off) and the road users (person, bicycle, car…): '
     + 'for each, confirmed, and the age of its last reading'},
@@ -68,6 +69,7 @@ export const BRAIN_ANSWERS: BrainFact[] = [
   {name: 'road_head', what: 'the kinds of road (narrow, country, gravel, potholes…), where they are marked in Speed review (Road conditions on)'},
   {name: 'type_head', what: 'the road type of the map (Read the map in Data › Prepare), corrected in Speed review where it is wrong (Road type (map) on)'},
   {name: 'users_head', what: 'where the persons and two-wheelers are (a detector, nnslr road-users) and the vehicles you confirmed crossing our path, in 8 columns, with their height (Road users on)'},
+  {name: 'applicability_head', what: 'whose road the speed sign in each of the 8 columns of sign_boxes is of, ours or another, where a box you reviewed in Sign review says it (Applicability on)'},
 ];
 
 /** The seconds that answer nothing (brain_targets.OUT_REASONS): they still go through the memory, as on the car. */

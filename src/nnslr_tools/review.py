@@ -2110,7 +2110,7 @@ def make_handler(app: ReviewApp):
                     # the classifier's or the cutter's Mapillary signs ({"mapillary": "on", "region": "europe",
                     # "share": "5"}), the classifier that reads the signs for the scene network and its board input
                     # ({"classifier", "boards"}), what the brain learns ({"works", "road", "types", "pool", "seeds",
-                    # "users"}; "driver" only "off", from a page of before), the drives it takes ({"routes_from": an
+                    # "users", "map", "applicability"}; "driver" only "off", from a page of before), the drives it takes ({"routes_from": an
                     # earlier brain run}) and the networks that read its signs ({"sign_cutter", "sign_classifier",
                     # "sign_decider"}), the models of a regression ({"openpilot", "brains"}), the route, provider,
                     # save and limit of an AI action, the drive and the networks of a replay ({"route", "set",
@@ -2119,7 +2119,7 @@ def make_handler(app: ReviewApp):
                                                           'signnet', 'mapillary', 'region', 'share', 'cutter',
                                                           'classifier', 'boards', 'works', 'road', 'types', 'driver', 'pool',
                                                           'seeds', 'users', 'routes_from', 'rebuild', 'map',
-                                                          'openpilot',
+                                                          'applicability', 'openpilot',
                                                           'brains', 'sign_cutter', 'sign_classifier', 'sign_decider')
                                if isinstance(body, dict) and isinstance(body.get(key), str)}
                     # [ai-reviewer] - START

@@ -17,7 +17,8 @@ set -euo pipefail
 #      network chosen in Train › Brain (NNSLR_BRAIN_CUTTER, _CLASSIFIER, _DECIDER; those in use by default), exported
 #      as Publish exports them and written into runs/NAME/networks.json, kept when the run is started again (#31, 10 Nov
 #      2026); then reads the signs of every drive it learns from (every dashcam drive) as the car does: its vision.py
-#      and applicability.py with those networks, the car's speed from the logs, a sign of another road left out
+#      and applicability.py with those networks, the car's speed from the logs, a sign of another road left out (its
+#      box kept apart: a brain that learns whose road a sign is of, NNSLR_BRAIN_APPLICABILITY, is given it too)
 #      (nnslr road-type-signs --labelled --sign-networks; a drive already read by them is not read again: a new
 #      vision.py or a new choice reads them all again, and the training refuses anything else), the signs it is given;
 #      then says what the labels give (nnslr brain-targets). The
@@ -49,7 +50,9 @@ set -euo pipefail
 # NNSLR_BRAIN_TYPES (1: it also learns the road type of the map and of Speed review, and only from the seconds that have
 # one; 0: not, every second), NNSLR_BRAIN_USERS (1: step 4 reads the road users and it learns them; 0: not),
 # NNSLR_BRAIN_MAP (1: the map's limit the comma had, liveMapDataSP, is one more input of the brain, #85; 0, the default:
-# not, the brain never reads the map),
+# not, the brain never reads the map), NNSLR_BRAIN_APPLICABILITY (1, the default: it also learns whose road a speed sign
+# is of from the reviewed boxes, a head only the training has, and is given the boxes of every sign read, those the
+# applicability network gives to another road too, #89; 0: not, it gets the signs taken as the brains before),
 # NNSLR_BRAIN_ROUTES_FROM (an earlier brain run's NAME: its drives instead of every dashcam drive; a run started again
 # keeps its own),
 # NNSLR_BRAIN_POOL (grid: the picture's features keep where they are; mean: not), NNSLR_BRAIN_INIT_FROM (an earlier
@@ -75,6 +78,7 @@ ROAD="${NNSLR_BRAIN_ROAD:-1}"
 TYPES="${NNSLR_BRAIN_TYPES:-1}"
 USERS="${NNSLR_BRAIN_USERS:-1}"
 MAP="${NNSLR_BRAIN_MAP:-0}"
+APPLICABILITY="${NNSLR_BRAIN_APPLICABILITY:-1}"
 ROUTES_FROM="${NNSLR_BRAIN_ROUTES_FROM:-}"
 POOL="${NNSLR_BRAIN_POOL:-grid}"
 INIT_FROM="${NNSLR_BRAIN_INIT_FROM:-}"
@@ -128,6 +132,11 @@ fi
 
 if [[ "$MAP" != "0" && "$MAP" != "1" ]]; then
   echo "error: NNSLR_BRAIN_MAP must be 0 or 1: $MAP" >&2
+  exit 2
+fi
+
+if [[ "$APPLICABILITY" != "0" && "$APPLICABILITY" != "1" ]]; then
+  echo "error: NNSLR_BRAIN_APPLICABILITY must be 0 or 1: $APPLICABILITY" >&2
   exit 2
 fi
 
@@ -232,6 +241,9 @@ fi
 if [[ "$MAP" == "1" ]]; then
   SETTINGS+=(--map-limit)
 fi
+if [[ "$APPLICABILITY" == "0" ]]; then
+  SETTINGS+=(--no-applicability)
+fi
 if [[ -n "$INIT_FROM" ]]; then
   SETTINGS+=(--init-from "$INIT_FROM")
 fi
@@ -241,6 +253,7 @@ echo "run:          $RUN_ID"
 echo "seeds:        ${SEEDS[*]}"
 echo "road users:   $([[ "$USERS" == "1" ]] && echo on || echo off)"
 echo "map's limit:  $([[ "$MAP" == "1" ]] && echo "on (an input of the brain)" || echo off)"
+echo "applicability: $([[ "$APPLICABILITY" == "1" ]] && echo "on (a head of the brain, every sign's box)" || echo off)"
 if [[ -n "$ROUTES_FROM" ]]; then
   echo "drives:       the same as $ROUTES_FROM"
 else

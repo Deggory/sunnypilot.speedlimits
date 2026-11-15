@@ -212,6 +212,39 @@ def test_the_contract_says_whether_the_car_gives_the_hours(tmp_path, monkeypatch
     assert json.loads((tmp_path / 'brain.onnx.contract.json').read_text())['step']['hours'] is hours
 
 
+def test_a_brain_that_learnt_whose_road_a_sign_is_of_goes_to_the_car_without_that_head(tmp_path):
+    """#89, stage 1: applicability_head is only in training (brain_net.TRAINING_ONLY); the car's file has the speed alone,
+    and its contract asks the car for the boxes of every sign read."""
+    import torch
+
+    from nnslr_tools.brain_net import build_brain_net, car_weights
+    groups = (*GROUPS, 'sign_boxes')
+    torch.manual_seed(0)
+    trained = build_brain_net(groups, pool='grid', works=True, pretrained=False, applicability=True)
+    path = tmp_path / 'brain-last.pt'
+    torch.save({'weights': trained.state_dict(), 'epoch': 0, 'groups': groups, 'pool': 'grid', 'works': True, 'features': 128,
+                'hidden': 128, 'rate_hz': 4.0, 'picture': 'brain', 'split': 'x', 'reader': None, 'applicability': True,
+                'other_road_boxes': True, 'inputs_sha256': inputs_sha256()}, path)
+    assert 'applicability_head.weight' in torch.load(path, weights_only=False)['weights']
+    model, _saved = brain_export.load_brain(path)
+    assert model.applicability_head is None
+    weights, kept = car_weights(model), car_weights(trained)
+    assert set(weights) == set(kept) and not [name for name in kept if name.startswith('applicability_head')]
+    assert all(torch.equal(weights[name], kept[name]) for name in weights)
+    brain_export.export_brain_onnx(path, tmp_path / 'brain.onnx')
+    contract = json.loads((tmp_path / 'brain.onnx.contract.json').read_text())
+    assert contract['step']['other_road_boxes'] is True and contract['step']['outputs'] == ['speed', 'hidden_out']
+
+
+@pytest.mark.parametrize('saved, every', [({}, False), ({'other_road_boxes': False}, False), ({'other_road_boxes': True}, True)])
+def test_the_contract_says_whether_the_car_gives_the_boxes_of_every_sign(tmp_path, monkeypatch, saved, every):
+    """#89: a brain that learnt whose road a sign is of was given the boxes of the signs of another road too; the car
+    gives them only to a brain whose contract says so (brain.BrainReader), a brain of before keeps the signs taken."""
+    path = checkpoint(tmp_path / 'brain-last.pt', monkeypatch, **saved)
+    brain_export.export_brain_onnx(path, tmp_path / 'brain.onnx')
+    assert json.loads((tmp_path / 'brain.onnx.contract.json').read_text())['step']['other_road_boxes'] is every
+
+
 @pytest.mark.parametrize('saved, plates', [({}, False), ({'plates': False}, False), ({'plates': True}, True)])
 def test_the_contract_says_whether_the_car_gives_the_plates(tmp_path, monkeypatch, saved, plates):
     path = checkpoint(tmp_path / 'brain-last.pt', monkeypatch, **saved)

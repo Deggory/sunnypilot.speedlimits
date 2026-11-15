@@ -386,6 +386,55 @@ def test_a_brain_that_reads_the_map_goes_on_the_car_only_when_the_pushed_daemon_
     assert car_release.brain_refused(index) == ''  # a brain without the map asks nothing of the daemon
 
 
+def test_a_brain_given_every_sign_s_box_goes_on_the_car_only_when_the_pushed_brain_py_gives_them(tmp_path, monkeypatch):
+    """#89: a brain that learns whose road a sign is of was trained with the boxes of every sign read, those of another
+    road too. A comma whose brain.py does not know the contract's other_road_boxes gives it only the signs taken, without
+    a word: Publish refuses it until the pushed speed-limits branch has that brain.py; the replay still takes it."""
+    data = tmp_path / 'data'
+    servers_runs(data)
+    told = {'true_positive': 3, 'false_positive': 1, 'false_negative': 1, 'precision': .75, 'recall': .75}
+    whose = {'ours': 20, 'another': 4, 'head': told, 'network': {**told, 'true_positive': 2, 'recall': .5}}
+    model_id = brain_run(data, 'b1', result={'groups': ['signs', 'sign_boxes'], 'seed': 0, 'history': [{}], 'validation': {},
+                                             'applicability': True, 'other_road_boxes': True,
+                                             'test': {'applicability': whose}})
+    use_brain(data, model_id)
+    index = ModelIndex(RunsIndex(data))
+    entry = index.in_use('brain')[0]
+    # Models shows the head beside the network on the same reviewed signs, and says what the brain learns
+    assert entry['applicability'] == {'learned': True, 'other_road_boxes': True, 'validation': None, 'test': {
+        'ours': 20, 'another': 4, 'head': {'precision': .75, 'recall': .75, 'found': 3, 'wrong': 1},
+        'network': {'precision': .75, 'recall': .5, 'found': 2, 'wrong': 1}}}
+    assert entry['detail'] == 'says the speed to hold · learns whose road a sign is of'
+    clone = tmp_path / 'sunnypilot'
+    monkeypatch.setenv(car_release.SUNNYPILOT_CLONE_ENV, str(clone))
+    assert not car_release.car_gives_every_box()  # no clone at all: nothing says the car gives them
+    assert 'boxes of every sign read' in car_release.brain_refused(index)
+    with pytest.raises(ValueError, match='boxes of every sign read'):
+        car_release.choose(data, 's1')
+    assert car_release.choose(data, 's1', brain_on_car=False)['brain']['id'] == model_id
+
+    def pushed(body):
+        reader = clone / car_release.CAR_BRAIN
+        reader.parent.mkdir(parents=True, exist_ok=True)
+        reader.write_text(body)
+        for command in (['init', '-q'], ['add', '-A'], ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'x'],
+                        ['update-ref', 'refs/remotes/' + car_release.CAR_BRANCH, 'HEAD']):
+            subprocess.run(['git', '-C', str(clone), *command], check=True)
+
+    pushed('self.sign_boxes.add(now, boxes, self.width, self.height)\n')
+    assert 'boxes of every sign read' in car_release.brain_refused(index)
+    pushed('self.other_road_boxes = bool(contract["step"].get("other_road_boxes", False))\n')
+    assert car_release.brain_refused(index) == ''
+    assert car_release.choose(data, 's1')['brain']['id'] == model_id
+    # A brain of before, or one trained without the head, asks nothing of the car's brain.py
+    plain = brain_run(data, 'b2')
+    use_brain(data, plain)
+    monkeypatch.setenv(car_release.SUNNYPILOT_CLONE_ENV, str(tmp_path / 'none'))
+    assert car_release.brain_refused(index) == ''
+    before = index.in_use('brain')[0]['applicability']
+    assert before == {'learned': None, 'other_road_boxes': False, 'validation': None, 'test': None}
+
+
 def test_a_brain_that_takes_the_drivers_inputs_never_goes_on_the_car(tmp_path):
     """With his pedals and the car's speed in, the brain followed his speed on the road (10 Nov 2026): one chosen before
     stays in use on Models, but Publish refuses it; Models › Drive's replay and a trial on the comma still take it."""

@@ -205,6 +205,22 @@ def test_without_the_road_users_the_step_is_skipped_and_every_training_says_so(t
     assert [line.split()[1] for line in lines if line.startswith('== ') and '/7 ' in line] == ['1/7', '2/7', '3/7', '4/7', '5/7']
 
 
+def test_the_applicability_head_is_on_unless_the_run_is_told_not(tmp_path):
+    """#89: NNSLR_BRAIN_APPLICABILITY, 1 unless given: 0 tells every training --no-applicability, the dry run too."""
+    process = run_script(tmp_path, env={'NNSLR_BRAIN_SEEDS': '0'})
+    assert process.returncode == 0, process.stderr + process.stdout
+    lines = (tmp_path / 'data' / 'runs' / 'n1' / 'brain.log').read_text().splitlines()
+    assert "applicability: on (a head of the brain, every sign's box)" in lines
+    assert not any('--no-applicability' in line for line in lines)
+    process = run_script(tmp_path, name='n2', env={'NNSLR_BRAIN_APPLICABILITY': '0', 'NNSLR_BRAIN_SEEDS': '0'})
+    assert process.returncode == 0, process.stderr + process.stdout
+    lines = (tmp_path / 'data' / 'runs' / 'n2' / 'brain.log').read_text().splitlines()
+    trainings = [line for line in lines if line.startswith('args: train-brain')]
+    assert 'applicability: off' in lines and len(trainings) == 2 and all('--no-applicability' in line for line in trainings)
+    process = run_script(tmp_path, name='n3', env={'NNSLR_BRAIN_APPLICABILITY': 'yes'})
+    assert process.returncode == 2 and 'NNSLR_BRAIN_APPLICABILITY must be 0 or 1' in process.stderr
+
+
 def test_the_drives_of_an_earlier_run_are_this_runs(tmp_path):
     """NNSLR_BRAIN_ROUTES_FROM: the drives an earlier brain run kept (its routes.json, else a seed's) go to the dry run
     and, those it keeps, to every step; a run that kept none stops it before the dry run."""

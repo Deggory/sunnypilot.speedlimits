@@ -14,7 +14,8 @@ import {BRAIN_GROUPS, BRAIN_OUT, BRAIN_OUTPUTS, BRAIN_PICTURE, type BrainFact} f
 
 const props = defineProps<{choices: BrainChoice}>();
 const learns = computed(() => ({works: props.choices.works === 'on', road: props.choices.road === 'on',
-  types: props.choices.types === 'on', map: props.choices.map === 'on'}));
+  types: props.choices.types === 'on', map: props.choices.map === 'on',
+  applicability: props.choices.applicability === 'on'}));
 
 type Kind = 'input' | 'net' | 'car' | 'train';
 interface Block {id: string; title: string; sub: string; kind: Kind; facts: BrainFact[]; note?: string}
@@ -35,7 +36,10 @@ const inputs = computed<Block[]>(() => [
   {id: 'signs', title: 'Signs read, plates, sign boxes, traffic lights', sub: 'what our sign networks read, mistakes included', kind: 'input',
     facts: facts(SIGN_GROUPS.filter((name) => carGroups.includes(name))),
     note: 'As the car reads them, never the signs you confirmed in Sign review. A drive not read yet has them unknown. '
-      + 'No metres to a sign: the brain gets the box of each sign, where it is in the picture and how big.'},
+      + 'No metres to a sign: the brain gets the box of each sign, where it is in the picture and how big.'
+      + (learns.value.applicability ? ' With Applicability on, the box of every speed sign read, also of those the '
+        + 'applicability network gives to another road; the number in force still comes from the signs that network takes.'
+        : ' Only the signs the applicability network takes: one it gives to another road is left out.')},
   {id: 'place', title: 'Hour, country, car ahead', sub: 'from the car', kind: 'input', facts: facts(placeGroups),
     note: 'Never your pedals nor the car’s speed: the answer is your own speed, and a brain that had them followed it.'},
   // Only with the switch on (#85): the one brain that reads the map.
@@ -58,6 +62,10 @@ const extras = computed<(Block & {source: string; map: boolean})[]>(() => [
     source: 'your marks in Speed review', what: 'whether the car is inside roadworks, compared with the ones marked in Speed review'},
   {on: learns.value.road, id: 'road', title: 'Road conditions', sub: 'narrow, country, gravel, potholes',
     source: 'your marks in Speed review', what: 'the kinds of road it sees, compared with the ones marked in Speed review'},
+  {on: learns.value.applicability, id: 'applicability', title: 'Applicability', sub: 'our road or another',
+    source: 'your reviews in Sign review',
+    what: 'whose road the speed sign in each of the 8 columns of sign_boxes is of, ours or another, compared with the boxes '
+      + 'reviewed in Sign review; measured beside the applicability network on the same signs'},
 ].filter((extra) => extra.on).map((extra) => ({id: extra.id, title: extra.title, sub: extra.sub, kind: 'train' as Kind,
   source: extra.source, map: extra.map === true, facts: [{name: extra.title, what: extra.what}],
   note: 'Only in training: its error updates the shared weights, then it is dropped from the car’s file.'})));

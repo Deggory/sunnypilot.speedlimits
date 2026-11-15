@@ -16,14 +16,17 @@ as Publish exports one (models: the brain's, sign_networks), on each segment's f
 (the road camera's pixel format), one decoded frame in VIDEO_STEP (20 fps: 4 a second, as speedvisiond), the settings
 of that release in place. The applicability network gets the car's speed of each frame (vEgo of carState at the
 frame's exposure, from the drive's joined logs; unknown without them, as the car gives it before its first carState).
-The signs it gives to another road are left out as on the car, and kept apart in the record ('other_road'). The reviewed sign labels are not used: most drives were reviewed before the other signs had boxes, and
+The signs it gives to another road are left out as on the car, and kept apart in the record ('other_road', with their
+boxes in 'other_boxes': a brain that learns whose road a sign is of is given the boxes of every sign read,
+brain_targets). The reviewed sign labels are not used: most drives were reviewed before the other signs had boxes, and
 the car never has them; what the car's networks miss or misread, the road-type network meets the same way.
 
 Per drive, data/derived/road_type_signs/<route>.json: the fingerprint of the code and networks used, the frames read
 per segment, every frame with a sign read sure enough (time in seconds from the start of the drive, class, confidence;
 'boxes', in the same order, their boxes in the frame's pixels, what vision.SignDistance measures the sign by) and the
 road signs SpeedLimitMemory confirms (time, road); 'other_road', the frames with a sign the applicability network left
-out (time, [[class, confidence], ...]); 'networks', the ids of the networks read with (their contracts' checkpoint).
+out (time, [[class, confidence], ...]) and 'other_boxes', in the same order, their boxes as 'boxes'; 'networks', the ids
+of the networks read with (their contracts' checkpoint).
 
 The brain's pictures come from the same pass (pictures=True: every drive the brain learns from and the certified ones): each
 frame read through the car's vision.BrainInput, the same class and the same NV12 frame as speedvisiond, saved per segment
@@ -76,7 +79,9 @@ NETWORK_FILES = {'finder': 'signnet.onnx', 'classifier': 'classifier.onnx'}
 DECIDER_FILE = 'decider.onnx'  # the applicability network, when the release has one
 RELEASE_MANIFEST = 'speed_limits.json'
 NOT_A_SIGN = 'not_a_sign'  # read sure enough, but neither a speed nor a road sign: left out of the cache
-CACHE_VERSION = 4  # 2: the boards; 3: the boxes of the signs; 4: the applicability network, a sign of another road left out
+# 2: the boards; 3: the boxes of the signs; 4: the applicability network, a sign of another road left out; 5: the boxes
+# of the signs of another road ('other_boxes')
+CACHE_VERSION = 5
 PROBE_ATTEMPTS = 4
 PROBE_PAUSE_S = 10
 CLASSIFIERS_RELATIVE = SIGNS_RELATIVE / 'classifiers'
@@ -298,7 +303,7 @@ def read_segment(task: tuple) -> dict:
     when the release has one: {'segment', 'frames' (read), 'signs': [[seconds into the segment, [[class, confidence],
     ...]], ...] (the frames with a sign read sure enough and not of another road), 'boxes' (their boxes, in the same
     order), 'other_road' (the frames with a sign read sure enough the applicability network gave to another road, as
-    'signs'), 'gpu' (the networks ran there), 'nvdec' (the video was decoded there), 'pictures' (how many were saved to
+    'signs'), 'other_boxes' (their boxes, in the same order), 'gpu' (the networks ran there), 'nvdec' (the video was decoded there), 'pictures' (how many were saved to
     the task's path, None without one)}. task: (video, segment, pictures path or None, and the car's speed in m/s of
     each frame read, by its place among them, None where unknown; without it, unknown). NVDEC first when the worker may
     use the GPU: a video it cannot decode is read again on the CPU."""
@@ -335,7 +340,7 @@ def _read_video(video: str, width: int, height: int, *, nvdec: bool, reduce: boo
                'rawvideo', '-']
     signnet_input = vision.SignNetInput(width, height)
     brain_input = vision.BrainInput(width, height) if pictures else None
-    found, boxes, other, saved, count = [], [], [], [], 0
+    found, boxes, other, other_boxes, saved, count = [], [], [], [], [], 0
     with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as process:
         while True:
             buffer = process.stdout.read(size)
@@ -352,6 +357,7 @@ def _read_video(video: str, width: int, height: int, *, nvdec: bool, reduce: boo
                 if left:
                     other.append([round(count * VIDEO_STEP / VIDEO_FPS, 3),
                                   [[sign['class'], round(sign['confidence'], 4)] for sign in left]])
+                    other_boxes.append([[round(float(value), 2) for value in sign['box']] for sign in left])
                 signs = _WORKER['applicability'].taken(signs)
             kept = [sign for sign in signs if sign['confidence'] >= vision.MIN_CONFIDENCE and sign['class'] != NOT_A_SIGN]
             if kept:
@@ -363,7 +369,7 @@ def _read_video(video: str, width: int, height: int, *, nvdec: bool, reduce: boo
             count += 1
     if pictures and count:
         _save_pictures(Path(pictures), saved)
-    return {'frames': count, 'signs': found, 'boxes': boxes, 'other_road': other,
+    return {'frames': count, 'signs': found, 'boxes': boxes, 'other_road': other, 'other_boxes': other_boxes,
             'gpu': finder.gpu and (ruler is None or _WORKER['decider'].gpu), 'nvdec': nvdec,
             'pictures': count if pictures and count else None}
 
@@ -503,6 +509,7 @@ def _save_signs(root: Path, route: str, segments: list[dict], stamp, videos: lis
               'boards': board_confirmations(vision, readings),
               'other_road': [[round(item['segment'] * SEGMENT_SECONDS + seconds, 3), signs]
                              for item in segments for seconds, signs in item.get('other_road') or []],
+              'other_boxes': [boxes for item in segments for boxes in item.get('other_boxes') or []],
               'networks': networks, 'speeds': speeds or [],
               'classifier': str(classifier) if classifier is not None else None}
     if all(item.get('pictures') == item['frames'] for item in segments if item['frames']):
