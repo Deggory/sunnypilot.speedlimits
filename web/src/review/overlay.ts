@@ -4,7 +4,7 @@
 // of one image pixel.
 import type {AiAction, AiSuggestion} from '../common/ai-types';
 import type {CarSign, CarUse} from './car';
-import {boxColor, hintLabel, shortName} from './catalog';
+import {boxColor, hintLabel, plateTag, shortName} from './catalog';
 import {boxArea, boxesOverlap, freeLabelY, labelWidth, rectOf, type PlacedLabel} from './geometry';
 import type {Box, Corner, Detection, Hint} from './types';
 
@@ -125,11 +125,11 @@ export function handlesOf(b: Box, size: number, hit: number, outside: boolean): 
   });
 }
 
-/** The label of box i on the photo and on its zoom: its number, the sign and, when said, the road: our road in
- * capitals after a road icon ("⟋⟍ 2 · 50 · OURS"), another in words. */
+/** The label of box i on the photo and on its zoom: its number, the sign, what its plate says ("500 m", "22-6", "wet")
+ * and, when said, the road: our road in capitals after a road icon ("⟋⟍ 2 · 50 · OURS"), another in words. */
 export function boxTitle(d: Detection, i: number): string {
   const road = d.applicability === 'own_road' ? ' · OURS' : d.applicability === 'other_road' ? ' · another' : '';
-  return (i + 1) + ' · ' + shortName(d) + road + (d.check_position ? ' · check' : '');
+  return (i + 1) + ' · ' + shortName(d) + plateTag(d) + road + (d.check_position ? ' · check' : '');
 }
 
 /** Where a label starts: at the left of its box, moved left when it would run off the right edge of the photo. */
@@ -223,7 +223,7 @@ export function drawAi(suggestion: Pick<AiSuggestion, 'detections' | 'deleted'>,
     drawn.push({kind, rect: rectOf(b), label: label(text, x, y, fontSize, k)});
   };
   suggestion.detections.forEach((d, i) => {
-    if (d.ai_action !== 'unjudged') add(d.ai_action, d.bbox_xyxy, 'AI ' + (i + 1) + ' · ' + shortName(d));
+    if (d.ai_action !== 'unjudged') add(d.ai_action, d.bbox_xyxy, 'AI ' + (i + 1) + ' · ' + shortName(d) + plateTag(d));
   });
   for (const d of suggestion.deleted) add('delete', d.bbox_xyxy, '✕ ' + d.number);
   return drawn;

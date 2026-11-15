@@ -184,6 +184,15 @@ function distanceText(d: Detection): string {
   return d.plate_distance_m != null ? ' · in ' + d.plate_distance_m + ' m' : ' · distance plate';
 }
 
+/** What the plate under a box says, after its name on the photo: " · 500 m" (" · ? m" when its metres are not read),
+ * " · 22-6" (" · hours" when they are not read), " · wet". So the picture shows whether a plate was given (#101). */
+export function plateTag(d: Detection): string {
+  if (d.supplementary_panel === 'distance') return ' · ' + (d.plate_distance_m != null ? d.plate_distance_m : '?') + ' m';
+  if (d.supplementary_panel === 'time') return ' · ' + (d.plate_hours || 'hours');
+  if (d.supplementary_panel === 'wet') return ' · wet';
+  return '';
+}
+
 /** The whole hours a plate can say, from and to (0 is also the 24 of "20-24"). */
 export const PLATE_HOURS: readonly number[] = Array.from({length: 24}, (_, hour) => hour);
 

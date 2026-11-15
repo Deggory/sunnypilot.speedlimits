@@ -45,7 +45,7 @@ import AiRouteSheet from '../components/AiRouteSheet.vue';
 import {aiLive} from '../composables/ai-live';
 import {askConfirm} from '../composables/confirm';
 import {toast} from '../composables/toast';
-import {boxColor, describe, shortName} from '../review/catalog';
+import {boxColor, describe, plateTag, shortName} from '../review/catalog';
 import {row as editRow} from '../review/current';
 import {frameKeyAt, loadSignEditor, stopSignEditor, videoFrameOf} from '../review/embed';
 import {frameStatus} from '../review/frames';
@@ -1030,7 +1030,7 @@ function worksIn(from: number, to: number) {
           <rect :x="box.bbox_xyxy[0]" :y="box.bbox_xyxy[1]" :width="Math.max(1, box.bbox_xyxy[2] - box.bbox_xyxy[0])"
                 :height="Math.max(1, box.bbox_xyxy[3] - box.bbox_xyxy[1])" :class="['sr-sign-box', {proposed: !pictureBoxes.confirmed}]"/>
           <text :x="box.bbox_xyxy[0]" :y="Math.max(pictureBoxes.height / 30, box.bbox_xyxy[1] - pictureBoxes.height / 120)"
-                :font-size="pictureBoxes.height / 28" class="sr-sign-tag">{{ isOtherRoad(box) ? 'another · ' + shortName(box) : shortName(box) }}</text>
+                :font-size="pictureBoxes.height / 28" class="sr-sign-tag">{{ (isOtherRoad(box) ? 'another · ' : '') + shortName(box) + plateTag(box) }}</text>
         </g>
       </svg>
       <span v-if="showSigns && shown && !zoomed && signNow" class="sr-read" id="sr-sign-read" role="img" :aria-label="signNowTitle">
