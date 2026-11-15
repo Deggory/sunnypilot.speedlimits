@@ -227,11 +227,13 @@ function booleanChanged(key: BooleanField, event: Event): void {
                 :data-kind="kind.id" :title="kind.label + (KIND_KEYS[kind.id] ? ' (' + KIND_KEYS[kind.id] + ')' : '')"
                 @click="setKind(kind.id); releaseFocus($event)">{{ kind.chip }}<kbd v-if="KIND_KEYS[kind.id]" class="key-hint">{{ KIND_KEYS[kind.id] }}</kbd></button>
       </div>
-      <!-- On or off, with any kind: the children's triangle with "SCHULE" is Children, painted. -->
+      <!-- On or off, with any kind: the children's triangle with "SCHULE" is Children, painted; a number painted on
+           the road ("30", "30 ZONE") is a Road marking (#96). -->
       <div class="kind-group" role="group" aria-label="Where">
         <span class="kind-group-label">Where</span>
         <button type="button" class="chip kind" id="painted"
-                :aria-pressed="detection?.family === 'other_sign' && detection?.painted === true"
+                :aria-pressed="detection?.family === 'road_marking_candidate' || (detection?.family === 'other_sign' && detection?.painted === true)"
+                title="A number painted on the road (30, 30 ZONE) is a Road marking with that number"
                 @click="togglePainted(); releaseFocus($event)">Painted on the road</button>
       </div>
     </div>

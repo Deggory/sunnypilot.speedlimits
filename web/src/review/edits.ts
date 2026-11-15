@@ -48,7 +48,19 @@ function editSelected(change: (d: Detection) => void): void {
   changed(row);
 }
 
+/** Painted on the road: an "Other sign" with "painted", or a number painted on the road, a Road marking ("30", "30 ZONE"). */
+function isPainted(d: Detection): boolean {
+  return d.family === 'road_marking_candidate' || (d.family === 'other_sign' && d.painted === true);
+}
+
+/** The families a number painted on the road takes the place of: a painted box stays painted when one is chosen. */
+const PAINTED_AS_MARKING = new Set(['maximum_speed', 'zone']);
+
 function applyFamily(d: Detection, id: string): void {
+  // A painted box stays painted: a speed limit or a zone painted on the road is a Road marking with its number (#96).
+  if (isPainted(d) && PAINTED_AS_MARKING.has(id)) id = 'road_marking_candidate';
+  // A Road marking made an "Other sign" stays painted on the road.
+  if (id === 'other_sign' && d.family === 'road_marking_candidate') d.painted = true;
   d.family = id;
   if (!familyHasValue(id)) d.value_kph = null;
   // The kind and "painted" belong to "Other sign" only.
@@ -72,10 +84,12 @@ export function toggleVariable(): void {
 /** The most common box: an "Other sign" (its kind kept when it has one) for the road the car drives on (S). */
 export function setOtherOurs(): void {
   editSelected((d) => {
+    const painted = isPainted(d);
     if (d.family !== 'other_sign') {
       delete d.sign_type;
       delete d.painted;
     }
+    if (painted) d.painted = true;
     d.family = 'other_sign';
     d.value_kph = null;
     d.value_state = 'unknown';
@@ -101,6 +115,7 @@ export function setOnVehicle(): void {
 /** The kind of the selected box, an other sign. Pressed again it stays: a press to make sure never takes it off. */
 export function setKind(id: string): void {
   editSelected((d) => {
+    if (d.family === 'road_marking_candidate') d.painted = true;
     d.family = 'other_sign';
     d.value_kph = null;
     d.value_state = 'unknown';
@@ -132,9 +147,18 @@ export function toggleUsersComplete(): void {
 }
 
 /** Painted on the road, on or off: the box becomes an "Other sign" and keeps its kind (the children's triangle with
- * "SCHULE" is "Children", painted). */
+ * "SCHULE" is "Children", painted). A box with a number (a speed limit, a zone) becomes a Road marking with it, the
+ * family of a number painted on the road ("30", "30 ZONE"), and a Road marking pressed again a speed limit (#96). */
 export function togglePainted(): void {
   editSelected((d) => {
+    if (d.family === 'road_marking_candidate') {
+      d.family = 'maximum_speed';
+      return;
+    }
+    if (PAINTED_AS_MARKING.has(d.family ?? '')) {
+      d.family = 'road_marking_candidate';
+      return;
+    }
     const painted = !(d.family === 'other_sign' && d.painted === true);
     if (d.family !== 'other_sign') delete d.sign_type;
     d.family = 'other_sign';
@@ -150,7 +174,8 @@ export function togglePainted(): void {
  * (25 mph is 25, never 40). */
 export function setValue(value: number | null): void {
   editSelected((d) => {
-    if (!familyHasValue(d.family)) d.family = 'maximum_speed';
+    // A number typed on a painted "Other sign" is a number painted on the road: a Road marking (#96).
+    if (!familyHasValue(d.family)) d.family = isPainted(d) ? 'road_marking_candidate' : 'maximum_speed';
     d.value_kph = value;
     d.sign_value = value;
     d.value_state = value === null ? 'unknown' : 'reviewed';
