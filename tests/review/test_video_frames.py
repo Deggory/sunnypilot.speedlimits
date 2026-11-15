@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import threading
 
 import pytest
 
@@ -320,6 +321,85 @@ def test_a_frame_prepared_ahead_is_saved_without_decoding_again_with_the_same_pi
     # A frame already saved is not prepared again.
     video_frames.prepare(root, ROUTE, 0, 45)
     assert not prepared.exists()
+
+
+def test_a_save_takes_out_its_whole_gop_and_the_saves_of_its_other_frames_only_move_pictures(drive, monkeypatch,
+                                                                                               tmp_path):
+    """Confirm walks the video frame by frame: one ffmpeg a GOP, not one a frame, whose saves fell minutes behind the
+    reviewer one at a time (#99, 15 Nov 2026)."""
+    root, video, rows, server = drive
+    folder = root / 'derived/frames' / ROUTE / '0'
+    calls = []
+    real = video_frames.extract_frames
+    monkeypatch.setattr(video_frames, 'extract_frames', lambda *args, **kwargs: calls.append(kwargs['decoded']) or
+                        real(*args, **kwargs))
+    assert server.post_frame(ROUTE, '0/1025', body([BOX]))[0] == 200
+    # Its GOP is 20..39: 20 is the picture at 1 a second (left out), 25 is saved, the others wait for their save.
+    assert calls == [list(range(21, 40))]
+    assert sorted(int(path.name.rsplit('-', 1)[1]) for path in folder.glob(video_frames.PREPARED_PREFIX + '*')) == [
+        index for index in range(21, 40) if index != 25]
+    for key in ('0/1026', '0/1027', '0/1039'):
+        assert server.post_frame(ROUTE, key, body([BOX]))[0] == 200
+    assert len(calls) == 1
+    manifest = [json.loads(line) for line in (folder / video_frames.VIDEO_MANIFEST).read_text().splitlines()]
+    assert [row['decoded_frame_index'] for row in manifest] == [25, 26, 27, 39]
+    # The same pictures as a decode of the whole video, the frames prepared included.
+    for row in manifest:
+        again = real(video, tmp_path / f'again-{row["decoded_frame_index"]}', decoded=[row['decoded_frame_index']])[0]
+        assert again.image_sha256 == row['image_sha256'] and (folder / f'video_{row["output_index"]:08d}.png').is_file()
+    # The next GOP: one ffmpeg more, without the frames already a picture.
+    assert server.post_frame(ROUTE, '0/1045', body([BOX]))[0] == 200
+    assert calls[1] == list(range(41, 60))
+
+
+def test_the_gops_of_a_segment_are_taken_out_at_once_and_one_gop_once(drive, monkeypatch):
+    """ffmpeg runs under its GOP's lock, not the segment's: two GOPs at once (each waits for the other to start), and
+    two frames of one GOP share one run."""
+    root, _video, _rows, _server = drive
+    real = video_frames.extract_frames
+    both = threading.Barrier(2, timeout=20)
+    calls = []
+
+    def together(*args, **kwargs):
+        calls.append(kwargs['decoded'][0])
+        both.wait()
+        return real(*args, **kwargs)
+    monkeypatch.setattr(video_frames, 'extract_frames', together)
+    made, errors = {}, []
+
+    def save(decoded):
+        try:
+            made[decoded] = video_frames.materialize(root, ROUTE, 0, decoded)
+        except Exception as exc:  # noqa: BLE001 - the test says which
+            errors.append(exc)
+    threads = [threading.Thread(target=save, args=(decoded,)) for decoded in (25, 45, 26, 46)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert not errors and sorted(calls) == [21, 41] and all(made[decoded][1] for decoded in (25, 45, 26, 46))
+    manifest = root / 'derived/frames' / ROUTE / '0' / video_frames.VIDEO_MANIFEST
+    assert sorted(json.loads(line)['decoded_frame_index'] for line in manifest.read_text().splitlines()) == [
+        25, 26, 45, 46]
+
+
+def test_a_save_sent_again_after_it_was_stored_is_answered_ok_without_a_new_revision(drive):
+    """The page sends a save again when its answer is late (CALL_TIMEOUT_MS): with the revision it had, the stored one
+    is newer. The same labels again are that save, stored already: OK, nothing written. Other labels stay a
+    conflict (#99)."""
+    root, _video, _rows, server = drive
+    store = ReviewStore(db_path(root))
+    for key in ('0/1', '0/1025'):
+        status, _response, data = server.post_frame(ROUTE, key, {**body([BOX]), 'base_revision': 0})
+        assert status == 200, data
+        status, _response, data = server.post_frame(ROUTE, key, {**body([BOX]), 'base_revision': 0})
+        assert status == 200, data
+        assert json_of(data)['review']['revision'] == 1 and len(store.history(ROUTE, RUN_ID, key)) == 1
+        status, _response, data = server.post_frame(ROUTE, key, {**body([dict(BOX, value_kph=60)]), 'base_revision': 0})
+        assert status == 409 and json_of(data)['error'] == 'revision_conflict'
+        other = {**body([BOX]), 'reviewer': 'Someone else', 'base_revision': 0}
+        assert server.post_frame(ROUTE, key, other)[0] == 409
+        assert store.review(ROUTE, RUN_ID, key)['revision'] == 1
 
 
 def test_a_later_read_of_the_same_frame_keeps_one_row(drive):

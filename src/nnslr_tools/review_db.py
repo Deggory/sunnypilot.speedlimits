@@ -301,6 +301,12 @@ class ReviewStore:
                     current = 0
                     if existing is not None:
                         current = existing['revision']
+                    if base_revision is not None and base_revision != current and _same_save(
+                            existing, json.loads(text), reviewer, reviewer_kind, channel):
+                        # The page sent this save again (it waited too long for the answer of the first) after the
+                        # first was stored: the frame holds it already, nothing is written, no conflict (#99).
+                        connection.execute('COMMIT')
+                        return existing
                     _check_base_revision(base_revision, current)
                     _check_human_review(protect_human, existing)
                     revision = current + 1
@@ -610,6 +616,14 @@ def _check_base_revision(base_revision: int | None, current: int) -> None:
         raise ReviewRejected(409, 'revision_conflict',
                              'This frame was saved by another page in the meantime: '
                              'reload the page to see the current version.')
+
+
+def _same_save(existing: dict | None, payload: dict, reviewer: str, reviewer_kind: str, channel: str) -> bool:
+    """A frame confirmed already from the page by the same reviewer with these labels (only its time differs): the
+    save the page sent again. The REST API and MCP keep their 409 (docs/API_MCP.md)."""
+    return (channel == 'web' and existing is not None and bool(existing['confirmed']) and existing['reviewer'] == reviewer
+            and existing['reviewer_kind'] == reviewer_kind and existing['channel'] == channel
+            and _comparable(existing['payload']) == _comparable(payload))
 
 
 def _check_human_review(protect_human: bool, existing: dict | None) -> None:

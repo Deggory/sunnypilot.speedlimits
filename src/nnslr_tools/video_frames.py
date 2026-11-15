@@ -533,21 +533,63 @@ def added_rows(root: Path, route: str) -> list[dict]:
     return rows
 
 
-def _extract(root: Path, route: str, segment: int, decoded: int, into: Path) -> dict:
-    """Its manifest row of a frame between the seconds, its PNG taken out of the video into the new folder ``into`` as
-    the pictures at 1 a second are (nnslr_tools.media.extract_frames)."""
-    video = video_of(root, route, segment)
-    first, last = gop_of(video, decoded)
+def _pictures_of(directory: Path) -> set[int]:
+    """The decoded indices of the frames of a segment folder that are a picture already: saved between the seconds
+    (the manifest, with their PNG), at 1 a second (frames.jsonl) or a read of the comma (sign_reads.jsonl). None of
+    them is ever taken out again."""
+    taken = set()
+    for name in (VIDEO_MANIFEST, 'frames.jsonl', 'sign_reads.jsonl'):
+        for row in _rows(directory / name):
+            if name != VIDEO_MANIFEST or Path(row.get('image_path', '')).is_file():
+                taken.add(row.get('decoded_frame_index'))
+    return taken
+
+
+def _prepared(directory: Path, decoded: int) -> bool:
+    return (directory / f'{PREPARED_PREFIX}{int(decoded)}' / 'row.json').is_file()
+
+
+def _extract_gop(root: Path, route: str, segment: int, video: Path, gop: tuple[int, int], directory: Path, *,
+                 wanted: int) -> None:
+    """Every frame of a GOP not a picture yet nor prepared taken out of the video in one run of ffmpeg, as the pictures
+    at 1 a second are (nnslr_tools.media.extract_frames), each left as prepared (<segment folder>/.prepared-<decoded
+    frame>) for its save to move. One run costs about as much for the 30 frames of a GOP as for one (1.3 s at 2688 x
+    1520: the GOP is decoded either way), and Confirm walks the video frame by frame: one ffmpeg a GOP instead of one a
+    frame, whose saves went one at a time behind the segment's lock and fell minutes behind the reviewer (#99, 15 Nov
+    2026). ``wanted``: the frame asked for, an error when it cannot be taken out (the others are left out quietly).
+    Called under the GOP's lock."""
+    first, last = gop
+    taken = _pictures_of(directory)
+    frames = [index for index in range(first, last + 1)
+              if index == wanted or index not in taken and not _prepared(directory, index)]
     alignment = root / 'derived/alignment' / route / f'{int(segment)}.jsonl'
     alignment = alignment if alignment.is_file() else None
-    # Only its GOP is decoded (0.3 s, the whole video takes 5), with the timings read when its frames were shown.
-    result = extract_frames(video, into, decoded=[decoded], prefix=VIDEO_PREFIX, index_base=READ_INDEX_BASE,
-                            alignment=alignment, route_id=route, segment_index=int(segment), timings=timings_of(video),
-                            gop=(first, gop_bytes(video, first, last)))
-    made = extracted_frame_rows(result, route_id=route, segment_index=int(segment), alignment=alignment)[0]
-    if not isinstance(made.get('media_time_s'), (int, float)):
-        raise VideoFrameError('the frame has no time in the video')
-    return made
+    directory.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='.video-', dir=directory) as temporary:
+        staging = Path(temporary)
+        # Only its GOP is decoded, with the timings read when its frames were shown; as many ffmpeg at once as the
+        # previews allow (MAX_DECODES, #60).
+        with _decode_slots:
+            result = extract_frames(video, staging / 'frames', decoded=frames, prefix=VIDEO_PREFIX,
+                                    index_base=READ_INDEX_BASE, alignment=alignment, route_id=route,
+                                    segment_index=int(segment), timings=timings_of(video),
+                                    gop=(first, gop_bytes(video, first, last)))
+        made_rows = extracted_frame_rows(result, route_id=route, segment_index=int(segment), alignment=alignment)
+        if not any(made.get('decoded_frame_index') == wanted and isinstance(made.get('media_time_s'), (int, float))
+                   for made in made_rows):
+            raise VideoFrameError('the frame has no time in the video')
+        for made in made_rows:
+            index = made.get('decoded_frame_index')
+            if type(index) is not int or not isinstance(made.get('media_time_s'), (int, float)):
+                continue
+            folder = staging / f'prepared-{index}'
+            folder.mkdir()
+            _move_picture(made, folder)
+            made['image_path'] = Path(made['image_path']).name
+            (folder / 'row.json').write_text(json.dumps(made, sort_keys=True))
+            target = directory / f'{PREPARED_PREFIX}{index}'
+            shutil.rmtree(target, ignore_errors=True)
+            folder.replace(target)
 
 
 def _move_picture(made: dict, directory: Path) -> None:
@@ -561,25 +603,22 @@ def _move_picture(made: dict, directory: Path) -> None:
 
 
 def prepare(root: Path, route: str, segment: int, decoded: int) -> None:
-    """A frame between the seconds the reviewer works on (Apply previous, Fit box) taken out of the video now, before
-    its save asks for it: the save then only moves its pictures (materialize), instead of waiting a second or more
-    for ffmpeg. Nothing is a row of the report until then."""
+    """A frame between the seconds the reviewer works on (Apply previous, Fit box) taken out of the video now with the
+    rest of its GOP (_extract_gop), before its save asks for it: the save then only moves its pictures (materialize),
+    instead of waiting a second or more for ffmpeg. Nothing is a row of the report until then."""
     root = Path(root)
     directory = root / 'derived/frames' / route / str(int(segment))
-    folder = directory / f'{PREPARED_PREFIX}{int(decoded)}'
-    with _lock('prepare', route, int(segment), int(decoded)):
-        if (folder / 'row.json').is_file() or (directory / VIDEO_MANIFEST).is_file() and any(
-                row.get('decoded_frame_index') == decoded for row in _rows(directory / VIDEO_MANIFEST)):
+    video = video_of(root, route, segment)
+    gop = gop_of(video, decoded)
+    with _lock('gop', route, int(segment), gop[0]):
+        if _prepared(directory, decoded) or _saved(directory, decoded) is not None:
             return
-        directory.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(prefix='.video-', dir=directory) as temporary:
-            staging = Path(temporary) / 'frame'
-            made = _extract(root, route, segment, decoded, staging)
-            made['image_path'] = Path(made['image_path']).name
-            (staging / 'row.json').write_text(json.dumps(made, sort_keys=True))
-            shutil.rmtree(folder, ignore_errors=True)
-            staging.replace(folder)
-    # Those never saved go.
+        _extract_gop(root, route, segment, video, gop, directory, wanted=decoded)
+    _forget_old_prepared(directory)
+
+
+def _forget_old_prepared(directory: Path) -> None:
+    """The frames prepared and never saved go after PREPARED_KEPT_S."""
     now = time.time()
     for old in directory.glob(PREPARED_PREFIX + '*'):
         try:
@@ -599,47 +638,58 @@ def prepare_soon(root: Path, route: str, segment: int, decoded: int) -> None:
     threading.Thread(target=run, name='video-prepare', daemon=True).start()
 
 
-def _take_prepared(directory: Path, route: str, segment: int, decoded: int) -> dict | None:
-    """The manifest row of the frame prepare took out, its pictures moved into ``directory``; None without one. Waits
-    for a prepare at work on it."""
+def _saved(directory: Path, decoded: int) -> dict | None:
+    """The manifest row of a frame between the seconds saved already, with its picture."""
+    for row in _rows(directory / VIDEO_MANIFEST):
+        if row.get('decoded_frame_index') == decoded and Path(row.get('image_path', '')).is_file():
+            return row
+    return None
+
+
+def _take_prepared(directory: Path, decoded: int) -> dict | None:
+    """The manifest row of a frame _extract_gop took out, its pictures moved into ``directory``; None without one.
+    Called under the GOP's lock."""
     folder = directory / f'{PREPARED_PREFIX}{int(decoded)}'
-    with _lock('prepare', route, int(segment), int(decoded)):
-        try:
-            made = json.loads((folder / 'row.json').read_text())
-            made['image_path'] = str(folder / made['image_path'])
-            if not isinstance(made, dict) or not Path(made['image_path']).is_file():
-                return None
-            _move_picture(made, directory)
-            return made
-        except (OSError, ValueError, KeyError, TypeError):
+    try:
+        made = json.loads((folder / 'row.json').read_text())
+        made['image_path'] = str(folder / made['image_path'])
+        if not isinstance(made, dict) or not Path(made['image_path']).is_file():
             return None
-        finally:
-            shutil.rmtree(folder, ignore_errors=True)
+        _move_picture(made, directory)
+        return made
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
 
 
 def materialize(root: Path, route: str, segment: int, decoded: int) -> tuple[dict, bool]:
-    """(manifest row, made now) of a frame between the seconds: its PNG taken out of the video as the pictures at 1
-    a second are (nnslr_tools.media.extract_frames), or by prepare before, added to video_frames.jsonl of its
-    segment."""
+    """(manifest row, made now) of a frame between the seconds: its PNG taken out of the video with the rest of its
+    GOP (_extract_gop) unless prepare did it before, added to video_frames.jsonl of its segment. ffmpeg runs under the
+    lock of its GOP only: the saves of the other GOPs of the segment wait only for the manifest's write."""
     root = Path(root)
-    video_of(root, route, segment)
+    video = video_of(root, route, segment)
+    gop = gop_of(video, decoded)
     directory = root / 'derived/frames' / route / str(int(segment))
     manifest = directory / VIDEO_MANIFEST
-    with _lock('manifest', route, int(segment)):
-        rows = _rows(manifest)
-        for row in rows:
-            if row.get('decoded_frame_index') == decoded and Path(row.get('image_path', '')).is_file():
-                return row, False
-        made = _take_prepared(directory, route, segment, decoded)
+    # Always the GOP's lock before the manifest's: forget takes only the manifest's.
+    with _lock('gop', route, int(segment), gop[0]):
+        row = _saved(directory, decoded)
+        if row is not None:
+            return row, False
+        made = _take_prepared(directory, decoded) if _prepared(directory, decoded) else None
         if made is None:
-            # Taken out on its own folder: extract_frames replaces every picture with its prefix in the folder it writes.
-            with tempfile.TemporaryDirectory(prefix='.video-', dir=directory) as temporary:
-                made = _extract(root, route, segment, decoded, Path(temporary))
-                _move_picture(made, directory)
-        rows = [row for row in rows if row.get('decoded_frame_index') != decoded] + [made]
-        temporary = manifest.with_suffix('.jsonl.tmp')
-        temporary.write_text(''.join(json.dumps(row, sort_keys=True) + '\n' for row in rows))
-        temporary.replace(manifest)
+            # Not prepared, or its folder gone or broken meanwhile (_forget_old_prepared): taken out now.
+            _extract_gop(root, route, segment, video, gop, directory, wanted=decoded)
+            made = _take_prepared(directory, decoded)
+        if made is None:
+            raise VideoFrameError('the frame could not be taken out of the video')
+        with _lock('manifest', route, int(segment)):
+            rows = [row for row in _rows(manifest) if row.get('decoded_frame_index') != decoded] + [made]
+            temporary = manifest.with_suffix('.jsonl.tmp')
+            temporary.write_text(''.join(json.dumps(row, sort_keys=True) + '\n' for row in rows))
+            temporary.replace(manifest)
+    _forget_old_prepared(directory)
     return made, True
 
 

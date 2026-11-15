@@ -282,8 +282,12 @@ def test_stale_report_and_concurrent_edit_conflicts(loopback):
     status, response, data = server.post_frame(ROUTE, '0/0', page_body(rows[0], run_id='20200101T000000Z-00000000'))
     assert status == 409 and 'rebuilt' in json_of(data)['message']
     assert server.post_frame(ROUTE, '0/0', page_body(rows[0], base_revision=0))[0] == 200
-    status, response, data = server.post_frame(ROUTE, '0/0', page_body(rows[0], base_revision=0))
+    # Another page with other labels, from the revision before.
+    status, response, data = server.post_frame(ROUTE, '0/0', page_body(rows[0], value_kph=80, base_revision=0))
     assert status == 409 and json_of(data)['error'] == 'revision_conflict'
+    # The same save sent again (its answer was late) is the one stored: OK, no new revision (#99).
+    status, response, data = server.post_frame(ROUTE, '0/0', page_body(rows[0], base_revision=0))
+    assert status == 200 and json_of(data)['review']['revision'] == 1
 
 
 def test_a_refused_save_and_a_server_error_are_in_the_log(loopback, capfd, monkeypatch):
