@@ -40,7 +40,7 @@ export const ACTION_TAB: Record<ActionName, string | null> = {
   fetch: '/prepare', prepare: '/prepare', prepare_again: '/prepare', setup_vlm: '/prepare',
   dataset: '/dataset', road_types: '/prepare', review_box: '/reviewers',
   train: '/train', train_continue: '/train', train_resume: '/train', train_classifier: '/train', train_brain: '/train',
-  train_users: '/train', train_cutter: '/train', train_decider: '/train', ai_review: '/train', mapillary_locations: '/train', mapillary_windows: '/train',
+  train_users: '/train', train_cutter: '/train', train_decider: '/models', ai_review: '/train', mapillary_locations: '/train', mapillary_windows: '/train',
   measure_proposer: '/evaluate', measure_ai_reviewer: '/evaluate', regression: '/drive', simulate: '/drive',
   networks_prepare: '/publish', networks_publish: '/publish',
   send_to_car: '/publish', try_on_comma: '/models', comma_restore: '/models',
@@ -69,10 +69,12 @@ export function activityTab(activity: Pick<Activity, 'group' | 'label'>): string
 
 /** The addresses of the tabs with work running: the running jobs of the site, and the work started from a terminal. A
  * process of a site job (its activity names the job) counts only through its action: Import sign reviews runs the
- * helper of the trainings, and lit Training besides Data. */
+ * helper of the trainings, and lit Training besides Data. A pipeline of Train running (pipeline) lights Train all
+ * along: also while it waits between its steps, and while its Applicability step trains (a job Models shows, #91). */
 export function busyTabs(jobs: readonly Pick<Job, 'action' | 'state'>[],
-                         activities: readonly Pick<Activity, 'group' | 'label' | 'job'>[]): Set<string> {
+                         activities: readonly Pick<Activity, 'group' | 'label' | 'job'>[], pipeline = false): Set<string> {
   const tabs = new Set<string>();
+  if (pipeline) tabs.add('/train');
   for (const job of jobs) {
     const tab = job.state === 'running' ? ACTION_TAB[job.action] : null;
     if (tab) tabs.add(tab);

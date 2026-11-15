@@ -98,7 +98,7 @@ const trainedTitle = computed(() => {
 
 <template>
   <section v-if="shown" class="card import-card labeler-card" id="box-fit" aria-labelledby="bf-title">
-    <h2 id="bf-title" class="rl-title" :title="what">Fit box</h2>
+    <h3 id="bf-title" class="rl-title" :title="what">Fit box</h3>
     <JobProgress v-if="bigJob" :job="bigJob" @details="emit('details', $event)" @stop="emit('stop', $event)"/>
     <TerminalActivity v-for="activity in activities" :key="activity.pid + activity.label" :activity="activity" :preparation="null"/>
     <div v-if="idle" class="import-row">

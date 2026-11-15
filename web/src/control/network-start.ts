@@ -1,5 +1,6 @@
-// Where the next training of the cutter, of applicability or of the brain starts, kept once for its section and for its
-// step of Train › Pipeline (the same choice in both): a finished version of its role in Models, whose weights it goes on
+// Where the next training of the cutter, of applicability or of the brain starts, kept once for its section (applicability's
+// in Models › Review helpers, ApplicabilityCard.vue) and for its step of Train › Pipeline (the same choice in both on Train;
+// applicability's card on Models keeps its own, on the same default): a finished version of its role in Models, whose weights it goes on
 // from (the one in use, until another is chosen), or its usual start (random weights for SignNet, ImageNet for
 // applicability and the brain; the choice while none is in use). An applicability run is one choice: each of its
 // networks goes on from its own of that run. A brain is one seed: its three seeds go on from it; it learnt on the

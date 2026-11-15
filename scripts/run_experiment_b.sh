@@ -14,7 +14,8 @@ set -euo pipefail
 # Environment: NNSLR_GPU_INDEX (default 0), NNSLR_DATASET_KIND (gold), NNSLR_GPU_VENV (.venv-gpu),
 # NNSLR_EXPERIMENT_EPOCHS (20), NNSLR_TRAIN_INIT=random for random weights instead of ImageNet ones,
 # NNSLR_DECIDER_INIT_FROM (the experiment-b folder of an earlier run: each variant goes on from its own there, a
-# variant it lacks from ImageNet; Train › Applicability › Start from), NNSLR_ALLOW_BUSY_GPU=1 to share a GPU that
+# variant it lacks from ImageNet; Models › Review helpers › Applicability › Start from, or its step of Train ›
+# Pipeline), NNSLR_ALLOW_BUSY_GPU=1 to share a GPU that
 # already has compute processes.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

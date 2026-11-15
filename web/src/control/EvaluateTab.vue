@@ -325,7 +325,8 @@ const loaded = computed(() => (view.value === 'proposers' ? proposers.value !== 
 const loadError = computed(() => (view.value === 'proposers' ? proposersError.value
   : view.value === 'ai' ? aiError.value : modelsError.value));
 const emptyText = computed(() => (view.value === 'proposers' ? 'No proposer on this server.'
-  : view.value === 'ai' ? 'No AI provider yet: add one in Settings.' : 'Nothing measured yet: train one on the Train tab.'));
+  : view.value === 'ai' ? 'No AI provider yet: add one in Settings.' : view.value === 'decider'
+    ? 'Nothing measured yet: train one in Models › Review helpers.' : 'Nothing measured yet: train one on the Train tab.'));
 
 const runSummary = computed(() => runsPayload.value?.runs.find((run) => run.name === shown.value?.run) ?? null);
 const {detail, loading, error} = useRunDetail(computed(() => runSummary.value?.name ?? null),

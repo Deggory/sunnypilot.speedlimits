@@ -47,7 +47,7 @@ const TO_PREPARE: RouteState[] = ['collegare', 'estrarre', 'preannotare'];
 const ROW_ACTIONS: Record<LoopKey, ActionName[]> = {
   drives: ['fetch', 'prepare', 'prepare_again', 'road_types'],
   review: ['ai_review'],
-  train: ['dataset', 'train_cutter', 'train_classifier', 'train_decider', 'train_brain', 'train_users', 'train', 'train_continue',
+  train: ['dataset', 'train_cutter', 'train_classifier', 'train_brain', 'train_users', 'train', 'train_continue',
     'train_resume'],
   car: ['send_to_car', 'try_on_comma', 'comma_restore'],
 };
@@ -69,7 +69,9 @@ function running(status: PanelStatus, key: LoopKey): string {
     const steps = status.pipeline.steps;
     const index = steps.findIndex((step) => step.state === 'running');
     const at = index < 0 ? '' : ': ' + steps[index]!.label + ', ' + (index + 1) + ' of ' + steps.length;
-    return ['Train all' + at, job ? wholePercent(job.progress.percent) : ''].filter(Boolean).join(' · ');
+    // The step's own job: its Applicability step is not in the row's actions (applicability alone is Models', #91).
+    const stepJob = index < 0 ? undefined : status.jobs.find((item) => item.id === steps[index]!.job) ?? job;
+    return ['Train all' + at, stepJob ? wholePercent(stepJob.progress.percent) : ''].filter(Boolean).join(' · ');
   }
   if (job) return runningText(job);
   const activity = status.activities.find((item) => ROW_GROUPS[key]?.includes(item.group));

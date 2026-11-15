@@ -105,7 +105,7 @@ const runFacts = (run: LabelerRun): string => [isoWhen(run.finished), plural(run
 
 <template>
   <section v-if="shown" class="card import-card labeler-card" id="road-labeler" aria-labelledby="rl-title">
-    <h2 id="rl-title" class="rl-title">Road labeler</h2>
+    <h3 id="rl-title" class="rl-title">Road labeler</h3>
     <p class="rl-what">An offline network that labels Speed review: the road types over the map, the kinds of road and the
       roadworks, from the camera at high definition, the map, the GPS and the speed. It never runs on the car. What it writes
       is final, as the brain learns it: you correct only where it is wrong, and your marks always win.</p>

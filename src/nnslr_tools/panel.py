@@ -982,13 +982,16 @@ class Panel:
 
     def running(self) -> dict:
         """What runs now, for the dots of the busy tabs on the pages outside the panel (GET /api/panel/system): the
-        running jobs of the site (id, action, label, state, gpus), the work started from a terminal and the Review with
-        AI at work (ai_live: Speed review marks its drive in the list)."""
+        running jobs of the site (id, action, label, state, gpus), the work started from a terminal, the Review with
+        AI at work (ai_live: Speed review marks its drive in the list) and whether a pipeline of Train runs (pipeline:
+        it lights Train all along, also while its Applicability step trains, a job Models shows)."""
         activities = self.activities()
         every = self.jobs(activities)
         jobs = [{key: job[key] for key in ('id', 'action', 'label', 'state', 'gpus')}
                 for job in every if job['state'] == 'running']
-        return {'jobs': jobs, 'activities': activities, 'ai_live': self.ai_live(every)}
+        plan = _read_json(self.logs / PIPELINE_FILE)
+        return {'jobs': jobs, 'activities': activities, 'ai_live': self.ai_live(every),
+                'pipeline': isinstance(plan, dict) and plan.get('state') == 'running'}
 
     def jobs(self, activities: list[dict] | None = None) -> list[dict]:
         """The last actions started from the panel, newest first."""

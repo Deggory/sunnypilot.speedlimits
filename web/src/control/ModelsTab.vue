@@ -1,8 +1,8 @@
 <script setup lang="ts">
-// Models: first the networks in use (the cutter, classifier and decider of the pipeline, the road type; docs/NEURAL_NETWORK.md), one
+// Models: first the networks in use (the cutter, the classifier, the brain and UserNet; docs/NEURAL_NETWORK.md), one
 // card each with its numbers; then the versions of one of them (the switch, or a tap on its card) as a table to
-// compare: the numbers that judge that role in columns, the one in use marked; only the recent versions, the older ones
-// behind “Show older versions” (nothing is deleted); a row opens its whole card (ModelItem:
+// compare (VersionsCard.vue: the numbers that judge that role in columns, the one in use marked; only the recent versions
+// of recentOf, the older ones behind “Show older versions”, nothing is deleted; a row opens its whole card, ModelItem:
 // details, Use this one, the run). A role has no model in use until someone picks one: there is no default. The
 // networks the comma downloads (models/on-car.json, written by nnslr on-car) are marked “on the car”. The cutter is
 // SignNet, the same network the comma runs: one at the car's band can be put in use; the old Detectors are listed to
@@ -11,24 +11,26 @@
 // code, until its next software update; models/on-comma-trial.json), whose job shows here while it runs, with “Back to
 // the build's networks”. The networks in use reach the car with Publish (/publish: scripts/send_to_car.sh). The runs
 // themselves are on Results (/evaluate). The settings of the comma's vision limit are no longer shown here (8 Nov 2026,
-// his call): Publish sends them as they are kept (nnslr_tools.car_settings). At the end, the road labeler
-// (RoadLabelerCard.vue): an offline network that prepares Speed review, trained and run from there; then
-// Fit box (BoxFitCard.vue): key C of the review page trained again on a V100, with its last measures.
+// his call): Publish sends them as they are kept (nnslr_tools.car_settings). At the end, Review helpers (#91): the
+// networks that help only the review work, each with its training: applicability (ApplicabilityCard.vue, its versions
+// in a VersionsCard of their own: it proposes OURS or another in Sign review), the road labeler (RoadLabelerCard.vue: an
+// offline network that prepares Speed review, trained and run from there) and Fit box (BoxFitCard.vue: key C of the
+// review page trained again on a V100, with its last measures).
 import {computed, nextTick, ref, watch} from 'vue';
 import {isoWhen} from '../common/format';
 import type {ActionName, ActionOptions, ActionState, Job, ModelRole, ModelVersion, PanelStatus, RoleModels} from '../common/panel-types';
 import {askConfirm} from '../composables/confirm';
+import ApplicabilityCard from './ApplicabilityCard.vue';
 import {pct} from './evaluate';
 import JobProgress from './JobProgress.vue';
 import {JOB_STATE, jobOf, startedWhen} from './jobs';
 import BoxFitCard from './BoxFitCard.vue';
-import ModelItem from './ModelItem.vue';
-import ModelFlow from './ModelFlow.vue';
 import RoadLabelerCard from './RoadLabelerCard.vue';
 import Segmented from './Segmented.vue';
-import {ROLE_TEXT, chosenText, metricsOf, putInUse, restoreQuestion, tryQuestion, useModels,
+import {ROLE_TEXT, chosenText, inUseOf, metricsOf, putInUse, restoreQuestion, tryQuestion, useModels,
   type CarState} from './models';
 import SectionHead from './SectionHead.vue';
+import VersionsCard from './VersionsCard.vue';
 
 const props = defineProps<{status: PanelStatus | null}>();
 const emit = defineEmits<{run: [name: ActionName, state: ActionState, start?: undefined, options?: ActionOptions];
@@ -40,45 +42,43 @@ const readOnly = computed(() => (props.status !== null && !props.status.actions_
 /** The version being put in use, so its button waits for the answer. */
 const busy = ref<string | null>(null);
 
-const ROLES: readonly ModelRole[] = ['cutter', 'classifier', 'decider', 'brain', 'users'];
-/** The role whose versions are listed: the address's (/models#role-classifier, or /models#role-decider:<version id>,
- * Train's link to its latest version), else the cutter. */
+/** The networks of the grid at the top. Applicability, which helps only Sign review, is in Review helpers at the bottom
+ * (#91). */
+const ROLES: readonly ModelRole[] = ['cutter', 'classifier', 'brain', 'users'];
+const topRoles = computed(() => roles.value.filter((role) => ROLES.includes(role.role)));
+const deciderRole = computed(() => roles.value.find((role) => role.role === 'decider') ?? null);
+/** The role whose versions are listed: the address's (/models#role-classifier, or /models#role-brain:<version id>,
+ * Train's link to its latest version), else the cutter. /models#role-decider[:<id>] opens applicability's versions in
+ * Review helpers. */
 const hashRole = location.hash.split(':')[0];
-const fromHash = ROLES.find((role) => hashRole === '#role-' + role) ?? null;
-/** The version the address names, opened and scrolled to once drawn, or ''. */
+const fromHash = [...ROLES, 'decider' as const].find((role) => hashRole === '#role-' + role) ?? null;
+/** The version the address names, opened and scrolled to once drawn (VersionsCard's openId), or ''. */
 const fromHashVersion = fromHash && location.hash.includes(':') ? decodeURIComponent(location.hash.slice(location.hash.indexOf(':') + 1)) : '';
-const picked = ref<ModelRole>(fromHash ?? 'cutter');
-const pickedRole = computed(() => roles.value.find((role) => role.role === picked.value) ?? null);
+const picked = ref<ModelRole>(fromHash && fromHash !== 'decider' ? fromHash : 'cutter');
+/** The version of the address still to open in the top table: only on arrival, not again after another network was
+ * picked and this one picked back. */
+const linkedVersion = ref(fromHash && fromHash !== 'decider' ? fromHashVersion : '');
+watch(picked, () => { linkedVersion.value = ''; });
+const pickedRole = computed(() => topRoles.value.find((role) => role.role === picked.value) ?? null);
 /** A tap on a card in use: its versions, scrolled to (below the cards on a phone). */
 function pick(role: ModelRole): void {
   picked.value = role;
-  void nextTick(() => document.querySelector('.versions-card')?.scrollIntoView({behavior: 'smooth', block: 'nearest'}));
+  void nextTick(() => document.querySelector('.versions-card[data-role="' + role + '"]')
+    ?.scrollIntoView({behavior: 'smooth', block: 'nearest'}));
 }
-/** A version of the list opened and scrolled to (Train's link to the latest version). */
-function openVersion(id: string): void {
-  const row = document.querySelector<HTMLDetailsElement>('.versions-card details[data-model="' + CSS.escape(id) + '"]');
-  if (row === null) return;
-  row.open = true;
-  row.scrollIntoView({behavior: 'smooth', block: 'center'});
-}
-// Arrived from a link to a role: its versions, once they are drawn (opened on the version named, if any).
+// Arrived from a link to a role: its versions, once they are drawn (VersionsCard opens the version named, if any);
+// applicability's in Review helpers, unfolded.
 let arrived = fromHash === null;
 watch(payload, (value) => {
   if (arrived || value === null || fromHash === null) return;
   arrived = true;
-  if (fromHashVersion) {
-    picked.value = fromHash;
-    const role = value.roles.find((item) => item.role === fromHash);
-    if (role && !recentOf(role).some((version) => version.id === fromHashVersion)) olderOf.value = fromHash;
-    void nextTick(() => openVersion(fromHashVersion));
-  } else pick(fromHash);
+  if (fromHash === 'decider') {
+    if (!fromHashVersion) void nextTick(() => document.getElementById('review-helpers')?.scrollIntoView({behavior: 'smooth', block: 'start'}));
+  } else if (!fromHashVersion) pick(fromHash);
 }, {immediate: true});
-const roleOptions = computed(() => roles.value.map((role) => ({key: role.role, label: role.label})));
-
-/** The version in use of a role, or null (none chosen, or its files are gone). */
-const inUseOf = (role: RoleModels): ModelVersion | null => role.versions.find((version) => version.in_use) ?? null;
-/** The version drawn under the picked network: the one in use, else the newest. */
-const drawn = computed(() => pickedRole.value ? inUseOf(pickedRole.value) ?? pickedRole.value.versions[0] ?? null : null);
+const roleOptions = computed(() => topRoles.value.map((role) => ({key: role.role, label: role.label})));
+/** The versions of applicability, from the same payload: the start of its next training (network-start.ts). */
+const versionsOf = (role: ModelRole) => roles.value.find((item) => item.role === role)?.versions;
 /** The cutter in use is an old Detector, chosen before SignNet could be, or the brain in use takes the driver's pedals and
  * the car's speed, chosen before 10 Nov 2026 (the server says so; an older one: a cutter not a SignNet). */
 function oldInUse(role: RoleModels): boolean {
@@ -106,23 +106,8 @@ function recentOf(role: RoleModels): ModelVersion[] {
   return recent.length ? recent : role.versions;
 }
 const recent = computed(() => Object.fromEntries(roles.value.map((role) => [role.role, recentOf(role)])) as Record<ModelRole, ModelVersion[]>);
-/** The role whose older versions are shown too, or null. */
-const olderOf = ref<ModelRole | null>(null);
-/** The rows of the table: the recent versions, or all of them. */
-const listed = computed((): ModelVersion[] => {
-  const role = pickedRole.value;
-  if (role === null) return [];
-  return olderOf.value === role.role ? role.versions : recent.value[role.role] ?? role.versions;
-});
-const olderCount = computed(() => (pickedRole.value?.versions.length ?? 0) - (recent.value[picked.value]?.length ?? 0));
 /** The version of a role that runs on the comma, or null. */
 const carOf = (role: RoleModels): ModelVersion | null => role.versions.find((version) => version.on_car) ?? null;
-/** A SignNet in a few words, to tell its versions apart in the table: "grid 8 px", "grid 4 px · 25 % of the drives". */
-function signnetText(version: ModelVersion): string {
-  if (version.role !== 'cutter' || version.kind !== 'signnet') return '';
-  return [version.stride ? 'grid ' + version.stride + ' px' : '',
-    version.train_share ? Math.round(version.train_share * 100) + ' % of the drives' : ''].filter(Boolean).join(' · ');
-}
 /** Whether the comma runs the version in use of a role, in words. Two versions often have the same name: the time
  * of the one on the car tells them apart. The comma runs the cutter, the classifier and the brain (Publish puts the ones
  * in use there); a trial replaces the first two until its next software update. UserNet is not on the car: no line. The
@@ -160,21 +145,6 @@ const carText = computed((): string => {
  * (nnslr_tools.preannotate.our_networks); the versions are newest first. */
 function fallbackOf(role: RoleModels): ModelVersion | null {
   return role.role === 'classifier' && inUseOf(role) === null ? role.versions.find((version) => version.part === 'classifier') ?? null : null;
-}
-
-/** The columns of the table: the numbers of the role's newest measured version (they are the same for every version
- * of a role, a cutter of the speed signs only has “–” under every sign). */
-const columns = computed(() => {
-  const versions = listed.value;
-  let widest: ReturnType<typeof metricsOf> = [];
-  for (const version of versions) {
-    const metrics = metricsOf(version);
-    if (metrics.length > widest.length) widest = metrics;
-  }
-  return widest.map((metric) => ({key: metric.key, label: metric.short ?? metric.label.replace(/^With the cutter.*/, 'With the cutter')}));
-});
-function cell(version: ModelVersion, key: string) {
-  return metricsOf(version).find((metric) => metric.key === key) ?? null;
 }
 
 /** The last trial on the comma or return to the build's networks; running or failed, it is shown in full above the
@@ -234,7 +204,7 @@ async function choose(version: ModelVersion): Promise<void> {
   if (busy.value !== null) return;
   busy.value = version.id;
   try {
-    if (await putInUse(version, pickedRole.value?.label ?? version.role)) await refresh();
+    if (await putInUse(version, roles.value.find((role) => role.role === version.role)?.label ?? version.role)) await refresh();
   } finally {
     busy.value = null;
   }
@@ -250,7 +220,7 @@ async function choose(version: ModelVersion): Promise<void> {
 
     <!-- The ones in use: tap one to list its versions below. -->
     <div class="inuse-grid" id="roles">
-      <button v-for="role in roles" :key="role.role" type="button" class="inuse-card" :class="{picked: role.role === picked}"
+      <button v-for="role in topRoles" :key="role.role" type="button" class="inuse-card" :class="{picked: role.role === picked}"
               :id="'role-' + role.role" :data-role="role.role" :aria-pressed="role.role === picked" @click="pick(role.role)">
         <span class="inuse-role">{{ role.label }}<span class="inuse-tag" :class="{none: inUseOf(role) === null}">{{ inUseOf(role) ? 'In use' : 'None chosen' }}</span></span>
         <template v-if="inUseOf(role)">
@@ -293,65 +263,46 @@ async function choose(version: ModelVersion): Promise<void> {
     </section>
 
     <!-- The versions of one network, to compare and to choose. -->
-    <section v-if="pickedRole" class="card versions-card" :data-role="pickedRole.role" aria-label="Versions">
+    <VersionsCard v-if="pickedRole" :key="pickedRole.role" :role="pickedRole" :recent="recent[pickedRole.role] ?? pickedRole.versions"
+                  :payload="payload" :read-only="readOnly" :busy="busy" :car="car" :trial="trial"
+                  :open-id="linkedVersion" @use="choose" @try="tryOnComma">
       <Segmented v-model="picked" :options="roleOptions" label="Network" class="versions-seg"/>
-      <p class="role-what">{{ ROLE_TEXT[pickedRole.role].what }}</p>
-      <template v-if="drawn">
-        <h3 class="flow-head">How it works{{ drawn.in_use ? '' : ' (no version in use: the newest)' }}</h3>
-        <ModelFlow :version="drawn"/>
+      <template #foot>
+        <p v-if="pickedRole.role === 'cutter' && carJob && !bigCarJob" class="last-line" id="car-last">{{ CAR_JOB_TEXT[carJob.action] }}:
+          {{ carJob.run ? 'SignNet ' + carJob.run + ', ' : '' }}{{ startedWhen(carJob) }} ·
+          {{ carJob.state === 'interrupted' ? 'stopped' : JOB_STATE[carJob.state][0] }} ·
+          <button type="button" class="link-button" @click="emit('details', carJob)">Details</button></p>
+        <p v-if="pickedRole.role === 'cutter'" class="note models-foot">As the car reads: a SignNet’s speed signs among its
+          {{ payload.box_budget ?? 5 }} best boxes of each frame of score 0.3 or more, those the comma keeps (best 5 at 0.3). Speed signs and
+          Every sign: found at score {{ payload.cutter_score_threshold }}, however many boxes it passes on (an old Detector a couple of hundred a
+          frame, SignNet a few). Best {{ payload.box_budget ?? 5 }}, any score: the speed signs among its {{ payload.box_budget ?? 5 }} best boxes
+          of each frame, whatever their score.</p>
+        <p class="note models-foot">The numbers compare only on the same test: the older versions were measured on fewer signs (the count
+          under each number). The choice is kept in <code>{{ payload.active_file }}</code> of the data root; it copies, exports and
+          deploys nothing: nothing on the comma changes. Only Publish, on the Publish tab, changes what the comma
+          downloads; Try on the comma now copies a SignNet onto it until its next software update.<template v-if="carText"> In the branch: the networks published in {{ carText }}.</template></p>
+        <p v-if="payload.on_car_problem" class="note">What is on the car cannot be shown: {{ payload.on_car_problem }}.</p>
       </template>
-      <p v-if="pickedRole.versions.length === 0" class="role-what muted">{{ ROLE_TEXT[pickedRole.role].empty }}
-        <a v-if="pickedRole.role !== 'decider'" href="/train">Go to Train ›</a></p>
-      <div v-else class="vt" :style="{'--vt-cols': columns.length}">
-        <div class="vt-head" aria-hidden="true"><span>Version</span><span v-for="column in columns" :key="column.key"
-          :class="'vt-c-' + column.key">{{ column.label }}</span><span></span></div>
-        <details v-for="version in listed" :key="version.id" class="vt-row" :class="{'in-use': version.in_use}"
-                 :data-model="version.id">
-          <summary>
-            <span class="vt-name"><b>{{ version.label }}</b><small>{{ version.trained_at ? isoWhen(version.trained_at) : version.run }}<template
-              v-if="signnetText(version)"> · {{ signnetText(version) }}</template><template
-              v-if="version.in_use"> · <em class="vt-use">in use</em></template><template v-else-if="!version.finished"> · <em
-              class="vt-wait">not finished</em></template><template v-if="version.on_car"> · <em class="vt-car">on the car</em></template><template
-              v-if="trial && version.role === 'cutter' && trial.signnet.run === version.run"> · <em class="vt-trial">trying on the comma</em></template></small></span>
-            <span v-for="column in columns" :key="column.key" class="vt-num" :class="['vt-c-' + column.key, {none: cell(version, column.key)?.value == null}]"
-                  :title="cell(version, column.key)?.detail ?? ''">
-              <b>{{ cell(version, column.key)?.value == null ? '–' : pct(cell(version, column.key)?.value) }}</b>
-              <span class="vt-bar" aria-hidden="true"><span :style="{width: Math.min(1, cell(version, column.key)?.value ?? 0) * 100 + '%'}"></span></span>
-              <small>{{ cell(version, column.key)?.count ?? '' }}</small>
-            </span>
-            <span class="vt-chev" aria-hidden="true">›</span>
-          </summary>
-          <ul class="model-list">
-            <ModelItem :version="version" :role-label="pickedRole.label" :score="payload.cutter_score_threshold"
-                       :read-only="readOnly" :busy="busy" :car="car" @use="choose" @try="tryOnComma"/>
-          </ul>
-        </details>
-        <button v-if="olderCount > 0" type="button" class="link-button vt-older" :aria-expanded="olderOf === pickedRole.role"
-                @click="olderOf = olderOf === pickedRole.role ? null : pickedRole.role">{{ olderOf === pickedRole.role
-                  ? 'Hide the older versions' : 'Show ' + olderCount + ' older ' + (olderCount === 1 ? 'version' : 'versions') }}</button>
-      </div>
-      <p v-if="pickedRole.role === 'cutter' && carJob && !bigCarJob" class="last-line" id="car-last">{{ CAR_JOB_TEXT[carJob.action] }}:
-        {{ carJob.run ? 'SignNet ' + carJob.run + ', ' : '' }}{{ startedWhen(carJob) }} ·
-        {{ carJob.state === 'interrupted' ? 'stopped' : JOB_STATE[carJob.state][0] }} ·
-        <button type="button" class="link-button" @click="emit('details', carJob)">Details</button></p>
-      <p v-if="pickedRole.role === 'cutter'" class="note models-foot">As the car reads: a SignNet’s speed signs among its
-        {{ payload.box_budget ?? 5 }} best boxes of each frame of score 0.3 or more, those the comma keeps (best 5 at 0.3). Speed signs and
-        Every sign: found at score {{ payload.cutter_score_threshold }}, however many boxes it passes on (an old Detector a couple of hundred a
-        frame, SignNet a few). Best {{ payload.box_budget ?? 5 }}, any score: the speed signs among its {{ payload.box_budget ?? 5 }} best boxes
-        of each frame, whatever their score.</p>
-      <p class="note models-foot">The numbers compare only on the same test: the older versions were measured on fewer signs (the count
-        under each number). The choice is kept in <code>{{ payload.active_file }}</code> of the data root; it copies, exports and
-        deploys nothing: nothing on the comma changes. Only Publish, on the Publish tab, changes what the comma
-        downloads; Try on the comma now copies a SignNet onto it until its next software update.<template v-if="carText"> In the branch: the networks published in {{ carText }}.</template></p>
-      <p v-if="payload.on_car_problem" class="note">What is on the car cannot be shown: {{ payload.on_car_problem }}.</p>
-    </section>
+    </VersionsCard>
 
-    <!-- The road labeler: an offline network that prepares Speed review, never on the car. -->
-    <RoadLabelerCard :status="status" @run="(...args) => emit('run', ...args)" @stop="emit('stop', $event)"
-                     @details="emit('details', $event)"/>
-    <!-- Fit box: key C of the review page, trained again on a V100 on the boxes people drew. -->
-    <BoxFitCard :status="status" @run="(...args) => emit('run', ...args)" @stop="emit('stop', $event)"
-                @details="emit('details', $event)"/>
+    <!-- Review helpers: the networks that help only the review work, each with its training (#91). -->
+    <section class="live-section" id="review-helpers" aria-labelledby="review-helpers-title">
+      <h2 class="section-title" id="review-helpers-title">Review helpers</h2>
+      <!-- Applicability: proposes OURS or another in Sign review; its versions folded under it. -->
+      <ApplicabilityCard :status="status" :role="deciderRole" :versions-of="versionsOf" :car-line="carLines.decider ?? null"
+                         :versions-open="fromHash === 'decider'"
+                         @run="(...args) => emit('run', ...args)" @stop="emit('stop', $event)" @details="emit('details', $event)">
+        <VersionsCard v-if="deciderRole" bare :role="deciderRole" :recent="recent.decider ?? deciderRole.versions" :payload="payload"
+                      :read-only="readOnly" :busy="busy" :car="car" :trial="trial"
+                      :open-id="fromHash === 'decider' ? fromHashVersion : ''" @use="choose" @try="tryOnComma"/>
+      </ApplicabilityCard>
+      <!-- The road labeler: an offline network that prepares Speed review, never on the car. -->
+      <RoadLabelerCard :status="status" @run="(...args) => emit('run', ...args)" @stop="emit('stop', $event)"
+                       @details="emit('details', $event)"/>
+      <!-- Fit box: key C of the review page, trained again on a V100 on the boxes people drew. -->
+      <BoxFitCard :status="status" @run="(...args) => emit('run', ...args)" @stop="emit('stop', $event)"
+                  @details="emit('details', $event)"/>
+    </section>
 
     <p v-if="error" class="note">Not updated: {{ error }}</p>
   </template>

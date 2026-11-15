@@ -54,11 +54,11 @@ onBeforeUnmount(() => document.removeEventListener('visibilitychange', onVisibil
 usePoll(async () => {
   if (hidden.value || (!light.value && status.value !== null)) return;
   try {
-    const answer = await poll<{system: SystemInfo; running?: {jobs: Pick<Job, 'action' | 'state'>[]; activities: Activity[]; ai_live?: AiLive | null}}>(
+    const answer = await poll<{system: SystemInfo; running?: {jobs: Pick<Job, 'action' | 'state'>[]; activities: Activity[]; ai_live?: AiLive | null; pipeline?: boolean}}>(
       '/api/panel/system');
     recordMachine(answer.system);
     if (answer.running) {
-      markBusy(busyTabs(answer.running.jobs, answer.running.activities));
+      markBusy(busyTabs(answer.running.jobs, answer.running.activities, answer.running.pipeline));
       // A server from before ai_live in this answer leaves it to the full status.
       if (answer.running.ai_live !== undefined) aiLive.value = answer.running.ai_live;
     }
@@ -89,7 +89,8 @@ function details(job: Job): void {
 
 /** The tabs with work running, by address: a job lights the tab that shows it (jobs.ts ACTION_TAB: a measure is
  * Evaluate's even if it uses the GPU as a training does); work started from a terminal is known by its group. */
-const busyPaths = computed((): ReadonlySet<string> => status.value ? busyTabs(status.value.jobs, status.value.activities) : new Set());
+const busyPaths = computed((): ReadonlySet<string> => status.value
+  ? busyTabs(status.value.jobs, status.value.activities, status.value.pipeline?.state === 'running') : new Set());
 /** A dot on their link in the top bar and the phone menu (markBusy). */
 watch(busyPaths, markBusy);
 </script>

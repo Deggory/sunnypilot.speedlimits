@@ -92,8 +92,10 @@ def test_control_page_reads_the_panel_status(served):
     assert 'tm-gpu' in asset('js/site.js')
     # The classifier with "not a sign": its action on Train, its sections on Evaluate.
     assert 'train_classifier' in script and 'chain-eval' in script and 'classifier-eval' in script
-    # The Train tab by role, one at a time: the cutter (its sizes and signs), the classifier, the decider, the pipeline.
-    for marker in ('train_cutter', 'train-sections', 'train-decider-note', 'Applicability', 'Pipeline', 'cutter-eval'):
+    # The Train tab by role, one at a time: the cutter (its sizes and signs), the classifier, the brain, the pipeline (its
+    # Applicability step); applicability's own training in Models › Review helpers (#91).
+    for marker in ('train_cutter', 'train-sections', 'review-helpers', 'applicability-versions', 'Applicability', 'Pipeline',
+                   'cutter-eval'):
         assert marker in script, marker
 
 

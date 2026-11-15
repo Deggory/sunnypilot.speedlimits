@@ -204,7 +204,7 @@ On the site: **Training**. There is one tab and one button per network. **They a
 - **Train the cutter** (SignNet): about 80 minutes. Its **Mapillary** switch adds photos of the Mapillary Traffic Sign Dataset, cut once with **Cut the Mapillary windows**: **With Mapillary** (about two hours) or **Mapillary, then ours** (about three hours, chosen at first once the windows are cut; the classifier's switch starts on it too).
 - **Train the classifier**: a few hours. It learns from the false boxes of the cutter in use, so choose a cutter first.
 - **Train the brain**: three networks that differ only by their seed, from your own speed on every drive with its logs read and the blocks of Data › Speed review; it reads the signs of those drives again first, as the car does. Compare them in Models › Brain.
-- **Train applicability** (is this sign for our road?): about 15 minutes. A prototype.
+- **Applicability** (is this sign for our road? only a help for Sign review): its **Train** is in Models › Review helpers since 15 Nov 2026 ([#91](https://github.com/cristianku/sunnypilot.smartspeed/issues/91)), about 15 minutes; the Pipeline keeps it as a step.
 
 <img src="docs/images/panel-train.png" alt="Training page, Cutter tab: the Train the cutter button, the latest SignNet 896 by 288 (in use, 74.9% of the speed signs) and the curves of its last training, validation recall and loss over 40 epochs." width="100%">
 
@@ -251,7 +251,7 @@ Day-to-day work happens on the site, whose buttons run a few helper scripts and 
 
 - `helpers/1_prepare.sh`, `helpers/2_review.sh`, `helpers/3_train.sh`, `helpers/update.sh`: the daily steps above. `helpers/status.sh` only reads.
 - `helpers/simulate_drive.sh`: Compute and Replay the certified drives of Models › Drive, a recorded drive replayed through the car's own vision code (always a V100, never the CPU).
-- `scripts/run_signnet.sh`, `scripts/run_classifier.sh`, `scripts/run_brain.sh`, `scripts/run_experiment_b.sh`: the trainings of the Training page (GPU).
+- `scripts/run_signnet.sh`, `scripts/run_classifier.sh`, `scripts/run_brain.sh`: the trainings of the Training page (GPU); `scripts/run_experiment_b.sh`: applicability's, in Models › Review helpers and as a step of Train › Pipeline (GPU).
 - `scripts/send_to_car.sh` and `scripts/try_on_comma.sh`: Publish (to the car) and Try on the comma now.
 - `helpers/ai_review.sh` and `helpers/measure_ai_reviewer.sh`: the AI reviewer. Its providers and keys stay on the server.
 - `helpers/mapillary.sh`, `helpers/mapillary_windows.sh`, `helpers/mapillary_locations.sh`: the Mapillary Traffic Sign Dataset, as crops for the classifier, as windows for the cutter, and where its photos were taken (CPU; the last one asks the Mapillary API).

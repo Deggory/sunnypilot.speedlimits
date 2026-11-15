@@ -1,10 +1,10 @@
-// The Models tab: the three networks of the pipeline (cutter, classifier, decider), the brain and UserNet (docs/NEURAL_NETWORK.md), every
-// version trained on this server (GET /api/panel/models 10 s after each answer while the tab is open), the one in use for each
+// The Models tab: the cutter, the classifier, the brain and UserNet, then applicability, which helps only Sign review
+// (docs/NEURAL_NETWORK.md), every version trained on this server (GET /api/panel/models 10 s after each answer while the tab is open), the one in use for each
 // role (POST /api/panel/models/active, asked first in the confirm dialog), and the words the tab shows.
 import {ref, shallowRef} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import {isoWhen, thousands} from '../common/format';
-import type {ActionState, ActiveChosen, ActiveModel, BrainNumbers, ModelRole, ModelVersion, ModelsPayload,
+import type {ActionState, ActiveChosen, ActiveModel, BrainNumbers, ModelRole, ModelVersion, ModelsPayload, RoleModels,
   UserNetNumbers} from '../common/panel-types';
 import {askConfirm, type ConfirmOptions} from '../composables/confirm';
 import {toast} from '../composables/toast';
@@ -38,9 +38,9 @@ export const ROLE_TEXT: Record<ModelRole, {what: string; today: string; empty: s
   decider: {
     what: 'Applicability: is this sign for our road? Our road, another road, or it abstains.',
     today: 'Today: only the prototypes of experiment B.',
-    empty: 'No applicability network trained yet: experiment B is the first prototype.',
-    emptyMore: 'Its variants appear here once scripts/run_experiment_b.sh has trained them.',
-    uses: 'The one in use says whom each speed sign applies to in Prepare’s Our networks and in the signs the brain’s training reads; it never goes to the car.',
+    empty: 'No applicability network trained yet: Train, above, trains its three versions.',
+    emptyMore: 'Train, in Review helpers, trains its three versions; they appear here.',
+    uses: 'The one in use proposes OURS or another on the speed signs of Prepare’s Our networks, for Sign review only: never on the car nor in the brain.',
   },
   brain: {
     what: 'Says the speed to hold from the camera, the signs read, the car ahead, the hour and the country. '
@@ -165,6 +165,9 @@ export function restoreQuestion(): ConfirmOptions {
     text: 'The comma gets back the networks of the build it runs, from the next drive. Nothing else on the comma is touched.',
   };
 }
+
+/** The version in use of a role, or null (none chosen, or its files are gone). */
+export const inUseOf = (role: RoleModels): ModelVersion | null => role.versions.find((version) => version.in_use) ?? null;
 
 /** Who chose the model in use, and when: "chosen 24 Oct 16:40 by admin". */
 export function chosenText(active: ActiveModel): string {

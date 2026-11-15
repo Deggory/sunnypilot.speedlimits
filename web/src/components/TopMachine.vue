@@ -176,10 +176,10 @@ function onKey(event: KeyboardEvent): void {
 let timer: number | undefined;
 async function ask(): Promise<void> {
   try {
-    const answer = await poll<{system: SystemInfo; running?: {jobs: Pick<Job, 'action' | 'state'>[]; activities: Activity[]}}>(
+    const answer = await poll<{system: SystemInfo; running?: {jobs: Pick<Job, 'action' | 'state'>[]; activities: Activity[]; pipeline?: boolean}}>(
       '/api/panel/system');
     recordMachine(answer.system);
-    if (answer.running) markBusy(busyTabs(answer.running.jobs, answer.running.activities));
+    if (answer.running) markBusy(busyTabs(answer.running.jobs, answer.running.activities, answer.running.pipeline));
     showConnection(null);
   } catch (error) {
     // The network, or the site restarting: the pills stay as they were, greyed out. Signed out: no more asking (the
