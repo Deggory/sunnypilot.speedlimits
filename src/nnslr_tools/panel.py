@@ -1700,6 +1700,9 @@ class Panel:
                 return None
             return datetime.strptime(match.group(1), '%Y%m%dT%H%M%SZ').replace(tzinfo=timezone.utc).isoformat()
 
+        def overall(data: dict) -> dict:
+            return (data.get('cross_validation') or {}).get('overall') or {}
+
         rankers = None
         found = readable('[0-9]*.json', 2)
         if found:
@@ -1725,6 +1728,17 @@ class Panel:
                     return None
                 return {key: number(values.get(key)) for key in ('cases', 'rough', 'rankers', 'refiner')}
 
+            in_use = number(((data.get('current') or {}).get('all') or {}).get('refiner'))
+            new, small = measure('all') or {}, measure('size:small') or measure('all') or {}
+
+            def worse(mine, theirs) -> bool:
+                return mine is not None and theirs is not None and mine <= theirs
+
+            # As refiner_train.run decides: better than the rankers in all and on the small signs, and than the one in use.
+            kept_because = (None if data.get('written') else
+                            'in_use' if worse(new.get('refiner'), in_use) else
+                            'rankers' if worse(new.get('refiner'), new.get('rankers')) else
+                            'small' if worse(small.get('refiner'), small.get('rankers')) else None)
             refiner = {'file': name, 'at': when(name), 'boxes': number(data.get('train_boxes')),
                        'held_out_boxes': number(data.get('held_out_boxes')), 'best_epoch': number(data.get('best_epoch')),
                        'epochs': number(data.get('epochs')), 'minutes': number(data.get('minutes')),
@@ -1741,9 +1755,6 @@ class Panel:
         from nnslr_tools.mapillary import token_ready
         if not (self.repo / LOCATIONS_SCRIPT).is_file():
             return LOCATIONS_SCRIPT + ' is missing in this installation'
-        def overall(data: dict) -> dict:
-            return (data.get('cross_validation') or {}).get('overall') or {}
-
         if not token_ready(self.repo):
             return "no Mapillary token: add MAPILLARY_TOKEN to the server's .env"
         return ''
@@ -1765,17 +1776,6 @@ class Panel:
             return (f'no drive to learn from: sunnypilot was on in every drive with its logs read ({len(left_out)}); '
                     'drive with sunnylink › Toggles › Enable sunnypilot off')
         return 'no drive to learn from yet: prepare one, then Read the logs on Data › Speed review'
-            in_use = number(((data.get('current') or {}).get('all') or {}).get('refiner'))
-            new, small = measure('all') or {}, measure('size:small') or measure('all') or {}
-
-            def worse(mine, theirs) -> bool:
-                return mine is not None and theirs is not None and mine <= theirs
-
-            # As refiner_train.run decides: better than the rankers in all and on the small signs, and than the one in use.
-            kept_because = (None if data.get('written') else
-                            'in_use' if worse(new.get('refiner'), in_use) else
-                            'rankers' if worse(new.get('refiner'), new.get('rankers')) else
-                            'small' if worse(small.get('refiner'), small.get('rankers')) else None)
 
     def brain_labels(self) -> dict:
         """Train › Brain, what a training gets today from every drive it learns from (training_routes: every dashcam
