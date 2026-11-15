@@ -6,7 +6,7 @@
 // saved. Hidden offline.
 import {computed} from 'vue';
 import {car, carAskOf, carAvailable, carDetection, carSignLeft, type CarSign} from './car';
-import {describe, holdsPlate} from './catalog';
+import {describe} from './catalog';
 import type {FrameEdit, FrameRow} from './types';
 
 const props = defineProps<{row: FrameRow; work: FrameEdit}>();
@@ -40,7 +40,7 @@ const rows = computed(() => {
     const sure = Math.round(sign.confidence * 100);
     return [{
       index: i, what: describe({...d, value_kph: null}) + (d.value_kph === null ? '' : ' · ' + d.value_kph)
-        + (d.supplementary_panel === 'wet' ? ', when wet' : holdsPlate(d) ? ', with hours' : ''),
+        + (d.supplementary_panel === 'wet' ? ', when wet' : d.supplementary_panel === 'time' ? ', with hours' : ''),
       sure: sure + '%', sureKind: sign.confidence >= 0.9 ? 'high' : sign.confidence >= value.release.min_confidence ? 'medium' : 'low',
       use, kind, sub: 'box ' + Math.round(sign.score * 100) + '%' + (i === value.surest ? ' · the frame’s reading' : '')
         + roadText(sign),

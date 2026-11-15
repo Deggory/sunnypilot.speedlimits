@@ -145,7 +145,7 @@ def build_server(service, *, client: str, read_only: bool = False):
     from mcp.server.mcpserver import MCPServer
     from mcp.server.mcpserver.exceptions import ToolError
     from mcp_types import CallToolResult, ImageContent, TextContent, ToolAnnotations
-    from pydantic import Field
+    from pydantic import Field, StrictInt
     from typing_extensions import NotRequired, TypedDict
 
     tools = ReviewTools(service, client=client, read_only=read_only)
@@ -259,8 +259,10 @@ def build_server(service, *, client: str, read_only: bool = False):
         applicability: Literal['own_road', 'other_road', 'unresolved']
         visibility: Literal['unknown', 'clear', 'partial', 'poor']
         occlusion: Literal['unknown', 'none', 'partial', 'heavy']
-        supplementary_panel: Literal['unknown', 'none', 'present', 'time', 'wet', 'unresolved']
+        supplementary_panel: Literal['unknown', 'none', 'present', 'time', 'wet', 'distance', 'unresolved']
         plate_hours: str | None
+        # Strict: lax mode would save JSON true as 1 m, which REST and the page refuse.
+        plate_distance_m: StrictInt | None
         temporary: bool | None
         variable_display: bool | None
         sign_type: Literal[SIGN_TYPES + NOT_A_SIGN_TYPES] | None

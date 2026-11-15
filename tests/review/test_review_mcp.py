@@ -182,6 +182,34 @@ def test_tools_have_schemas_and_return_real_images(service):
     assert service.store.review(ROUTE, RUN_ID, '0/1') is None
 
 
+def test_the_metres_of_a_distance_plate_are_whole_numbers_over_mcp_too(service):
+    """#98: lax validation would save JSON true as 1 m and "200" as 200, which REST and the page refuse."""
+    sdk()
+    from mcp.client.client import Client
+    from nnslr_tools.review_mcp import build_server
+    server = build_server(service, client='test')
+
+    def box(metres):
+        return [{'detection_id': '0/0/0', 'family': 'maximum_speed', 'value_kph': 50, 'applicability': 'own_road',
+                 'supplementary_panel': 'distance', 'plate_distance_m': metres}]
+
+    async def scenario():
+        async with Client(server) as client:
+            frame = (await client.call_tool('get_frame', {'route_id': ROUTE, 'frame_key': '0/0'})).structured_content
+            for metres in (True, '200', 200.0):
+                refused = await client.call_tool('save_frame_review', {
+                    'route_id': ROUTE, 'frame_key': '0/0', 'run_id': frame['run_id'], 'base_revision': 0,
+                    'reviewer': 'Claude', 'detections': box(metres)})
+                assert refused.is_error, metres
+            saved = await client.call_tool('save_frame_review', {
+                'route_id': ROUTE, 'frame_key': '0/0', 'run_id': frame['run_id'], 'base_revision': 0,
+                'reviewer': 'Claude', 'detections': box(200)})
+            assert not saved.is_error, saved.content
+            assert saved.structured_content['review']['detections'][0]['plate_distance_m'] == 200
+
+    run(scenario)
+
+
 def test_read_only_server_offers_no_save_tool(service):
     sdk()
     from mcp.client.client import Client

@@ -134,6 +134,21 @@ def test_a_box_with_its_plate_of_hours_keeps_its_place():
     assert any('its plate' in warning for warning in result['warnings'])
 
 
+def test_a_box_with_its_plate_of_distance_keeps_its_place_and_its_metres():
+    held = [{**SENT[1], 'supplementary_panel': 'distance', 'plate_distance_m': 15}]
+    result = suggest({'boxes': [{'n': 1, 'verdict': 'correct', 'box': [310, 290, 390, 360], 'family': 'other_sign',
+                                 'sign_type': 'give_way'}]}, held)
+    (kept,) = result['detections']
+    assert kept['bbox_xyxy'] == held[0]['bbox_xyxy']
+    assert (kept['supplementary_panel'], kept['plate_distance_m']) == ('distance', 15)
+    assert any('its plate' in warning for warning in result['warnings'])
+    # Made no sign by the AI: no plate of distance, no metres.
+    result = suggest({'boxes': [{'n': 1, 'verdict': 'correct', 'family': 'not_a_sign'}]}, held)
+    (changed,) = result['detections']
+    assert changed['family'] == 'not_a_sign'
+    assert changed['supplementary_panel'] == 'unknown' and 'plate_distance_m' not in changed
+
+
 def test_scale_of_the_coordinates_is_detected():
     unit = suggest({'added': [{'box': [0.1, 0.2, 0.3, 0.4], 'family': 'other_sign'}]}, [], 1164, 874)
     assert unit['detections'][0]['bbox_xyxy'] == [116.4, 174.8, 349.2, 349.6]

@@ -46,7 +46,7 @@ from typing import Any, Iterator
 from nnslr_tools.media import full_picture
 from nnslr_tools.progress import report as report_progress
 from nnslr_tools.signnet import CAR_MAX_BOXES, CAR_MIN_SCORE
-from nnslr_tools.sign_types import without_hours
+from nnslr_tools.sign_types import holds_distance, without_hours
 from nnslr_tools.training import (BOXES_OTHER_SIGNS, DEFAULT_WORKERS, DETECTOR_FAMILIES, NEGATIVE_MAX_IOU, NEGATIVE_PARTITIONS, NEGATIVES_KIND,
                                   NOT_A_SIGN, OTHER_SIGN_RULE_AT, READER_NORMALIZE_MEAN, READER_NORMALIZE_STD,
                                   REVIEW_TIERS, _label_basis, _safe_image_path, box_overlap, checkpoint_class_scheme,
@@ -667,6 +667,13 @@ def evaluate_chain(dataset_path: Path, split_path: Path, data_root: Path, cutter
     for frame, pixels, predictions in cutter_boxes(cutter_model, device, frames, data_root, min_score=thresholds[0],
                                                    batch_size=batch_size, num_workers=num_workers, task="chain"):
         height, width = int(pixels.shape[1]), int(pixels.shape[2])
+        # A sign with a plate of distance (#98) is a box the cutter learns and the classifier has no class for yet: the
+        # cutter's box on it is neither found nor false, so it leaves the count.
+        unlabelled = [row["bbox_xyxy"] for row in frame["kept"]
+                      if holds_distance(row) and scheme_label(row, scheme) is None]
+        if unlabelled:
+            predictions = [item for item in predictions
+                           if all(box_overlap(item["box"], box) < iou_threshold for box in unlabelled)]
         cut = crop_cutter(data_root, frame, pixels)
         # Every box of the lowest threshold, cut from the frame at full resolution and classified once.
         for start in range(0, len(predictions), CLASSIFIER_BATCH):

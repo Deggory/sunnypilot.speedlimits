@@ -23,6 +23,8 @@ export interface Detection {
   supplementary_panel?: string;
   /** The hours read on a plate of hours, "22-6" (nnslr_tools.sign_types.PLATE_HOURS); absent or null: not said. */
   plate_hours?: string | null;
+  /** The metres written on a plate of distance (Panel below: Distance, #98), whole metres; absent or null: not read. */
+  plate_distance_m?: number | null;
   visibility?: string;
   occlusion?: string;
   temporary?: boolean | null;

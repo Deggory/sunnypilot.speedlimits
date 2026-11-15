@@ -2,8 +2,9 @@
 // The editor of the selected box: where it comes from and Fit box (its zoom is inside the photo, ZoomInset.vue), the
 // labels used last, road, speed signs, other value, type and kinds of other signs, details.
 import {computed, ref, watch} from 'vue';
-import {BOOLEAN_FIELDS, FAMILIES, PANELS, PLATE_HOURS, QUICK_VALUES, ROADS, SELECT_FIELDS, SIGN_KIND_GROUPS, US_VALUES,
-  familyHasValue, signStyleOf, type BooleanField, type SelectField} from './catalog';
+import {BOOLEAN_FIELDS, FAMILIES, PANELS, PLATE_DISTANCE_MAX_M, PLATE_HOURS, QUICK_VALUES, ROADS, SELECT_FIELDS,
+  SIGN_KIND_GROUPS, US_VALUES, familyHasValue, holdsPlate, signStyleOf, takesDistance, type BooleanField,
+  type SelectField} from './catalog';
 import {aiBlocker, canFitLocally, fitBox, fitLocal, fitting, localFitting} from './ai';
 import {addedBy, originalOf} from './boxes';
 import {releaseFocus} from './dom';
@@ -35,6 +36,15 @@ const hours = computed<[string, string]>(() => {
   const [from = '', to = ''] = props.detection?.plate_hours?.split('-') ?? [];
   return props.detection?.plate_hours ? [from, to] : halfHours.value;
 });
+// A plate of distance (#98) goes under any sign, not under a box that is no sign, a road marking or a road user.
+const panels = computed(() => PANELS.filter((item) => item.id !== 'distance'
+  || (props.detection !== null && takesDistance(props.detection))));
+const plateNote = computed(() => props.detection === null || !holdsPlate(props.detection) ? ''
+  : panel.value === 'distance' ? 'The box takes the sign and the plate.' : 'The box takes the disc and the plate.');
+// The metres written on a plate of distance; empty when they cannot be read.
+const asksDistance = computed(() => panel.value === 'distance');
+const metresError = ref(false);
+watch(() => [props.row.frame_key, state.selected], () => { metresError.value = false; });
 // O X U, G P R E M and the road users W Y K on a keyboard (use-keyboard.ts).
 const ROAD_KEYS: Record<string, string> = {own_road: 'O', other_road: 'X', unresolved: 'U'};
 /** The traffic lights, the kind given most: at the top of the editor, the other kinds under Type. */
@@ -60,8 +70,8 @@ const evidence = computed(() => {
 const SELECT_CHOICES: Record<SelectField, [string, string][]> = {
   visibility: [['unknown', 'To assess'], ['clear', 'Clear'], ['partial', 'Partial'], ['poor', 'Poor']],
   occlusion: [['unknown', 'To assess'], ['none', 'None'], ['partial', 'Partial'], ['heavy', 'Heavy']],
-  supplementary_panel: [['unknown', 'To assess'], ['none', 'None'], ['time', 'Hours'], ['wet', 'Wet'], ['present', 'Other'],
-    ['unresolved', 'Unresolved']],
+  supplementary_panel: [['unknown', 'To assess'], ['none', 'None'], ['time', 'Hours'], ['wet', 'Wet'], ['distance', 'Distance'],
+    ['present', 'Other'], ['unresolved', 'Unresolved']],
 };
 const SELECT_LABELS: Record<SelectField, string> = {
   visibility: 'Visibility', occlusion: 'Occlusion', supplementary_panel: 'Panel below',
@@ -99,6 +109,21 @@ function hoursChanged(side: 0 | 1, event: Event): void {
   const [from, to] = chosen;
   const value = from !== '' && to !== '' && from !== to ? from + '-' + to : null;
   if ((props.detection?.plate_hours ?? null) !== value) setField('plate_hours', value);
+  releaseFocus(event);
+}
+function metresChanged(event: Event): void {
+  const input = event.target as HTMLInputElement;
+  // Typed but not a number ("1,2"): the browser gives an empty value, which must not clear the metres read.
+  if (input.validity.badInput) {
+    metresError.value = true;
+    return;
+  }
+  const raw = input.value.trim();
+  const value = raw === '' ? null : Number(raw);
+  metresError.value = value !== null && (!Number.isInteger(value) || value < 1 || value > PLATE_DISTANCE_MAX_M);
+  if (metresError.value) return;
+  if ((props.detection?.plate_distance_m ?? null) !== value) setField('plate_distance_m', value);
+  // Back to the page's keys (A, next...), as after the hours.
   releaseFocus(event);
 }
 function booleanChanged(key: BooleanField, event: Event): void {
@@ -171,14 +196,24 @@ function booleanChanged(key: BooleanField, event: Event): void {
       <button type="button" class="chip quick variable" id="variable" :aria-pressed="variable"
               @click="toggleVariable(); releaseFocus($event)">Variable speed limit<kbd>L</kbd></button>
     </div>
-    <!-- The panel under the sign: with None and Other the box stays on the disc, with Hours it takes disc and plate
-         (a sign of its own for the classifier). A second tap takes the choice back. -->
+    <!-- The panel under the sign: with None and Other the box stays on the disc, with Hours and Wet it takes disc and
+         plate (a sign of its own for the classifier), with Distance (any sign: the give way with "15 m") the sign and
+         its plate. A second tap takes the choice back. -->
     <p class="field-label">Panel below</p>
     <div class="segmented" id="panels" role="group" aria-label="Panel below the sign">
-      <button v-for="item in PANELS" :key="item.id" type="button" :aria-pressed="panel === item.id" :data-panel="item.id"
+      <button v-for="item in panels" :key="item.id" type="button" :aria-pressed="panel === item.id" :data-panel="item.id"
               @click="setField('supplementary_panel', panel === item.id ? 'unknown' : item.id); releaseFocus($event)">{{ item.label }}</button>
     </div>
-    <p v-if="panel === 'time' || panel === 'wet'" class="effect-note" id="plateNote">The box takes the disc and the plate.</p>
+    <p v-if="plateNote" class="effect-note" id="plateNote">{{ plateNote }}</p>
+    <!-- The distance written on the plate ("15 m", "1,2 km" is 1200); empty when it cannot be read. -->
+    <div v-if="asksDistance" id="plateDistance" class="value-line">
+      <label for="plateMetres">Metres</label>
+      <input v-fill="detection?.plate_distance_m == null ? '' : String(detection.plate_distance_m)" type="number"
+             id="plateMetres" :min="1" :max="PLATE_DISTANCE_MAX_M" step="1" inputmode="numeric" placeholder="–"
+             aria-label="Distance written on the plate, in metres" @change="metresChanged">
+    </div>
+    <p v-if="asksDistance" class="field-error" id="metresError" :hidden="!metresError">Type whole metres from 1 to
+      {{ PLATE_DISTANCE_MAX_M }} (1,2 km is 1200), or leave it empty if it cannot be read.</p>
     <!-- The hours written on the plate; empty when they cannot be read, or the plate has days or two ranges. -->
     <div v-if="asksHours" id="plateHours" class="value-line plate-hours">
       <label for="hoursFrom">From</label>

@@ -76,6 +76,15 @@ PLATE_CLASSES = {HOURS_CLASS: 'time', WET_CLASS: 'wet'}
 # one spelling, because they end the class (maximum_speed_hours:30:22-6). A plate with days, minutes or two ranges, or
 # one too small to read, says none: its class is the number alone (maximum_speed_hours:30).
 PLATE_HOURS = re.compile(r'([0-9]|1[0-9]|2[0-3])-([0-9]|1[0-9]|2[0-3])')
+# A plate that says how far ahead the sign holds (#98): the give way with "15 m", a limit with "200 m". The review's
+# Panel below: Distance, on any sign (not on a box that is no sign, a road marking or a road user). Like Hours and
+# Wet, the box takes the sign and the plate. plate_distance_m is the distance written on it in whole metres (a plate
+# in km in metres: "1,2 km" is 1200), absent or null when it cannot be read. No class says it yet: the classifier
+# leaves these boxes out until one does (training._classifier_label).
+DISTANCE_PANEL = 'distance'
+PLATE_DISTANCE_MAX_M = 5000
+# The families whose boxes never have a plate under them.
+NO_PLATE_FAMILIES = ('not_a_sign', 'road_marking', 'road_marking_candidate')
 
 
 def is_road_user(row: dict) -> bool:
@@ -121,13 +130,49 @@ def without_hours(label: str) -> str:
 
 
 def holds_plate(row: dict) -> bool:
-    """Whether a box takes in a plate as well as its sign (the review's Panel below: Hours or Wet)."""
+    """Whether a box takes in a plate of a class of its own (the review's Panel below: Hours or Wet). takes_plate
+    also counts a plate of distance."""
     return row.get('supplementary_panel') in PLATE_CLASSES.values()
 
 
 def holds_hours(row: dict) -> bool:
     """Whether the plate of a box is one of hours (the review's Panel below: Hours)."""
     return row.get('supplementary_panel') == 'time'
+
+
+def holds_distance(row: dict) -> bool:
+    """Whether the plate of a box says a distance (the review's Panel below: Distance)."""
+    return row.get('supplementary_panel') == DISTANCE_PANEL
+
+
+def takes_plate(row: dict) -> bool:
+    """Whether a box takes in a plate as well as its sign, so it is taller on purpose: Hours, Wet or Distance."""
+    return holds_plate(row) or holds_distance(row)
+
+
+def distance_panel_problem(detection: dict) -> str | None:
+    """Why a box may not have Panel below Distance, or None when it may (a review box: family; a dataset row:
+    sign_family)."""
+    if not holds_distance(detection):
+        return None
+    family = detection.get('family', detection.get('sign_family'))
+    if family in NO_PLATE_FAMILIES or (family == 'other_sign' and detection.get('sign_type') in ROAD_USERS):
+        return ('supplementary_panel distance is only for signs: not for a box of family '
+                + ', '.join(NO_PLATE_FAMILIES) + ', nor for a road user')
+    return None
+
+
+def plate_distance_problem(detection: dict) -> str | None:
+    """Why the plate_distance_m of a box is not allowed, or None when it is."""
+    value = detection.get('plate_distance_m')
+    if value is None:
+        return None
+    if not holds_distance(detection):
+        return 'plate_distance_m is only for boxes with supplementary_panel distance'
+    if type(value) is not int or not 1 <= value <= PLATE_DISTANCE_MAX_M:
+        return (f'plate_distance_m must be whole metres from 1 to {PLATE_DISTANCE_MAX_M} (a plate in km in metres: '
+                '1,2 km is 1200), or null when it cannot be read')
+    return None
 
 
 def plate_hours_problem(detection: dict) -> str | None:

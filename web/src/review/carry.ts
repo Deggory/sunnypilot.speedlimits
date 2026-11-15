@@ -155,9 +155,21 @@ export async function applyPrevious(): Promise<void> {
     // The fit without error: every carried box counts as checked (a box the fit kept stays where the carry put it) and
     // the frame stays on screen, not saved, with no message: A again (or Enter) saves it and goes on.
     if (state.currentKey !== key || state.notice?.error) return;
-    for (const d of work.detections) delete d.check_position;
-    if (state.selected < 0 || state.selected >= work.detections.length) state.selected = work.detections.length > 0 ? 0 : -1;
-    state.notice = null;
+    // Except a sign with a plate of distance found here without its plate (carry_over._carry, #98): no fit moves a box
+    // with a plate, so it stays to check, and A again stops on it (confirmFrame, blockUnchecked).
+    for (const d of work.detections) if (d.supplementary_panel !== 'distance') delete d.check_position;
+    const plateLeft = uncheckedIndices(work);
+    if (plateLeft.length > 0) {
+      state.selected = plateLeft[0]!;
+      state.selectedByUser = true;
+      state.notice = {key, text: (plateLeft.length === 1 ? 'Box ' : 'Boxes ') + plateLeft.map((i) => i + 1).join(', ')
+        + ', a sign with a distance plate, to check: draw ' + (plateLeft.length === 1 ? 'it' : 'each')
+        + ' over the sign and the plate, then press “Here”.', error: false, warn: true};
+      void nextTick(revealEditor);
+    } else {
+      if (state.selected < 0 || state.selected >= work.detections.length) state.selected = work.detections.length > 0 ? 0 : -1;
+      state.notice = null;
+    }
     carried.value = key;
     if (saveAfterCarry) {
       carrying = null;

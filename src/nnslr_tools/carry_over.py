@@ -25,7 +25,7 @@ from __future__ import annotations
 import copy
 import math
 
-from nnslr_tools.sign_types import holds_hours, holds_plate
+from nnslr_tools.sign_types import distance_panel_problem, holds_distance, holds_hours, holds_plate
 
 # Where the road runs to, as a fraction of width and height: signs move away from it as they come
 # closer (median of the confirmed pairs: x 0.52, y 0.53).
@@ -55,10 +55,11 @@ TURN_COST = 0.3
 MAX_TURN_UP = 0.1
 # The labels a box takes from the previous frame. Visibility and occlusion belong to this picture.
 CARRIED_KEYS = ('family', 'value_kph', 'applicability', 'supplementary_panel', 'temporary', 'variable_display',
-                'sign_type', 'painted', 'notes', 'sign_value', 'sign_unit', 'plate_hours')
+                'sign_type', 'painted', 'notes', 'sign_value', 'sign_unit', 'plate_hours', 'plate_distance_m')
 # The labels that tell whether the reviewer already changed a box (the review page's fields).
 LABEL_KEYS = ('family', 'value_kph', 'applicability', 'supplementary_panel', 'visibility', 'occlusion',
-              'temporary', 'variable_display', 'sign_type', 'painted', 'sign_value', 'sign_unit', 'plate_hours')
+              'temporary', 'variable_display', 'sign_type', 'painted', 'sign_value', 'sign_unit', 'plate_hours',
+              'plate_distance_m')
 VALUE_FAMILIES = ('maximum_speed', 'cancellation', 'zone', 'variable_display', 'road_marking_candidate')
 CHECK_FIELD = 'check_position'
 FROM_FIELD = 'carried_from'
@@ -126,6 +127,13 @@ def _with_plate(old: dict, new: list[float]) -> list[float] | None:
     if not holds_plate(old) or tall <= PLATE_SHAPE * shape:
         return new
     return None if PLATE_SHAPE * shape < 1 else [new[0], new[1], new[2], new[1] + (new[2] - new[0]) * tall]
+
+
+def _sign_alone(old: dict, new: list[float]) -> bool:
+    """Whether ``new`` is flatter than the box of ``old`` by more than a plate makes (PLATE_SHAPE): the sign without the
+    plate ``old`` took in."""
+    box = _box(old)
+    return (box[3] - box[1]) / (box[2] - box[0]) > PLATE_SHAPE * (new[3] - new[1]) / (new[2] - new[0])
 
 
 def _cost(pair, new: list[float], turn: tuple[float, float], unit: float) -> float | None:
@@ -340,9 +348,15 @@ def carry_over(previous: list, current: list, *, width: float, height: float, so
 
 def _carry(target: dict, old: dict, source_key: str, height: float) -> bool:
     """The labels of ``old`` on a box of this frame: True when the box stays where it is, False when it held the disc
-    alone of ``old`` and went down over the plate (_with_plate), a guess to check."""
+    alone of ``old`` and went down over the plate (_with_plate), a guess to check, or holds the sign alone of a box of
+    ``old`` with a plate of distance, to be drawn over the plate (check_position)."""
     _take_labels(target, old, source_key)
     box = _box(target)
+    if holds_distance(old) and holds_distance(target) and _sign_alone(old, box):
+        # A plate of distance (#98) may be under or over its sign, of any shape: no guess. The box of this frame holds
+        # the sign alone; the reviewer draws it over the plate.
+        target[CHECK_FIELD] = True
+        return False
     tall = _with_plate(old, box)
     if tall == box:
         return True
@@ -373,7 +387,9 @@ def _take_labels(target: dict, old: dict, source_key: str) -> None:
             target['family'] = reading[0]
         target['value_kph'] = reading[1]
         target.update(original_reading)
-    if plate_here and target.get('family') == 'maximum_speed':
+    # Never over a plate of distance a person gave (#98): no class says one yet, so the model often reads such a sign as
+    # hours or wet, and A held would save it so.
+    if plate_here and target.get('family') == 'maximum_speed' and not holds_distance(old):
         target['supplementary_panel'] = plate_here
     # The kind read here on a proposal (an Other sign's, since 14 Nov 2026) goes when the previous box says another
     # family and names no kind: a speed limit never keeps "give way". An Other sign carried without a kind keeps the
@@ -382,6 +398,11 @@ def _take_labels(target: dict, old: dict, source_key: str) -> None:
         target.pop('sign_type', None)
     if target.get('family') != 'maximum_speed' or not holds_hours(target):
         target.pop('plate_hours', None)
+    # A plate of distance stays only on a sign (#98), and its metres only with it.
+    if distance_panel_problem(target) is not None:
+        target['supplementary_panel'] = 'unknown'
+    if not holds_distance(target):
+        target.pop('plate_distance_m', None)
     target['value_state'] = 'unknown' if target.get('value_kph') is None else 'reviewed'
     target.pop(CHECK_FIELD, None)
     target[FROM_FIELD] = source_key

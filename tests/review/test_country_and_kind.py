@@ -200,6 +200,87 @@ def test_the_hours_read_on_a_plate_reach_the_dataset(server, tmp_path):
         assert status == 400 and json_of(data)['error'] == 'invalid_plate_hours'
 
 
+def test_a_plate_of_distance_and_its_metres_reach_the_dataset(server, tmp_path):
+    """A give way with "15 m" under it (#98): Panel below Distance, on any sign, with the metres when they are read."""
+    from nnslr_tools.annotations import reviewed_frame_annotations, validate_dataset
+    running, rows = server
+    body = page_body(rows['0/0'])
+    body['detections'][0].update(family='other_sign', value_kph=None, sign_type='give_way',
+                                 supplementary_panel='distance', plate_distance_m=15)
+    status, response, data = running.post_frame(ROUTE, '0/0', body)
+    saved = json_of(data)['review']['detections'][0]
+    assert status == 200 and (saved['supplementary_panel'], saved['plate_distance_m']) == ('distance', 15)
+    payload = {review['frame_key']: review for review in running.app.store.reviews(ROUTE, RUN_ID)}['0/0']['payload']
+    annotations = reviewed_frame_annotations(payload, '0' * 64, dataset_kind='gold', name='test')
+    assert [(row['supplementary_panel'], row['plate_distance_m']) for row in annotations] == [('distance', 15)]
+    assert validate_dataset(annotations, tmp_path, dataset_kind='gold')['valid'] is True
+    # A road user with a plate of distance is no dataset row.
+    report = validate_dataset([{**annotations[0], 'sign_type': 'road_user_person'}], tmp_path, dataset_kind='gold')
+    assert report['valid'] is False and 'supplementary_panel' in json.dumps(report['errors'])
+    # Not read: the panel stays, the rows have no metres; a box with no plate of distance has none either.
+    payload['detections'][0]['plate_distance_m'] = None
+    row = reviewed_frame_annotations(payload, '0' * 64, dataset_kind='gold', name='test')[0]
+    assert row['supplementary_panel'] == 'distance' and 'plate_distance_m' not in row
+    # A limit with "200 m" too.
+    body = page_body(rows['0/2'])
+    body['detections'][0].update(family='maximum_speed', value_kph=50, supplementary_panel='distance', plate_distance_m=200)
+    status, response, data = running.post_frame(ROUTE, '0/2', body)
+    assert status == 200 and json_of(data)['review']['detections'][0]['plate_distance_m'] == 200
+    for panel, metres in (('distance', 0), ('distance', 5001), ('distance', 1.2), ('distance', '15'), ('none', 15),
+                          ('time', 15)):
+        body = page_body(rows['0/2'])
+        body['detections'][0].update(family='maximum_speed', value_kph=50, supplementary_panel=panel,
+                                     plate_distance_m=metres)
+        status, response, data = running.post_frame(ROUTE, '0/2', body)
+        assert status == 400 and json_of(data)['error'] == 'invalid_plate_distance', (panel, metres)
+    for refused in ({'family': 'not_a_sign', 'value_kph': None},
+                    {'family': 'other_sign', 'value_kph': None, 'sign_type': 'road_user_person'}):
+        body = page_body(rows['0/2'])
+        body['detections'][0].update(refused, supplementary_panel='distance')
+        status, response, data = running.post_frame(ROUTE, '0/2', body)
+        assert status == 400 and json_of(data)['error'] == 'invalid_supplementary_panel', refused
+        assert 'only for signs' in json_of(data)['message']
+
+
+def test_a_proposal_of_hours_moved_to_another_plate_saves_without_its_hours(tmp_path, monkeypatch):
+    """The model reads a limit with "200 m" under it as one with hours (no class says a distance yet, #98). The page
+    drops plate_hours when the reviewer chooses Distance (or None, Wet): the save must not take the proposal's hours
+    back from it, which made it a 400 invalid_schema the page could not get out of."""
+    from nnslr_tools.annotations import reviewed_frame_annotations, validate_dataset
+    from nnslr_tools.review import write_review
+    monkeypatch.setenv('NNSLR_REVIEW_TOKEN', TOKEN)
+    rows = make_report(tmp_path, count=3)
+    rows[0]['detections'][0].update(model_label='maximum_speed_hours:30:22-6', supplementary_panel='time',
+                                    plate_hours='22-6')
+    directory = tmp_path / 'derived/preannotations' / ROUTE / RUN_ID
+    (directory / 'preannotations.jsonl').write_text(''.join(json.dumps(r) + '\n' for r in rows))
+    write_review(directory, rows, RUN_ID)
+    running = RunningServer(tmp_path)
+    try:
+        revision = 0
+        for panel, metres in (('distance', 200), ('distance', None), ('none', None), ('wet', None)):
+            body = page_body(rows[0], base_revision=revision)
+            body['detections'][0].update(supplementary_panel=panel, plate_distance_m=metres)
+            del body['detections'][0]['plate_hours']
+            status, response, data = running.post_frame(ROUTE, '0/0', body)
+            assert status == 200, (panel, json_of(data))
+            saved = json_of(data)['review']['detections'][0]
+            revision = json_of(data)['review']['revision']
+            assert saved['supplementary_panel'] == panel and 'plate_hours' not in saved
+            assert saved.get('plate_distance_m') == metres
+            payload = {review['frame_key']: review for review in running.app.store.reviews(ROUTE, RUN_ID)}['0/0']['payload']
+            annotations = reviewed_frame_annotations(payload, '0' * 64, dataset_kind='gold', name='test')
+            assert validate_dataset(annotations, tmp_path, dataset_kind='gold')['valid'] is True, panel
+        # A box that only names its proposal keeps all of it, the hours too.
+        body = page_body(rows[0], base_revision=revision)
+        body['detections'] = [{'detection_id': rows[0]['detections'][0]['detection_id']}]
+        status, response, data = running.post_frame(ROUTE, '0/0', body)
+        saved = json_of(data)['review']['detections'][0]
+        assert status == 200 and (saved['supplementary_panel'], saved['plate_hours']) == ('time', '22-6')
+    finally:
+        running.close()
+
+
 def test_an_other_sign_painted_on_the_road_keeps_its_kind(server, tmp_path):
     """The children's triangle with "SCHULE" painted in front of a school: Children, painted on the road."""
     from nnslr_tools.annotations import reviewed_frame_annotations, validate_dataset

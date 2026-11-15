@@ -43,6 +43,9 @@ export const ON_VEHICLE = 'on_vehicle';
 export function dropStaleKind(d: Detection): void {
   if (d.family !== 'other_sign') delete d.painted;
   if (d.family !== 'maximum_speed' || d.supplementary_panel !== 'time') delete d.plate_hours;
+  // A plate of distance only under a sign (nnslr_tools.sign_types.distance_panel_problem), its metres only with it.
+  if (d.supplementary_panel === 'distance' && !takesDistance(d)) d.supplementary_panel = 'unknown';
+  if (d.supplementary_panel !== 'distance') delete d.plate_distance_m;
   if (d.sign_type == null) return;
   if (d.family === 'other_sign' || (d.family === 'not_a_sign' && d.sign_type === ON_VEHICLE)) return;
   delete d.sign_type;
@@ -151,13 +154,34 @@ export const PANELS: readonly {id: string; label: string}[] = [
   {id: 'none', label: 'None'},
   {id: 'time', label: 'Hours'},
   {id: 'wet', label: 'Wet'},
+  {id: 'distance', label: 'Distance'},
   {id: 'present', label: 'Other'},
 ];
 
-/** A box around a sign and its plate (of hours, or for wet roads): taller than the sign on purpose, so no fit may bring it
- * to the disc. */
+/** A box around a sign and its plate (of hours, for wet roads or of distance): taller than the sign on purpose, so no fit
+ * may bring it to the disc. */
 export function holdsPlate(d: Detection): boolean {
-  return d.supplementary_panel === 'time' || d.supplementary_panel === 'wet';
+  return d.supplementary_panel === 'time' || d.supplementary_panel === 'wet' || d.supplementary_panel === 'distance';
+}
+
+/** The families whose boxes never have a plate under them (nnslr_tools.sign_types.NO_PLATE_FAMILIES). */
+const NO_PLATE_FAMILIES: readonly string[] = ['not_a_sign', 'road_marking', 'road_marking_candidate'];
+/** The kinds of an "Other sign" that are who is on the road (nnslr_tools.sign_types.ROAD_USER_PREFIX). */
+const ROAD_USER_PREFIX = 'road_user_';
+
+/** Whether a box may have a plate of distance: any sign, but not a box that is no sign, a road marking or a road user. */
+export function takesDistance(d: Detection): boolean {
+  return !NO_PLATE_FAMILIES.includes(d.family)
+    && !(d.family === 'other_sign' && typeof d.sign_type === 'string' && d.sign_type.startsWith(ROAD_USER_PREFIX));
+}
+
+/** The longest distance a plate may say, in metres (nnslr_tools.sign_types.PLATE_DISTANCE_MAX_M). */
+export const PLATE_DISTANCE_MAX_M = 5000;
+
+/** " · in 15 m" after a sign with a plate of distance, " · distance plate" when its metres are not read. */
+function distanceText(d: Detection): string {
+  if (d.supplementary_panel !== 'distance') return '';
+  return d.plate_distance_m != null ? ' · in ' + d.plate_distance_m + ' m' : ' · distance plate';
 }
 
 /** The whole hours a plate can say, from and to (0 is also the 24 of "20-24"). */
@@ -207,15 +231,15 @@ export function hasValue(d: {value_kph?: number | null | undefined}): boolean {
 export function describe(d: Detection): string {
   const kind = d.family === 'other_sign' ? signKindOf(d.sign_type) : null;
   const painted = d.family === 'other_sign' && d.painted === true ? ', painted on the road' : '';
-  if (kind !== null) return kind.label + painted;
-  if (painted) return 'Other sign' + painted;
+  if (kind !== null) return kind.label + painted + distanceText(d);
+  if (painted) return 'Other sign' + painted + distanceText(d);
   if (d.family === 'not_a_sign' && d.sign_type === ON_VEHICLE) return 'Not a sign: on a vehicle';
   const family = familyOf(d.family);
   let text = family ? family.brief ?? family.label : String(d.family || 'No type');
   if (hasValue(d)) text += ' · ' + d.value_kph + (d.sign_unit === 'mph' || d.sign_unit === 'km/h' ? ' ' + d.sign_unit : ' (unit not recorded)');
   if (d.plate_hours) text += ' · hours ' + d.plate_hours;
   if (d.supplementary_panel === 'wet') text += ' · when wet';
-  return text;
+  return text + distanceText(d);
 }
 
 // Short label on the photo: the list in the panel has the full description.

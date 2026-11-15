@@ -33,7 +33,7 @@ from nnslr_tools.annotations import ENUMS, LABEL_KEYS
 from nnslr_tools.llm_providers import LlmError
 from nnslr_tools.review_db import MAX_DETECTIONS_PER_FRAME, ReviewRejected
 from nnslr_tools.review_service import DETECTION_FAMILIES, MAX_PAGE_SIZE
-from nnslr_tools.sign_types import SIGN_TYPES, holds_plate
+from nnslr_tools.sign_types import SIGN_TYPES, distance_panel_problem, plate_distance_problem, takes_plate
 
 ANSWER_TIMEOUT = 120.0
 RUN_TIMEOUT = 180.0
@@ -464,9 +464,13 @@ def _detection(detection_id: str, box: list[float], labels: dict, original: dict
         result['painted'] = True
     occlusion = original.get('occlusion')
     panel = original.get('supplementary_panel')
+    panel = panel if panel in ENUMS['supplementary_panel'] else 'unknown'
+    # A plate of distance stays only on a sign (#98): a box the AI made no sign, or a road user, loses it.
+    if distance_panel_problem({**result, 'supplementary_panel': panel}) is not None:
+        panel = 'unknown'
     result.update({'visibility': labels['visibility'],
                    'occlusion': occlusion if occlusion in ENUMS['occlusion'] else 'unknown',
-                   'supplementary_panel': panel if panel in ENUMS['supplementary_panel'] else 'unknown',
+                   'supplementary_panel': panel,
                    'temporary': original.get('temporary') if type(original.get('temporary')) is bool else None,
                    'variable_display': original.get('variable_display')
                    if type(original.get('variable_display')) is bool else None,
@@ -474,6 +478,10 @@ def _detection(detection_id: str, box: list[float], labels: dict, original: dict
     # The hours read on the plate: the reviewer's, kept while the box stays a limit with hours.
     if labels['family'] == 'maximum_speed' and panel == 'time' and original.get('plate_hours'):
         result['plate_hours'] = original['plate_hours']
+    # The metres read on a plate of distance: the reviewer's, kept while the box keeps that plate.
+    distance = {'supplementary_panel': panel, 'plate_distance_m': original.get('plate_distance_m')}
+    if panel == 'distance' and distance['plate_distance_m'] is not None and plate_distance_problem(distance) is None:
+        result['plate_distance_m'] = distance['plate_distance_m']
     return result
 
 
@@ -538,7 +546,7 @@ def to_suggestion(answer: dict, boxes: list[dict], width: int, height: int) -> d
                 warnings.append(f'{label}: the corrected box is not [x1, y1, x2, y2]: the old box stays')
             elif _small(corrected):
                 warnings.append(f'{label}: the corrected box is smaller than 2 px: the old box stays')
-            elif holds_plate(box):
+            elif takes_plate(box):
                 # Rule 11 asks for the sign face: a box around a disc and its plate would lose the plate.
                 warnings.append(f'{label}: the box holds a sign and its plate: the old box stays')
             else:

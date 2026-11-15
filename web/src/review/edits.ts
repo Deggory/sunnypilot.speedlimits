@@ -225,7 +225,8 @@ export function squareSelected(): void {
   if (!row || !d || refuseChange()) return;
   // A box of a sign and its plate is taller on purpose.
   if (holdsPlate(d)) {
-    state.notice = {key: row.frame_key, text: 'The box takes the disc and the plate: kept as it is.', error: false, warn: true};
+    const sign = d.supplementary_panel === 'distance' ? 'sign' : 'disc';
+    state.notice = {key: row.frame_key, text: 'The box takes the ' + sign + ' and the plate: kept as it is.', error: false, warn: true};
     return;
   }
   const [x1, y1, x2, y2] = d.bbox_xyxy;

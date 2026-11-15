@@ -41,7 +41,8 @@ from nnslr_tools.annotations import (
     validate_dataset,
 )
 from nnslr_tools.carry_over import unchecked_boxes
-from nnslr_tools.sign_types import painted_problem, plate_hours_problem, sign_type_problem
+from nnslr_tools.sign_types import (distance_panel_problem, holds_distance, holds_hours, painted_problem,
+                                     plate_distance_problem, plate_hours_problem, sign_type_problem)
 from nnslr_tools.manifest import parse_route_id
 from speed_vision_core.types import MAX_VALUE_KPH, MIN_VALUE_KPH
 
@@ -686,6 +687,13 @@ def _reviewed_detection(item, originals: dict):
     # a speed limit, or left an Other sign without a kind. A box that only names its proposal keeps all of it.
     if 'family' in item and 'sign_type' not in item:
         detection.pop('sign_type', None)
+    # The hours or metres of the proposal's plate go with its panel: a box the reviewer moved from Hours to Distance,
+    # None or Wet (the page drops plate_hours, so it is not in the item) must not get them back here (#98). What the
+    # item itself says passed plate_hours_problem and plate_distance_problem in save_frame_review.
+    if detection.get('family') != 'maximum_speed' or not holds_hours(detection):
+        detection.pop('plate_hours', None)
+    if not holds_distance(detection):
+        detection.pop('plate_distance_m', None)
     if detection.get('box_source') is None:
         detection.pop('box_source', None)
     if 'detection_id' in item:
@@ -898,6 +906,12 @@ def save_frame_review(store: ReviewStore, root: Path, *, route_id: str, run_id: 
         problem = plate_hours_problem(item) if isinstance(item, dict) else None
         if problem is not None:
             raise ReviewRejected(400, 'invalid_plate_hours', f'Box {number}: {problem}.')
+        problem = distance_panel_problem(item) if isinstance(item, dict) else None
+        if problem is not None:
+            raise ReviewRejected(400, 'invalid_supplementary_panel', f'Box {number}: {problem}.')
+        problem = plate_distance_problem(item) if isinstance(item, dict) else None
+        if problem is not None:
+            raise ReviewRejected(400, 'invalid_plate_distance', f'Box {number}: {problem}.')
         if isinstance(item, dict) and item.get('box_source') is not None and item['box_source'] not in BOX_SOURCES:
             raise ReviewRejected(400, 'invalid_box_source',
                                  f'Box {number}: box_source must be one of {", ".join(BOX_SOURCES)}, or absent.')

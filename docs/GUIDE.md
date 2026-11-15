@@ -249,7 +249,7 @@ On the review page a rough box is fitted to the sign under it in two ways:
 
 **Square boxes** ([#66](https://github.com/cristianku/sunnypilot.smartspeed/issues/66)): hold **Shift** while drawing a box and it is a square; **Shift ↑** and **Shift ↓** make the selected box larger and smaller around its centre with its proportions (held down, the key repeats), and Shift held while dragging a corner keeps them too (since 14 Nov 2026: before, the corner made a square); **Q**, or the **Square** chip before **Fit box**, makes the selected box a square on its centre, its side the mean of its width and height. Boxes of one shape teach **Fit box** better.
 
-Neither moves a box with **Panel below** on **Hours** or **Wet**: it holds the disc and the plate, and both fits look for the disc. The page says "The box takes the disc and the plate: kept as it is."
+Neither moves a box with **Panel below** on **Hours**, **Wet** or **Distance**: it holds the sign and its plate, and both fits look for the sign face. The page says "The box takes the disc and the plate: kept as it is." ("the sign and the plate" for Distance).
 
 Both work only for a browser that has signed in, or the site on 127.0.0.1; the token alone cannot fit boxes. At most two fits run at a time. Fit box is two rankers, `colour.npz` and `edges.npz`, and the box refiner `refiner.onnx`, a small CNN used only on a box under 30 px a side (one pass, then the two rankers on its box). They come in **versions** ([#94](https://github.com/cristianku/sunnypilot.smartspeed/issues/94)): `scripts/train_box_fit.sh` trains them again on every box people drew (the candidates cut on the CPU in about 2 minutes, then the trees, the networks and the refiner trained on a V100, never on the CPU: without a card it stops, [#65](https://github.com/cristianku/sunnypilot.smartspeed/issues/65)) into a new version, the folder `data/runs/<YYYY-MM-DD_HHMM>-box-fit/`, and measures it against the version in use on the same rough boxes of drives left out. Nothing is replaced: the version in use stays until a person chooses another. The first one, `box_fit:code`, is the files in `src/nnslr_tools/box_fit/`. In the portal it is **Models › Review helpers › Fit box**: the action "Train Fit box" (a dry run, the training with or without the refiner, its progress), then every version, newest first, with its measures (the mean IoU on drives left out of the version, of the version in use when it was trained, and on the small signs) and **Use this one**. The choice is saved in `data/models/box-fit.json` and the review page fits with it from its next fit, without a restart. Without the refiner, a version carries the refiner of the version in use. Every version is saved on GitHub with the other networks (Models › Publish › GitHub), and its row says whether GitHub has it.
 
@@ -289,6 +289,12 @@ The brain gets the plate as one more input, and sees in the picture whether the 
 - Pass it on a dry road above the number, and it learns to go on.
 
 Models › Brain then says **Reads them** under **Wet plates**. Publish refuses such a brain with a classifier that has no wet class.
+
+### A sign with a distance plate (Panel below: Distance)
+
+A sign with a plate saying how far ahead it holds, such as a give way with "15 m" or a limit with "200 m" ([#98](https://github.com/cristianku/sunnypilot.smartspeed/issues/98)). In **Sign review** choose the sign, then **Panel below › Distance**, and draw one box around the sign and the plate. **Metres** holds the distance written on it in whole metres (1,2 km is 1200); leave it empty when it cannot be read. Distance is offered on every sign, but not on Not a sign, a road marking or a road user. **Apply previous** carries the box with its metres. When the box it finds on the next frame holds the sign alone, it marks the box to check instead of stretching it, because the plate can be above or below the sign. Draw it over the plate before you confirm.
+
+For now these boxes teach only the cutter, which learns the tall box. The classifier has no class for them yet: its training leaves them out and counts them under `plate_of_distance_no_class_yet`. The car does not read the metres, and no brain gets them.
 
 ### Drives at full definition
 

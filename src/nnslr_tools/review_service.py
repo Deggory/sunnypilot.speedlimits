@@ -25,7 +25,7 @@ from pathlib import Path
 from nnslr_tools.annotations import ENUMS, LABEL_KEYS
 from nnslr_tools.carry_over import carry_over, unchecked_boxes
 from nnslr_tools.drives import drive_of
-from nnslr_tools.sign_types import SIGN_TYPES
+from nnslr_tools.sign_types import PLATE_DISTANCE_MAX_M, SIGN_TYPES
 from nnslr_tools.gps import load_positions, positions_path
 from nnslr_tools.manifest import parse_route_id
 from nnslr_tools.preannotate import PreannotationError, _inside
@@ -1119,6 +1119,9 @@ def review_schema() -> dict:
             'plate_hours': 'with family maximum_speed and supplementary_panel time: the hours written on the plate, '
                            'from-to in whole hours 0-23 without leading zeros ("22-6"); null or omitted when they '
                            'cannot be read, or the plate has days, minutes or two ranges',
+            'plate_distance_m': 'with supplementary_panel distance: the distance written on the plate in whole metres '
+                                f'from 1 to {PLATE_DISTANCE_MAX_M} (a plate in km in metres: "1,2 km" is 1200); null '
+                                'or omitted when it cannot be read',
             'temporary': 'true, false or null',
             'variable_display': 'true, false or null',
             'notes': 'string, possibly empty; never null',
@@ -1155,8 +1158,12 @@ def review_schema() -> dict:
             'A limit with a plate saying it holds only on a wet road under it (the German "bei Nässe", or a cloud with '
             'rain): supplementary_panel "wet" and one box around the disc and the plate.',
             'A limit with a plate of hours under it (22-6...): supplementary_panel "time" and one box around the disc '
-            'and the plate, never the disc alone: with its number it is a class of its own. With any other panel the '
+            'and the plate, never the disc alone: with its number it is a class of its own. With none or present the '
             'box stays on the disc. plate_hours says the hours when the plate can be read in this frame.',
+            'A sign with a plate that says how far ahead it holds (a give way with "15 m", a limit with "200 m"): '
+            'supplementary_panel "distance" and one box around the sign and the plate, on any sign (never on '
+            'not_a_sign, a road marking or a road user). plate_distance_m says the metres when the plate can be read '
+            'in this frame.',
             'Other traffic signs (give way, stop, direction signs, town entry and exit, main road, motorway, '
             'no entry, no overtaking, weight, height or width limits, minimum speed, danger signs...) get a box '
             'too: family "other_sign" with their sign_type (get_review_schema lists them), so the model learns '

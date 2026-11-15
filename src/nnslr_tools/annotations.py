@@ -31,7 +31,7 @@ ENUMS = {
     "sign_family": {"maximum_speed", "cancellation", "zone", "variable_display", "other_sign", "not_a_sign", "unreadable", "road_marking"},
     "value_state": {"read", "unreadable", "unknown", "not_applicable"},
     "applicability": {"own_road", "other_road", "unresolved"},
-    "supplementary_panel": {"none", "present", "time", "wet", "unresolved", "unknown"},
+    "supplementary_panel": {"none", "present", "time", "wet", "distance", "unresolved", "unknown"},
     "visibility": {"clear", "partial", "poor", "unknown"},
     "occlusion": {"none", "partial", "heavy", "unknown"},
     "review_state": {"pending", "accepted", "corrected", "rejected"},
@@ -44,21 +44,23 @@ FIELDS = set(ENUMS) | {
     "capture_mono_ns", "image_path", "image_sha256", "width", "height", "bbox_xyxy", "value_kph",
     "temporary", "variable_display", "proposal_source", "proposal_score", "reviewer", "review_timestamp", "notes",
     "source_video_sha256", "source_log_sha256", "provenance", "site_group", "encounter_id",
-    "country", "gps", "sign_type", "painted", "sign_value", "sign_unit", "plate_hours", "users_complete",
+    "country", "gps", "sign_type", "painted", "sign_value", "sign_unit", "plate_hours", "plate_distance_m",
+    "users_complete",
 }
 # Added later, so rows imported before them may miss them: the country of the frame (ISO code, from its GPS
 # position or the reviewer), where the car was ({latitude, longitude, speed_mps, bearing_deg}, nnslr_tools.gps)
 # the kind of an "Other sign" (nnslr_tools.sign_types) and whether it is painted on the road. The split by place
-# uses gps. The hours read on a plate (nnslr_tools.sign_types.PLATE_HOURS) are there only when read.
+# uses gps. The hours read on a plate (nnslr_tools.sign_types.PLATE_HOURS) are there only when read, and so are the
+# metres of a plate of distance (plate_distance_m, #98).
 # users_complete (true) is on every row of a frame the reviewer ticked "road users complete": every person and
 # two-wheeler from 24 px tall and every vehicle from 40 px tall is boxed there; the rows of other frames have none.
 OPTIONAL_FIELDS = {"country", "gps", "sign_type", "painted", "sign_value", "sign_unit", "plate_hours",
-                   "users_complete"}
+                   "plate_distance_m", "users_complete"}
 COUNTRY_CODE = re.compile(r"[A-Z]{2}")
 # Label fields of a reviewed box: a box whose labels all equal the proposal is
 # "accepted", otherwise "corrected". The review server copies the same fields.
 LABEL_KEYS = ('bbox_xyxy', 'family', 'value_kph', 'applicability', 'supplementary_panel', 'visibility', 'occlusion',
-              'temporary', 'variable_display', 'sign_value', 'sign_unit', 'plate_hours')
+              'temporary', 'variable_display', 'sign_value', 'sign_unit', 'plate_hours', 'plate_distance_m')
 
 
 class DatasetError(ValueError):
@@ -209,8 +211,10 @@ def validate_annotation(row: dict, root: Path, *, dataset_kind: str = 'gold',
     painted = row.get('painted')
     require(painted is None or (painted is True and row['sign_family'] == 'other_sign'), "invalid_schema", "painted")
     require('users_complete' not in row or type(row['users_complete']) is bool, "invalid_schema", "users_complete")
-    from nnslr_tools.sign_types import plate_hours_problem
+    from nnslr_tools.sign_types import distance_panel_problem, plate_distance_problem, plate_hours_problem
     require(plate_hours_problem({**row, 'family': row['sign_family']}) is None, "invalid_schema", "plate_hours")
+    require(distance_panel_problem(row) is None, "invalid_schema", "supplementary_panel")
+    require(plate_distance_problem(row) is None, "invalid_schema", "plate_distance_m")
     require(_hash(row['image_sha256']), "missing_provenance", "image_sha256")
     for field in ('source_video_sha256', 'source_log_sha256'):
         require(row[field] is None or _hash(row[field]), "missing_provenance", field)
@@ -404,6 +408,8 @@ def _canonical(frame: dict, detection: dict | None, original: dict | None, sourc
         'value_state': value_state, 'value_kph': value,
         **{k: d[k] for k in ('sign_value', 'sign_unit') if k in d},
         **({'plate_hours': d['plate_hours']} if family == 'maximum_speed' and d.get('plate_hours') else {}),
+        # Copied as it is: validate_annotation refuses metres that are wrong or on a box without a plate of distance.
+        **({'plate_distance_m': d['plate_distance_m']} if d.get('plate_distance_m') is not None else {}),
         'applicability': d.get('applicability', 'unresolved'), 'supplementary_panel': d.get('supplementary_panel', 'unknown'),
         'visibility': d.get('visibility', 'unknown'), 'occlusion': d.get('occlusion', 'unknown'),
         'temporary': d.get('temporary'), 'variable_display': d.get('variable_display'),

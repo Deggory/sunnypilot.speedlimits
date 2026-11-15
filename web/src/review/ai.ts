@@ -198,8 +198,13 @@ function meanwhile(count: Record<FitOutcome, number>): string {
 /** The box being fitted (Fit with AI), by frame key and index; null when none. */
 export const fitting = reactive<{key: string | null; index: number}>({key: null, index: -1});
 
-/** The words for a box a fit leaves alone because it holds a plate (holdsPlate): a fit looks for the disc. */
-const PLATE_KEPT = 'The box takes the disc and the plate: kept as it is.';
+/** The words for the boxes a fit leaves alone because they hold a plate (holdsPlate): a fit looks for the disc, or for
+ * the sign of a plate of distance. */
+function plateKept(boxes: Detection[]): string {
+  const plated = boxes.filter(holdsPlate);
+  const sign = plated.length > 0 && plated.every((d) => d.supplementary_panel === 'distance') ? 'sign' : 'disc';
+  return 'The box takes the ' + sign + ' and the plate: kept as it is.';
+}
 
 /** Fit with AI (Shift+C): the box the reviewer picked (``selected``: the one selected, as the button of its
  * editor), else every box of the frame (the page selects the first one by itself), sent with only the picture
@@ -214,7 +219,7 @@ export async function fitBox(selected = false): Promise<void> {
   const targets = (chosen ? [chosen] : boxes).filter((detection) => !holdsPlate(detection));
   const key = row.frame_key;
   if (targets.length === 0) {
-    if (boxes.length > 0) state.notice = {key, text: PLATE_KEPT, error: false};
+    if (boxes.length > 0) state.notice = {key, text: plateKept(chosen ? [chosen] : boxes), error: false};
     return;
   }
   fitting.key = key;
@@ -262,8 +267,8 @@ export type FitWhich = 'frame' | 'box' | 'carried';
 /** Fit box: the boxes of ``which``, each to the sign under it on the server's CPU (…/fit, nnslr_tools.box_fit), all
  * in one request and in a fraction of a second, with no AI. Each fitted box is an unsaved change to confirm, as with
  * Fit with AI; a box with no better box found (no sign there, or already right), moved less than a pixel, or moved or
- * removed meanwhile, is left as it is. So is a box that holds a plate of hours, even selected: the fit would bring it
- * towards the disc. */
+ * removed meanwhile, is left as it is. So is a box that holds a plate (hours, wet or distance: holdsPlate), even
+ * selected: the fit would bring it towards the sign face. */
 export async function fitLocal(which: FitWhich = 'frame'): Promise<void> {
   const row = currentRow();
   const apiBase = report.apiBase;
@@ -279,7 +284,7 @@ export async function fitLocal(which: FitWhich = 'frame'): Promise<void> {
     if (byHand) state.notice = {key, error: false, warn: true,
       text: (byHand === 1 ? 'The box was' : 'All ' + byHand + ' boxes were') + ' placed by hand: kept as '
         + (byHand === 1 ? 'it is' : 'they are') + '. C fits ' + (byHand === 1 ? 'it' : 'them') + ' anyway.'};
-    else if (boxes.length > 0) state.notice = {key, text: PLATE_KEPT, error: false};
+    else if (boxes.length > 0) state.notice = {key, text: plateKept(chosen ? [chosen] : boxes), error: false};
     return;
   }
   localFitting.key = key;

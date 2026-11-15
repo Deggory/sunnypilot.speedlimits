@@ -419,6 +419,60 @@ def test_the_hours_of_a_plate_go_on_with_its_sign():
     assert carried['plate_hours'] == '22-6'
 
 
+def test_the_metres_of_a_plate_of_distance_go_on_with_its_sign():
+    old = confirmed(tall_at(900, 315, 30), family='other_sign', value=None, sign_type='give_way',
+                    supplementary_panel='distance', plate_distance_m=15)
+    tall = proposal(tall_at(958, 308, 36), 'p')
+    (carried,) = carry_over([old], [tall], width=W, height=H, source_key='1/2', proposals=[tall])['detections']
+    assert (carried['sign_type'], carried['supplementary_panel'], carried['plate_distance_m']) == ('give_way', 'distance', 15)
+    assert carried['bbox_xyxy'] == tall['bbox_xyxy']
+
+
+def test_a_sign_carried_without_its_plate_of_distance_is_left_to_check():
+    """No model proposes a plate of distance: the box of this frame holds the sign alone, the plate may be under or
+    over it, so the box is not guessed but flagged, and the reviewer draws it over the plate."""
+    old = confirmed(tall_at(900, 315, 30), family='other_sign', value=None, sign_type='give_way',
+                    supplementary_panel='distance', plate_distance_m=15)
+    face = proposal(box_at(958, 300, 36), 'p')
+    result = carry_over([old], [face], width=W, height=H, source_key='1/2', proposals=[face])
+    (carried,) = result['detections']
+    assert (carried['supplementary_panel'], carried['plate_distance_m']) == ('distance', 15)
+    assert carried['bbox_xyxy'] == face['bbox_xyxy'] and carried['check_position'] is True
+    assert unchecked_boxes(result['detections']) == [1]
+
+
+def test_a_plate_of_distance_is_never_replaced_by_the_hours_or_wet_read_here():
+    """No class says a distance yet, so the model reads a limit with "200 m" under it as one with hours or for wet
+    roads: Apply previous (A held: carry, save, next) must keep the Distance and the metres a person gave."""
+    old = confirmed(tall_at(900, 315, 30), family='maximum_speed', value=50, supplementary_panel='distance',
+                    plate_distance_m=200)
+    for panel, extra in (('time', {'plate_hours': '22-6'}), ('wet', {})):
+        tall = {**proposal(tall_at(958, 308, 36), 'p', 'maximum_speed', 50), 'supplementary_panel': panel, **extra}
+        result = carry_over([old], [tall], width=W, height=H, source_key='1/2', proposals=[tall])
+        (carried,) = result['detections']
+        assert (carried['supplementary_panel'], carried['plate_distance_m']) == ('distance', 200), panel
+        assert 'plate_hours' not in carried and 'check_position' not in carried and result['matched'] == 1
+    # A plain number confirmed before still takes the hours read here, as before #98.
+    old = confirmed(tall_at(900, 315, 30), family='maximum_speed', value=50, supplementary_panel='none')
+    tall = {**proposal(tall_at(958, 308, 36), 'p', 'maximum_speed', 50), 'supplementary_panel': 'time',
+            'plate_hours': '22-6'}
+    (carried,) = carry_over([old], [tall], width=W, height=H, source_key='1/2', proposals=[tall])['detections']
+    assert (carried['supplementary_panel'], carried['plate_hours']) == ('time', '22-6')
+
+
+def test_metres_leave_with_the_plate_of_distance_and_a_road_user_has_none():
+    old = confirmed(tall_at(900, 315, 30), family='maximum_speed', value=30, supplementary_panel='time',
+                    plate_distance_m=15)
+    tall = proposal(tall_at(958, 308, 36), 'p', 'maximum_speed', 30)
+    (carried,) = carry_over([old], [tall], width=W, height=H, source_key='1/2', proposals=[tall])['detections']
+    assert carried['supplementary_panel'] == 'time' and 'plate_distance_m' not in carried
+    old = confirmed(tall_at(900, 315, 30), family='other_sign', value=None, sign_type='road_user_person',
+                    supplementary_panel='distance', plate_distance_m=15)
+    tall = proposal(tall_at(958, 308, 36), 'p')
+    (carried,) = carry_over([old], [tall], width=W, height=H, source_key='1/2', proposals=[tall])['detections']
+    assert carried['supplementary_panel'] == 'unknown' and 'plate_distance_m' not in carried
+
+
 def test_hours_read_here_stay_on_a_sign_confirmed_without_them():
     old = confirmed(box_at(900, 315, 30), family='maximum_speed', value=30, supplementary_panel='none')
     tall = {**proposal(tall_at(958, 308, 36), 'p', 'maximum_speed', 30), 'supplementary_panel': 'time', 'plate_hours': '22-6'}

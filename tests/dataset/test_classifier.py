@@ -25,7 +25,8 @@ from nnslr_tools.chain import (ChainTally, classifier_comparison, frame_candidat
                                select_negatives, truth_objects)
 from nnslr_tools.comma_trial import speed_of
 from nnslr_tools.evaluation import PER_FRAME_MAX_BOXES, PER_FRAME_STEPS, classifier_metrics
-from nnslr_tools.sign_types import class_hours, class_parts, plate_hours_problem, without_hours
+from nnslr_tools.sign_types import (class_hours, class_parts, distance_panel_problem, holds_plate, plate_distance_problem,
+                                    plate_hours_problem, takes_plate, without_hours)
 from nnslr_tools.synthetic_signs import value_of
 from nnslr_tools.training import (MIN_KIND_TRAIN_CROPS, TrainConfig, _classifier_label, _reader_label,
                                   crop_rectangle, family_label, jitter_box, prepare_reader_training,
@@ -1141,3 +1142,85 @@ def test_hours_with_enough_crops_are_a_class(tmp_path, capsys, monkeypatch):
                                    class_scheme="v2")
     assert "maximum_speed_hours:30:22-6" in plan["classes"] and "maximum_speed_hours:30" not in plan["classes"]
     assert "maximum_speed_hours:30:22-6" not in plan["folded_labels"]
+
+
+def test_a_sign_with_a_plate_of_distance_has_no_class_yet_and_is_never_a_limit_for_wet_roads():
+    for row in ({**_row("maximum_speed", 30), "supplementary_panel": "distance", "plate_distance_m": 200},
+                {**_row("maximum_speed", 30), "supplementary_panel": "distance"},
+                {**_row("other_sign", sign_type="give_way"), "supplementary_panel": "distance", "plate_distance_m": 15},
+                {**_row("zone", 30), "supplementary_panel": "distance"}):
+        assert _classifier_label(row) is None, row
+        # The old reader reads the number as it does under a plate of hours.
+        assert _reader_label(row) == _reader_label({**row, "supplementary_panel": "none"})
+        assert takes_plate(row) and not holds_plate(row)
+    assert _classifier_label({**_row("maximum_speed", 30), "supplementary_panel": "distance", "review_state": "rejected"}) is None
+
+
+@pytest.mark.parametrize("metres", [1, 15, 200, 1200, 5000, None])
+def test_the_metres_of_a_plate_of_distance_are_whole_metres_up_to_five_km(metres):
+    assert plate_distance_problem({"family": "other_sign", "supplementary_panel": "distance", "plate_distance_m": metres}) is None
+
+
+@pytest.mark.parametrize("metres", [0, -15, 5001, 15.0, 1.2, "15", "15 m", True])
+def test_any_other_distance_is_refused(metres):
+    problem = plate_distance_problem({"family": "other_sign", "supplementary_panel": "distance", "plate_distance_m": metres})
+    assert "whole metres from 1 to 5000" in problem
+
+
+def test_metres_belong_to_a_plate_of_distance_and_a_plate_of_distance_to_a_sign():
+    for panel in ("none", "time", "wet", "present", "unknown", None):
+        assert "only for" in plate_distance_problem({"family": "maximum_speed", "supplementary_panel": panel,
+                                                     "plate_distance_m": 200})
+    for family in ("maximum_speed", "cancellation", "zone", "variable_display", "unreadable", "other_sign"):
+        assert distance_panel_problem({"family": family, "supplementary_panel": "distance"}) is None
+        assert distance_panel_problem({"sign_family": family, "supplementary_panel": "distance"}) is None
+    assert distance_panel_problem({"family": "other_sign", "sign_type": "give_way", "supplementary_panel": "distance"}) is None
+    for refused in ({"family": "not_a_sign"}, {"family": "road_marking_candidate"}, {"sign_family": "road_marking"},
+                    {"family": "other_sign", "sign_type": "road_user_person"}):
+        assert "only for signs" in distance_panel_problem({**refused, "supplementary_panel": "distance"}), refused
+        assert distance_panel_problem({**refused, "supplementary_panel": "time"}) is None
+
+
+def _frames_with_distance(frames):
+    """FRAMES with the first limit of 30 and the first give way in train marked Distance, as boxes of the sign and its
+    plate."""
+    changed, marked = [], set()
+    for split, who, kept, removed in frames:
+        boxes = []
+        for box in kept:
+            kind = box.get("sign_type") or box["family"]
+            if split == "train" and kind in ("maximum_speed", "give_way") and kind not in marked:
+                if kind == "maximum_speed" and box["value_kph"] != 30:
+                    boxes.append(box)
+                    continue
+                marked.add(kind)
+                box = {**box, "supplementary_panel": "distance", "plate_distance_m": 200 if kind == "maximum_speed" else 15,
+                       "bbox_xyxy": [box["bbox_xyxy"][0], box["bbox_xyxy"][1], box["bbox_xyxy"][2], box["bbox_xyxy"][3] + 8]}
+            boxes.append(box)
+        changed.append((split, who, boxes, removed))
+    return changed
+
+
+def test_the_classifier_leaves_out_a_plate_of_distance_and_the_cutter_learns_it_with_its_plate(tmp_path, capsys,
+                                                                                               monkeypatch):
+    from nnslr_tools.training import prepare_detector_training
+
+    plain = tmp_path / "plain"
+    latest = plain / "splits" / "latest.json"
+    before = prepare_reader_training(_classifier_fixture(plain, capsys), latest, plain, class_scheme="v2")
+
+    marked = tmp_path / "marked"
+    monkeypatch.setitem(globals(), "FRAMES", _frames_with_distance(FRAMES))
+    dataset = _classifier_fixture(marked, capsys)
+    rows = [row for row in load_jsonl(dataset) if row.get("supplementary_panel") == "distance"]
+    assert sorted(row["plate_distance_m"] for row in rows) == [15, 200]
+    latest = marked / "splits" / "latest.json"
+    plan = prepare_reader_training(dataset, latest, marked, class_scheme="v2")
+    assert set(plan["classes"]) <= set(before["classes"])
+    assert not any(label.startswith("maximum_speed_wet") for label in plan["classes"])
+    assert plan["skipped"]["plate_of_distance_no_class_yet"] == 2
+    assert len(plan["records"]) == len(before["records"]) - 2
+    cutter = prepare_detector_training(dataset, latest, marked)
+    plates = [box for frame in cutter["frames"] for box in frame.get("plate_boxes", [])]
+    assert sorted(plates) == sorted(row["bbox_xyxy"] for row in rows)
+    assert all(box in frame["boxes"] for frame in cutter["frames"] for box in frame.get("plate_boxes", []))

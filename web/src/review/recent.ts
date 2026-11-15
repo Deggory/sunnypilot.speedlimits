@@ -15,7 +15,7 @@ import type {Detection, FrameRow} from './types';
 const SHOWN = 6;
 
 export const LABEL_FIELDS = ['family', 'value_kph', 'sign_unit', 'sign_type', 'painted', 'applicability',
-  'supplementary_panel', 'plate_hours', 'temporary', 'variable_display'] as const;
+  'supplementary_panel', 'plate_hours', 'plate_distance_m', 'temporary', 'variable_display'] as const;
 export type Label = Pick<Detection, (typeof LABEL_FIELDS)[number]>;
 
 export interface Recent {
@@ -62,6 +62,7 @@ function recentOf(label: Label): Recent {
   }
   if (label.supplementary_panel === 'time') parts.push(label.plate_hours ?? 'hours');
   else if (label.supplementary_panel === 'wet') parts.push('wet');
+  else if (label.supplementary_panel === 'distance') parts.push(label.plate_distance_m != null ? label.plate_distance_m + ' m' : 'distance');
   else if (label.supplementary_panel === 'present') parts.push('panel');
   if (label.temporary === true) parts.push('temporary');
   const road = ROAD_SHORT[label.applicability ?? 'unresolved'];

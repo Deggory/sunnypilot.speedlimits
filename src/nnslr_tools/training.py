@@ -44,8 +44,8 @@ from nnslr_tools.checkpoints import (DEFAULT_DETECTOR_ANCHOR_MIN_RATIO, DEFAULT_
 from nnslr_tools.media import FRAME_SIZE, full_picture
 from nnslr_tools.progress import report as report_progress
 from nnslr_tools.annotations import load_jsonl, validate_dataset, written_sign_value
-from nnslr_tools.sign_types import (HOURS_CLASS, NOT_A_SIGN_TYPES, SIGN_TYPES, WET_CLASS, class_hours, class_parts, holds_hours,
-                                     holds_plate, is_road_user, without_hours)
+from nnslr_tools.sign_types import (HOURS_CLASS, NOT_A_SIGN_TYPES, SIGN_TYPES, WET_CLASS, class_hours, class_parts, holds_distance,
+                                     holds_hours, holds_plate, is_road_user, takes_plate, without_hours)
 
 # The kind of a "not a sign" box on a vehicle.
 ON_VEHICLE = NOT_A_SIGN_TYPES[0]
@@ -159,8 +159,12 @@ def _classifier_label(row: dict[str, Any]) -> str | None:
     """The v2 label of a reviewed box: the v1 label, the kind of an other sign (``other_sign:<kind>`` when the
     review gives one, else ``other_sign``), ``maximum_speed_hours:<number>`` for a speed limit with a plate of hours
     and a known number (with no number it stays ``maximum_speed:unknown``), and ``not_a_sign`` for a kept box a
-    reviewer marked so (none for one on a vehicle)."""
+    reviewer marked so (none for one on a vehicle). A sign with a plate of distance (Panel below: Distance, #98) has
+    none yet: its box takes the sign and the plate, which no class says, so the classifier leaves it out until one
+    does (the cutter learns it, as a box with its plate)."""
     if row.get("review_state") not in ELIGIBLE_REVIEW_STATES:
+        return None
+    if holds_distance(row) and row.get("sign_family") != NOT_A_SIGN:
         return None
     bbox = row.get("bbox_xyxy")
     if not isinstance(bbox, list) or len(bbox) != 4:
@@ -563,7 +567,7 @@ def _record(row: dict[str, Any], split: str, label: str, source: str, **extra: A
         "label_basis": _label_basis(row),
         "source": source,
         # Never drawn as an end of limit (synthetic_signs): only a box with a plate says so.
-        **({"holds_plate": True} if holds_plate(row) else {}),
+        **({"holds_plate": True} if takes_plate(row) else {}),
         **extra,
     }
 
@@ -656,6 +660,9 @@ def _prepare_classifier(loaded: dict[str, Any], dataset_path: Path, split_path: 
     skipped = Counter()
     for row in rows:
         label = _classifier_label(row)
+        if label is None and holds_distance(row) and row.get("review_state") in ELIGIBLE_REVIEW_STATES:
+            skipped["plate_of_distance_no_class_yet"] += 1
+            continue
         if label is None:
             skipped["not_classifier_eligible"] += 1
             continue
@@ -864,9 +871,9 @@ def prepare_detector_training(
     """Build a full-frame detector plan from reviewed annotations.
 
     The boxes of the families chosen (CUTTER_FAMILIES: the speed signs, or those and the other signs) are the
-    positive detector boxes; every frame keeps the family of each box (box_families), and the boxes around a disc and
-    its plate of hours (plate_boxes, only on a frame that has one), which no end of limit is drawn over. A frame is a
-    detector negative only when it has an explicit whole-frame not_a_sign
+    positive detector boxes; every frame keeps the family of each box (box_families), and the boxes around a sign and
+    its plate of hours, for wet roads or of distance (plate_boxes, only on a frame that has one), which no end of limit
+    is drawn over. A frame is a detector negative only when it has an explicit whole-frame not_a_sign
     review. other_sign rows alone are not silently promoted to
     whole-frame negatives. A switched-off variable display (off_display) is an ignore box of its frame
     (ignore_boxes), and so is the box of a road user (sign_types.ROAD_USERS: a person, a car...), which the cutter does
@@ -969,7 +976,7 @@ def prepare_detector_training(
             frame["boxes"].append(list(row["bbox_xyxy"]))
             frame["box_families"].append(family)
             frame["annotation_ids"].append(annotation_id)
-            if holds_plate(row):
+            if takes_plate(row):
                 frame.setdefault("plate_boxes", []).append(list(row["bbox_xyxy"]))
         else:
             ignored["non_detector_label"] += 1
