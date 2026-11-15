@@ -38,7 +38,8 @@ says that a person went through the drive from its start to the frame shown and 
 is free of works. Saying where works are not is what lets the brain learn them at all (nnslr_tools.brain_targets).
 
 The kinds of road. The same taps mark what the road is, kind by kind: a narrow road, a country road, a gravel road,
-potholes (FIRST_ROAD_KINDS), and any kind a person adds from the page (speed_road_kinds, which only grows: a kind keeps
+potholes, speed bumps (FIRST_ROAD_KINDS: a stretch from the first bump to past the last), and any kind a person adds
+from the page (speed_road_kinds, which only grows: a kind keeps
 its marks). Like the roadworks they say nothing of the speed and are never an input of the car: the brain learns to tell
 them (nnslr_tools.brain_net's road_head), and that changes the memory the speed shares. One stretch can be of several
 kinds at once, so the marks of one kind never overlap and those of two kinds may. "Checked to here" is a kind's own
@@ -92,7 +93,9 @@ MAX_NOTE = 500
 MIN_BLOCK_SECONDS = 1
 WORKS_TAPS = ('start', 'end', 'remove', 'checked')
 # The kinds of road there are before a person adds one: (kind, label), in the order the page and the brain take them.
-FIRST_ROAD_KINDS = (('narrow', 'Narrow road'), ('country', 'Country road'), ('gravel', 'Gravel road'), ('potholes', 'Potholes'))
+# Seeded at every opening (INSERT OR IGNORE): a kind added here reaches a store made before, after the kinds it has.
+FIRST_ROAD_KINDS = (('narrow', 'Narrow road'), ('country', 'Country road'), ('gravel', 'Gravel road'), ('potholes', 'Potholes'),
+                    ('speed_bump', 'Speed bump'))
 MAX_KIND_LABEL = 40
 # The names a kind of road may not take: the page's own roadworks ("works", its taps go to speed_works), a name every
 # object of the page has already ("constructor"), and the fields a guest's copy drops as places

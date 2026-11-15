@@ -7,7 +7,7 @@
 // it again with the same ends, and removed with its start. The lane draws his speed as a step line, the blocks over it with
 // their kph, the roadworks and how far the drive was gone through for them. Roadworks are marked next to the speed, two
 // taps on the frame shown; a third tap says that the drive was gone through up to the frame shown, so that no mark there
-// means no works, and the drive opens there again. The kinds of road (narrow, country, gravel, potholes, and those added
+// means no works, and the drive opens there again. The kinds of road (narrow, country, gravel, potholes, speed bumps, and those added
 // with "+") are marked the same way, each with its own marks and its own "checked to here": a tap on a chip starts a mark of
 // it at the frame shown and a second tap ends it there; the chip is solid where the frame shown is inside one of its
 // marks, and the last one tapped is the one the lane draws and Remove / Checked to here work on. The road type

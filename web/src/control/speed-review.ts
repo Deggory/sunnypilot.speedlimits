@@ -27,7 +27,7 @@ export interface Works {
 
 export type WorksTap = 'start' | 'end' | 'remove' | 'checked';
 
-/** A kind of road a person can mark as the roadworks (narrow, country, gravel, potholes, and those added from the page):
+/** A kind of road a person can mark as the roadworks (narrow, country, gravel, potholes, speed bumps, and those added from the page):
  * the brain learns them aside, as the roadworks, to understand the road better; they change no speed. */
 export interface RoadKind {
   kind: string;

@@ -7,7 +7,7 @@ three things:
 
 - the road type: one of `road_types.ROAD_TYPES`, which are town, rural, expressway, motorway, ramp, parking, zone30,
   garage and merge;
-- the kinds of road: tunnel and the other kinds of `speed_road_kinds` (narrow, country, gravel, potholes...);
+- the kinds of road: tunnel and the other kinds of `speed_road_kinds` (narrow, country, gravel, potholes, speed bumps...);
 - whether the car is inside roadworks, and so where they start and end.
 
 It is an offline network. It never runs on the car and is never an input of the car. What it writes is the base layer of

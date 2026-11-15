@@ -558,7 +558,7 @@ def test_the_labels_say_the_drives_to_read_again_and_a_problem_is_words(root, ch
     assert labels['training'] == {'drives': 0, 'hours': 0.0, 'sunnypilot_on': 0}
     # The names of the kinds of road, the first ones while Speed review has no file yet.
     assert labels['road_labels'] == {'narrow': 'Narrow road', 'country': 'Country road', 'gravel': 'Gravel road',
-                                     'potholes': 'Potholes'}
+                                     'potholes': 'Potholes', 'speed_bump': 'Speed bump'}
 
     def broken(*args, **kwargs):
         raise OSError('the sunnypilot clone is missing')

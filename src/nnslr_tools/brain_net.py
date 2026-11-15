@@ -24,7 +24,7 @@ speed uses too: that is how a mark changes the network, without ever being an in
 (car_weights), and no code goes from works to speed. Whether it helps is measured: the same training without it
 (works=False), on sites of test and validation.
 
-The kinds of road (a narrow road, a country road, a gravel road, potholes, and those a person adds in Speed review:
+The kinds of road (a narrow road, a country road, a gravel road, potholes, speed bumps, and those added in Speed review:
 brain_targets.road_kinds) teach the memory the same way: road_head is one layer with a logit a kind, loss += ROAD_LOSS *
 binary cross entropy of each kind on its own frames, so each kind weighs as the roadworks do. It is left out of the car's
 network too (TRAINING_ONLY), so the car's brain is the same network with or without it. A kind is a column in the order of
