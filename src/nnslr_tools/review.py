@@ -2240,8 +2240,8 @@ def make_handler(app: ReviewApp):
                 # "Apply previous" of the page: nothing is saved, the page shows the boxes to check.
                 self._json(200, app.apply_previous(route, frame_key, body))
                 return
-            # The saves of one frame one after the other (frame_lock, #99).
-            with app.frame_lock(route, frame_key):
+            # The saves of one drive one after the other, with the flags they send back (save_lock, #99, #100).
+            with app.save_lock(route):
                 try:
                     directory, rows, by_key = app.report(route)
                 except (PreannotationError, ValueError, OSError):
@@ -2264,17 +2264,17 @@ def make_handler(app: ReviewApp):
                     if made:
                         app.forget_video_frame(route, frame_key, directory.name)
                     raise
+                # A confirmation can change which neighbours are suspicious (rule d): send the new flags.
+                hints_by_frame, hint_stats = app.hints(route, rows)
+                suspicious = app.suspicious(route, directory.name, rows, hints_by_frame)
+                confirmed_count = app.store.confirmed_count(route, directory.name)
             reviewer = terminal_text(review['reviewer'])
             if review['confirmed']:
                 print(f'Salvato: {route} fotogramma {frame_key}, revisione {review["revision"]} '
                       f'({reviewer})', flush=True)
             else:
                 print(f'Conferma annullata: {route} fotogramma {frame_key} ({reviewer})', flush=True)
-            # A confirmation can change which neighbours are suspicious (rule d): send the new flags.
-            hints_by_frame, hint_stats = app.hints(route, rows)
-            suspicious = app.suspicious(route, directory.name, rows, hints_by_frame)
-            self._json(200, {'ok': True, 'review': public_review(review),
-                             'confirmed_count': app.store.confirmed_count(route, directory.name),
+            self._json(200, {'ok': True, 'review': public_review(review), 'confirmed_count': confirmed_count,
                              'suspicious': suspicious})
 
         # [ai-reviewer] - START

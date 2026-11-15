@@ -153,16 +153,23 @@ class ReviewService:
         # hashes the picture, 4 ms each, which made every save of such a frame wait seconds on a drive with hundreds.
         self._added_frames = {}
         self._car_positions = {}
-        self._frame_locks = {}
-        self._frame_locks_guard = threading.Lock()
+        # The rows of a report file, parsed once (_report_rows): a frame between the seconds saved only adds its row.
+        self._report_files = {}
+        self._route_locks = {}
+        self._route_locks_guard = threading.Lock()
 
-    def frame_lock(self, route: str, frame_key: str) -> threading.Lock:
-        """The page's saves of one frame, one after the other: a copy sent again while the first still runs (the page
-        gives up after 60 s), or another tab. Without it the refused one of two saves of a frame between the seconds
-        took away the picture of the other, stored (forget_video_frame), and a copy could miss the row the first had
-        just added (#99)."""
-        with self._frame_locks_guard:
-            return self._frame_locks.setdefault((route, frame_key), threading.Lock())
+    def _route_lock(self, kind: str, route: str) -> threading.Lock:
+        with self._route_locks_guard:
+            return self._route_locks.setdefault((kind, route), threading.Lock())
+
+    def save_lock(self, route: str) -> threading.Lock:
+        """The page's saves of one drive, one after the other. Confirm goes on without waiting for its save, so a
+        reviewer walking the video sends several at once: run together, their threads fought over the GIL and each
+        rebuilt the report, 11 to 18 s a save on a drive of 39 minutes where one alone takes 0.25 s (#100). It also
+        keeps two copies of one save apart (a copy sent again while the first still runs, or another tab): the refused
+        one took away the picture of the other, stored (forget_video_frame), and a copy could miss the row the first
+        had just added (#99). Taken before any other lock (then the GOP's and the manifest's, video_frames)."""
+        return self._route_lock('save', route)
 
     def log(self, text: str) -> None:
         if self._log is not None:
@@ -178,43 +185,75 @@ class ReviewService:
         """
         from nnslr_tools.review import latest_report
         directory = latest_report(self.root, route)
-        positions = positions_path(self.root, route)
-        try:
-            stamp = positions.stat().st_mtime_ns
-        except OSError:
-            stamp = None
-        key = (str(directory), stamp, video_frames.manifest_stamp(self.root, route))
+        key = self._report_key(route, directory)
         with self._reports_lock:
             cached = self._reports.get(key)
         if cached is None:
-            from nnslr_tools.review import report_rows
-            rows = report_rows(directory)
-            located = load_positions(self.root, route) if stamp is not None else {}
-            by_key = {}
-            for row in rows:
-                if isinstance(row, dict):
-                    position = located.get(row.get('frame_key'))
-                    row['gps'] = None
-                    row['country_proposed'] = None
-                    row['country_from'] = None
-                    if position is not None and position.get('latitude') is not None:
-                        row['gps'] = {name: position.get(name) for name in GPS_FIELDS}
-                    if position is not None:
-                        row['country_proposed'] = position.get('country')
-                        row['country_from'] = position.get('country_from')
-                by_key[row.get('frame_key')] = row
-            added = self._added_rows(route, directory, rows, by_key)
-            if added:
-                rows = sorted(rows + added, key=frame_order)
-                for row in added:
-                    by_key[row['frame_key']] = row
-            cached = (rows, by_key)
-            with self._reports_lock:
-                # One entry per report: the rows of an older positions file go.
-                for old in [item for item in self._reports if item[0] == key[0]]:
-                    del self._reports[old]
-                self._reports[key] = cached
+            # One thread builds it; the others wait and take its rows (each rebuilt it: 57 builds for 21 saves, #100).
+            with self._route_lock('report', route):
+                key = self._report_key(route, directory)
+                with self._reports_lock:
+                    cached = self._reports.get(key)
+                if cached is None:
+                    cached = self._build_report(route, directory, key)
         return directory, cached[0], cached[1]
+
+    def _report_key(self, route: str, directory: Path) -> tuple:
+        try:
+            stamp = positions_path(self.root, route).stat().st_mtime_ns
+        except OSError:
+            stamp = None
+        return str(directory), stamp, video_frames.manifest_stamp(self.root, route)
+
+    def _report_rows(self, route: str, directory: Path, stamp) -> tuple[list[dict], dict]:
+        """The rows of the report file with their GPS and country, and by frame_key, parsed once for a report and its
+        positions file: 0.14 s on a drive of 39 minutes, which every save of a frame between the seconds paid again
+        (it changes the manifest, not the report). Shared by the reports built on them, as the rows of one report
+        always were by its readers."""
+        file_key = (str(directory), stamp)
+        with self._reports_lock:
+            parsed = self._report_files.get(file_key)
+        if parsed is not None:
+            return parsed
+        from nnslr_tools.review import report_rows
+        rows = report_rows(directory)
+        located = load_positions(self.root, route) if stamp is not None else {}
+        by_key = {}
+        for row in rows:
+            if isinstance(row, dict):
+                position = located.get(row.get('frame_key'))
+                row['gps'] = None
+                row['country_proposed'] = None
+                row['country_from'] = None
+                if position is not None and position.get('latitude') is not None:
+                    row['gps'] = {name: position.get(name) for name in GPS_FIELDS}
+                if position is not None:
+                    row['country_proposed'] = position.get('country')
+                    row['country_from'] = position.get('country_from')
+            by_key[row.get('frame_key')] = row
+        parsed = (rows, by_key)
+        with self._reports_lock:
+            # One entry per report: the rows of an older positions file go.
+            for old in [item for item in self._report_files if item[0] == file_key[0]]:
+                del self._report_files[old]
+            self._report_files[file_key] = parsed
+        return parsed
+
+    def _build_report(self, route: str, directory: Path, key: tuple) -> tuple[list[dict], dict]:
+        rows, by_key = self._report_rows(route, directory, key[1])
+        added = self._added_rows(route, directory, rows, by_key)
+        if added:
+            rows = sorted(rows + added, key=frame_order)
+            by_key = dict(by_key)
+            for row in added:
+                by_key[row['frame_key']] = row
+        cached = (rows, by_key)
+        with self._reports_lock:
+            # One entry per report: the rows of an older positions file or manifest go.
+            for old in [item for item in self._reports if item[0] == key[0]]:
+                del self._reports[old]
+            self._reports[key] = cached
+        return cached
 
     def _added_rows(self, route: str, directory: Path, rows: list[dict], by_key: dict) -> list[dict]:
         """The frames between the seconds saved in Sign review since the report was made (nnslr_tools.video_frames),

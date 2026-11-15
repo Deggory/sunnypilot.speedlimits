@@ -438,6 +438,45 @@ def test_two_saves_of_one_frame_at_once_go_one_after_the_other(drive, monkeypatc
     assert (folder / 'video_00001045.png').is_file()
 
 
+def test_the_saves_of_a_drive_sent_together_go_one_at_a_time_and_its_report_file_is_read_once(drive, monkeypatch):
+    """Confirm goes on without waiting for its save: the saves of a drive sent together run one after the other, and
+    each adds its frame to the report without the report file being read again (#100)."""
+    from nnslr_tools import review as review_module
+    root, _video, _rows, server = drive
+    server.app.report(ROUTE)
+    reads = []
+    real_rows = review_module.report_rows
+    monkeypatch.setattr(review_module, 'report_rows', lambda directory: reads.append(directory) or real_rows(directory))
+    running, most = [0], [0]
+    real_materialize = video_frames.materialize
+
+    def materialize(*args, **kwargs):
+        running[0] += 1
+        most[0] = max(most[0], running[0])
+        try:
+            time.sleep(0.05)
+            return real_materialize(*args, **kwargs)
+        finally:
+            running[0] -= 1
+    monkeypatch.setattr(video_frames, 'materialize', materialize)
+    keys = [f'0/{1000 + decoded}' for decoded in range(21, 27)]
+    answers = {}
+
+    def save(key):
+        answers[key] = server.post_frame(ROUTE, key, {**body([]), 'base_revision': 0})[0]
+    threads = [threading.Thread(target=save, args=(key,)) for key in keys]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert answers == {key: 200 for key in keys}
+    assert most[0] == 1 and reads == []
+    by_key = server.app.report(ROUTE)[2]
+    assert all(key in by_key for key in keys) and reads == []
+    store = ReviewStore(db_path(root))
+    assert all(store.review(ROUTE, RUN_ID, key)['confirmed'] for key in keys)
+
+
 def test_prepared_frames_left_go_after_an_hour_from_every_drive_and_never_halfway_through_a_save(drive, monkeypatch):
     root, _video, _rows, server = drive
     folder = root / 'derived/frames' / ROUTE / '0'
