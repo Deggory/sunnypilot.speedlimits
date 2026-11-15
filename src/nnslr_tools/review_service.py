@@ -162,13 +162,21 @@ class ReviewService:
         with self._route_locks_guard:
             return self._route_locks.setdefault((kind, route), threading.Lock())
 
+    def frame_lock(self, route: str, frame_key: str) -> threading.Lock:
+        """The page's saves of one frame, one after the other, from its read of the report to its answer. It keeps two
+        copies of one save apart (a copy sent again while the first still runs, or another tab): the refused one took
+        away the picture of the other, stored (forget_video_frame), and a copy could miss the row the first had just
+        added (#99). The picture of a frame between the seconds is taken out of the video under this lock alone, so
+        the drive's other saves never wait for ffmpeg (#100). Taken before any other lock: then the GOP's and the
+        manifest's (video_frames), or save_lock."""
+        return self._route_lock('frame:' + frame_key, route)
+
     def save_lock(self, route: str) -> threading.Lock:
-        """The page's saves of one drive, one after the other. Confirm goes on without waiting for its save, so a
-        reviewer walking the video sends several at once: run together, their threads fought over the GIL and each
-        rebuilt the report, 11 to 18 s a save on a drive of 39 minutes where one alone takes 0.25 s (#100). It also
-        keeps two copies of one save apart (a copy sent again while the first still runs, or another tab): the refused
-        one took away the picture of the other, stored (forget_video_frame), and a copy could miss the row the first
-        had just added (#99). Taken before any other lock (then the GOP's and the manifest's, video_frames)."""
+        """The page's saves of one drive, one after the other, with the flags they send back. Confirm goes on without
+        waiting for its save, so a reviewer walking the video sends several at once: run together, their threads fought
+        over the GIL and each rebuilt the report, 11 to 18 s a save on a drive of 39 minutes where one alone takes
+        0.25 s (#100). Taken after frame_lock, never around ffmpeg: under it only the manifest's lock (a refused save
+        of a frame between the seconds forgets its picture) and the report's."""
         return self._route_lock('save', route)
 
     def log(self, text: str) -> None:

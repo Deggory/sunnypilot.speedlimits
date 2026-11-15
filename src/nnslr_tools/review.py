@@ -2240,8 +2240,9 @@ def make_handler(app: ReviewApp):
                 # "Apply previous" of the page: nothing is saved, the page shows the boxes to check.
                 self._json(200, app.apply_previous(route, frame_key, body))
                 return
-            # The saves of one drive one after the other, with the flags they send back (save_lock, #99, #100).
-            with app.save_lock(route):
+            # The saves of one frame one after the other (frame_lock, #99); of one drive, one after the other with the
+            # flags they send back, but never waiting for another frame's ffmpeg (save_lock, #100).
+            with app.frame_lock(route, frame_key):
                 try:
                     directory, rows, by_key = app.report(route)
                 except (PreannotationError, ValueError, OSError):
@@ -2253,21 +2254,22 @@ def make_handler(app: ReviewApp):
                 if report_row is None:
                     # A frame between the seconds confirmed: its picture is taken out of the video now.
                     report_row, made = app.video_frame_row(route, frame_key, body)
-                    rows = app.report(route)[1]
                 if report_row is None:
                     self._problem(404, 'unknown_frame', 'Frame not in the report of this route.', True)
                     return
-                try:
-                    review = save_frame_review(app.store, app.root, route_id=route, run_id=directory.name,
-                                               report_row=report_row, body=body, client=self.client_address[0])
-                except Exception:
-                    if made:
-                        app.forget_video_frame(route, frame_key, directory.name)
-                    raise
-                # A confirmation can change which neighbours are suspicious (rule d): send the new flags.
-                hints_by_frame, hint_stats = app.hints(route, rows)
-                suspicious = app.suspicious(route, directory.name, rows, hints_by_frame)
-                confirmed_count = app.store.confirmed_count(route, directory.name)
+                with app.save_lock(route):
+                    rows = app.report(route)[1]
+                    try:
+                        review = save_frame_review(app.store, app.root, route_id=route, run_id=directory.name,
+                                                   report_row=report_row, body=body, client=self.client_address[0])
+                    except Exception:
+                        if made:
+                            app.forget_video_frame(route, frame_key, directory.name)
+                        raise
+                    # A confirmation can change which neighbours are suspicious (rule d): send the new flags.
+                    hints_by_frame, hint_stats = app.hints(route, rows)
+                    suspicious = app.suspicious(route, directory.name, rows, hints_by_frame)
+                    confirmed_count = app.store.confirmed_count(route, directory.name)
             reviewer = terminal_text(review['reviewer'])
             if review['confirmed']:
                 print(f'Salvato: {route} fotogramma {frame_key}, revisione {review["revision"]} '

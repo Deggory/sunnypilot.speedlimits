@@ -448,17 +448,17 @@ def test_the_saves_of_a_drive_sent_together_go_one_at_a_time_and_its_report_file
     real_rows = review_module.report_rows
     monkeypatch.setattr(review_module, 'report_rows', lambda directory: reads.append(directory) or real_rows(directory))
     running, most = [0], [0]
-    real_materialize = video_frames.materialize
+    real_hints = server.app.hints
 
-    def materialize(*args, **kwargs):
+    def hints(*args, **kwargs):
         running[0] += 1
         most[0] = max(most[0], running[0])
         try:
             time.sleep(0.05)
-            return real_materialize(*args, **kwargs)
+            return real_hints(*args, **kwargs)
         finally:
             running[0] -= 1
-    monkeypatch.setattr(video_frames, 'materialize', materialize)
+    monkeypatch.setattr(server.app, 'hints', hints)
     keys = [f'0/{1000 + decoded}' for decoded in range(21, 27)]
     answers = {}
 
@@ -475,6 +475,34 @@ def test_the_saves_of_a_drive_sent_together_go_one_at_a_time_and_its_report_file
     assert all(key in by_key for key in keys) and reads == []
     store = ReviewStore(db_path(root))
     assert all(store.review(ROUTE, RUN_ID, key)['confirmed'] for key in keys)
+
+
+def test_a_save_never_waits_for_the_ffmpeg_of_another_frame_of_its_drive(drive):
+    """A frame between the seconds never prepared waits for ffmpeg (every decode slot taken by the video playing): the
+    save of a frame of the report sent meanwhile answers at once, and the first is saved when ffmpeg is free (#100)."""
+    root, _video, _rows, server = drive
+    server.app.report(ROUTE)
+    answers = {}
+
+    def save(key):
+        answers[key] = server.post_frame(ROUTE, key, {**body([]), 'base_revision': 0})[0]
+    for _ in range(video_frames.MAX_DECODES):
+        video_frames._decode_slots.acquire()
+    between = threading.Thread(target=save, args=('0/1025',))
+    try:
+        between.start()
+        time.sleep(0.3)
+        row = threading.Thread(target=save, args=('0/1',))
+        row.start()
+        row.join(5)
+        assert answers.get('0/1') == 200 and '0/1025' not in answers
+    finally:
+        for _ in range(video_frames.MAX_DECODES):
+            video_frames._decode_slots.release()
+    between.join(30)
+    assert answers == {'0/1': 200, '0/1025': 200}
+    store = ReviewStore(db_path(root))
+    assert store.review(ROUTE, RUN_ID, '0/1025')['confirmed'] and store.review(ROUTE, RUN_ID, '0/1')['confirmed']
 
 
 def test_prepared_frames_left_go_after_an_hour_from_every_drive_and_never_halfway_through_a_save(drive, monkeypatch):
