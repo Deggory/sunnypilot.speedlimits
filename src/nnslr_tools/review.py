@@ -2240,27 +2240,30 @@ def make_handler(app: ReviewApp):
                 # "Apply previous" of the page: nothing is saved, the page shows the boxes to check.
                 self._json(200, app.apply_previous(route, frame_key, body))
                 return
-            try:
-                directory, rows, by_key = app.report(route)
-            except (PreannotationError, ValueError, OSError):
-                self._problem(404, 'unknown_route', 'Unknown route, or route without a pre-annotation report.', True)
-                return
-            report_row = by_key.get(frame_key)
-            made = False
-            if report_row is None:
-                # A frame between the seconds confirmed: its picture is taken out of the video now.
-                report_row, made = app.video_frame_row(route, frame_key, body)
-                rows = app.report(route)[1]
-            if report_row is None:
-                self._problem(404, 'unknown_frame', 'Frame not in the report of this route.', True)
-                return
-            try:
-                review = save_frame_review(app.store, app.root, route_id=route, run_id=directory.name,
-                                           report_row=report_row, body=body, client=self.client_address[0])
-            except Exception:
-                if made:
-                    app.forget_video_frame(route, frame_key)
-                raise
+            # The saves of one frame one after the other (frame_lock, #99).
+            with app.frame_lock(route, frame_key):
+                try:
+                    directory, rows, by_key = app.report(route)
+                except (PreannotationError, ValueError, OSError):
+                    self._problem(404, 'unknown_route', 'Unknown route, or route without a pre-annotation report.',
+                                  True)
+                    return
+                report_row = by_key.get(frame_key)
+                made = False
+                if report_row is None:
+                    # A frame between the seconds confirmed: its picture is taken out of the video now.
+                    report_row, made = app.video_frame_row(route, frame_key, body)
+                    rows = app.report(route)[1]
+                if report_row is None:
+                    self._problem(404, 'unknown_frame', 'Frame not in the report of this route.', True)
+                    return
+                try:
+                    review = save_frame_review(app.store, app.root, route_id=route, run_id=directory.name,
+                                               report_row=report_row, body=body, client=self.client_address[0])
+                except Exception:
+                    if made:
+                        app.forget_video_frame(route, frame_key, directory.name)
+                    raise
             reviewer = terminal_text(review['reviewer'])
             if review['confirmed']:
                 print(f'Salvato: {route} fotogramma {frame_key}, revisione {review["revision"]} '

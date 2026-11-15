@@ -4,9 +4,11 @@ import keep."""
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import threading
+import time
 
 import pytest
 
@@ -400,6 +402,81 @@ def test_a_save_sent_again_after_it_was_stored_is_answered_ok_without_a_new_revi
         other = {**body([BOX]), 'reviewer': 'Someone else', 'base_revision': 0}
         assert server.post_frame(ROUTE, key, other)[0] == 409
         assert store.review(ROUTE, RUN_ID, key)['revision'] == 1
+
+
+def test_two_saves_of_one_frame_at_once_go_one_after_the_other(drive, monkeypatch):
+    """A copy sent again while the first still runs, or another tab: the same labels are both OK; other labels are a
+    conflict that never takes away the picture of the save stored (#99 review)."""
+    root, _video, _rows, server = drive
+    real = video_frames.extract_frames
+
+    def slow(*args, **kwargs):
+        time.sleep(0.3)
+        return real(*args, **kwargs)
+    monkeypatch.setattr(video_frames, 'extract_frames', slow)
+    folder = root / 'derived/frames' / ROUTE / '0'
+    store = ReviewStore(db_path(root))
+    for key, bodies in (('0/1025', [BOX, BOX]), ('0/1045', [BOX, dict(BOX, value_kph=60)])):
+        answers = []
+
+        def save(box):
+            status, _response, data = server.post_frame(ROUTE, key, {**body([box]), 'base_revision': 0})
+            answers.append((status, json_of(data)))
+        threads = [threading.Thread(target=save, args=(box,)) for box in bodies]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        statuses = sorted(status for status, _answer in answers)
+        assert statuses == ([200, 200] if bodies[0] == bodies[1] else [200, 409]), answers
+        saved = store.review(ROUTE, RUN_ID, key)
+        assert saved['confirmed'] and saved['revision'] == 1
+        picture = folder / f'video_{int(key.split("/")[1]):08d}.png'
+        assert picture.is_file() and key in server.app.report(ROUTE)[2]
+    # A save refused while the frame is confirmed already (by the REST API, MCP) keeps its picture.
+    server.app.forget_video_frame(ROUTE, '0/1045', RUN_ID)
+    assert (folder / 'video_00001045.png').is_file()
+
+
+def test_prepared_frames_left_go_after_an_hour_from_every_drive_and_never_halfway_through_a_save(drive, monkeypatch):
+    root, _video, _rows, server = drive
+    folder = root / 'derived/frames' / ROUTE / '0'
+    # No sweep in the background but those the test asks for.
+    monkeypatch.setattr(video_frames, '_last_sweep', [time.monotonic()])
+    video_frames.prepare(root, ROUTE, 0, 25)
+    old = time.time() - video_frames.PREPARED_KEPT_S - 60
+    prepared = sorted(folder.glob(video_frames.PREPARED_PREFIX + '*'))
+    assert len(prepared) == 19
+    for path in prepared[:-1]:
+        os.utime(path, (old, old))
+    # A folder a stopped server left, in a segment of another drive never opened again.
+    other = root / 'derived/frames/00000002--0123456789/3'
+    (other / '.video-abc').mkdir(parents=True)
+    os.utime(other / '.video-abc', (old, old))
+    # A save takes an old prepared frame whole while the frames left are removed at the same moment.
+    real_move = video_frames._move_picture
+
+    def move_while_forgetting(made, directory):
+        video_frames.forget_old_prepared(root)
+        real_move(made, directory)
+    with monkeypatch.context() as patched:
+        patched.setattr(video_frames, '_move_picture', move_while_forgetting)
+        made, fresh = video_frames.materialize(root, ROUTE, 0, 26)
+    assert fresh and made['decoded_frame_index'] == 26 and (folder / 'video_00001026.png').is_file()
+    # The old ones went, the recent one stayed; no folder of the save is left.
+    assert [path.name for path in folder.glob('.*')] == [prepared[-1].name] and not list(other.iterdir())
+    # The sweep runs in the background at most once every SWEEP_EVERY_S.
+    monkeypatch.setattr(video_frames, '_last_sweep', [])
+    os.utime(prepared[-1], (old, old))
+    video_frames.forget_old_prepared_soon(root)
+    for thread in threading.enumerate():
+        if thread.name == 'video-prepared-sweep':
+            thread.join()
+    assert not list(folder.glob('.*'))
+    (folder / '.video-again').mkdir()
+    os.utime(folder / '.video-again', (old, old))
+    video_frames.forget_old_prepared_soon(root)
+    assert (folder / '.video-again').is_dir()
 
 
 def test_a_later_read_of_the_same_frame_keeps_one_row(drive):

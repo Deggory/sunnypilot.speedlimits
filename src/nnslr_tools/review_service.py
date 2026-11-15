@@ -153,6 +153,16 @@ class ReviewService:
         # hashes the picture, 4 ms each, which made every save of such a frame wait seconds on a drive with hundreds.
         self._added_frames = {}
         self._car_positions = {}
+        self._frame_locks = {}
+        self._frame_locks_guard = threading.Lock()
+
+    def frame_lock(self, route: str, frame_key: str) -> threading.Lock:
+        """The page's saves of one frame, one after the other: a copy sent again while the first still runs (the page
+        gives up after 60 s), or another tab. Without it the refused one of two saves of a frame between the seconds
+        took away the picture of the other, stored (forget_video_frame), and a copy could miss the row the first had
+        just added (#99)."""
+        with self._frame_locks_guard:
+            return self._frame_locks.setdefault((route, frame_key), threading.Lock())
 
     def log(self, text: str) -> None:
         if self._log is not None:
@@ -272,8 +282,10 @@ class ReviewService:
             return None, False
         _directory, rows, _by_key = self.known_report(route)
         decoded = index - READ_INDEX_BASE
-        if any(row.get('segment_index') == segment and row.get('decoded_frame_index') == decoded for row in rows):
-            return None, False
+        for row in rows:
+            if row.get('segment_index') == segment and row.get('decoded_frame_index') == decoded:
+                # Saved meanwhile under this key (the report read before did not have it yet): that row.
+                return (row, False) if row.get('frame_key') == frame_key else (None, False)
         if not isinstance(body, dict) or body.get('confirmed') is not True:
             return None, False
         from nnslr_tools.reproposing import refuse_if_busy
@@ -384,8 +396,12 @@ class ReviewService:
                 continue
         return found
 
-    def forget_video_frame(self, route, frame_key: str) -> None:
-        """Undo video_frame_row when the save it was for was refused."""
+    def forget_video_frame(self, route, frame_key: str, run_id: str) -> None:
+        """Undo video_frame_row when the save it was for was refused; never for a frame confirmed meanwhile (the REST
+        API, MCP), whose review would lose its picture and stop every import (missing_image)."""
+        saved = self.store.review(route, run_id, frame_key)
+        if saved is not None and saved['confirmed']:
+            return
         segment, index = (int(part) for part in frame_key.split('/'))
         video_frames.forget(self.root, route, segment, index - READ_INDEX_BASE)
 

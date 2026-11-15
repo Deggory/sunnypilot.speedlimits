@@ -27,6 +27,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import uuid
 from functools import lru_cache
 from pathlib import Path
 
@@ -62,6 +63,9 @@ HEADER_BYTES = 1 << 16
 # its save moves its pictures beside the others (materialize); one never saved goes after this long.
 PREPARED_PREFIX = '.prepared-'
 PREPARED_KEPT_S = 3600
+# How often a save or a prepare looks through every segment folder for those (forget_old_prepared_soon).
+SWEEP_EVERY_S = 600
+_last_sweep: list[float] = []
 
 _locks: dict[tuple, threading.Lock] = {}
 _locks_guard = threading.Lock()
@@ -104,9 +108,12 @@ def wide_video_of(root: Path, route: str, segment: int) -> Path:
 
 
 def _rows(path: Path) -> list[dict]:
-    if not path.is_file():
+    try:
+        text = path.read_text()
+    except (FileNotFoundError, NotADirectoryError):
+        # Missing, or removed meanwhile (forget unlinks an empty manifest under its lock; _saved reads without it).
         return []
-    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    return [json.loads(line) for line in text.splitlines() if line.strip()]
 
 
 @lru_cache(maxsize=512)
@@ -565,15 +572,15 @@ def _extract_gop(root: Path, route: str, segment: int, video: Path, gop: tuple[i
     alignment = root / 'derived/alignment' / route / f'{int(segment)}.jsonl'
     alignment = alignment if alignment.is_file() else None
     directory.mkdir(parents=True, exist_ok=True)
+    # Only its GOP is decoded, with the timings read when its frames were shown.
+    timings, data = timings_of(video), gop_bytes(video, first, last)
     with tempfile.TemporaryDirectory(prefix='.video-', dir=directory) as temporary:
         staging = Path(temporary)
-        # Only its GOP is decoded, with the timings read when its frames were shown; as many ffmpeg at once as the
-        # previews allow (MAX_DECODES, #60).
+        # As many ffmpeg at once as the previews allow (MAX_DECODES, #60).
         with _decode_slots:
             result = extract_frames(video, staging / 'frames', decoded=frames, prefix=VIDEO_PREFIX,
                                     index_base=READ_INDEX_BASE, alignment=alignment, route_id=route,
-                                    segment_index=int(segment), timings=timings_of(video),
-                                    gop=(first, gop_bytes(video, first, last)))
+                                    segment_index=int(segment), timings=timings, gop=(first, data))
         made_rows = extracted_frame_rows(result, route_id=route, segment_index=int(segment), alignment=alignment)
         if not any(made.get('decoded_frame_index') == wanted and isinstance(made.get('media_time_s'), (int, float))
                    for made in made_rows):
@@ -614,18 +621,45 @@ def prepare(root: Path, route: str, segment: int, decoded: int) -> None:
         if _prepared(directory, decoded) or _saved(directory, decoded) is not None:
             return
         _extract_gop(root, route, segment, video, gop, directory, wanted=decoded)
-    _forget_old_prepared(directory)
+    forget_old_prepared_soon(root)
 
 
-def _forget_old_prepared(directory: Path) -> None:
-    """The frames prepared and never saved go after PREPARED_KEPT_S."""
-    now = time.time()
-    for old in directory.glob(PREPARED_PREFIX + '*'):
+def _drop_old(paths, now: float) -> None:
+    """The folders among ``paths`` older than PREPARED_KEPT_S removed, each renamed first: a save that took one
+    (_take_prepared, which renames it too) keeps it whole, the other finds it gone."""
+    for old in paths:
         try:
-            if now - old.stat().st_mtime > PREPARED_KEPT_S:
-                shutil.rmtree(old, ignore_errors=True)
+            if now - old.stat().st_mtime <= PREPARED_KEPT_S:
+                continue
+            dropped = old.with_name(f'.video-drop-{uuid.uuid4().hex}')
+            old.rename(dropped)
+        except OSError:
+            continue
+        shutil.rmtree(dropped, ignore_errors=True)
+
+
+def forget_old_prepared(root: Path) -> None:
+    """The frames prepared and never saved go after PREPARED_KEPT_S, in every segment folder of every drive, with the
+    temporary folders a stopped server left (.video-*). A segment the reviewer never came back to kept them for good:
+    1 GB on 15 Nov 2026, before a GOP was prepared at once (#99)."""
+    frames = Path(root) / 'derived/frames'
+    _drop_old([*frames.glob('*/*/' + PREPARED_PREFIX + '*'), *frames.glob('*/*/.video-*')], time.time())
+
+
+def forget_old_prepared_soon(root: Path) -> None:
+    """forget_old_prepared in the background, at most once every SWEEP_EVERY_S (0.2 s for 2000 segment folders)."""
+    with _locks_guard:
+        now = time.monotonic()
+        if _last_sweep and now - _last_sweep[0] < SWEEP_EVERY_S:
+            return
+        _last_sweep[:] = [now]
+
+    def sweep() -> None:
+        try:
+            forget_old_prepared(root)
         except OSError:
             pass
+    threading.Thread(target=sweep, name='video-prepared-sweep', daemon=True).start()
 
 
 def prepare_soon(root: Path, route: str, segment: int, decoded: int) -> None:
@@ -648,19 +682,29 @@ def _saved(directory: Path, decoded: int) -> dict | None:
 
 def _take_prepared(directory: Path, decoded: int) -> dict | None:
     """The manifest row of a frame _extract_gop took out, its pictures moved into ``directory``; None without one.
-    Called under the GOP's lock."""
+    Its folder is renamed first, so that forget_old_prepared, which renames what it removes, cannot take a picture out
+    of it halfway (a frame saved without its picture at full definition); made recent before, so that it does not
+    look old under its new name (.video-*) while its pictures move. Called under the GOP's lock."""
     folder = directory / f'{PREPARED_PREFIX}{int(decoded)}'
+    taken = directory / f'.video-take-{int(decoded)}-{uuid.uuid4().hex}'
     try:
-        made = json.loads((folder / 'row.json').read_text())
-        made['image_path'] = str(folder / made['image_path'])
-        if not isinstance(made, dict) or not Path(made['image_path']).is_file():
+        os.utime(folder)
+        folder.rename(taken)
+    except OSError:
+        return None
+    try:
+        made = json.loads((taken / 'row.json').read_text())
+        if not isinstance(made, dict):
+            return None
+        made['image_path'] = str(taken / made['image_path'])
+        if not Path(made['image_path']).is_file():
             return None
         _move_picture(made, directory)
         return made
     except (OSError, ValueError, KeyError, TypeError):
         return None
     finally:
-        shutil.rmtree(folder, ignore_errors=True)
+        shutil.rmtree(taken, ignore_errors=True)
 
 
 def materialize(root: Path, route: str, segment: int, decoded: int) -> tuple[dict, bool]:
@@ -689,7 +733,7 @@ def materialize(root: Path, route: str, segment: int, decoded: int) -> tuple[dic
             temporary = manifest.with_suffix('.jsonl.tmp')
             temporary.write_text(''.join(json.dumps(row, sort_keys=True) + '\n' for row in rows))
             temporary.replace(manifest)
-    _forget_old_prepared(directory)
+    forget_old_prepared_soon(root)
     return made, True
 
 
