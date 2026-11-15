@@ -434,8 +434,12 @@ def _brain_applicability(result: dict) -> dict:
     """Whose road a sign is of, of a brain's result.json (brain_train, since 15 Nov 2026, #89): whether
     applicability_head learned it, whether the brain was given the boxes of every sign read (other_road_boxes: the car
     must give it the same), and on validation and test the speed signs a reviewed box answers (ours, another) with the
-    precision and recall of "of another road" of the head and, on the same signs, of the applicability network. Every
-    part None for a brain of before."""
+    precision and recall of "of another road" of the head and, on the same signs, of the applicability network; with
+    the head, how often it says what the network said (agrees) and, of the signs the network ruled wrongly
+    (network_wrong: columns), on how many the head is right (head_right): the head can read the network's verdict in
+    its inputs, so only these show what it adds. no_network: the same two partitions with every sign read taken, as with
+    no applicability network in the release (brain_train's validation_no_network, test_no_network): the speed, and the
+    head where nothing tells it what the network decided. Every part None for a brain of before."""
     def told(part: Any) -> dict | None:
         if not isinstance(part, dict):
             return None
@@ -446,12 +450,23 @@ def _brain_applicability(result: dict) -> dict:
         found = _dig(result, (name, 'applicability'))
         if not isinstance(found, dict):
             return None
+        wrong = found.get('where_network_wrong')
         return {'ours': _int(found.get('ours')), 'another': _int(found.get('another')), 'head': told(found.get('head')),
-                'network': told(found.get('network'))}
+                'network': told(found.get('network')), 'agrees': _num(found.get('agrees')),
+                'network_wrong': {'columns': _int(wrong.get('columns')), 'head_right': _int(wrong.get('head_right'))}
+                if isinstance(wrong, dict) else None}
+
+    def unfiltered(name: str) -> dict | None:
+        speed = _dig(result, (name + '_no_network', 'speed'))
+        if not isinstance(speed, dict):
+            return None
+        return {'speed': {key: speed.get(key) for key in ('frames', 'right', 'mean_error_kph')},
+                'applicability': partition(name + '_no_network')}
 
     return {'learned': None if 'applicability' not in result else bool(result.get('applicability')),
             'other_road_boxes': bool(result.get('other_road_boxes')),
-            'validation': partition('validation'), 'test': partition('test')}
+            'validation': partition('validation'), 'test': partition('test'),
+            'no_network': {'validation': unfiltered('validation'), 'test': unfiltered('test')}}
 
 
 def brain_digest(result: Any) -> dict:

@@ -1542,12 +1542,22 @@ export interface AnotherRoadNumbers {
   wrong: number | null;
 }
 /** Whose road a speed sign is of, on one partition of a brain: the reviewed signs of our road and of another, and how
- * the brain's head (null: it has none) and the applicability network tell them, on the same signs. */
+ * the brain's head (null: it has none) and the applicability network tell them, on the same signs. With the head: how
+ * often it says what the network said (agrees, 0 to 1), and of the signs the network ruled wrongly, on how many the head
+ * is right: the head can read the network's verdict in its inputs, so only these show what it adds. */
 export interface BrainApplicabilityNumbers {
   ours: number | null;
   another: number | null;
   head: AnotherRoadNumbers | null;
   network: AnotherRoadNumbers | null;
+  agrees?: number | null;
+  network_wrong?: {columns: number | null; head_right: number | null} | null;
+}
+/** A partition of a brain with every sign read taken, as with no applicability network in the release: the speed, and
+ * the head where nothing tells it what that network decided. */
+export interface BrainNoNetwork {
+  speed: BrainNumbers;
+  applicability: BrainApplicabilityNumbers | null;
 }
 export interface BrainModel extends ModelBase {
   role: 'brain';
@@ -1590,7 +1600,8 @@ export interface BrainModel extends ModelBase {
   /** Whose road a sign is of (#89): whether its head learnt it (null: a brain of before 15 Nov 2026), whether it was given
    * the boxes of every sign read (the car gives such a brain the same), and the two measured on validation and test. */
   applicability?: {learned: boolean | null; other_road_boxes: boolean;
-    validation: BrainApplicabilityNumbers | null; test: BrainApplicabilityNumbers | null} | null;
+    validation: BrainApplicabilityNumbers | null; test: BrainApplicabilityNumbers | null;
+    no_network?: {validation: BrainNoNetwork | null; test: BrainNoNetwork | null}} | null;
 }
 
 /** UserNet on one partition at its score (0.5, what the brain will read; nnslr_tools.usernet.digest): the frames, the road

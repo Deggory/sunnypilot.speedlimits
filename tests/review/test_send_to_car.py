@@ -393,17 +393,28 @@ def test_a_brain_given_every_sign_s_box_goes_on_the_car_only_when_the_pushed_bra
     data = tmp_path / 'data'
     servers_runs(data)
     told = {'true_positive': 3, 'false_positive': 1, 'false_negative': 1, 'precision': .75, 'recall': .75}
-    whose = {'ours': 20, 'another': 4, 'head': told, 'network': {**told, 'true_positive': 2, 'recall': .5}}
+    whose = {'ours': 20, 'another': 4, 'head': told, 'network': {**told, 'true_positive': 2, 'recall': .5},
+             'agrees': .875, 'where_network_wrong': {'columns': 3, 'head_right': 2},
+             'where_network_right': {'columns': 21, 'head_right': 20}}
+    bare = {'speed': {'frames': 100, 'right': .25, 'mean_error_kph': 9.5, 'more': 1},
+            'applicability': {'ours': 20, 'another': 4, 'head': {**told, 'true_positive': 1, 'recall': .25}, 'network': told}}
     model_id = brain_run(data, 'b1', result={'groups': ['signs', 'sign_boxes'], 'seed': 0, 'history': [{}], 'validation': {},
                                              'applicability': True, 'other_road_boxes': True,
-                                             'test': {'applicability': whose}})
+                                             'test': {'applicability': whose}, 'test_no_network': bare})
     use_brain(data, model_id)
     index = ModelIndex(RunsIndex(data))
     entry = index.in_use('brain')[0]
     # Models shows the head beside the network on the same reviewed signs, and says what the brain learns
+    found = {'precision': .75, 'recall': .75, 'found': 3, 'wrong': 1}
     assert entry['applicability'] == {'learned': True, 'other_road_boxes': True, 'validation': None, 'test': {
-        'ours': 20, 'another': 4, 'head': {'precision': .75, 'recall': .75, 'found': 3, 'wrong': 1},
-        'network': {'precision': .75, 'recall': .5, 'found': 2, 'wrong': 1}}}
+        'ours': 20, 'another': 4, 'head': found, 'network': {**found, 'recall': .5, 'found': 2},
+        # What the head adds over the network, whose verdict it can read in its inputs
+        'agrees': .875, 'network_wrong': {'columns': 3, 'head_right': 2}},
+        # With every sign taken, as with no applicability network: the speed, and the head on its own
+        'no_network': {'validation': None, 'test': {
+            'speed': {'frames': 100, 'right': .25, 'mean_error_kph': 9.5},
+            'applicability': {'ours': 20, 'another': 4, 'head': {**found, 'recall': .25, 'found': 1}, 'network': found,
+                              'agrees': None, 'network_wrong': None}}}}
     assert entry['detail'] == 'says the speed to hold · learns whose road a sign is of'
     clone = tmp_path / 'sunnypilot'
     monkeypatch.setenv(car_release.SUNNYPILOT_CLONE_ENV, str(clone))
@@ -432,7 +443,8 @@ def test_a_brain_given_every_sign_s_box_goes_on_the_car_only_when_the_pushed_bra
     monkeypatch.setenv(car_release.SUNNYPILOT_CLONE_ENV, str(tmp_path / 'none'))
     assert car_release.brain_refused(index) == ''
     before = index.in_use('brain')[0]['applicability']
-    assert before == {'learned': None, 'other_road_boxes': False, 'validation': None, 'test': None}
+    assert before == {'learned': None, 'other_road_boxes': False, 'validation': None, 'test': None,
+                      'no_network': {'validation': None, 'test': None}}
 
 
 def test_a_brain_that_takes_the_drivers_inputs_never_goes_on_the_car(tmp_path):

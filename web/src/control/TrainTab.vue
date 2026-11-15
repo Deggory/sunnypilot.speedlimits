@@ -207,7 +207,7 @@ const BRAIN_ACTIONS = computed((): [ActionName, string][] => {
     + starts.brain.words + signNetworks.words
     + (one ? ', about 3 minutes on the GPU' : ', one after the other, about 3 minutes each on the GPU')
     + ', after reading the signs of the drives as the car does '
-    + '(the applicability network leaves out those of another road). Then you ' + (one ? 'find it' : 'choose one') + ' in Models and Publish it.']];
+    + '(the applicability network keeps those of another road out of the number in force). Then you ' + (one ? 'find it' : 'choose one') + ' in Models and Publish it.']];
 });
 /** UserNet's stage: BDD100K's pictures first, then the road users of your drives, usually from a BDD100K one
  * (scripts/run_usernet.sh, NNSLR_USERNET_STAGE). */

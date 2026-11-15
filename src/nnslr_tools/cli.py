@@ -2978,7 +2978,10 @@ def _cmd_train_brain(args: argparse.Namespace) -> int:
                          for part in ('train', 'validation', 'test')},
                       **{part: result[part] for part in ('validation_swapped', 'test_swapped')},
                       **{part: {'speed': result[part]['speed']} for part in ('validation_no_map', 'test_no_map')
-                         if part in result}}, indent=2))
+                         if part in result},
+                      # With every sign taken, as with no applicability network: the speed and the head on their own.
+                      **{part: {'speed': result[part]['speed'], 'applicability': result[part].get('applicability')}
+                         for part in ('validation_no_network', 'test_no_network') if part in result}}, indent=2))
     return 0
 
 

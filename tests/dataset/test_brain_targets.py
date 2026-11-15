@@ -1442,6 +1442,55 @@ def test_whose_road_a_sign_is_of_comes_from_the_reviewed_boxes(tmp_path):
     assert not targets.applicability_answers(tmp_path, 'no--reviews', reading_frames(), read_record())['weight'].any()
 
 
+def test_the_last_frames_of_a_minute_go_to_the_first_reading_of_the_next(tmp_path):
+    """Frames 1198 and 1199 of a segment's video are nearest to frame 0 of the next one, which is a reading too."""
+    numpy = _np()
+    targets = _targets()
+    record = {'readings': [[60.0, [['maximum_speed:80', .9]]]], 'boxes': [[OURS]], 'other_road': [], 'other_boxes': []}
+    frames = [{'segment': 0, 'decoded': 1195}, {'segment': 1, 'decoded': 0}, {'segment': 1, 'decoded': 5}]
+    for decoded in (1198, 1199):
+        write_reviews(tmp_path, [reviewed(decoded, OURS, 'other_road')])
+        targets._REVIEWED.clear()
+        found = targets.applicability_answers(tmp_path, ROUTE, frames, record)
+        assert [(int(row), int(column)) for row, column in zip(*numpy.nonzero(found['weight']))] == [(1, 6)], decoded
+        assert found['target'][1, 6] == 1
+    # The nearer frame wins across the two minutes too: frame 1 of the next one over frame 1198 of this one
+    write_reviews(tmp_path, [reviewed(1198, OURS, 'other_road'), reviewed(1, OURS, 'own_road', segment_index=1)])
+    targets._REVIEWED.clear()
+    found = targets.applicability_answers(tmp_path, ROUTE, frames, record)
+    assert found['weight'][1, 6] == 1 and found['target'][1, 6] == 0
+    # A drive that ends there has no such reading: nothing is answered
+    write_reviews(tmp_path, [reviewed(1199, OURS, 'other_road')])
+    targets._REVIEWED.clear()
+    assert not targets.applicability_answers(tmp_path, ROUTE, frames[:1], record)['weight'].any()
+
+
+def test_with_no_applicability_network_every_sign_read_is_taken():
+    """The groups made from the signs as with no such network in the release (stage 2 of #89): the 40 the network gave
+    to another road becomes a reading like any other. Only for a measure: nothing there says what the network decided."""
+    numpy = _np()
+    targets = _targets()
+    frames = [{'segment': 0, 'index': second, 'seconds': second} for second in (0.25, 0.5, 0.75)]
+    ns = (numpy.array([frame['seconds'] for frame in frames]) * NS).astype(numpy.int64)
+    record = read_record()
+    every = targets.unruled_inputs(frames, record)
+    assert set(every) == set(targets.SIGN_GROUPS)
+    taken = targets.drive_inputs(frames, ns, {}, record['readings'], None, record['boxes'], targets.all_readings(record))
+    # Ruled: the single reading at 0.5 s is the 80 the network took. Unruled: the surer 40 it gave away.
+    assert taken['signs'][1, 8] == pytest.approx(80 / 130) and every['signs'][1, 8] == pytest.approx(40 / 130)
+    assert numpy.array_equal(every['sign_boxes'], taken['sign_boxes'])  # a head brain has every box either way
+    drive = {'inputs': taken, 'inputs_unruled': every, 'route': 'r'}
+    groups = ('signs', 'sign_boxes', 'lead')
+    blind = targets.without_network(drive, groups)
+    assert numpy.array_equal(blind['inputs']['signs'], every['signs']) and blind['inputs']['lead'] is taken['lead']
+    assert numpy.array_equal(blind['extra'], targets.pack_inputs({**taken, **every}, groups)) and drive['inputs'] is taken
+    # A drive read before the boxes of the signs of another road were kept, or not read: no such measure
+    old = {key: value for key, value in record.items() if key != 'other_boxes'}
+    assert targets.unruled_inputs(frames, old) is None and targets.unruled_inputs(frames, None) is None
+    assert targets.without_network({'inputs': taken, 'inputs_unruled': None}, groups) is None
+    assert targets.without_network({'inputs': taken}, groups) is None
+
+
 def test_the_reviewed_boxes_are_read_again_when_the_dataset_changes(tmp_path):
     import os
     targets = _targets()

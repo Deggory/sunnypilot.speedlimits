@@ -76,8 +76,9 @@ export function useSignNetworks(versionsOf: (role: ModelRole) => readonly ModelV
     if (missed.length) return {text: 'No ' + missed.join(', no ') + ' to read the signs with: train one, or the brain cannot start.', warn: true};
     const before = SIGN_PARTS.filter(({part}) => trained.includes(part)).map(({part}) => WORD[part]);
     return {text: (before.length ? 'Its signs are read with the ' + listed(before) + ' trained just before. ' : '')
-      + 'The signs the brain learns from are read as the car reads them: the applicability network leaves out those of '
-      + 'another road (an exit, a side road). A drive not read by these three is read again first.', warn: false};
+      + 'The signs the brain learns from are read as the car reads them: a sign the applicability network gives to '
+      + 'another road (an exit, a side road) never becomes the number in force; with Applicability on, its box still '
+      + 'reaches the brain. A drive not read by these three is read again first.', warn: false};
   };
   const missing = computed(() => missingOf());
   const option = computed(() => optionOf());

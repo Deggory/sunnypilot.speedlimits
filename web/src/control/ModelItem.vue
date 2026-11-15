@@ -42,7 +42,19 @@ const anotherRoad = computed(() => {
   const said = (who: 'head' | 'network') => parts.filter(([, numbers]) => numbers![who])
     .map(([name, numbers]) => `${name} ${numbers![who]!.found ?? 0} of ${numbers!.another ?? 0}, ${numbers![who]!.wrong ?? 0} wrong`)
     .join(' · ');
-  return {head: found.learned ? said('head') : '', network: said('network'),
+  // What the head adds: the signs the network ruled wrongly, and on how many of them the head is right.
+  const adds = found.learned ? parts.filter(([, numbers]) => numbers!.network_wrong?.columns)
+    .map(([name, numbers]) => `${name} ${numbers!.network_wrong!.head_right ?? 0} of ${numbers!.network_wrong!.columns} right`)
+    .join(' · ') : '';
+  const same = found.learned ? parts.filter(([, numbers]) => numbers!.agrees != null)
+    .map(([name, numbers]) => `${name} ${pct(numbers!.agrees)}`).join(', ') : '';
+  // With every sign taken, as with no applicability network: the speed on the test, and the head on its own there.
+  const bare = found.no_network?.test ?? null;
+  const alone = bare?.applicability?.head && found.learned
+    ? ` · its head ${bare.applicability.head.found ?? 0} of ${bare.applicability.another ?? 0}, ${bare.applicability.head.wrong ?? 0} wrong` : '';
+  const noNetwork = bare && bare.speed.mean_error_kph != null
+    ? `${bare.speed.mean_error_kph.toFixed(1)} km/h off on the test${alone}` : '';
+  return {head: found.learned ? said('head') : '', network: said('network'), adds, same, noNetwork,
     signs: parts.map(([name, numbers]) => `${name} ${(numbers!.ours ?? 0) + (numbers!.another ?? 0)}`).join(', ')};
 });
 /** UserNet's numbers: on the test, else on validation (the test has no ticked frame yet). */
@@ -256,6 +268,8 @@ const noOtherOnTest = computed(() => decider.value?.test?.other_road_support ===
           <div v-if="brain.test_no_map"><dt title="The same test frames with no map at all, as past a border with no map downloaded: what is left of it without the map">Off without the map</dt><dd>{{ brain.test_no_map.mean_error_kph?.toFixed(1) ?? '–' }} km/h</dd></div>
           <div v-if="anotherRoad?.head"><dt :title="'Of the speed signs a reviewed box gives to another road (reviewed speed signs it is given: ' + anotherRoad.signs + '): how many its applicability head finds, and how many signs of our road it calls another’s'">Another road, its head</dt><dd>{{ anotherRoad.head }}</dd></div>
           <div v-if="anotherRoad?.network"><dt title="The same signs as the applicability network ruled them when the drives were read. It learnt on its own split: some of these signs may have been in its training">Another road, the network</dt><dd>{{ anotherRoad.network }}</dd></div>
+          <div v-if="anotherRoad?.adds"><dt :title="'The reviewed signs the applicability network ruled wrongly, and on how many of them the head is right. The head can read the network’s verdict in what it is given (the number in force comes from the signs the network takes), so only these show what it adds' + (anotherRoad.same ? '; it says what the network said on ' + anotherRoad.same + ' of the signs' : '')">Where the network was wrong</dt><dd>{{ anotherRoad.adds }}</dd></div>
+          <div v-if="anotherRoad?.noNetwork"><dt title="The same test frames with every sign read taken, as with no applicability network in the release: what the brain says without its filter, and what its head finds of the signs of another road when nothing tells it what the network decided">With no applicability network</dt><dd>{{ anotherRoad.noNetwork }}</dd></div>
           <div><dt title="What it reads each second beside the picture; the map only when map_limit is among them">Inputs</dt><dd>{{ brain.groups?.join(', ') ?? '–' }}</dd></div>
           <div><dt title="Whether the frames it trained on had a limit with a plate of hours">Hours plates</dt><dd>{{ brain.hours ? 'Reads them and their hours' : brain.plates ? 'Reads them' : 'Does not read them' }}</dd></div>
           <div><dt title="Whether the frames it trained on had a limit valid only on a wet road">Wet plates</dt><dd>{{ brain.wet ? 'Reads them' : 'Does not read them' }}</dd></div>

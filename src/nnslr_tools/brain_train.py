@@ -52,7 +52,11 @@ between roads seen and not seen:
   recall of "of another road", of applicability_head (head; None without it) and, on the same columns, of the
   applicability network as it ruled the drive when it was read (network), with how many columns say our road and how
   many another. The comparison flatters the network: it learnt on its own split, so some signs of the brain's test were
-  in its training;
+  in its training. It flatters the head too: the number in force and the last single reading it is given come from the
+  signs the network takes, so a box with no fresh reading beside it is a sign the network gave away, and a head that
+  only says that back scores as the network. So, with the head: agrees (the share of those columns where the head says
+  what the network said), where_network_wrong and where_network_right (the columns where the network's word is not,
+  or is, the review's, and on how many of them the head is right: only the first shows what the head adds);
 - sites: per mark of the partition, how long after his end tap the speed reaches (within RIGHT_KPH) the speed he drove
   after it, and how much of the mark was above his label: said too early, the end of works that is not there. The speed
   after is the 90th percentile of his answers in END_WINDOW_S after the tap, the one he reaches, not his first answer there,
@@ -66,6 +70,12 @@ test_swapped and validation_swapped ask the network what the swap asks in traini
 passage says its number (brain_targets.swap_passages: within SWAP_TOLERANCE_KPH), with that number changed to the other of its
 family and his answers moved as much. A network deaf to the sign is still right on the frames that go to the speed it says, so
 moved counts the answers that changed by more than RIGHT_KPH: the network reads the sign when they follow it.
+
+validation_no_network and test_no_network: the same partitions with the groups made from the signs as with no
+applicability network in the release, every sign read taken (brain_targets.without_network). Nothing the brain is given
+then says what that network decided: the head's numbers there are its own, and the speed's are what the brain says
+without the network's filter, the condition of stage 2 of #89. Not in a dry run, nor on drives read before the boxes of
+the signs of another road were kept.
 
 validation_no_map and test_no_map, of a brain that learns the map's limit: the same partitions with no map on any frame
 (brain_targets.without_map), as past a border with no map downloaded. Beside validation and test they say what the map
@@ -125,7 +135,7 @@ from nnslr_tools.brain_targets import (INPUT_SIZES, LEFT_OUT, MAP_GROUP, METRES_
                                        learning_pieces, loss_weights, night_frames, pack_inputs, plates_in_train, read_split,
                                        road_weights, sign_kph, swap_passages, swapped, training_counts,
                                        training_counts_text, type_weights, users_counts, users_counts_text, users_weights,
-                                       wet_in_train, without_map)
+                                       wet_in_train, without_map, without_network)
 from nnslr_tools.media import FRAME_SIZE
 from nnslr_tools.road_users import CHECK_BINS
 from nnslr_tools.road_types import ROAD_TYPES
@@ -420,12 +430,17 @@ def _applicability_measure(drives: list[dict], answers: list[dict], partition: s
     """Whose road a speed sign is of, on the columns of sign_boxes a reviewed box answers in a partition, every frame
     with one: {'ours', 'another': the columns of each; 'head': precision and recall of "of another road" as
     applicability_head says it (_told), None for a network without the head; 'network': the same of the applicability
-    network, as it ruled the drive when it was read}. None for drives without those answers."""
+    network, as it ruled the drive when it was read; and with the head, 'agrees': the share of those columns where the
+    head says what the network said, 'where_network_wrong' and 'where_network_right': {'columns', 'head_right'}, the
+    columns where the network's word is not, or is, the review's, and on how many the head is right}. None for drives
+    without those answers."""
     if not any('applicability_weight' in drive for drive in drives):
         return None
     head = ({'true_positive': 0, 'false_positive': 0, 'false_negative': 0}, {'yes': 0, 'no': 0})
     network = ({'true_positive': 0, 'false_positive': 0, 'false_negative': 0}, {'yes': 0, 'no': 0})
     learned = False
+    same = 0
+    wrong, right = {'columns': 0, 'head_right': 0}, {'columns': 0, 'head_right': 0}
     for drive, said in zip(drives, answers):
         weight = applicability_weights(drive, partition)
         if weight is None:
@@ -435,8 +450,19 @@ def _applicability_measure(drives: list[dict], answers: list[dict], partition: s
         if said.get('applicability') is not None:
             learned = True
             _count(said['applicability'], drive['applicability'], known, *head)
-    return {'ours': network[1]['no'], 'another': network[1]['yes'], 'head': _told(*head) if learned else None,
-            'network': _told(*network)}
+            real, given_away = drive['applicability'][known] > 0, drive['applicability_network'][known] > 0
+            yes = said['applicability'][known] >= .5
+            same += int((yes == given_away).sum())
+            for part, here in ((wrong, given_away != real), (right, given_away == real)):
+                part['columns'] += int(here.sum())
+                part['head_right'] += int((yes[here] == real[here]).sum())
+    columns = network[1]['yes'] + network[1]['no']
+    found = {'ours': network[1]['no'], 'another': network[1]['yes'], 'head': _told(*head) if learned else None,
+             'network': _told(*network)}
+    if learned:
+        found.update({'agrees': same / columns if columns else None, 'where_network_wrong': wrong,
+                      'where_network_right': right})
+    return found
 
 
 def applicability_pos_weight(drives: list[dict]) -> float | None:
@@ -598,7 +624,9 @@ def _short(drive: dict, length: int) -> dict:
                                                 'type_weight', 'typed_by_person', 'own_kph', 'measured',
                                                 'blocked', 'users', 'users_height', 'users_weight', 'applicability',
                                                 'applicability_weight', 'applicability_network') if name in drive}
+    unruled = drive.get('inputs_unruled')
     return {**drive, **cut, 'inputs': {name: value[part] for name, value in drive['inputs'].items()},
+            **({'inputs_unruled': {name: value[part] for name, value in unruled.items()}} if unruled is not None else {}),
             'cuts': {at - first for at in drive['cuts'] if first < at < first + length}}
 
 
@@ -849,7 +877,8 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
             'one added since waits for the next run.')
     if sign_networks is not None:
         log('The signs read by the cutter ' + sign_networks['cutter'] + ', the classifier ' + sign_networks['classifier']
-            + ' and the applicability network ' + sign_networks['decider'] + ': a sign of another road is left out.')
+            + ' and the applicability network ' + sign_networks['decider'] + ': a sign of another road never becomes '
+            'the number in force' + ('; its box still goes to the brain.' if applicability else ', and its box is left out.'))
     drives = dataset(root, merged_of, routes, log=log, rate=RATE_HZ, need_pictures=not dry_run, types=types,
                      networks=sign_networks, other_road_boxes=applicability)
     if not drives and not counts['drives']:
@@ -957,6 +986,14 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
         blind = [without_map(drive, groups) for drive in drives]
         said = [predict(model, drive, store, chunk=chunk, device=device) for drive in blind]
         no_map = {'validation_no_map': measure(blind, said, 'validation'), 'test_no_map': measure(blind, said, 'test')}
+    # With the groups made from the signs as with no applicability network (every sign taken): nothing then says what
+    # that network decided, so the head's numbers are its own, and the speed's are the brain's without its filter.
+    no_network = {}
+    blind = [without_network(drive, groups) for drive in drives]
+    if not dry_run and all(drive is not None for drive in blind):
+        said = [predict(model, drive, store, chunk=chunk, device=device) for drive in blind]
+        no_network = {'validation_no_network': measure(blind, said, 'validation'),
+                      'test_no_network': measure(blind, said, 'test')}
     table = [int(round(value)) for value in model.class_kph.tolist()]
     # rate_hz, hidden and kph: how the car steps it and what it says, for Models (model_roles.brain_digest).
     result = {'groups': list(groups), 'map_limit': map_limit, 'map_path': map_limit, 'pool': pool, 'works': works, 'road_kinds': kinds,
@@ -975,6 +1012,7 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
               'train': measure(drives, answers, 'train'), 'validation': measure(drives, answers, 'validation'),
               'test': measure(drives, answers, 'test'), 'validation_cold': measure(drives, cold, 'validation'),
               'test_cold': measure(drives, cold, 'test'),
-              'validation_swapped': swapped_measure('validation'), 'test_swapped': swapped_measure('test'), **no_map}
+              'validation_swapped': swapped_measure('validation'), 'test_swapped': swapped_measure('test'), **no_map,
+              **no_network}
     (run_dir / RESULT).write_text(json.dumps(result, indent=2), encoding='utf-8')
     return result

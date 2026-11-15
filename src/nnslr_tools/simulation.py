@@ -40,6 +40,7 @@ A result, derived/simulation/<route>/<set>.json.gz, is the whole reading of the 
   {version, route, set, name, made_at, device, frame [width, height], networks [{role, file, id, sha256}],
    code {file: sha256}, settings {...}, videos [[segment, size, mtime]], brain_memory_gap (s, None without a brain),
    brain_groups [[name, size]] (the groups of its input row, in order; None without a brain),
+   brain_every_box (its sign_boxes hold every sign read, those of another road too: its contract's other_road_boxes),
    sources {video [[segment, sha256 of its fcamera.hevc]], logs [[segment, kind, sha256 of the log read]]},
    frames {t_ns, segment, frame},                    which frame of which minute's video, and its time on the log's clock
    out {speedLimit, speedLimitAhead, ..., rawSignSeen},   speedVisionSP as the car would send it, a column a field
@@ -125,7 +126,7 @@ REGRESSION_SUFFIX = '.regression.json'  # beside a result: how it stands next to
 # What a result's meta keeps of it (the rows aside); COMPARE_VERSION: of compare()'s counts kept beside a result, made
 # again when compare() looks at more.
 META_FIELDS = ('version', 'route', 'set', 'name', 'made_at', 'device', 'networks', 'code', 'settings', 'brain_type_head')
-COMPARE_VERSION = 3
+COMPARE_VERSION = 4  # 4: sign_boxes is no shared input of a brain given every sign's box and one given the signs taken
 # The messages of the log a replay gives the car's loop, and those that say when each frame of the video came.
 GPS_SERVICES = ('gpsLocationExternal', 'gpsLocation')
 LOG_WORKERS = 8
@@ -661,9 +662,12 @@ def _restarts(brain: dict, times: list[int], gap: float | None) -> set[int]:
 
 def _shared_cuts(was: dict, now: dict) -> tuple[list | None, list | None]:
     """Where each brain's input row has the groups both brains take, in one order: [(from, to)] of each, or None for the
-    whole row when they take the same groups (brain_groups [[name, size]])."""
+    whole row when they take the same groups (brain_groups [[name, size]]). sign_boxes is not one they share when one
+    brain is given the boxes of every sign read and the other those of the signs taken (brain_every_box, the contract's
+    other_road_boxes, #89): there the rows differ by the brains' own contracts, not by what is read before them."""
     mine, theirs = was.get('brain_groups'), now.get('brain_groups')
-    if not mine or not theirs or mine == theirs:
+    apart = {'sign_boxes'} if bool(was.get('brain_every_box')) != bool(now.get('brain_every_box')) else set()
+    if not mine or not theirs or (mine == theirs and not apart):
         return None, None
 
     def places(groups: list) -> dict[str, tuple[int, int]]:
@@ -673,7 +677,7 @@ def _shared_cuts(was: dict, now: dict) -> tuple[list | None, list | None]:
         return found
 
     was_places, now_places = places(mine), places(theirs)
-    shared = [name for name, _size in mine if name in now_places]
+    shared = [name for name, _size in mine if name in now_places and name not in apart]
     return [was_places[name] for name in shared], [now_places[name] for name in shared]
 
 
@@ -1159,6 +1163,7 @@ def replay(root: Path, route: str, set_key: str, *, device: str = 'cuda', packag
             'videos': _video_stamp({segment: videos[segment] for segment in segments}),
             'brain_memory_gap': (files.brain_contract.get('step') or {}).get('memory_gap_seconds') if reader else None,
             'brain_groups': [[name, car.brain.brain_inputs.INPUT_SIZES[name]] for name in reader.groups] if reader else None,
+            'brain_every_box': bool(getattr(reader, 'other_road_boxes', False)) if reader else None,
             'sources': {'video': video_sha, 'logs': [row for row in logs['files'] if row[0] in segments]},
             'frames': frames, 'out': out, 'signs': signs, 'in': {**inputs, 'brain': brain_rows},
             **({'no_map': True} if no_map else {}),

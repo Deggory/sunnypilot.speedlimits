@@ -88,7 +88,11 @@ box that covers its sign (APPLICABILITY_IOU of overlap with the box SignNet gave
 not the tallest of its column, teaches nothing: the head answers of what the brain is given. It is an answer of a head
 only the training has (brain_net's applicability_head), beside what the applicability network said of the same sign when
 the drive was read ('applicability_network': 1 where it gave it to another road), so that the two are measured on the
-same signs (brain_train). A brain that learns it is given the boxes of every speed sign read (other_road_boxes: the
+same signs (brain_train). What the head can read of that network: the number in force and the last single reading
+(signs) still come from the signs it takes, so a box in sign_boxes with no fresh reading beside it is a sign it gave
+away, and the head may learn to say that back. So the head is also measured where nothing says it: with the groups made
+from the signs as with no such network, every sign taken (unruled_inputs, without_network), and on the signs where the
+network was wrong. A brain that learns it is given the boxes of every speed sign read (other_road_boxes: the
 record's 'other_road' and 'other_boxes' with its readings, all_readings), since it can only judge what it sees; the
 number in force still comes from the signs the applicability network takes. Any other brain keeps the boxes of the signs
 taken.
@@ -796,6 +800,35 @@ def all_readings(record: dict | None) -> tuple[list | None, list | None]:
             [[list(box) for _name, _confidence, box, _other in signs[seconds]] for seconds in sorted(signs)])
 
 
+# The groups made from the signs: what the applicability network's verdict reaches. sign_distance, which no brain of
+# today learns, and light_boxes, which that network never rules, are not among them.
+SIGN_GROUPS = ('signs', 'plate', 'plate_hours', 'plate_wet', 'road_signs', 'sign_boxes')
+
+
+def unruled_inputs(frames: list[dict], record: dict | None) -> dict[str, np.ndarray] | None:
+    """SIGN_GROUPS (frames, size) made from every sign read, as if the applicability network gave none to another road:
+    what the brain would be given with no such network in the release (the number in force too then comes from every
+    sign). For the measure without that network's verdict (without_network): never an input of a training. None for a
+    drive not read, or read before the boxes of the signs of another road were kept."""
+    if not record or record.get('boxes') is None or 'other_boxes' not in record:
+        return None
+    seconds = np.array([frame.get('seconds', frame['segment'] * SEGMENT_SECONDS + frame['index']) for frame in frames],
+                       dtype=np.float64)
+    readings, boxes = all_readings(record)
+    signs, plate, plate_hours, plate_wet = sign_inputs(seconds, readings)
+    return {'signs': signs, 'plate': plate, 'plate_hours': plate_hours, 'plate_wet': plate_wet,
+            'road_signs': road_sign_inputs(seconds, readings), 'sign_boxes': box_inputs(seconds, readings, boxes)}
+
+
+def without_network(drive: dict, groups: tuple[str, ...]) -> dict | None:
+    """The drive with the groups made from the signs as with no applicability network: every sign read is taken
+    (unruled_inputs). Then nothing the brain is given says what that network decided. None for a drive without them."""
+    if drive.get('inputs_unruled') is None:
+        return None
+    inputs = {**drive['inputs'], **drive['inputs_unruled']}
+    return {**drive, 'inputs': inputs, 'extra': pack_inputs(inputs, groups)}
+
+
 def _speed_columns(signs: list[tuple]) -> dict[int, tuple]:
     """{column: (box, given to another road)} of the speed signs of one reading [(class, confidence, box, given to
     another road), ...]: the tallest of each column of sign_boxes, by the rule of the car's BoxInputs.add (the first
@@ -872,14 +905,18 @@ def applicability_answers(root: Path, route: str, frames: list[dict], record: di
     if not reviewed or not record or record.get('boxes') is None or 'other_boxes' not in record:
         return found
     rows = {(frame['segment'], frame['decoded']): row for row, frame in enumerate(frames) if 'decoded' in frame}
-    # The reading nearest to each reviewed frame; of two reviewed frames at one reading, the nearer one's boxes.
+    # The reading nearest to each reviewed frame; of two reviewed frames at one reading, the nearer one's boxes. The
+    # last two frames of a segment are nearest to the first reading of the next one.
     near: dict[tuple, tuple] = {}
     for segment, decoded, box, another in reviewed:
         reading = int(round(decoded / VIDEO_STEP)) * VIDEO_STEP
-        away, at, boxes = near.get((segment, reading), (math.inf, None, []))
-        if (abs(decoded - reading), decoded) < (away, at) or at is None:
-            near[segment, reading] = (abs(decoded - reading), decoded, [(box, another)])
-        elif decoded == at:
+        away, frame = abs(decoded - reading), (segment, decoded)
+        if reading >= SEGMENT_SECONDS * VIDEO_FPS:
+            segment, reading = segment + 1, reading - SEGMENT_SECONDS * VIDEO_FPS
+        nearest, at, boxes = near.get((segment, reading), (math.inf, None, []))
+        if at is None or (away, frame) < (nearest, at):
+            near[segment, reading] = (away, frame, [(box, another)])
+        elif frame == at:
             boxes.append((box, another))
     signs = _signs_read(record)
     for (segment, reading), (_away, _at, boxes) in near.items():
@@ -1030,7 +1067,9 @@ def drive_targets(root: Path, route: str, labels: dict, merged: dict, split: dic
     applicability network said of it: applicability_answers), applicability_reviewed (the reviewed boxes of the drive
     with a label), other_road_boxes (as asked: sign_boxes holds every sign read, those of another road too, for a brain
     that learns whose road a sign is of; False, the signs taken), other_boxes_read (the record has the boxes of the
-    signs of another road), reader (what read
+    signs of another road), inputs_unruled (the groups made from the signs as with no applicability network, for the
+    measure without its verdict: unruled_inputs; None without inputs or on a drive read before those boxes were kept),
+    reader (what read
     them), pictures (at RATE_HZ, the brain's pictures are there), no_picture_s (seconds of the drive with an answer of the
     speed and no frame with its picture: prepare keeps only the slow ones at the start and the end of a drive).
     labels: read_labels' of the drive, NO_LABELS without a block or a mark. need_pictures=False (a dry run): a frame
@@ -1097,6 +1136,7 @@ def drive_targets(root: Path, route: str, labels: dict, merged: dict, split: dic
             'inputs': drive_inputs(frames, ns, merged, readings, root, record.get('boxes') if record else None,
                                    all_readings(record) if other_road_boxes else None)
             if inputs else None,
+            'inputs_unruled': unruled_inputs(frames, record) if inputs else None,
             'signs_read': readings is not None,
             'boxes_read': record is not None and record.get('boxes') is not None,
             'reader': record.get('fingerprint') if record else None,

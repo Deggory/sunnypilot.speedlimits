@@ -158,6 +158,27 @@ def test_brains_with_other_groups_are_compared_on_the_groups_both_take():
     assert (found['same_input'], found['other_input']) == (0, 1)
 
 
+def test_a_brain_given_every_sign_s_box_and_one_given_the_signs_taken_do_not_share_the_sign_boxes():
+    """#89: a box of another road in sign_boxes is there by the brain's own contract (other_road_boxes), not because
+    what is read before the brain changed: next to a brain given the signs taken, another speed is the brain's."""
+    groups = [['signs', 1], ['sign_boxes', 2]]
+    was = brain_record([50, 50], {'0': [0.1, 0.0, 0.0], '1': [0.1, 0.0, 0.0]})
+    now = brain_record([50, 30], {'0': [0.1, 0.0, 0.0], '1': [0.1, 0.7, 0.2]}, brain_sha='e' * 64)
+    was['brain_groups'], now['brain_groups'] = groups, groups
+    was['brain_every_box'], now['brain_every_box'] = False, True
+    found = simulation.compare(was, now)
+    assert (found['same_input'], found['other_input']) == (1, 0)
+    # Two brains fed alike: another row of sign_boxes is another input, as before (a result of before has no such word)
+    now['brain_every_box'] = False
+    assert (simulation.compare(was, now)['same_input'], simulation.compare(was, now)['other_input']) == (0, 1)
+    del was['brain_every_box'], now['brain_every_box']
+    assert (simulation.compare(was, now)['same_input'], simulation.compare(was, now)['other_input']) == (0, 1)
+    # What both take still counts: another number in force is another input
+    now['brain_every_box'] = True
+    now['in']['brain']['1'] = [0.4, 0.7, 0.2]
+    assert (simulation.compare(was, now)['same_input'], simulation.compare(was, now)['other_input']) == (0, 1)
+
+
 def test_another_picture_points_before_the_brain():
     # The same rows, but the video of the minute is another file (or the code that makes the picture changed).
     was = brain_record([50, 50], {'0': [0.1], '1': [0.1]})
