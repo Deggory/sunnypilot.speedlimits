@@ -281,7 +281,7 @@ export function useKeyboard(): void {
         if (report.apiBase) {
           event.preventDefault();
           // The Shift key, not the letter: with Caps Lock "A" comes without Shift and stays Apply previous (#105).
-          void (event.shiftKey ? applyNext(event.repeat) : applyPrevious());
+          void (event.shiftKey ? applyNext(event.repeat) : applyPrevious(event.repeat));
         }
         break;
       case 'i':

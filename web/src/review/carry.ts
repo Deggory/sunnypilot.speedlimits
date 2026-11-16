@@ -137,8 +137,9 @@ let carryingWay: CarryWay = 'previous';
 let saveAfterCarry = false;
 // The frame whose boxes were carried last, and from where: the boxes to check say it (blockUnchecked).
 let lastCarry: {key: string; way: CarryWay} | null = null;
-// Shift+A held down that saved a frame with no frame before it to go to (the start of the drive or of the filter): the
-// repeats of the key stop there, instead of carrying and saving that frame again and again; a new press works.
+// A or Shift+A held down that saved a frame with no frame after it (A) or before it (Shift+A) to go to (the end or the
+// start of the drive or of the filter): the repeats of the key stop there, instead of carrying and saving that frame
+// again and again; a new press works.
 let stoppedAt: string | null = null;
 
 /** The boxes waiting for the reviewer to check their position, by index. */
@@ -150,9 +151,9 @@ export function uncheckedIndices(work: FrameEdit): number[] {
   return found;
 }
 
-/** A: the boxes of the frame before; A again saves and goes on. */
-export function applyPrevious(): Promise<void> {
-  return applyFrom('previous');
+/** A: the boxes of the frame before; A again saves and goes on. ``repeat``: a repeat of the key held down. */
+export function applyPrevious(repeat = false): Promise<void> {
+  return applyFrom('previous', repeat);
 }
 
 /** Shift+A (#105): the boxes of the frame after, carried back; Shift+A again saves and goes to the frame before.
@@ -167,14 +168,18 @@ async function saveAndGoBack(key: string): Promise<void> {
   if (state.currentKey === key) stoppedAt = key;
 }
 
+/** A again: saved, and on to the next frame; none (the page stays here): the key's repeats stop here. */
+async function saveAndGoOn(key: string): Promise<void> {
+  await confirmFrame();
+  if (state.currentKey === key) stoppedAt = key;
+}
+
 async function applyFrom(way: CarryWay, repeat = false): Promise<void> {
   const row = currentRow();
   const apiBase = report.apiBase;
   if (!row || !apiBase) return;
-  if (way === 'next') {
-    if (!repeat) stoppedAt = null;
-    else if (stoppedAt === row.frame_key) return;
-  }
+  if (!repeat) stoppedAt = null;
+  else if (stoppedAt === row.frame_key) return;
   // A, A pressed quickly: the second one saves once the boxes are carried. The other key meanwhile does nothing.
   if (carrying === row.frame_key) {
     if (carryingWay === way) saveAfterCarry = true;
@@ -191,7 +196,7 @@ async function applyFrom(way: CarryWay, repeat = false): Promise<void> {
   // Carried by this same key: saved, and on (A) or back (Shift+A). Carried by the other key, it carries anew.
   if (carriedHere(key, way)) {
     carried.value = null;
-    await (way === 'next' ? saveAndGoBack(key) : confirmFrame());
+    await (way === 'next' ? saveAndGoBack(key) : saveAndGoOn(key));
     return;
   }
   const work = workOf(row);
@@ -275,7 +280,7 @@ async function applyFrom(way: CarryWay, repeat = false): Promise<void> {
     if (saveAfterCarry) {
       carrying = null;
       carried.value = null;
-      await (way === 'next' ? saveAndGoBack(key) : confirmFrame());
+      await (way === 'next' ? saveAndGoBack(key) : saveAndGoOn(key));
     }
   } catch (error) {
     if (!answered) work.detections = sent;
