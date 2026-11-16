@@ -117,10 +117,12 @@ class ReviewTools:
     def get_review_history(self, route_id, frame_key) -> dict:
         return self.service.history(route_id, frame_key)
 
-    def apply_previous_frame(self, route_id, frame_key, detections=None) -> dict:
+    def apply_previous_frame(self, route_id, frame_key, detections=None, direction='previous') -> dict:
         body = {}
         if detections is not None:
             body['detections'] = detections
+        if direction != 'previous':
+            body['direction'] = direction
         return self.service.apply_previous(route_id, frame_key, body)
 
     def save_frame_review(self, route_id, frame_key, *, run_id, base_revision, reviewer, detections,
@@ -360,10 +362,15 @@ def build_server(service, *, client: str, read_only: bool = False):
         (unknown value, unreadable, road unresolved) and the first unconfirmed frame."""
         return call(tools.get_review_progress, route_id, suspicious_limit)
 
+    CarryDirection = Annotated[Literal['previous', 'next'], Field(description=(
+        'previous (default): from the last frame confirmed before this one; next: from the first frame confirmed '
+        'after it, going back in time (Shift+A on the review page).'))]
+
     class Carried(TypedDict):
         route_id: str
         run_id: str
         frame_key: str
+        direction: str
         source_frame_key: str
         source_revision: int
         source_reviewer_kind: str
@@ -381,7 +388,8 @@ def build_server(service, *, client: str, read_only: bool = False):
     def apply_previous_frame(route_id: RouteId, frame_key: FrameKey,
                              detections: Annotated[list[Detection] | None, Field(max_length=100, description=(
                                  'The boxes of this frame as you have them now; omit to start from the model '
-                                 'proposals.'))] = None) -> Carried:
+                                 'proposals.'))] = None,
+                             direction: CarryDirection = 'previous') -> Carried:
         """The boxes of the last frame confirmed before this one (source_frame_key: the frame just before, or an
         earlier one of this minute or the minute before when those between are not confirmed) carried onto this one
         (saves nothing). A box of this
@@ -389,8 +397,9 @@ def build_server(service, *, client: str, read_only: bool = False):
         box where it should be, with check_position true: look at the image, fix its bbox_xyxy or drop it if
         the sign is gone, and remove check_position before save_frame_review (which refuses it otherwise).
         Check every carried value in this image too. 409 previous_not_confirmed: no frame before it is confirmed,
-        confirm one first."""
-        return call(tools.apply_previous_frame, route_id, frame_key, detections)
+        confirm one first. direction "next" is the same from the first frame confirmed after this one (this minute or
+        the one after; 409 next_not_confirmed when none is)."""
+        return call(tools.apply_previous_frame, route_id, frame_key, detections, direction)
 
     @server.tool(annotations=reading)
     def get_review_history(route_id: RouteId, frame_key: FrameKey) -> History:

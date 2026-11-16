@@ -50,8 +50,18 @@ function askAboutDuplicate(row: FrameRow): boolean {
   return true;
 }
 
-/** Enter (and A again after Apply previous): saves and goes on. */
-export async function confirmFrame(): Promise<void> {
+/** Enter (and A again after Apply previous): saves and goes on. No argument: it is the click handler of the Confirm
+ * buttons too, which would pass their event. */
+export function confirmFrame(): Promise<void> {
+  return confirmAndMove(1);
+}
+
+/** Shift+A again after Apply next (#105): saves and goes back, to the frame before. */
+export function confirmFrameBack(): Promise<void> {
+  return confirmAndMove(-1);
+}
+
+async function confirmAndMove(direction: 1 | -1): Promise<void> {
   const row = currentRow();
   if (!row || refuseChange()) return;
   const key = row.frame_key;
@@ -63,12 +73,14 @@ export async function confirmFrame(): Promise<void> {
     state.lastSave = {key, result: 'unchanged', revision: current.revision || 0};
     // Through the video: on to the next frame of the second still to confirm.
     if ((state.filter === 'todo' || state.filter === 'all') && hasVideo(row.segment_index)) {
-      void afterConfirm(key, 'Already confirmed.');
+      void afterConfirm(key, 'Already confirmed.', false, direction);
       return;
     }
-    go(1);
+    go(direction);
     if (state.currentKey === key) {
-      const text = allConfirmed() ? allConfirmedText() : 'Already confirmed: there are no more frames with this filter.';
+      const text = allConfirmed() ? allConfirmedText() : direction < 0
+        ? 'Already confirmed: there are no frames before it with this filter.'
+        : 'Already confirmed: there are no more frames with this filter.';
       state.notice = {key, text, error: false};
     }
     return;
@@ -108,7 +120,7 @@ export async function confirmFrame(): Promise<void> {
       review_timestamp: s.review_timestamp,
     };
     store();
-    advanceAfterConfirm(key, 'Confirmed ' + key + ' in this browser.');
+    advanceAfterConfirm(key, 'Confirmed ' + key + ' in this browser.', direction);
     return;
   }
   state.notice = null;
@@ -118,7 +130,7 @@ export async function confirmFrame(): Promise<void> {
   // that fails is listed above the confirm button with "Retry saving" (messages.ts).
   const fromVideo = isVirtual(key);
   void send(key);
-  void afterConfirm(key, 'Confirmed ' + key + ' at ' + timeNow() + '.', fromVideo);
+  void afterConfirm(key, 'Confirmed ' + key + ' at ' + timeNow() + '.', fromVideo, direction);
 }
 
 export async function withdrawFrame(): Promise<void> {

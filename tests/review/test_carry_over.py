@@ -186,6 +186,32 @@ def test_a_number_readable_only_now_is_kept():
     assert item['applicability'] == 'own_road'
 
 
+def test_apply_next_carries_back_in_time_onto_smaller_signs():
+    """Shift+A (#105): the boxes of a frame after this one, carried back: here the signs are smaller and nearer the
+    focus. The forward bounds refuse that; ``backward`` takes it, and places a sign not found like its neighbour."""
+    left = box_at(560, 330, 42)
+    right = box_at(840, 330, 42)
+    current = [proposal(closer(left, 1 / 1.4), 'p1')]
+    forward = carry_over([confirmed(left), confirmed(right, value=100)], current, width=W, height=H,
+                         source_key='2/53', proposals=current)
+    assert forward['matched'] == 0
+    result = carry_over([confirmed(left), confirmed(right, value=100)], current, width=W, height=H,
+                        source_key='2/53', proposals=current, backward=True)
+    assert result['matched'] == 1 and result['estimated'] == 1
+    assert result['detections'][0]['detection_id'] == 'p1' and result['detections'][0]['value_kph'] == 80
+    placed = result['detections'][1]
+    assert placed['check_position'] is True and placed['carried_from'] == '2/53'
+    assert placed['value_kph'] == 100 and placed['detection_id'] == 'next-2-53-1'
+    assert all(abs(a - b) < 1 for a, b in zip(placed['bbox_xyxy'], closer(right, 1 / 1.4)))
+
+
+def test_a_sign_is_followed_back_onto_the_picture_before():
+    from nnslr_tools.carry_track import follow
+    after, before = _road((609, 296), 44), _road((600, 300), 40)
+    found = follow(after, before, [609, 296, 653, 340], [609, 296, 653, 340], backward=True)
+    assert found is not None and iou(found, [600, 300, 640, 340]) > 0.85
+
+
 # ---------- the server: page API, REST, MCP, the save check ----------
 
 KEYS = [(0, 0), (0, 1), (0, 2), (2, 0)]
@@ -308,6 +334,57 @@ def test_only_the_frame_just_before(server):
     assert status == 409 and answer['error'] == 'no_previous_frame'
     status, answer = apply_on_page(running, '0/0', {'run_id': RUN_ID})
     assert status == 409 and answer['error'] == 'no_previous_frame'
+
+
+def test_apply_next_takes_the_first_confirmed_frame_after(server):
+    """Shift+A (#105): the same as A the other way, from the first frame confirmed after this one, in this segment or
+    the next; a frame confirmed on the page and still on its way is sent along, the nearer of the two is the source."""
+    running, rows = server
+
+    def apply_next(key, **extra):
+        return apply_on_page(running, key, {'run_id': RUN_ID, 'detections': [], 'direction': 'next', **extra})
+    status, answer = apply_next('0/0')
+    assert status == 409 and answer['error'] == 'next_not_confirmed' and '0/2' in answer['message'], answer
+    assert running.post_frame(ROUTE, '0/2', page_body(rows['0/2'], value_kph=50))[0] == 200
+    status, answer = apply_next('0/0')
+    assert status == 200 and answer['source_frame_key'] == '0/2' and answer['direction'] == 'next', answer
+    assert [item['value_kph'] for item in answer['detections']] == [50]
+    # Plain A is unchanged: nothing before 0/0.
+    status, answer = apply_on_page(running, '0/0', {'run_id': RUN_ID, 'detections': []})
+    assert status == 409 and answer['error'] == 'no_previous_frame'
+    status, answer = apply_on_page(running, '0/1', {'run_id': RUN_ID, 'detections': [], 'direction': 'previous'})
+    assert status == 409 and answer['error'] == 'previous_not_confirmed'
+    # 0/1 confirmed on the page, still on its way: nearer than 0/2.
+    box = dict(page_body(rows['0/0'], value_kph=80)['detections'][0], detection_id='manual-1')
+    status, answer = apply_next('0/0', previous={'frame_key': '0/1', 'detections': [box]})
+    assert status == 200 and answer['source_frame_key'] == '0/1', answer
+    assert [item['value_kph'] for item in answer['detections']] == [80]
+    # Not after this frame.
+    status, answer = apply_next('0/1', previous={'frame_key': '0/0', 'detections': [box]})
+    assert status == 409 and answer['error'] == 'no_next_frame'
+    # Further than the confirmed frame the server has: the server's, nearer, stays the source.
+    body = page_body(rows['0/1'])
+    body['detections'] = [box]
+    assert running.post_frame(ROUTE, '0/1', body)[0] == 200
+    status, answer = apply_next('0/0', previous={'frame_key': '0/2', 'detections': [dict(box, value_kph=30)]})
+    assert status == 200 and answer['source_frame_key'] == '0/1', answer
+    assert [item['value_kph'] for item in answer['detections']] == [80]
+    # 2/0 follows 0/2, but segment 1 is missing: not a frame just after it; 2/0 is the last frame.
+    assert running.post_frame(ROUTE, '2/0', page_body(rows['2/0']))[0] == 200
+    status, answer = apply_next('0/2')
+    assert status == 409 and answer['error'] == 'no_next_frame'
+    status, answer = apply_next('2/0')
+    assert status == 409 and answer['error'] == 'no_next_frame'
+    status, answer = apply_on_page(running, '0/0', {'run_id': RUN_ID, 'direction': 'back'})
+    assert status == 400 and answer['error'] == 'invalid_schema'
+    # The REST API and MCP take it too; without it, the frame before.
+    path = f'/api/v1/routes/{ROUTE}/frames/0/1/apply-previous'
+    status, response, data = running.request('POST', path, body={'direction': 'next'}, headers=AUTH)
+    assert status == 200 and json_of(data)['source_frame_key'] == '0/2' and json_of(data)['direction'] == 'next'
+    tools = ReviewTools(running.app, client='test')
+    assert tools.apply_previous_frame(ROUTE, '0/0', direction='next')['source_frame_key'] == '0/1'
+    result = tools.apply_previous_frame(ROUTE, '0/2')
+    assert result['source_frame_key'] == '0/1' and result['direction'] == 'previous'
 
 
 def test_tracks_follow_the_same_sign_across_consecutive_frames():

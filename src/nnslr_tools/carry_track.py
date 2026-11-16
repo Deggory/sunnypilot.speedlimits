@@ -8,6 +8,9 @@ count) are searched near where :mod:`nnslr_tools.carry_over` expects it, at a fe
 Measured on 498 boxes of consecutive frames of the video confirmed by hand (00000154--fa7e8f49aa, 11 Nov 2026), mean
 IoU with the box confirmed on the next frame: 0.693 left where it was, 0.871 with Fit box, 0.890 followed (30-60 px
 signs 0.858 -> 0.924); about 8 ms a box on the CPU. Nothing is saved here.
+
+Shift+A (Apply next, #105) follows a box from the frame after onto this one, back in time: the sign is a little smaller
+and nearer the middle, so the scales are the inverse ones (``backward``).
 """
 from __future__ import annotations
 
@@ -29,11 +32,11 @@ MIN_TEMPLATE = 6
 MIN_CONTRAST = 4.0
 
 
-def follow(before, now, old: list, guess: list) -> list[float] | None:
+def follow(before, now, old: list, guess: list, backward: bool = False) -> list[float] | None:
     """Where the sign of box ``old`` on picture ``before`` is on picture ``now``, searched around box ``guess``.
 
     The pictures are images of the same size (BGR or grey); the boxes ``[x1, y1, x2, y2]`` in their pixels. None when no
-    match reaches MIN_SCORE."""
+    match reaches MIN_SCORE. ``backward``: ``before`` is the frame after ``now`` (Apply next), the sign shrinks."""
     import cv2
     import numpy as np
     height, width = before.shape[:2]
@@ -49,13 +52,15 @@ def follow(before, now, old: list, guess: list) -> list[float] | None:
     # The search area: the template placed on the guess, widened by the reach and by the largest growth.
     gx, gy = guess[0] - (x1 - tx1), guess[1] - (y1 - ty1)
     reach = max(REACH_PX, REACH * max(x2 - x1, y2 - y1))
-    grow = SCALES[1]
+    low, high, count = SCALES
+    if backward:
+        low, high = 1 / high, 1 / low
+    grow = high
     sx1, sy1 = int(max(0, gx - reach)), int(max(0, gy - reach))
     sx2 = int(min(width, gx + template.shape[1] * grow + reach))
     sy2 = int(min(height, gy + template.shape[0] * grow + reach))
     area = now[sy1:sy2, sx1:sx2]
     best_score, best = -2.0, None
-    low, high, count = SCALES
     for step in range(count):
         scale = low * (high / low) ** (step / (count - 1))
         w, h = max(4, round(template.shape[1] * scale)), max(4, round(template.shape[0] * scale))

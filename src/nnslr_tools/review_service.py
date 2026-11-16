@@ -933,12 +933,21 @@ class ReviewService:
         video between the seconds not saved yet (video_stand_in) works too: it has no proposals. A sign found on no
         box of this frame is followed from the picture before onto this one (nnslr_tools.carry_track): found, its box
         is there with no check (``followed``); not found, it is to check (Fit box or "Here").
+
+        ``direction: "next"`` (Shift+A on the page, "Apply next", #105) is the same the other way: the boxes of the
+        first frame confirmed after this one (in this minute or the one after), carried back onto it, the signs
+        smaller and nearer the middle (carry_over ``backward``); ``previous`` is then that frame confirmed on the page
+        and still on its way. The answer says the ``direction`` it took.
         """
         key = frame_key_of(frame_key)
         if body is None:
             body = {}
         if not isinstance(body, dict):
             raise ReviewRejected(400, 'invalid_schema', 'The request must be a JSON object.')
+        direction = body.get('direction', 'previous')
+        if direction not in ('previous', 'next'):
+            raise ReviewRejected(400, 'invalid_schema', 'direction is "previous" (the default) or "next".')
+        backward = direction == 'next'
         snapshot = self.snapshot(route)
         if key in snapshot.position:
             row = snapshot.row(key)
@@ -955,16 +964,29 @@ class ReviewService:
         # nearest confirmed one (since 14 Nov 2026; before, only the frame just before, which had to be confirmed: a
         # reviewer who goes a few frames on to the moment that matters has not confirmed those in between).
         near = []
-        for index in range(position - 1, -1, -1):
-            if snapshot.by_key[snapshot.order[index]]['segment_index'] < row['segment_index'] - 1:
-                break
-            near.append(snapshot.order[index])
-        if not near:
+        if backward:
+            # Apply next: the frames after it, in this segment or the one after, the nearest first. A frame of the
+            # video not saved has none of the report at its own place: the first one after it is at ``position``.
+            start = position + 1 if key in snapshot.position else position
+            for index in range(start, len(snapshot.order)):
+                if snapshot.by_key[snapshot.order[index]]['segment_index'] > row['segment_index'] + 1:
+                    break
+                near.append(snapshot.order[index])
+        else:
+            for index in range(position - 1, -1, -1):
+                if snapshot.by_key[snapshot.order[index]]['segment_index'] < row['segment_index'] - 1:
+                    break
+                near.append(snapshot.order[index])
+        previous = body.get('previous')
+        # The last frames of the video of a drive, after its last picture, have no frame of the report after them: the
+        # one confirmed on the page and still on its way is the only one.
+        if not near and not (backward and previous is not None):
+            if backward:
+                raise ReviewRejected(409, 'no_next_frame', 'This frame has no frame just after it.')
             raise ReviewRejected(409, 'no_previous_frame', 'This frame has no frame just before it.')
         source_key = next((other for other in near if (snapshot.reviews.get(other) or {}).get('confirmed')), None)
         source = snapshot.reviews.get(source_key) if source_key is not None else None
         before_row = snapshot.by_key[source_key] if source_key is not None else None
-        previous = body.get('previous')
         if previous is not None:
             # The frame before confirmed on the page and still on its way here (Confirm goes on at once): its boxes
             # come with the request. It is the frame before as the server has it, or a frame of the video after it.
@@ -972,20 +994,34 @@ class ReviewService:
                     or not isinstance(previous.get('detections'), list) \
                     or len(previous['detections']) > MAX_DETECTIONS_PER_FRAME \
                     or not all(isinstance(item, dict) for item in previous['detections']):
-                raise ReviewRejected(400, 'invalid_schema',
-                                     'previous is {frame_key, detections}: the boxes confirmed on the frame before.')
+                raise ReviewRejected(400, 'invalid_schema', 'previous is {frame_key, detections}: the boxes confirmed '
+                                     + ('on the frame after.' if backward else 'on the frame before.'))
             previous_key = frame_key_of(previous['frame_key'])
             previous_row = snapshot.by_key.get(previous_key) or self.video_stand_in(snapshot, previous_key)
             # A frame before this one, no further back than the frames above; the nearer of it and the confirmed
-            # frame the server has is the source.
-            if not frame_order(snapshot.by_key[near[-1]]) <= frame_order(previous_row) < frame_order(row):
+            # frame the server has is the source. Apply next: a frame after it, no further on.
+            if backward:
+                inside = frame_order(row) < frame_order(previous_row) and (
+                    frame_order(previous_row) <= frame_order(snapshot.by_key[near[-1]]) if near
+                    else previous_row['segment_index'] <= row['segment_index'] + 1)
+                nearer = before_row is None or frame_order(previous_row) <= frame_order(before_row)
+            else:
+                inside = frame_order(snapshot.by_key[near[-1]]) <= frame_order(previous_row) < frame_order(row)
+                nearer = before_row is None or frame_order(previous_row) >= frame_order(before_row)
+            if not inside:
+                if backward:
+                    raise ReviewRejected(409, 'no_next_frame', f'{previous_key} is not a frame just after this one.')
                 raise ReviewRejected(409, 'no_previous_frame',
                                      f'{previous_key} is not a frame just before this one.')
-            if before_row is None or frame_order(previous_row) >= frame_order(before_row):
+            if nearer:
                 kept = snapshot.reviews.get(previous_key)
                 source_key, before_row = previous_key, previous_row
                 source = {'payload': {'detections': previous['detections']}, 'confirmed': True,
                           'revision': kept['revision'] if kept is not None else 0, 'reviewer_kind': 'human'}
+        if source is None and backward:
+            raise ReviewRejected(409, 'next_not_confirmed',
+                                 f'No frame after this one is confirmed, up to {near[-1]} (the frame just after, '
+                                 f'{near[0]}, is not): confirm one first.')
         if source is None:
             raise ReviewRejected(409, 'previous_not_confirmed',
                                  f'No frame before this one is confirmed, back to {near[-1]} (the frame just before, '
@@ -1009,12 +1045,13 @@ class ReviewService:
             untouched = untouched + [item for item in review['payload'].get('detections', []) if isinstance(item, dict)]
         result = carry_over(source['payload'].get('detections', []), current, width=row.get('width') or 0,
                             height=row.get('height') or 0, source_key=source_key, proposals=untouched,
-                            follow=self._follower(snapshot, before_row, row))
+                            follow=self._follower(snapshot, before_row, row, backward), backward=backward)
         to_check = unchecked_boxes(result['detections'])
         return {
             'route_id': snapshot.route,
             'run_id': snapshot.run_id,
             'frame_key': key,
+            'direction': direction,
             'source_frame_key': source_key,
             'source_revision': source['revision'],
             'source_reviewer_kind': source['reviewer_kind'],
@@ -1030,9 +1067,10 @@ class ReviewService:
             'save': {'run_id': snapshot.run_id, 'base_revision': review['revision'] if review else 0},
         }
 
-    def _follower(self, snapshot: RouteSnapshot, before_row: dict, row: dict):
+    def _follower(self, snapshot: RouteSnapshot, before_row: dict, row: dict, backward: bool = False):
         """carry_over's ``follow`` from the picture of ``before_row`` to that of ``row`` (carry_track.follow), both
-        read at the size of ``row`` on the first box to follow; a picture that cannot be read follows nothing."""
+        read at the size of ``row`` on the first box to follow; a picture that cannot be read follows nothing.
+        ``backward``: ``before_row`` is the frame after ``row`` (Apply next)."""
         pictures = []
 
         def follow(old, guess):
@@ -1040,7 +1078,7 @@ class ReviewService:
             if not pictures:
                 pictures.append((self._picture(snapshot, before_row, row), self._picture(snapshot, row, row)))
             before, now = pictures[0]
-            return None if before is None or now is None else carry_track.follow(before, now, old, guess)
+            return None if before is None or now is None else carry_track.follow(before, now, old, guess, backward)
         return follow
 
     def _picture(self, snapshot: RouteSnapshot, frame: dict, size: dict):

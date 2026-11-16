@@ -721,6 +721,43 @@ def test_apply_previous_takes_the_boxes_of_a_frame_before_still_on_its_way(drive
     assert not manifest.exists()
 
 
+def test_apply_next_works_on_the_frames_of_the_video_going_back(drive):
+    """Shift+A (#105) on a frame of the video not saved: the boxes of the first frame confirmed after it, followed back
+    onto its picture; the frame after it confirmed on the page and still on its way is sent along, the last frames of
+    the video after the drive's last picture included. Nothing is saved."""
+    root, video, rows, server = drive
+
+    def apply(key, previous=None):
+        payload = {'run_id': RUN_ID, 'detections': [], 'direction': 'next'}
+        if previous is not None:
+            payload['previous'] = previous
+        status, _response, data = server.request('POST', f'/api/route/{ROUTE}/frame/{key}/apply-previous', body=payload)
+        return status, json_of(data)
+
+    status, answer = apply('0/1035')
+    assert status == 409 and answer['error'] == 'next_not_confirmed' and '0/2' in answer['message'], answer
+    assert server.post_frame(ROUTE, '0/2', body([BOX]))[0] == 200
+    status, answer = apply('0/1035')
+    assert status == 200 and answer['source_frame_key'] == '0/2' and answer['direction'] == 'next', answer
+    carried = answer['detections']
+    assert len(carried) == 1 and carried[0]['value_kph'] == 50 and answer['followed'] == 1
+    assert all(abs(a - b) < 1 for a, b in zip(carried[0]['bbox_xyxy'], BOX['bbox_xyxy']))
+    assert 'check_position' not in carried[0] and not answer['to_check']
+    # The frame after it, confirmed on the page and still on its way.
+    moved = dict(BOX, value_kph=60)
+    status, answer = apply('0/1034', {'frame_key': '0/1035', 'detections': [moved]})
+    assert status == 200 and answer['source_frame_key'] == '0/1035', answer
+    assert answer['detections'][0]['value_kph'] == 60
+    assert apply('0/1034', {'frame_key': '0/1030', 'detections': [moved]})[0] == 409
+    # After the last picture of the drive (0/2, frame 40) no frame of the report follows: only one on its way.
+    status, answer = apply('0/1050')
+    assert status == 409 and answer['error'] == 'no_next_frame'
+    status, answer = apply('0/1050', {'frame_key': '0/1051', 'detections': [moved]})
+    assert status == 200 and answer['source_frame_key'] == '0/1051', answer
+    manifest = root / 'derived/frames' / ROUTE / '0' / video_frames.VIDEO_MANIFEST
+    assert not manifest.exists()
+
+
 def test_a_frame_of_any_second_of_the_video_is_saved(drive):
     """The whole drive is in Sign review: a frame of the video between the seconds is saved in every second of its
     segment, a second whose picture at 1 a second is missing too."""

@@ -4,7 +4,8 @@
 // sign for our road, V on a vehicle (not a sign), L variable speed limit (a lit display) or back, G give way, P stop, R roundabout, E something else, M main road (a direction has no
 // key, only its button), W person, Y bicycle, K car (on the selected box, or while drawing on the box about to be drawn),
 // J road users complete (the frame's tick: every road user from the size rule is boxed), Enter confirm, B or N new box, C fit the box picked to its sign on the server
-// (every box of the frame when none was picked; Shift+C the same with the AI), A apply previous, I ask the AI, T the car's
+// (every box of the frame when none was picked; Shift+C the same with the AI), A apply previous (Shift+A apply next: from the
+// frame after, saved going back), I ask the AI, T the car's
 // networks on the frame (car.ts), H second reading, D removes every
 // box of the frame, Del removes a box the reviewer selected (on the one the page opened on it says to click it
 // first), Esc cancel, ? shows or hides the list of the keys. While a menu or panel of the site's top bar is open, the keys are its own.
@@ -12,7 +13,7 @@ import {onBeforeUnmount, onMounted} from 'vue';
 import {isGuest} from '../common/guest';
 import {askAi, fitBox, fitLocal} from './ai';
 import {toggleCar} from './car';
-import {applyPrevious} from './carry';
+import {applyNext, applyPrevious} from './carry';
 import {confirmFrame} from './confirm';
 import {cancelAll, removeAllBoxes, removeSelected, scaleSelected, squareSelected, selectBox, setField, setKind, setOnVehicle, setOtherOurs, setUserKind, setValue,
   toggleDrawing, toggleHints, toggleUsersComplete, toggleVariable} from './edits';
@@ -279,7 +280,8 @@ export function useKeyboard(): void {
       case 'A':
         if (report.apiBase) {
           event.preventDefault();
-          void applyPrevious();
+          // The Shift key, not the letter: with Caps Lock "A" comes without Shift and stays Apply previous (#105).
+          void (event.shiftKey ? applyNext(event.repeat) : applyPrevious());
         }
         break;
       case 'i':

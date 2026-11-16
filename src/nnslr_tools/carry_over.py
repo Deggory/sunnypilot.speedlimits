@@ -17,6 +17,10 @@ holds the model's proposals and, on a frame confirmed before, its saved boxes (a
 labels of the frame before, as one never reviewed does). Signs only grow and move outwards from the point the road runs to (``FOCUS``), which is
 what the matching expects; it was measured on 359 pairs of confirmed boxes one frame apart.
 
+Shift+A on the review page (#105, "Apply next") carries the other way, from a frame confirmed after this one, going
+back in time: with ``backward`` the sign of this frame is the old one seen earlier, so it is smaller and nearer
+``FOCUS`` (scale 1/MAX_SCALE to 1/MIN_SCALE); the focus, the turn and the rest are the same geometry read the other way.
+
 The page, the REST API and the MCP server all call :func:`carry_over` through
 ``ReviewService.apply_previous``; nothing is saved here.
 """
@@ -96,12 +100,14 @@ def _size(box: list[float]) -> float:
     return math.sqrt((box[2] - box[0]) * (box[3] - box[1]))
 
 
-def _pair(old: list[float], new: list[float], focus: tuple[float, float]):
+def _pair(old: list[float], new: list[float], focus: tuple[float, float], backward: bool = False):
     """(scale, shift, moved) of ``new`` seen as the sign ``old`` one frame later, or None when it cannot
     be: a sign does not shrink nor grow beyond MAX_SCALE in a second. ``shift`` is how far ``new`` is from
-    where the growth alone puts it: the turn of the car (the whole view slides) plus the error."""
+    where the growth alone puts it: the turn of the car (the whole view slides) plus the error. ``backward``: ``new``
+    is the sign one frame earlier (Apply next), smaller by the inverse of those bounds."""
     scale = _size(new) / _size(old)
-    if scale < MIN_SCALE or scale > MAX_SCALE:
+    low, high = (1 / MAX_SCALE, 1 / MIN_SCALE) if backward else (MIN_SCALE, MAX_SCALE)
+    if scale < low or scale > high:
         return None
     old_center = _center(old)
     new_center = _center(new)
@@ -190,8 +196,8 @@ def _edited(item: dict, proposals: dict) -> bool:
     return False
 
 
-def _new_id(taken: set, source_key: str) -> str:
-    base = 'previous-' + source_key.replace('/', '-')
+def _new_id(taken: set, source_key: str, backward: bool = False) -> str:
+    base = ('next-' if backward else 'previous-') + source_key.replace('/', '-')
     number = 1
     while base + '-' + str(number) in taken:
         number = number + 1
@@ -199,11 +205,12 @@ def _new_id(taken: set, source_key: str) -> str:
     return base + '-' + str(number)
 
 
-def match_boxes(olds: list, news: list, *, width: float, height: float) -> dict:
+def match_boxes(olds: list, news: list, *, width: float, height: float, backward: bool = False) -> dict:
     """Which box of ``news`` (this frame) is the same sign as each box of ``olds`` (the frame before):
     {old index: (new index, scale, shift)}. Boxes without a valid bbox_xyxy match nothing.
 
     Signs grow and move away from FOCUS as the car gets closer; in a turn the whole view slides as well.
+    ``backward``: ``olds`` is a frame after this one (Apply next): the signs here are smaller and nearer FOCUS.
     """
     unit = width / 1344 if width else 1.0
     focus = (FOCUS[0] * width, FOCUS[1] * height)
@@ -217,7 +224,7 @@ def match_boxes(olds: list, news: list, *, width: float, height: float) -> dict:
             if new_box is None:
                 continue
             seen = _with_plate(old, new_box)
-            pair = None if seen is None else _pair(old_box, seen, focus)
+            pair = None if seen is None else _pair(old_box, seen, focus, backward)
             if pair is not None and _same_shape(old_box, seen, width):
                 candidates[(i, j)] = pair
     # In a turn the whole view slides: try no slide and the slide each candidate pair implies, keep the one
@@ -237,7 +244,7 @@ def match_boxes(olds: list, news: list, *, width: float, height: float) -> dict:
 
 
 def carry_over(previous: list, current: list, *, width: float, height: float, source_key: str,
-               proposals: list | None = None, follow=None) -> dict:
+               proposals: list | None = None, follow=None, backward: bool = False) -> dict:
     """The boxes of this frame after "Apply previous", and what happened to each previous box.
 
     ``previous``: the confirmed boxes of the previous frame. ``current``: the boxes of this frame as
@@ -247,6 +254,7 @@ def carry_over(previous: list, current: list, *, width: float, height: float, so
     (:func:`nnslr_tools.carry_track.follow` on the two pictures); a box placed there needs no check.
     Returns {'detections', 'matched', 'estimated', 'followed', 'dropped', 'kept'}; a carried box has
     ``carried_from`` (the previous frame key) and, when its position is a guess, ``check_position``.
+    ``backward``: ``previous`` holds the boxes of a frame confirmed after this one (Shift+A, Apply next, #105).
     """
     unit = width / 1344 if width else 1.0
     focus = (FOCUS[0] * width, FOCUS[1] * height)
@@ -256,7 +264,7 @@ def carry_over(previous: list, current: list, *, width: float, height: float, so
             by_id[item['detection_id']] = item
     result = [copy.deepcopy(item) for item in current if isinstance(item, dict)]
     olds = [item for item in previous if isinstance(item, dict) and _box(item) is not None]
-    taken_old = match_boxes(olds, result, width=width, height=height)
+    taken_old = match_boxes(olds, result, width=width, height=height, backward=backward)
 
     matched = 0
     estimated = 0
@@ -320,7 +328,7 @@ def carry_over(previous: list, current: list, *, width: float, height: float, so
             if key in old:
                 item[key] = copy.deepcopy(old[key])
         item['value_state'] = 'unknown' if item.get('value_kph') is None else 'reviewed'
-        item['detection_id'] = _new_id(ids, source_key)
+        item['detection_id'] = _new_id(ids, source_key, backward)
         item[FROM_FIELD] = source_key
         item[SOURCE_FIELD] = CARRIED
         result.append(item)

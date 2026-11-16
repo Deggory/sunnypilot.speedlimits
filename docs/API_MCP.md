@@ -87,6 +87,7 @@ Base: `http://<server>:8765/api/v1`. Tutte le risposte sono JSON (tranne le imma
 | `GET /api/v1/routes/{route}/frames/{seg}/{img}/image?variant=&crop=&long_side=` | L'immagine: `variant=preview` (JPEG del report, default) o `original` (PNG estratto); `crop=x1,y1,x2,y2` in pixel originali e `long_side=32..2048` richiedono Pillow sul server. On a drive at full definition `width`, `height` and the boxes stay 1344 × 760, while `preview` is the frame as recorded, 2688 × 1520; `crop` keeps the frame's pixels of the row |
 | `GET /api/v1/routes/{route}/frames/{seg}/{img}/history` | Cronologia: ogni revisione con revisore, tipo, canale, ora e riquadri |
 | `POST /api/v1/routes/{route}/frames/{seg}/{img}/review` | Salva conferma, correzione o ritiro |
+| `POST /api/v1/routes/{route}/frames/{seg}/{img}/apply-previous` | Apply previous, nothing saved: the boxes of the last frame confirmed before this one (this minute or the one before) carried onto it, each on a box of `detections` (this frame's boxes as they are now; default its proposals) or followed onto its sign, one not found with `check_position: true`. Body `{run_id, detections?, direction?}`: `direction: "next"` (⇧ A on the page, [#105](https://github.com/cristianku/sunnypilot.smartspeed/issues/105)) takes them from the first frame confirmed after it instead (this minute or the one after; 409 `next_not_confirmed` when none is, `no_next_frame` when no frame follows). The answer has `source_frame_key`, `direction`, the `detections` and `to_check` |
 | `GET /api/v1/sign-distance` | Data › Sign distance, read only: every drive with its state (`signs`, `unread`, `unreadable`, `no_logs`, `build_too_old`, `no_sign_seen`, `no_video`, `reading`) and its counts, and `summary` (the median `late_s` with its count, smallest and largest, `late_m` with its `note`, the signs left out by reason, the marks out of the medians, the orphan marks, `by_drive`) |
 | `GET /api/v1/sign-distance/{route}` | One drive of Sign distance, read only: its state, its signs (vision's zero `zero_s`, the last sighting, `included` or `excluded` with the reason, the `mark` in effect and its `metrics`: `late_s`, `late_m`, `vision_m`, `v_kmh`) and its `orphans` |
 
@@ -233,6 +234,7 @@ saved = call('POST', f"/routes/{route}/frames/{frame['frame_key']}/review", {
 | `get_frame_image` | **Contenuto immagine MCP** (`type: image`, base64) più una riga JSON; anteprima JPEG o originale PNG, ritaglio e ingrandimento | no |
 | `get_frame_context` | Vicini prima e dopo; con `include_images` anche le immagini dei 4 più vicini | no |
 | `get_review_schema` | Campi, valori ammessi, regole, errori | no |
+| `apply_previous_frame` | The boxes of the last frame confirmed before this one carried onto it (as the REST `apply-previous`); `direction: "next"` from the first frame confirmed after it. Saves nothing: check the boxes with `check_position`, then `save_frame_review` | no |
 | `save_frame_review` | Conferma, correzione, nessun cartello o ritiro (`confirmed: false`) | **sì** |
 | `get_review_progress` | Conteggi, sospetti con motivi, confermati con dubbi | no |
 | `get_review_history` | Cronologia del fotogramma | no |

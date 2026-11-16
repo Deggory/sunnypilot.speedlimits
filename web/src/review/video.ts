@@ -179,7 +179,11 @@ async function nextToConfirm(key: string): Promise<string | null> {
  * the server has it, frame by frame, with a sign or with none; elsewhere a frame of the video that was not saved
  * (``fromVideo``) goes on to the next frame of the video, a frame of the report to the next one of the filter
  * (navigation.ts). */
-export async function afterConfirm(key: string, savedText: string, fromVideo = false): Promise<void> {
+export async function afterConfirm(key: string, savedText: string, fromVideo = false, direction = 1): Promise<void> {
+  if (direction < 0) {
+    await afterConfirmBack(key, savedText, fromVideo);
+    return;
+  }
   const row = rowOf(key);
   if (row === null || !walksVideo(row)) {
     if (fromVideo) await nextVideoFrame(savedText);
@@ -208,6 +212,26 @@ export async function afterConfirm(key: string, savedText: string, fromVideo = f
   if (opened !== null && at !== null) {
     void gopOf(opened.segment_index, at).then(() => preload(opened.segment_index, at, 1)).catch(() => undefined);
   }
+}
+
+/** After Shift+A again (Apply next, #105), afterConfirm the other way: the frame before, confirmed or not, frame by
+ * frame through the video as ← goes where the server has it (with To review and All, or from a frame of the video that
+ * was not saved), elsewhere the frame before of the filter (navigation.ts). */
+async function afterConfirmBack(key: string, savedText: string, fromVideo: boolean): Promise<void> {
+  const row = rowOf(key);
+  if (row === null || !(walksVideo(row) || fromVideo)) {
+    advanceAfterConfirm(key, savedText, -1);
+    return;
+  }
+  if (walking) {
+    state.notice = {key, text: savedText, error: false};
+    return;
+  }
+  const moved = await moveOne(-1);
+  const now = state.currentKey;
+  if (now === null) return;
+  const where = moved ? ' Here is the frame before.' : now === key ? ' It is the first frame of the drive.' : '';
+  state.notice = {key: now, text: savedText + where, error: false};
 }
 
 /** ← → ‹ ›: the frame of the video just before or after (20 a second), with the review server; the picture just

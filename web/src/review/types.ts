@@ -223,6 +223,8 @@ export interface CarryAnswer {
   /** 1-based numbers of the boxes to check. */
   to_check: number[];
   message: string;
+  /** "previous" (A) or "next" (Shift+A, #105); missing from a server older than Shift+A. */
+  direction?: string;
 }
 
 /** An error answer of the API (400, 403, 409 revision_conflict or stale_report...). */

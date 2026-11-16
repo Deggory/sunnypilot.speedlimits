@@ -70,9 +70,13 @@ export function openFrame(key: string, reveal = true): void {
   if (reveal) void nextTick(revealStage);
 }
 
-// The frame to show after a confirmation: the next one still to do under the current filter.
-function nextAfterConfirm(key: string): string | null {
-  for (const row of report.rows.slice(anchorIndex(key) + 1)) {
+// The frame to show after a confirmation: the next one still to do under the current filter. Direction -1 (Shift+A
+// again, Apply next, #105): the one before, by the same rules.
+function nextAfterConfirm(key: string, direction = 1): string | null {
+  const index = indexOf(key);
+  const rows = direction < 0 ? report.rows.slice(0, index >= 0 ? index : anchorIndex(key) + 1).reverse()
+    : report.rows.slice(anchorIndex(key) + 1);
+  for (const row of rows) {
     if (state.filter === 'all') return row.frame_key;
     if (confirmedFilter(state.filter)) {
       if (matchesFilter(row, state.filter)) return row.frame_key;
@@ -114,13 +118,15 @@ export function startAtWork(): void {
   state.notice = {key: next, text: 'Opened at the next frame still to review.', error: false};
 }
 
-export function advanceAfterConfirm(key: string, savedText: string): void {
-  const next = nextAfterConfirm(key);
+export function advanceAfterConfirm(key: string, savedText: string, direction = 1): void {
+  const next = nextAfterConfirm(key, direction);
   if (next === null) {
-    state.notice = {key, text: savedText + ' No frames left to review with this filter.', error: false};
+    state.notice = {key, text: savedText + (direction < 0 ? ' No frames left to review before it with this filter.'
+      : ' No frames left to review with this filter.'), error: false};
     return;
   }
-  state.notice = {key: next, text: savedText + ' Here is the next one.', error: false};
+  state.notice = {key: next, text: savedText + (direction < 0 ? ' Here is the one before.' : ' Here is the next one.'),
+    error: false};
   openFrame(next);
 }
 
