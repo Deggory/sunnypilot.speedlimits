@@ -320,8 +320,14 @@ def build_splits(rows: list[dict], root: Path, *, seed: int = 0, output: Path | 
         atomic_write(base / 'splits/latest.json', (json.dumps({'path': str(target.relative_to(root)) if target.is_relative_to(root) else str(target),
                                                            'sha256': digest}, sort_keys=True) + '\n').encode())
     # [model-review] - END
+    # In a split by place a row with no position is grouped by its drive: nothing keeps it away from the areas the drive
+    # went through, the validation's too (#104). How many each partition has, said here (nnslr build-splits prints it)
+    # and not in the file, whose sha256 names the split in every training plan.
+    without_place = {name: sum(assignments[r['annotation_id']] == name and place_of(r) is None for r in active)
+                     for name in names} if by_place else None
     return {'valid': True, 'dataset_kind': dataset_kind, 'dataset_sha256': report['dataset_sha256'], 'split_sha256': digest,
             'split_path': str(target.relative_to(root)) if target.is_relative_to(root) else str(target),
             'policy': payload['policy'], 'counts': payload['counts'], 'human_reviewed_counts': human,
-            'routes': payload['routes'], 'warnings': report['warnings']}
+            'routes': payload['routes'], 'warnings': report['warnings'],
+            **({'rows_without_place': without_place} if by_place else {})}
 # [reviewed-dataset] - END

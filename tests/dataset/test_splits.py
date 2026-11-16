@@ -226,7 +226,27 @@ def test_split_by_place_keeps_the_test_areas_and_a_buffer_out_of_training(tmp_pa
     for a,b in areas['validation']:
         assert not any((a+da,b+db) in areas['test'] for da in (-1,0,1) for db in (-1,0,1))
     assert split['counts']['test']<=0.3*len(canonical)
+    assert report['rows_without_place']=={'train':0,'validation':0,'test':0,'buffer':0}
 # [place-split] - END
+
+
+def test_a_split_by_place_says_how_many_rows_have_no_place(tmp_path,capsys):
+    """#104: a row with no position is grouped by its drive, so nothing keeps it out of the areas of validation. The
+    report of build-splits counts them by partition; the file stays as it was, its sha256 names the split."""
+    road=list(range(20))
+    rows=(located_frames(tmp_path,'00000001--abcdef1234',road)
+          +located_frames(tmp_path,'00000002--abcdef1234',road,human=False)
+          +located_frames(tmp_path,'00000003--abcdef1234',road,human=False))
+    lost=route_frames(tmp_path,'00000004--abcdef1234',3)
+    for row in lost:
+        row['gps']=None
+    from nnslr_tools.annotations import load_jsonl
+    dataset=import_rows(tmp_path,capsys,rows+lost)
+    report,split=split_of(tmp_path,capsys,'--test-route','00000001--abcdef1234')
+    assert split['policy']=='place-v4' and 'rows_without_place' not in split
+    assert sum(report['rows_without_place'].values())==3 and report['rows_without_place']['buffer']==0
+    where={split['assignments'][row['annotation_id']] for row in load_jsonl(dataset) if row['route_id'].startswith('00000004')}
+    assert len(where)==1 and report['rows_without_place'][where.pop()]==3
 
 
 def test_validation_grows_compact_from_the_area_with_the_most_speed_values():

@@ -150,6 +150,76 @@ def test_the_country_is_saved_proposed_or_picked(server):
     assert status == 200 and json_of(data)['review']['country'] is None
 
 
+def test_a_review_saved_without_a_position_takes_the_one_its_frame_has_now(tmp_path):
+    """A frame between the seconds saved before the positions of its route had it: gps None, with or without a
+    country. The import gives it the position its frame has now; one saved with the review stays (#104)."""
+    from nnslr_tools.review_db import _with_position
+    fix = {'latitude': 47.48, 'longitude': 8.05, 'speed_mps': 13.6, 'bearing_deg': 14.4}
+    lines = [{'frame_key': '0/0', 'segment_index': 0, 'output_index': 0, **fix, 'position_from': 'gps',
+              'country': 'CH', 'country_from': 'gps'},
+             {'frame_key': '0/1', 'segment_index': 0, 'output_index': 1, 'latitude': None, 'longitude': None,
+              'speed_mps': None, 'bearing_deg': None, 'country': 'CH', 'country_from': 'nearest_fix'}]
+    path = positions_path(tmp_path, ROUTE)
+    path.parent.mkdir(parents=True)
+    path.write_text(''.join(json.dumps(line) + '\n' for line in lines))
+    saved = {'route_id': ROUTE, 'segment_index': 0, 'output_index': 0, 'gps': None, 'country': 'CH'}
+    assert _with_position(saved, tmp_path, {}) == {**saved, 'gps': fix}
+    # The line of the review itself is not touched, and the reviewer's country stays.
+    assert saved['gps'] is None
+    assert _with_position({**saved, 'country': 'IT'}, tmp_path, {}) == {**saved, 'gps': fix, 'country': 'IT'}
+    assert _with_position({**saved, 'country': None}, tmp_path, {}) == {**saved, 'gps': fix}
+    # A position saved with the review is never replaced by the one of today.
+    own = {'latitude': 46.2, 'longitude': 6.14, 'speed_mps': 5.0, 'bearing_deg': 90.0}
+    assert _with_position({**saved, 'gps': own}, tmp_path, {})['gps'] == own
+    assert _with_position({**saved, 'gps': own, 'country': None}, tmp_path, {}) == {**saved, 'gps': own}
+    # A frame without a fix, or without a line of its own: still no position.
+    assert _with_position({**saved, 'output_index': 1}, tmp_path, {}) == {**saved, 'output_index': 1}
+    assert _with_position({**saved, 'output_index': 2}, tmp_path, {}) == {**saved, 'output_index': 2}
+
+
+def test_a_frame_saved_without_a_position_gets_it_at_the_next_import(server, tmp_path):
+    """Its rows then have a place for the split and the car's speed; a frame saved with its position keeps it,
+    whatever the positions of the route say later (#104)."""
+    from nnslr_tools.review_db import import_from_db
+    from nnslr_tools.splits import place_of
+    running, rows = server
+    # 0/0 has a position, 0/1 a line without a fix (and the country of the nearest one), 0/2 no line at all.
+    for key in ('0/0', '0/1', '0/2'):
+        status, response, data = running.post_frame(ROUTE, key, page_body(rows[key]))
+        assert status == 200, data
+    output = tmp_path / 'annotations/objects.jsonl'
+
+    def imported():
+        report = import_from_db(tmp_path, output, store=running.app.store)
+        found = {}
+        for line in output.read_text().splitlines():
+            row = json.loads(line)
+            found.setdefault(row['output_index'], []).append(row)
+        return report, found
+
+    report, found = imported()
+    assert report['imported_frame_count'] == 3 and sorted(found) == [0, 1, 2]
+    assert found[0][0]['gps']['latitude'] == 47.48
+    assert all(row['gps'] is None and place_of(row) is None for index in (1, 2) for row in found[index])
+    # The route's positions are read again (nnslr gps, as after a Propose again that took in the frames between the
+    # seconds): every frame has a fix now, and 0/0 another one.
+    lines = [{'frame_key': f'0/{index}', 'segment_index': 0, 'output_index': index, 'latitude': 47.5 + index / 1000,
+              'longitude': 8.07, 'speed_mps': 12.0 + index, 'bearing_deg': 20.0, 'position_from': 'gps',
+              'country': 'CH', 'country_from': 'gps'} for index in range(3)]
+    positions_path(tmp_path, ROUTE).write_text(''.join(json.dumps(line) + '\n' for line in lines))
+    report, found = imported()
+    assert (report['replaced_frame_count'], report['already_imported_frame_count']) == (2, 1)
+    assert found[0][0]['gps'] == {'latitude': 47.48, 'longitude': 8.05, 'speed_mps': 13.6, 'bearing_deg': 14.4}
+    for index in (1, 2):
+        for row in found[index]:
+            assert row['gps'] == {'latitude': 47.5 + index / 1000, 'longitude': 8.07, 'speed_mps': 12.0 + index,
+                                  'bearing_deg': 20.0}
+            assert row['country'] == 'CH' and place_of(row) is not None
+    # Nothing left to give: the import after that changes no frame.
+    report, found = imported()
+    assert (report['replaced_frame_count'], report['already_imported_frame_count']) == (0, 3)
+
+
 def test_the_kind_of_an_other_sign_is_kept_and_checked(server):
     running, rows = server
     body = page_body(rows['0/0'])

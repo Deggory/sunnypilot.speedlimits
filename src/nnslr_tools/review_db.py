@@ -1053,8 +1053,11 @@ def _with_position(line: dict, root: Path, cache: dict) -> dict:
     """The line with gps and country: a review saved before they existed takes them from the positions of its
     route (nnslr gps), when there are any; the reviewer's country, when given, stays. A review saved without a
     country (its GPS gave none then: a drive outside Europe before frame_country) takes the one its position gives
-    now."""
-    if 'gps' in line and line.get('country') is not None:
+    now. A review saved without a position (gps None: a frame between the seconds saved before the positions of its
+    route had it) takes the one its frame has now as well: its rows were split by their drive, beside the validation
+    frames of the same sign, and had no speed of the car (#104). A position saved with the review is never
+    replaced."""
+    if line.get('gps') is not None and line.get('country') is not None:
         return line
     route = line.get('route_id')
     if route not in cache:
@@ -1069,7 +1072,7 @@ def _with_position(line: dict, root: Path, cache: dict) -> dict:
         # Nothing to add: the line stays exactly the one the page export writes.
         return line
     line = dict(line)
-    if 'gps' not in line:
+    if line.get('gps') is None:
         line['gps'] = None
         if position is not None and position.get('latitude') is not None:
             line['gps'] = {name: position.get(name) for name in ('latitude', 'longitude', 'speed_mps', 'bearing_deg')}
