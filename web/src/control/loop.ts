@@ -83,6 +83,17 @@ function drives(status: PanelStatus): Omit<LoopRow, 'primary'> {
   const proposers = status.proposers;
   const chosen = proposers?.chosen ?? null;
   const missing = chosen === 'ours' ? proposers?.ours ?? '' : chosen === 'qwen' ? proposers?.qwen ?? proposers?.qwen_gpu ?? '' : '';
+  // A drive whose download from the comma stopped before its end (#109): Prepare waits for the rest of it.
+  const unfinished = !count ? status.routes.filter((row) => row.state === 'scaricare').length : 0;
+  if (unfinished && status.actions.fetch) {
+    return {
+      key: 'drives', label: 'Drives', href: '/prepare', kind: 'prepare',
+      big: plural(unfinished, 'drive') + ' not all downloaded',
+      note: 'The download stopped before the end: Download fetches the rest, then Prepare takes them.', warn: '',
+      more: null, waiting: true, ok: false, running: running(status, 'drives'),
+      action: {name: 'fetch', state: status.actions.fetch, label: 'Download'}, link: null,
+    };
+  }
   // Prepared, but not read on the map yet (Drives, Read the map): that is the work of the row until it is done.
   const roads = !count ? status.road_types_missing ?? 0 : 0;
   if (roads && status.actions.road_types) {

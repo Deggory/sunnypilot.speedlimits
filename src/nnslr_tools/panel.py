@@ -3650,6 +3650,9 @@ def _next_step_text(payload: dict) -> tuple[str, bool]:
         return 'No drives yet: download drives from the comma.', False
     if states & {'collegare', 'estrarre', 'preannotare'}:
         return 'New videos to turn into frames with proposed signs: prepare the new drives.', False
+    if 'scaricare' in states:
+        # helpers/fetch_comma_segments.sh stopped before a drive's last segment (#109): Prepare waits for the rest.
+        return 'A drive is not all downloaded: download from the comma again to finish it, then prepare it.', False
     if 'revisionare' in states:
         return 'Open the drives to review and confirm or correct the signs.', False
     if payload['reviewed_routes'] < payload['min_routes']:

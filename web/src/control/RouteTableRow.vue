@@ -11,7 +11,7 @@ const props = defineProps<{row: RouteRow}>();
 
 // State of a route: label, pill classes, and a prefix dropped on phones ("ready to import" -> "to import").
 const STATE: Record<RouteState, [label: string, kind: string, prefix?: string]> = {
-  collegare: ['to link', 'todo'], estrarre: ['to extract', 'todo'], preannotare: ['to pre-annotate', 'todo'],
+  scaricare: ['downloading', 'muted hollow'], collegare: ['to link', 'todo'], estrarre: ['to extract', 'todo'], preannotare: ['to pre-annotate', 'todo'],
   revisionare: ['to review', 'muted hollow'], importare: ['to import', 'ok hollow', 'ready '],
   pronta: ['in the dataset', 'ok'],
 };

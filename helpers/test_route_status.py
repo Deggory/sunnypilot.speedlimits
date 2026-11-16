@@ -99,6 +99,36 @@ class RouteStatusTests(unittest.TestCase):
         row = self.row()
         self.assertEqual((row["state"], row["unlinked"], row["segments"]), ("estrarre", 0, 1))
 
+    def test_a_drive_whose_download_is_not_finished_waits(self):
+        # #109: the fetch keeps <videos>/.downloading/<route> until the drive's last segment is here.
+        self.shared(1, 2)
+        self.linked(1, 2)
+        self.extracted(1, 2)
+        marker = self.videos / status.DOWNLOADING / ROUTE
+        marker.parent.mkdir()
+        marker.write_bytes(b"")
+        row = self.row()
+        self.assertEqual((row["state"], row["downloading"]), ("scaricare", True))
+        self.assertEqual(status.next_step([row]), "helpers/fetch_comma_segments.sh")
+        marker.unlink()
+        self.assertEqual(self.row()["state"], "preannotare")
+
+    def test_a_drive_just_started_downloading_is_listed(self):
+        (self.videos / status.DOWNLOADING).mkdir()
+        (self.videos / status.DOWNLOADING / ROUTE).write_bytes(b"")
+        (self.videos / status.DOWNLOADING / "not-a-route").write_bytes(b"")
+        row = self.row()
+        self.assertEqual((row["state"], row["segments"]), ("scaricare", 0))
+
+    def test_a_prepared_drive_keeps_its_state_while_downloading(self):
+        self.shared(1)
+        self.linked(1)
+        self.extracted(1)
+        self.report(2)
+        (self.videos / status.DOWNLOADING).mkdir()
+        (self.videos / status.DOWNLOADING / ROUTE).write_bytes(b"")
+        self.assertEqual(self.row()["state"], "revisionare")
+
     def test_reviews_after_the_import_are_new(self):
         self.shared(1)
         self.linked(1)

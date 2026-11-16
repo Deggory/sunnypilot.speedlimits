@@ -58,6 +58,15 @@
 # Already downloaded files are skipped without asking rsync (same size as on the comma, read with one
 # stat per drive), and every ssh/rsync goes through one shared ssh connection, so a run with nothing
 # new takes seconds and it can be run after every drive.
+# A file cut off halfway (the wifi dropped, the job was stopped) never sits under its own name: rsync keeps
+# it in <segment>/.rsync.part/ and the next run goes on from there; a segment folder holding a *.part
+# item is skipped by nnslr link-videos and helpers/route_status.py (#109).
+# A drive being downloaded has the empty file <COMMA_VIDEOS_DIR>/.downloading/<route> until every one of
+# its segments is here: helpers/1_prepare.sh leaves such a drive out (route_status "download not
+# finished"), so a drive is never prepared with half of its segments. A run stopped halfway leaves the
+# file, and the next run finishes the drive; in automatic mode the file of a drive no longer on the comma
+# goes (what is here is all there will be). While the comma is on the road, its newest drive is still
+# being recorded: it is downloaded as far as it is and keeps its file.
 #
 # --skip: every segment of the route found on the comma, except the listed ones.
 #         The list takes numbers, ranges (2-5), "last" (the highest segment, the arrival),
@@ -293,11 +302,18 @@ read_comma_sizes() {
   done < <(ssh "$COMMA_HOST" "cd $REMOTE_DIR && stat -c '%n %s' $route--*/rlog.zst $route--*/fcamera.hevc $route--*/ecamera.hevc 2>/dev/null || true")
 }
 
+# <COMMA_VIDEOS_DIR>/.downloading/<route>: the drive is not all here yet (see the header).
+DOWNLOADING_DIR=""
+mark_downloading() { mkdir -p "$DOWNLOADING_DIR" && : > "$DOWNLOADING_DIR/$route"; }
+unmark_downloading() { rm -f "$DOWNLOADING_DIR/$route"; }
+
 # Copies $segments of $route into the shared folder, links them into data/, then runs the
-# localizer when asked.
+# localizer when asked. The drive is marked as being downloaded until its last segment is here,
+# or for good while it is still being recorded ($recording_route).
 download_segments() {
   route_hex="$(echo "$route" | tr -d '-')"
   read_comma_sizes
+  mark_downloading
   for s in $segments; do
     src="$REMOTE_DIR/$route--$s"
     shared="$VIDEOS_DIR/$route--$s"
@@ -335,7 +351,8 @@ download_segments() {
       move_old_file "$dst/$f" "$shared/$f"
       # Same size as on the comma: already here, no rsync (a file stopped halfway is shorter).
       if [ ! -f "$shared/$f" ] || [ "$(file_size "$shared/$f")" != "${comma_size[$route--$s/$f]}" ]; then
-        rsync -avP $RSYNC_NO_OWNER "$COMMA_HOST:$src/$f" "$shared/"
+        # Not -P: its --partial would leave a file cut off halfway under its own name.
+        rsync -av --progress --partial-dir=.rsync.part $RSYNC_NO_OWNER "$COMMA_HOST:$src/$f" "$shared/"
         fetched_files=$((fetched_files + 1))
       fi
       link_file "$shared/$f" "$dst/$f"
@@ -346,6 +363,36 @@ download_segments() {
       (cd "$ROOT" && uv run python -m localizer.run --segment "$name")
     fi
   done
+  if [ "$route" = "${recording_route:-}" ]; then
+    echo "$route: still being recorded (the comma is on the road): downloaded as far as it is, finished by the next download"
+  else
+    unmark_downloading
+  fi
+}
+
+# Automatic mode: the file of a drive no longer on the comma goes, since nothing more of it can come.
+forget_gone_downloads() {
+  local marker gone
+  [ -d "$DOWNLOADING_DIR" ] || return 0
+  for marker in "$DOWNLOADING_DIR"/*; do
+    [ -f "$marker" ] || continue
+    gone="$(basename "$marker")"
+    if [[ " $comma_routes " != *" $gone "* ]]; then
+      rm -f "$marker"
+      echo "$gone: no longer on the comma, its download stays as far as it got"
+    fi
+  done
+}
+
+# Automatic mode: while the comma is on the road its newest drive is still being recorded.
+find_recording_route() {
+  local onroad last=""
+  recording_route=""
+  onroad="$(ssh "$COMMA_HOST" "cat /data/params/d/IsOnroad 2>/dev/null || true")"
+  [ "$onroad" = "1" ] || return 0
+  for last in $comma_routes; do :; done
+  recording_route="$last"
+  echo "The comma is on the road: $recording_route is still being recorded"
 }
 
 # Automatic mode: puts every route still on the comma in $comma_routes, dashcam or not.
@@ -501,6 +548,8 @@ fi
 # Absolute path: Distill links must keep working when a folder moves to data_scartati/.
 mkdir -p "$VIDEOS_DIR" || die "cannot create the shared folder $VIDEOS_DIR (COMMA_VIDEOS_DIR)"
 VIDEOS_DIR="$(cd "$VIDEOS_DIR" && pwd)"
+DOWNLOADING_DIR="$VIDEOS_DIR/.downloading"
+recording_route=""
 
 # One ssh connection to the comma for the whole run: ssh and rsync reuse it instead of opening
 # a new one (about a second each) for every file. In /tmp and not in $TMPDIR: the panel's is deep in
@@ -521,6 +570,8 @@ if [ "$auto_mode" -eq 1 ]; then
     exit 0
   fi
   echo "Routes found on the comma:$comma_routes"
+  forget_gone_downloads
+  find_recording_route
 
   for r in $comma_routes; do
     route="$r"

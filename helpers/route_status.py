@@ -8,6 +8,8 @@ Standard library only, read-only: it never writes in the data root or in the rev
   python -m helpers.route_status --todo=preannotate (extracted, without a pre-annotation report)
   python -m helpers.route_status --todo=repropose   (with a report and frames still to confirm: Propose again gives
                                                     those new proposals, the confirmed ones stay)
+  python -m helpers.route_status --todo=download    (not prepared, with its download from the comma not finished:
+                                                    Prepare leaves it out until helpers/fetch_comma_segments.sh is done)
 """
 from __future__ import annotations
 
@@ -25,6 +27,9 @@ REPO = Path(__file__).resolve().parents[1]
 SEGMENT_DIR = re.compile(r"^([0-9a-f]{8}--[0-9a-f]{10})--(\d+)$")
 ROUTE_ID = re.compile(r"^[0-9a-f]{8}--[0-9a-f]{10}$")
 RUN_ID = re.compile(r"^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$")
+# helpers/fetch_comma_segments.sh keeps the empty file <COMMA_VIDEOS_DIR>/.downloading/<route> until every segment
+# of the drive is here (#109).
+DOWNLOADING = ".downloading"
 # nnslr build-splits makes three disjoint partitions (train, validation, test) of independent
 # route/site groups: fewer reviewed routes cannot be split.
 MIN_REVIEWED_ROUTES = 3
@@ -32,6 +37,7 @@ MIN_REVIEWED_ROUTES = 3
 # State of a route, in pipeline order, with the helper that moves it forward.
 # The keys stay as they are (the JSON of the site and of --json uses them); the words are English.
 STATES = {
+    "scaricare": ("download from the comma not finished", "helpers/fetch_comma_segments.sh"),
     "collegare": ("videos to link", "helpers/1_prepare.sh"),
     "estrarre": ("pictures to take out", "helpers/1_prepare.sh"),
     "preannotare": ("signs to propose", "helpers/1_prepare.sh"),
@@ -62,6 +68,15 @@ def shared_segments(videos: Path) -> dict[str, set[int]]:
                 and not any(item.name.endswith(".part") for item in entry.iterdir())):
             found.setdefault(match[1], set()).add(int(match[2]))
     return found
+
+
+def unfinished_downloads(videos: Path) -> set[str]:
+    """The drives whose download from the comma has not reached their last segment (a download running, stopped
+    halfway, or of a drive still being recorded): Prepare waits for the rest of them."""
+    folder = videos / DOWNLOADING
+    if not folder.is_dir():
+        return set()
+    return {entry.name for entry in folder.iterdir() if ROUTE_ID.fullmatch(entry.name) and entry.is_file()}
 
 
 def _numbered_dirs(directory: Path) -> list[Path]:
@@ -149,7 +164,8 @@ def dataset_objects(root: Path) -> tuple[Counter, str | None]:
 
 def route_rows(root: Path, videos: Path) -> list[dict]:
     shared = shared_segments(videos)
-    routes = set(shared)
+    downloading = unfinished_downloads(videos)
+    routes = set(shared) | downloading
     for folder in ("raw/routes", "derived/frames", "derived/preannotations"):
         base = root / folder
         if base.is_dir():
@@ -177,6 +193,7 @@ def route_rows(root: Path, videos: Path) -> list[dict]:
             "confirmed_by_ai": by_ai.get((route, run), 0) if run else 0,
             "new_reviews": newer.get((route, run), 0) if run else 0,
             "objects": objects.get(route, 0),
+            "downloading": route in downloading,
         }
         row["state"] = route_state(row)
         rows.append(row)
@@ -185,13 +202,16 @@ def route_rows(root: Path, videos: Path) -> list[dict]:
 
 def route_state(row: dict) -> str:
     # A pre-annotated route is prepared again only by Propose again (helpers/1_prepare.sh --again), which copies
-    # its confirmed frames onto the new report. Segments that show up later stay unused (see print_table).
+    # its confirmed frames onto the new report. Segments that show up later stay unused (see print_table), so a
+    # drive is not prepared while its download is not finished.
     if row["run_id"] is not None:
         if row["confirmed"] < row["report_frames"]:
             return "revisionare"
         if row["new_reviews"]:
             return "importare"
         return "pronta"
+    if row["downloading"]:
+        return "scaricare"
     if row["unlinked"] or row["linked"] == 0:
         return "collegare"
     if row["extracted"] < row["linked"]:
@@ -203,7 +223,7 @@ def next_step(rows: list[dict]) -> str:
     states = {row["state"] for row in rows}
     if not rows:
         return "no drives yet: download the videos with helpers/fetch_comma_segments.sh"
-    for state in ("collegare", "estrarre", "preannotare", "revisionare"):
+    for state in ("collegare", "estrarre", "preannotare", "scaricare", "revisionare"):
         if state in states:
             return STATES[state][1]
     reviewed = sum(1 for row in rows if row["confirmed"])
@@ -230,7 +250,7 @@ def print_table(rows: list[dict]) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--todo", choices=("extract", "preannotate", "repropose"),
+    parser.add_argument("--todo", choices=("extract", "preannotate", "repropose", "download"),
                         help="print only the routes that still need this step, one per line")
     parser.add_argument("--json", action="store_true", help="every route as JSON")
     args = parser.parse_args()
@@ -243,7 +263,7 @@ def main() -> int:
             if reviewed is not None and row["run_id"] and row["confirmed"] < row["report_frames"]:
                 print(row["route"])
     elif args.todo:
-        wanted = "estrarre" if args.todo == "extract" else "preannotare"
+        wanted = {"extract": "estrarre", "preannotate": "preannotare", "download": "scaricare"}[args.todo]
         for row in rows:
             if row["state"] == wanted:
                 print(row["route"])

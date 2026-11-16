@@ -20,7 +20,8 @@
 # Without --again a route that already has a pre-annotation report is never processed again. With it,
 # the new report gets the confirmed frames of the old one (nnslr preannotate --keep-reviews), copied
 # before it becomes the current one; it also adds the frames of the comma's reads. Segments of a route that arrive later stay unused (helpers/status.sh
-# shows them).
+# shows them), so a drive whose download from the comma is not finished (helpers/fetch_comma_segments.sh
+# stopped before its last segment, or the comma was still recording it) is left out until a download finishes it (#109).
 # Every route writes its own log in data/logs/prepare/<route>.log.
 # Who proposes the signs: NNSLR_PROPOSER=vietnam (the Vietnamese YOLO of Hugging Face), ours (our cutter,
 # classifier and decider in use, on the GPU) or qwen; unset, the choice of the Prepare tab (data/web/proposer.json),
@@ -99,6 +100,10 @@ prepare_route() {
     "$NN" preannotate --route "$route" --keep-reviews < /dev/null >> "$log" 2>&1 \
       || { echo "$route: proposing failed (see $log)"; return 1; }
     echo "$route: ready to review"
+    return 0
+  fi
+  if todo download | grep -qx "$route"; then
+    echo "$route: its download from the comma is not finished, left out until a download finishes it"
     return 0
   fi
   if todo extract | grep -qx "$route"; then
@@ -186,6 +191,10 @@ if [ "${#routes[@]}" -eq 0 ]; then
     mapfile -t routes < <(todo repropose | sed '/^$/d' | sort -u)
   else
     mapfile -t routes < <( (todo extract; todo preannotate) | sed '/^$/d' | sort -u)
+    mapfile -t unfinished < <(todo download | sed '/^$/d')
+    if [ "${#unfinished[@]}" -gt 0 ]; then
+      echo "Left out until their download from the comma is finished: ${unfinished[*]}"
+    fi
   fi
 fi
 if [ "${#routes[@]}" -eq 0 ]; then

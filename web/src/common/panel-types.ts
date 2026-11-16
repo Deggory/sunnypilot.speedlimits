@@ -256,7 +256,8 @@ export interface MapillaryRegions {
   ids_table: boolean;
 }
 export type JobState = 'running' | 'ok' | 'failed' | 'interrupted';
-export type RouteState = 'collegare' | 'estrarre' | 'preannotare' | 'revisionare' | 'importare' | 'pronta';
+/** helpers/route_status.py STATES; 'scaricare': its download from the comma is not finished (#109). */
+export type RouteState = 'scaricare' | 'collegare' | 'estrarre' | 'preannotare' | 'revisionare' | 'importare' | 'pronta';
 
 export interface ActionState {
   label: string;

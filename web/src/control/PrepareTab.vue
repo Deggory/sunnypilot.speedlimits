@@ -140,7 +140,9 @@ const total = computed(() => counts.value.reduce((sum, item) => sum + item.count
 const running = computed(() => job.value?.state === 'running' || activities.value.length > 0);
 /** The job shown as a card: running, or failed (its error must be read); one done or stopped by hand is a line. */
 const bigJob = computed(() => job.value && (job.value.state === 'running' || job.value.state === 'failed') ? job.value : null);
-const WAITING: RouteState[] = ['collegare', 'estrarre', 'preannotare'];
+const WAITING: RouteState[] = ['scaricare', 'collegare', 'estrarre', 'preannotare'];
+/** The drives whose download from the comma stopped before their end (#109): Prepare leaves them out until it is done. */
+const unfinished = computed(() => (props.status?.routes ?? []).filter((row) => row.state === 'scaricare').length);
 const notReady = computed(() => (props.status?.routes ?? []).filter((row) => WAITING.includes(row.state)));
 /** The drives with frames left to review (in progress or not started), and those reviewed to the end. */
 const review = computed(() => reviewSummary(props.status));
@@ -169,11 +171,14 @@ function openComma(): void {
     <h2 class="sr-only" id="prepare-title">New drives</h2>
     <p v-if="total" class="figure-note prep-state" id="prepare-big">{{ plural(total, 'drive') }} copied from the comma, waiting
       to be prepared.</p>
-    <p v-else-if="status" class="figure-note prep-state" id="prepare-big">No new drive to prepare. New drives come from the comma:
+    <p v-else-if="status && !unfinished" class="figure-note prep-state" id="prepare-big">No new drive to prepare. New drives come from the comma:
       <button type="button" class="link-button" @click="openComma">Download new drives</button></p>
     <ul v-if="total" class="chips">
       <li v-for="item in counts.filter((entry) => entry.count)" :key="item.state"><strong>{{ item.count }}</strong> {{ item.label }}</li>
     </ul>
+    <p v-if="unfinished" class="figure-note prep-state" id="prepare-unfinished">{{ plural(unfinished, 'drive') }} not all
+      downloaded: Prepare leaves {{ unfinished === 1 ? 'it' : 'them' }} out until the rest is here.
+      <button type="button" class="link-button" @click="openComma">Download new drives</button></p>
     <h3 class="prep-step">Find the signs</h3>
     <p class="figure-note prep-state">Draws a box around every sign in every picture and reads it, for you to confirm in Review.</p>
     <div class="proposer">
