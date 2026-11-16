@@ -407,6 +407,66 @@ def test_the_lists_are_filtered(outside, monkeypatch):
     assert OTHER_ROUTE not in page
 
 
+def test_a_key_that_is_no_frame_of_the_drive_leaves_no_lock_behind(outside):
+    server, rows = outside
+    frame_locks = lambda: [key for key in server.app._route_locks if key[0].startswith('frame:')]  # noqa: E731
+    for index in (7, 999, 1005, 2600, 123456789):
+        assert server.post_frame(ROUTE, f'9/{index}', {}, headers=proof())[0] == 404
+        assert server.post_frame(ROUTE, f'0/{index}', {}, headers=proof())[0] == 404
+    assert frame_locks() == []
+    # A frame of the report still takes its lock and is saved.
+    status, _, data = server.post_frame(ROUTE, rows[0]['frame_key'], page_body(rows[0]), headers=proof())
+    assert status == 200, data
+    assert frame_locks() == [('frame:' + rows[0]['frame_key'], ROUTE)]
+
+
+def test_a_save_brings_no_text_longer_than_a_note(outside):
+    server, rows = outside
+    body = page_body(rows[0])
+    for change in ({'site_group': 'x' * 201}, {'encounter_id': 'y' * 201}):
+        status, _, data = server.post_frame(ROUTE, rows[0]['frame_key'], {**body, **change}, headers=proof())
+        assert status == 400 and json_of(data)['error'] == 'invalid_group', data
+    long_note = {**body, 'detections': [{**body['detections'][0], 'notes': 'n' * 2001}] + body['detections'][1:]}
+    status, _, data = server.post_frame(ROUTE, rows[0]['frame_key'], long_note, headers=proof())
+    assert status == 400 and json_of(data)['error'] == 'invalid_schema', data
+    assert server.app.store.review(ROUTE, body['run_id'], rows[0]['frame_key']) is None
+    long_id = {**body, 'detections': [{**body['detections'][0], 'detection_id': 'd' * 201}] + body['detections'][1:]}
+    assert server.post_frame(ROUTE, rows[0]['frame_key'], long_id, headers=proof())[0] == 400
+    note = {**body, 'detections': [{**body['detections'][0], 'notes': 'n' * 2000}] + body['detections'][1:]}
+    assert server.post_frame(ROUTE, rows[0]['frame_key'], note, headers=proof())[0] == 200
+    # Withdrawn twice: the second changes nothing and copies nothing into the history.
+    history = lambda: len(server.app.store.history(ROUTE, body['run_id'], rows[0]['frame_key']))  # noqa: E731
+    withdraw = {'run_id': body['run_id'], 'confirmed': False}
+    assert server.post_frame(ROUTE, rows[0]['frame_key'], withdraw, headers=proof())[0] == 200
+    rows_then = history()
+    assert server.post_frame(ROUTE, rows[0]['frame_key'], withdraw, headers=proof())[0] == 200
+    assert history() == rows_then == 2
+
+
+def test_the_requests_from_outside_never_hold_every_connection(outside):
+    server, _ = outside
+    slots = server.app.guest_slots
+    held = 0
+    while slots.acquire(blocking=False):
+        held += 1
+    try:
+        assert held == review.GUEST_CONNECTIONS < review.MAX_CONNECTIONS
+        status, _, data = server.request('GET', '/api/reviewer/work', headers=proof())
+        assert status == 503 and json_of(data)['error'] == 'busy'
+        assert server.request('GET', '/reviews', headers=proof())[0] == 503
+        # This network is not counted with them.
+        assert server.request('GET', '/api/reviewers', headers=sign_in(server))[0] == 200
+    finally:
+        for _ in range(held):
+            slots.release()
+    assert server.request('GET', '/api/reviewer/work', headers=proof())[0] == 200
+    # A request that ended gave its place back, a refused one too.
+    assert server.request('GET', f'/route/{OTHER_ROUTE}/', headers=proof())[0] == 403
+    assert slots.acquire(blocking=False) and all(slots.acquire(blocking=False) for _ in range(held - 1))
+    for _ in range(held):
+        slots.release()
+
+
 # ---------- what the server stamps ----------
 
 def test_a_frame_is_signed_by_the_server_never_by_the_page(outside):

@@ -291,6 +291,8 @@ class ReviewStore:
         ``protect_human`` refuses (409) to change a frame a human confirmed.
         """
         text = json.dumps(payload, sort_keys=True, separators=(',', ':'), allow_nan=False)
+        if len(text) > MAX_PAYLOAD_BYTES:
+            raise ReviewRejected(400, 'too_large', 'This frame holds too much text to be saved: shorten the notes.')
         now = utc_now()
         with self._write_lock:
             connection = self._connect()
@@ -350,6 +352,10 @@ class ReviewStore:
                                              'No saved review to withdraw for this frame.')
                     _check_base_revision(base_revision, existing['revision'])
                     _check_human_review(protect_human, existing)
+                    if not existing['confirmed']:
+                        # Withdrawn already: nothing changes, and its payload is not copied into the history again (#102).
+                        connection.execute('COMMIT')
+                        return existing
                     payload = json.dumps(existing['payload'], sort_keys=True, separators=(',', ':'), allow_nan=False)
                     revision = existing['revision'] + 1
                     connection.execute(
@@ -864,6 +870,31 @@ def _check_versioning(body: dict, run_id: str) -> None:
                              'base_revision is missing: send the revision read with the frame (0 if it was not saved).')
 
 
+# The text a save may bring, in characters (the longest note saved by 16 Nov 2026 has 107). Without a limit one request
+# left half a megabyte in the history, which is never cut (#102).
+MAX_GROUP_CHARS = 200
+MAX_NOTES_CHARS = 2000
+# And the whole frame as it is stored: the largest saved by 16 Nov 2026 has 10.6 kB; a hundred boxes with their notes
+# stay well under this.
+MAX_PAYLOAD_BYTES = 256 * 1024
+
+
+def _check_text_sizes(body: dict) -> None:
+    for field in ('site_group', 'encounter_id'):
+        value = body.get(field)
+        if isinstance(value, str) and len(value) > MAX_GROUP_CHARS:
+            raise ReviewRejected(400, 'invalid_group', f'{field} can have at most {MAX_GROUP_CHARS} characters.')
+    detections = body.get('detections')
+    for item in detections if isinstance(detections, list) else ():
+        notes = item.get('notes') if isinstance(item, dict) else None
+        if isinstance(notes, str) and len(notes) > MAX_NOTES_CHARS:
+            raise ReviewRejected(400, 'invalid_schema', f'The notes of a box can have at most {MAX_NOTES_CHARS} characters.')
+        identity = item.get('detection_id') if isinstance(item, dict) else None
+        if isinstance(identity, str) and len(identity) > MAX_GROUP_CHARS:
+            raise ReviewRejected(400, 'invalid_schema',
+                                 f'The detection_id of a box can have at most {MAX_GROUP_CHARS} characters.')
+
+
 def save_frame_review(store: ReviewStore, root: Path, *, route_id: str, run_id: str, report_row: dict,
                       body, client: str, channel: str = 'web', require_versioning: bool = False) -> dict:
     """Handle one save: confirm (validated, stored) or withdraw a frame.
@@ -894,6 +925,7 @@ def save_frame_review(store: ReviewStore, root: Path, *, route_id: str, run_id: 
     if type(override) is not bool:
         raise ReviewRejected(400, 'invalid_schema', italian_message('invalid_schema', 'override_human_review'))
     _check_reviewer_text(body.get('reviewer'))
+    _check_text_sizes(body)
     kind = _reviewer_kind(body, channel, require_versioning)
     reviewer = _stored_reviewer(body.get('reviewer'), kind)
     # An AI never changes a human confirmation unless the owner asked for it.

@@ -51,6 +51,8 @@ DETECTION_FAMILIES = ('maximum_speed', 'cancellation', 'zone', 'variable_display
                       'other_sign', 'unreadable', 'not_a_sign')
 VALUE_FAMILIES = ('maximum_speed', 'cancellation', 'zone', 'variable_display', 'road_marking_candidate')
 FRAME_KEY_PATTERN = re.compile(r'([0-9]{1,9})/([0-9]{1,9})')
+# A minute of road video has 1200 frames (60 s at 20 a second); no frame between the seconds has an index past this.
+SEGMENT_FRAMES_MOST = 1500
 UNKNOWN_ROUTE_MESSAGE = 'Unknown route, or route without a pre-annotation report.'
 
 
@@ -319,6 +321,23 @@ class ReviewService:
                            'frame_key': keys.get(index, f'{segment}/{READ_INDEX_BASE + index}')})
         return {'route_id': route, 'run_id': directory.name, 'segment_index': segment, 'frame_count': count,
                 'gop': [first, last], 'frames': frames}
+
+    def can_be_frame(self, route: str, frame_key: str) -> bool:
+        """A key the page may save on: a row of the report, or a frame of the road video of one of the drive's minutes.
+        Asked before frame_lock, whose locks stay for good: any other key left one behind at every request (#102)."""
+        if frame_key in self.report(route)[2]:
+            return True
+        segment, index = (int(part) for part in frame_key.split('/'))
+        if index < READ_INDEX_BASE:
+            return False
+        # A frame between the seconds: the page is told why it cannot be saved, as its save would say.
+        try:
+            if index >= READ_INDEX_BASE + SEGMENT_FRAMES_MOST:
+                raise video_frames.VideoFrameError(f'frame {index - READ_INDEX_BASE} is not in the video')
+            video_frames.video_of(self.root, route, segment)
+        except (video_frames.VideoFrameError, OSError, ValueError) as exc:
+            raise ReviewRejected(404, 'no_video_frame', 'This frame of the video cannot be saved: ' + str(exc)) from exc
+        return True
 
     def video_frame_row(self, route, frame_key: str, body) -> tuple[dict | None, bool]:
         """(report row, made now) of a frame between the seconds the page confirms (with its boxes, or as no sign):

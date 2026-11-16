@@ -65,6 +65,9 @@ MAX_BODY_BYTES = 512 * 1024
 # MAX_CONNECTIONS are open at once, so idle clients cannot use up threads.
 REQUEST_TIMEOUT_SECONDS = 30
 MAX_CONNECTIONS = 64
+# Of those, the most the requests from outside (through the proxy) hold at once: the rest stays for this network, so
+# that a reviewer who keeps many requests open cannot close the site to the administrator and the agents (#102).
+GUEST_CONNECTIONS = 32
 # [site-login] - START
 LOGIN_MESSAGE = 'Sign-in required: reload the page and sign in with your name and password.'
 # Sign-in calls that work without a session, and all of them.
@@ -295,6 +298,7 @@ class ReviewApp(ReviewService):
         # On 127.0.0.1 there is no proxy and no outside.
         self.access = GuestAccess.from_env() if require_token else GuestAccess()
         self.assignments = Assignments(auth_dir(root))
+        self.guest_slots = threading.BoundedSemaphore(GUEST_CONNECTIONS)
         # [guest-reviewers] - END
         self._mcp = None
         self._mcp_failed = False
@@ -700,6 +704,15 @@ def make_handler(app: ReviewApp):
                     # '': from outside, nobody we know. Their error page holds nothing of the site.
                     self.guest = ''
                     self._problem(exc.status, exc.reason, exc.message, self.path.startswith('/api/'))
+                    return
+                if self.guest is not None:
+                    if not app.guest_slots.acquire(blocking=False):
+                        self._problem(503, 'busy', 'The site is busy: try again in a moment.', self.path.startswith('/api/'))
+                        return
+                    try:
+                        self._handle(method)
+                    finally:
+                        app.guest_slots.release()
                     return
                 # [guest-reviewers] - END
                 self._handle(method)
@@ -2235,6 +2248,17 @@ def make_handler(app: ReviewApp):
                 # "Apply previous" of the page: nothing is saved, the page shows the boxes to check.
                 self._json(200, app.apply_previous(route, frame_key, body))
                 return
+            # A key that is no frame of this drive takes no lock: each would stay for good (#102).
+            try:
+                known = app.can_be_frame(route, frame_key)
+            except ReviewRejected:
+                raise
+            except (PreannotationError, ValueError, OSError):
+                self._problem(404, 'unknown_route', 'Unknown route, or route without a pre-annotation report.', True)
+                return
+            if not known:
+                self._problem(404, 'unknown_frame', 'Frame not in the report of this route.', True)
+                return
             # The saves of one frame one after the other (frame_lock, #99); of one drive, one after the other with the
             # flags they send back, but never waiting for another frame's ffmpeg (save_lock, #100).
             with app.frame_lock(route, frame_key):
@@ -2247,6 +2271,9 @@ def make_handler(app: ReviewApp):
                 report_row = by_key.get(frame_key)
                 made = False
                 if report_row is None:
+                    if isinstance(body, dict) and body.get('run_id') != directory.name:
+                        # Refused in any case (save_frame_review): before ffmpeg takes its GOP out, not after.
+                        raise ReviewRejected(409, 'stale_report', 'The report of this route was rebuilt: reload the page.')
                     # A frame between the seconds confirmed: its picture is taken out of the video now.
                     report_row, made = app.video_frame_row(route, frame_key, body)
                 if report_row is None:

@@ -64,8 +64,19 @@ HEADER_BYTES = 1 << 16
 PREPARED_PREFIX = '.prepared-'
 PREPARED_KEPT_S = 3600
 # How often a save or a prepare looks through every segment folder for those (forget_old_prepared_soon).
-SWEEP_EVERY_S = 600
+SWEEP_EVERY_S = 120
 _last_sweep: list[float] = []
+# A reviewer walking the video asks for one GOP after the other. A page, or a reviewer from outside, that asked for
+# thousands of frames at once started a thread each and left every frame of a drive on the disk as a PNG, about
+# 100 GB for an hour of driving (#102). So at most PREPARES_AT_ONCE prepares of a drive wait or run at once, each
+# frame once, and PREPARES_AT_ONCE_ALL of all the drives (one more is not started: the save of its frame takes it out
+# itself); a drive keeps at most PREPARED_KEPT frames prepared, about 3 GB at full definition, and all the drives
+# together PREPARED_KEPT_ALL, the oldest going first (_keep_prepared after each GOP taken out, the sweep for all).
+PREPARES_AT_ONCE = 16
+PREPARES_AT_ONCE_ALL = 64
+PREPARED_KEPT = 2000
+PREPARED_KEPT_ALL = 6000
+_preparing: set[tuple] = set()
 
 _locks: dict[tuple, threading.Lock] = {}
 _locks_guard = threading.Lock()
@@ -621,21 +632,57 @@ def prepare(root: Path, route: str, segment: int, decoded: int) -> None:
         if _prepared(directory, decoded) or _saved(directory, decoded) is not None:
             return
         _extract_gop(root, route, segment, video, gop, directory, wanted=decoded)
+    _keep_prepared(root, route)
     forget_old_prepared_soon(root)
 
 
+def _drop(folder: Path) -> None:
+    """A prepared folder removed, renamed first: a save that took it (_take_prepared, which renames it too) keeps it
+    whole, the other finds it gone."""
+    try:
+        dropped = folder.with_name(f'.video-drop-{uuid.uuid4().hex}')
+        folder.rename(dropped)
+    except OSError:
+        return
+    shutil.rmtree(dropped, ignore_errors=True)
+
+
 def _drop_old(paths, now: float) -> None:
-    """The folders among ``paths`` older than PREPARED_KEPT_S removed, each renamed first: a save that took one
-    (_take_prepared, which renames it too) keeps it whole, the other finds it gone."""
+    """The folders among ``paths`` older than PREPARED_KEPT_S removed (_drop)."""
     for old in paths:
         try:
             if now - old.stat().st_mtime <= PREPARED_KEPT_S:
                 continue
-            dropped = old.with_name(f'.video-drop-{uuid.uuid4().hex}')
-            old.rename(dropped)
         except OSError:
             continue
-        shutil.rmtree(dropped, ignore_errors=True)
+        _drop(old)
+
+
+def _keep_prepared(root: Path, route: str) -> None:
+    """At most PREPARED_KEPT frames of a drive stay prepared: the oldest go first. A frame that went is taken out of
+    the video again by its save."""
+    aged = []
+    for folder in (Path(root) / 'derived/frames' / route).glob('*/' + PREPARED_PREFIX + '*'):
+        try:
+            aged.append((folder.stat().st_mtime, folder))
+        except OSError:
+            continue
+    _drop_oldest(aged, PREPARED_KEPT)
+
+
+def _drop_oldest(aged: list[tuple[float, Path]], kept: int) -> None:
+    """All but the ``kept`` newest of the (time, prepared folder) listed, removed. One made again since the listing (its
+    save found it gone and took its GOP out again) is new: it stays."""
+    if len(aged) <= kept:
+        return
+    aged.sort(key=lambda item: item[0])
+    for age, folder in aged[:len(aged) - kept]:
+        try:
+            if folder.stat().st_mtime != age:
+                continue
+        except OSError:
+            continue
+        _drop(folder)
 
 
 def forget_old_prepared(root: Path) -> None:
@@ -644,6 +691,14 @@ def forget_old_prepared(root: Path) -> None:
     1 GB on 15 Nov 2026, before a GOP was prepared at once (#99)."""
     frames = Path(root) / 'derived/frames'
     _drop_old([*frames.glob('*/*/' + PREPARED_PREFIX + '*'), *frames.glob('*/*/.video-*')], time.time())
+    # And of all the drives together no more than PREPARED_KEPT_ALL stay.
+    aged = []
+    for folder in frames.glob('*/*/' + PREPARED_PREFIX + '*'):
+        try:
+            aged.append((folder.stat().st_mtime, folder))
+        except OSError:
+            continue
+    _drop_oldest(aged, PREPARED_KEPT_ALL)
 
 
 def forget_old_prepared_soon(root: Path) -> None:
@@ -663,13 +718,30 @@ def forget_old_prepared_soon(root: Path) -> None:
 
 
 def prepare_soon(root: Path, route: str, segment: int, decoded: int) -> None:
-    """prepare outside the request; a frame it cannot take out is taken out again by its save, which says why."""
+    """prepare outside the request; a frame it cannot take out is taken out again by its save, which says why. Not
+    started for a frame whose prepare already waits or runs, nor while PREPARES_AT_ONCE of its drive do (the frames
+    of one GOP wait together for its one ffmpeg), or PREPARES_AT_ONCE_ALL of all the drives."""
+    key = (str(root), route, int(segment), int(decoded))
+    with _locks_guard:
+        if key in _preparing or len(_preparing) >= PREPARES_AT_ONCE_ALL \
+                or sum(1 for item in _preparing if item[:2] == key[:2]) >= PREPARES_AT_ONCE:
+            return
+        _preparing.add(key)
+
     def run() -> None:
         try:
             prepare(root, route, segment, decoded)
         except (VideoFrameError, MediaToolError, OSError, ValueError):
             pass
-    threading.Thread(target=run, name='video-prepare', daemon=True).start()
+        finally:
+            with _locks_guard:
+                _preparing.discard(key)
+    try:
+        threading.Thread(target=run, name='video-prepare', daemon=True).start()
+    except BaseException:
+        with _locks_guard:
+            _preparing.discard(key)
+        raise
 
 
 def _saved(directory: Path, decoded: int) -> dict | None:
@@ -722,6 +794,7 @@ def materialize(root: Path, route: str, segment: int, decoded: int) -> tuple[dic
         if row is not None:
             return row, False
         made = _take_prepared(directory, decoded) if _prepared(directory, decoded) else None
+        extracted = made is None
         if made is None:
             # Not prepared, or its folder gone or broken meanwhile (_forget_old_prepared): taken out now.
             _extract_gop(root, route, segment, video, gop, directory, wanted=decoded)
@@ -733,6 +806,10 @@ def materialize(root: Path, route: str, segment: int, decoded: int) -> tuple[dic
             temporary = manifest.with_suffix('.jsonl.tmp')
             temporary.write_text(''.join(json.dumps(row, sort_keys=True) + '\n' for row in rows))
             temporary.replace(manifest)
+    if extracted:
+        # The rest of its GOP stays prepared: counted like those prepare leaves (a save refused after this, sent for
+        # one frame of every GOP, left the whole drive on the disk, #102).
+        _keep_prepared(root, route)
     forget_old_prepared_soon(root)
     return made, True
 

@@ -154,6 +154,8 @@ Other people can do review work on the drives you give them, and nothing else: n
 
 **Where they work.** On this server, through the sign-in in front of it (since 16 Nov 2026; from 6 to 16 Nov a separate machine, the review box, held copies of the drives given: it went, with its copy back and forth). A drive you give in **Data › Reviewers** is theirs at once, and what they save is saved here like yours. The positions and the road names stay on the disk and are taken out of every answer to a reviewer, as said above.
 
+**What a reviewer cannot use up.** The requests from outside hold at most 32 of the site's 64 connections, so the site stays open to you. Frames between the seconds are taken out of the video ahead for at most 16 at a time a drive, and a drive keeps at most 2000 of them waiting (about 3 GB; 6000 for all the drives), the oldest going first. A save brings notes of at most 2000 characters a box and a frame of at most 256 kB.
+
 **Review completed** on their list hands a drive back: all their work on it is taken back at once, and the card of the person's work in **Data › Reviewers** lists what they completed and when. Give the work again and it is no longer listed as completed.
 
 **Turning it on** (once, when the proxy is ready):

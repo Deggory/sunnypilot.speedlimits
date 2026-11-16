@@ -505,6 +505,93 @@ def test_a_save_never_waits_for_the_ffmpeg_of_another_frame_of_its_drive(drive):
     assert store.review(ROUTE, RUN_ID, '0/1025')['confirmed'] and store.review(ROUTE, RUN_ID, '0/1')['confirmed']
 
 
+def test_only_so_many_frames_are_prepared_at_once_and_each_once(tmp_path, monkeypatch):
+    started, go = [], threading.Event()
+
+    def held(root, route, segment, decoded):
+        started.append(decoded)
+        go.wait(10)
+    monkeypatch.setattr(video_frames, 'prepare', held)
+    monkeypatch.setattr(video_frames, 'PREPARES_AT_ONCE', 3)
+    monkeypatch.setattr(video_frames, 'PREPARES_AT_ONCE_ALL', 5)
+    other = '00000002--0123456789'
+    try:
+        for decoded in (5, 5, 6, 7, 8, 9):
+            video_frames.prepare_soon(tmp_path, ROUTE, 0, decoded)
+        # Another drive is not kept out by this one's; all the drives together have their own count.
+        for decoded in (1, 2, 3):
+            video_frames.prepare_soon(tmp_path, other, 0, decoded)
+        deadline = time.monotonic() + 5
+        while len(started) < 5 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        # The second 5 was already waiting; 8 and 9 came with three of their drive at work, and the 3 of the other
+        # drive with five in all: their saves take them out themselves.
+        assert sorted(started) == [1, 2, 5, 6, 7]
+    finally:
+        go.set()
+    deadline = time.monotonic() + 5
+    while video_frames._preparing and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert not video_frames._preparing
+    # Once they ended, the next is prepared again, a frame that failed too.
+    monkeypatch.setattr(video_frames, 'prepare', lambda *args: (_ for _ in ()).throw(video_frames.VideoFrameError('no video')))
+    video_frames.prepare_soon(tmp_path, ROUTE, 0, 8)
+    deadline = time.monotonic() + 5
+    while video_frames._preparing and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert not video_frames._preparing
+
+
+def test_a_drive_keeps_only_so_many_frames_prepared_the_oldest_go_first(drive, monkeypatch):
+    root, _video, _rows, _server = drive
+    folder = root / 'derived/frames' / ROUTE / '0'
+    monkeypatch.setattr(video_frames, '_last_sweep', [time.monotonic()])
+    video_frames.prepare(root, ROUTE, 0, 25)
+    prepared = sorted(folder.glob(video_frames.PREPARED_PREFIX + '*'), key=lambda path: int(path.name.rsplit('-', 1)[1]))
+    assert len(prepared) == 19
+    now = time.time()
+    for age, path in enumerate(prepared):
+        os.utime(path, (now - 100 + age, now - 100 + age))
+    # A frame prepared on another drive is not counted with these and stays.
+    other = root / 'derived/frames/00000002--0123456789/3' / (video_frames.PREPARED_PREFIX + '7')
+    other.mkdir(parents=True)
+    os.utime(other, (now - 5000, now - 5000))
+    monkeypatch.setattr(video_frames, 'PREPARED_KEPT', 5)
+    video_frames._keep_prepared(root, ROUTE)
+    assert sorted(folder.glob(video_frames.PREPARED_PREFIX + '*')) == sorted(prepared[-5:])
+    assert other.is_dir() and not list(folder.glob('.video-drop-*'))
+    # The next GOP prepared trims by itself, and so does a save that takes its GOP out; a frame that went is still
+    # saved: its save takes it out again.
+    video_frames.prepare(root, ROUTE, 0, 45)
+    assert len(list(folder.glob(video_frames.PREPARED_PREFIX + '*'))) == 5
+    for path in folder.glob(video_frames.PREPARED_PREFIX + '*'):
+        video_frames._drop(path)
+    _row, made = video_frames.materialize(root, ROUTE, 0, 5)
+    assert made and len(list(folder.glob(video_frames.PREPARED_PREFIX + '*'))) == 5
+    # A folder made again since it was listed is new: it stays. All the drives together have their own count.
+    newest = max(folder.glob(video_frames.PREPARED_PREFIX + '*'), key=lambda path: path.stat().st_mtime)
+    video_frames._drop_oldest([(newest.stat().st_mtime - 50, newest)], 0)
+    assert newest.is_dir()
+    monkeypatch.setattr(video_frames, 'PREPARED_KEPT_ALL', 2)
+    os.utime(other, (now + 60, now + 60))
+    video_frames.forget_old_prepared(root)
+    assert other.is_dir() and len(list(folder.glob(video_frames.PREPARED_PREFIX + '*'))) == 1
+
+
+def test_a_refused_save_takes_nothing_out_of_the_video_and_leaves_nothing_prepared(drive, monkeypatch):
+    root, _video, _rows, server = drive
+    folder = root / 'derived/frames' / ROUTE / '0'
+    # No run_id: refused in any case, before ffmpeg.
+    status, _response, data = server.post_frame(ROUTE, '0/1025', {'confirmed': True})
+    assert status == 409 and json_of(data)['error'] == 'stale_report', data
+    assert not list(folder.glob(video_frames.PREPARED_PREFIX + '*')) and not (folder / video_frames.VIDEO_MANIFEST).exists()
+    # A frame past the end of a minute, and a minute without its video, say why, and take no lock.
+    for key in ('0/2600', '7/1025'):
+        status, _response, data = server.post_frame(ROUTE, key, body([]))
+        assert status == 404 and json_of(data)['error'] == 'no_video_frame', data
+    assert not [name for name in server.app._route_locks if name[0] in ('frame:0/2600', 'frame:7/1025')]
+
+
 def test_prepared_frames_left_go_after_an_hour_from_every_drive_and_never_halfway_through_a_save(drive, monkeypatch):
     root, _video, _rows, server = drive
     folder = root / 'derived/frames' / ROUTE / '0'
