@@ -11,10 +11,10 @@ On the GPU first: one ffmpeg over the first minutes decodes, scales and encodes 
 minutes (CPU_SHARE of the frames, CPU_WORKERS ffmpeg side by side) and the GPU encodes them; the pieces are then joined
 without encoding again. The GPU's video decoder is one chip, about 220 frames a second of a full definition drive, and the
 CPU's 20 cores decode about as many, so together a drive takes under half the time (a 50 minute drive at full
-definition in 109 s instead of about 280). A busy CPU (a training) leaves the whole drive to the GPU. The GPU often has room for one
-process only, so a video made while its memory is taken, or on a server without one, goes on the CPU: the minutes side by side (WORKERS ffmpeg at low priority with
-THREADS threads each: it never slows a training) and then joined without encoding again. The index says which
-(encoder).
+definition in 109 s instead of about 280). A busy CPU (a training) leaves the whole drive to the GPU. The cards are tried in turn, the one with the most free
+memory first (a training may hold one); when none can make it, or the server has none, the video is not made and the
+player says why: it never goes on the CPU (AGENTS.md, #108). The site's watcher tries a failed drive again after
+RETRY_FAILED seconds, and a page that opens the drive tries at once.
 
 Made once, by the site as soon as a drive's minutes have arrived (watch: a recent drive whose minutes did not change
 for a scan), else the first time the Drive view shows the drive (Panel.drive_video), or with `nnslr drive-video ROUTE`;
@@ -52,12 +52,12 @@ CPU_THREADS = 2
 # The site makes the video of a drive whose minutes arrived in the last WATCH_DAYS, checking every WATCH_PERIOD seconds.
 WATCH_DAYS = 14
 WATCH_PERIOD = 300
-# Minutes encoded at once, and the threads of each ffmpeg.
+# A drive whose video failed (every card full) is tried again by the watcher after this many seconds.
+RETRY_FAILED = 1800
+# Minutes whose frames are counted at once.
 WORKERS = 8
-THREADS = 2
-CPU_ENCODER = 'libx264'
 GPU_ENCODER = 'h264_nvenc'
-# The GPU's constant quality with the size of the CPU's crf 27 (about 2 MB a minute), the same picture.
+# The GPU's constant quality: about 2 MB a minute, the size libx264's crf 27 gave before the GPU made them.
 GPU_QUALITY = 36
 ROUTE = re.compile(r'[0-9a-f]{8}--[0-9a-f]{10}')
 # One video made at a time, by this process.
@@ -114,11 +114,29 @@ def index(root: Path, route: str) -> dict | None:
     return value
 
 
+def _cards() -> list[int]:
+    """The server's NVIDIA cards (nvidia-smi's numbers, in bus order), the one with the most free memory first; none
+    without nvidia-smi."""
+    try:
+        answer = subprocess.run(['nvidia-smi', '--query-gpu=index,memory.free', '--format=csv,noheader,nounits'],
+                                capture_output=True, text=True, timeout=30, check=True)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    cards = []
+    for line in answer.stdout.splitlines():
+        number, _, free = (part.strip() for part in line.partition(','))
+        if number.isdigit():
+            cards.append((-int(free) if free.isdigit() else 0, int(number)))
+    return [number for _free, number in sorted(cards)]
+
+
 def _ffmpeg(arguments: list[str], done: Callable[[int], None]) -> int:
-    """Runs ffmpeg at low priority, done(frames so far) while it works; returns the frames it wrote."""
+    """Runs ffmpeg at low priority, done(frames so far) while it works; returns the frames it wrote. Its cards are
+    numbered in bus order, as nvidia-smi numbers them (_cards)."""
     command = ['nice', '-n', '15', 'ffmpeg', '-hide_banner', '-loglevel', 'error', '-nostats', '-progress', 'pipe:2',
                '-y', *arguments]
-    process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stderr=subprocess.PIPE, text=False)
+    process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stderr=subprocess.PIPE, text=False,
+                               env={**os.environ, 'CUDA_DEVICE_ORDER': 'PCI_BUS_ID'})
     errors, frames = [], 0
     for line in process.stderr:  # type: ignore[union-attr]
         text = line.decode('utf-8', 'replace').strip()
@@ -132,32 +150,24 @@ def _ffmpeg(arguments: list[str], done: Callable[[int], None]) -> int:
     return frames
 
 
-def _encode(source: Path, target: Path, width: int, done: Callable[[int], None]) -> None:
-    """One minute of raw HEVC to H.264 (an MP4 of its own) on the CPU."""
-    try:
-        _ffmpeg(['-f', 'hevc', '-r', str(FPS), '-i', str(source), '-an', '-vf', f'scale={width}:-2', '-c:v', CPU_ENCODER,
-                 '-preset', 'veryfast', '-crf', '27', '-g', str(KEY_FRAMES), '-pix_fmt', 'yuv420p', '-threads', str(THREADS),
-                 str(target)], done)
-    except RuntimeError as exc:
-        raise RuntimeError(f'ffmpeg failed on minute {source.parent.name}: {exc}') from exc
+def _gpu_output(target: Path, card: int) -> list[str]:
+    return ['-an', '-c:v', GPU_ENCODER, '-gpu', str(card), '-preset', 'p5', '-tune', 'hq', '-rc', 'vbr', '-cq',
+            str(GPU_QUALITY), '-b:v', '0', '-spatial-aq', '1', '-g', str(KEY_FRAMES), '-bf', '0', '-movflags', '+faststart',
+            str(target)]
 
 
-def _gpu_output(target: Path) -> list[str]:
-    return ['-an', '-c:v', GPU_ENCODER, '-preset', 'p5', '-tune', 'hq', '-rc', 'vbr', '-cq', str(GPU_QUALITY), '-b:v', '0',
-            '-spatial-aq', '1', '-g', str(KEY_FRAMES), '-bf', '0', '-movflags', '+faststart', str(target)]
-
-
-def _gpu_piece(parts: list[tuple[int, Path]], target: Path, width: int, frames: int, done: Callable[[int], None], *,
-               cpu_decodes: bool = False) -> None:
-    """Minutes in a row to one MP4 encoded on the GPU, decoded there or by the CPU. The concat protocol reads the minutes
-    as one stream, so a frame lost at a join would move every minute after it: any other count is a failure."""
+def _gpu_piece(parts: list[tuple[int, Path]], target: Path, width: int, frames: int, done: Callable[[int], None],
+               card: int, *, cpu_decodes: bool = False) -> None:
+    """Minutes in a row to one MP4 encoded on the card, decoded there or by the CPU. The concat protocol reads the
+    minutes as one stream, so a frame lost at a join would move every minute after it: any other count is a failure."""
     source = ['-f', 'hevc', '-r', str(FPS), '-i', 'concat:' + '|'.join(str(path) for _segment, path in parts)]
     if cpu_decodes:
         arguments = ['-threads', str(CPU_THREADS), *source, '-vf', f'scale={width}:-2:flags=fast_bilinear',
                      '-pix_fmt', 'yuv420p']
     else:
-        arguments = ['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda', *source, '-vf', f'scale_cuda={width}:-2']
-    written = _ffmpeg([*arguments, *_gpu_output(target)], done)
+        arguments = ['-hwaccel', 'cuda', '-hwaccel_device', str(card), '-hwaccel_output_format', 'cuda', *source,
+                     '-vf', f'scale_cuda={width}:-2']
+    written = _ffmpeg([*arguments, *_gpu_output(target, card)], done)
     if written != frames:
         raise RuntimeError(f'{written} frames written of {frames}')
 
@@ -194,12 +204,12 @@ def _split(parts: list[tuple[int, Path]], counts: list[int]) -> list[list[int]]:
 
 
 def _encode_on_gpu(parts: list[tuple[int, Path]], counts: list[int], folder: Path, target: Path, width: int,
-                   done: Callable[[int], None]) -> None:
-    """The whole drive to one MP4 encoded on the GPU, its index at the front: the first minutes decoded on the GPU, the
-    last ones by the CPU at the same time (_split), the pieces joined without encoding again."""
+                   done: Callable[[int], None], card: int) -> None:
+    """The whole drive to one MP4 encoded on the card, its index at the front: the first minutes decoded on the card,
+    the last ones by the CPU at the same time (_split), the pieces joined without encoding again."""
     pieces = _split(parts, counts)
     if len(pieces) == 1:
-        _gpu_piece(parts, target, width, sum(counts), done)
+        _gpu_piece(parts, target, width, sum(counts), done, card)
         return
     folder.mkdir(exist_ok=True)
     files = [folder / f'{number:04d}.mp4' for number in range(len(pieces))]
@@ -213,38 +223,11 @@ def _encode_on_gpu(parts: list[tuple[int, Path]], counts: list[int], folder: Pat
 
     with ThreadPoolExecutor(max_workers=len(pieces)) as pool:
         jobs = [pool.submit(_gpu_piece, [parts[i] for i in piece], file, width, sum(counts[i] for i in piece),
-                            functools.partial(advance, number), cpu_decodes=number > 0)
+                            functools.partial(advance, number), card, cpu_decodes=number > 0)
                 for number, (piece, file) in enumerate(zip(pieces, files))]
         for job in jobs:
             job.result()
     _join(files, folder, target)
-
-
-def _encode_on_cpu(parts: list[tuple[int, Path]], folder: Path, target: Path, width: int, total: int,
-                   progress: Callable[[float], None] | None) -> None:
-    """The minutes side by side in folder, then joined into target without encoding again."""
-    folder.mkdir(exist_ok=True)
-    pieces = [folder / f'{number:04d}.mp4' for number in range(len(parts))]
-    done = [0] * len(parts)
-    counting = threading.Lock()
-
-    def advance(number: int, frames: int) -> None:
-        with counting:
-            done[number] = frames
-            if progress is not None and total:
-                progress(min(1.0, sum(done) / total))
-
-    with ThreadPoolExecutor(max_workers=WORKERS) as pool:
-        jobs = [pool.submit(_encode, path, piece, width, functools.partial(advance, number))
-                for number, ((_segment, path), piece) in enumerate(zip(parts, pieces))]
-        try:
-            for job in jobs:
-                job.result()
-        except BaseException:
-            for job in jobs:
-                job.cancel()
-            raise
-    _join(pieces, folder, target)
 
 
 def _join(pieces: list[Path], folder: Path, target: Path) -> None:
@@ -286,20 +269,25 @@ def make(root: Path, route: str, progress: Callable[[float], None] | None = None
         if progress is not None and total:
             progress(min(1.0, frames / total))
 
+    failures = []
     try:
-        try:
-            _encode_on_gpu(parts, counts, folder, partial, width, advance)
-            encoder = GPU_ENCODER
-        except (OSError, RuntimeError) as exc:
-            print(f'Drive video {route}: on the CPU ({exc})', flush=True)
-            shutil.rmtree(folder, ignore_errors=True)
-            _encode_on_cpu(parts, folder, partial, width, total, progress)
-            encoder = CPU_ENCODER
+        # Each card in turn; none left, the video is not made: never on the CPU (#108).
+        for card in _cards():
+            try:
+                _encode_on_gpu(parts, counts, folder, partial, width, advance, card)
+                break
+            except (OSError, RuntimeError) as exc:
+                print(f'Drive video {route}: card {card} could not make it ({exc})', flush=True)
+                failures.append(f'card {card}: {exc}')
+                shutil.rmtree(folder, ignore_errors=True)
+        else:
+            raise RuntimeError('no free GPU card for the drive video (' + ('; '.join(failures) or 'no NVIDIA card on this '
+                               'server') + '): it is made when a card is free, never on the CPU')
         os.replace(partial, video)
     finally:
         partial.unlink(missing_ok=True)
         shutil.rmtree(folder, ignore_errors=True)
-    value = {'route': route, 'fps': FPS, 'width': width, 'encoder': encoder, 'segments': segments,
+    value = {'route': route, 'fps': FPS, 'width': width, 'encoder': GPU_ENCODER, 'card': card, 'segments': segments,
              'duration': round(start, 3), 'source': _signature(parts), 'made_at': time.strftime('%Y-%m-%dT%H:%M:%S%z')}
     index_path.write_text(json.dumps(value, indent=1) + '\n', encoding='utf-8')
     return value
@@ -340,7 +328,18 @@ def _run(root: Path, route: str, work: dict) -> None:
             make(root, route, lambda share: work.__setitem__('progress', round(share, 3)))
             work['state'] = 'ready'
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
-            work.update(state='failed', reason=str(exc))
+            work.update(state='failed', reason=str(exc), failed_at=time.time())
+
+
+def _may_start(route: str, now: float | None = None) -> bool:
+    """Whether the watcher may make a drive's video: never tried by this process, or failed RETRY_FAILED seconds ago
+    or more (every card was full, #108)."""
+    with _lock:
+        work = _making.get(route)
+    if work is None:
+        return True
+    now = time.time() if now is None else now
+    return work['state'] == 'failed' and now - work.get('failed_at', now) >= RETRY_FAILED
 
 
 def _recent(root: Path, route: str) -> list | None:
@@ -372,7 +371,7 @@ def watch(root: Path, stop: threading.Event | None = None) -> None:
                 stable = signature is not None and seen.get(route) == signature
                 if signature is not None:
                     seen[route] = signature
-                if stable and index(root, route) is None and route not in _making:
+                if stable and index(root, route) is None and _may_start(route):
                     print(f'Drive video {route}: made in the background', flush=True)
                     state(root, route, start=True)
                     break
