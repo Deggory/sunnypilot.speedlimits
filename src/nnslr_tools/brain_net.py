@@ -73,18 +73,46 @@ class, a hard answer would cost 52 for 53 as much as 52 for 120, and a speed off
 bell a near speed is a small error, so the network learns the order of the speeds; the car still decodes by argmax. A frame
 of weight 0 adds nothing, whatever its answer says.
 
-The number goes straight to the answer too: number is 1 on the class of the number in force, so trust(h) is added to that
-class alone. As one value among the GRU's inputs it hardly reached the answer: with the numbers swapped in training (5 Nov
-2026) the answer moved on almost no frame when the number changed, and on few even with one constant picture in place of the
-road. The network still decides: trust comes from the memory and can be 0 or below on a sign it has reason to doubt, and
-speed_head can say any speed. It is all comparisons, which export as they are. A comparison with no signs among the groups
-has no number and no such path.
+The number goes straight to the answer too. As one value among the GRU's inputs it hardly reached the answer: with the
+numbers swapped in training (5 Nov 2026) the answer moved on almost no frame when the number changed, and on few even with
+one constant picture in place of the road. What `number` is in the formula at the top is the brain's number path (NUMBER_PATHS),
+a word its checkpoint keeps ('number_path'; one that does not say has the first):
+
+- 'class', every brain until 16 Nov 2026: number is 1 on the class of the number in force, so trust(h) is added to that
+  class alone. On the table of 5 km/h, with one class as the answer, that could be the whole answer. Since 8 Nov 2026 the
+  answer is a bell 2 km/h wide on a class a km/h, of which one class holds 0.2 at the most: with speed_head a bell at 50,
+  the sign at 60 and his speed 60, the best trust takes the loss from 14.61 to 12.30 and no further. So little gradient
+  reached trust: its layer stayed near its random start (L2 0.70 to 0.84, 0.58 fresh; 1.44 to 1.58 in the brains of 5 and
+  6 Nov) and a swapped number moved the answer on 4 to 22 % of the test frames, 62 to 100 % before (#104). That this path
+  is the cause is read from the arithmetic and the weights: the dashboard speed as the answer and the 4 steps a second
+  came the same day, and no training changed the path alone.
+- 'bell', the trainings since 16 Nov 2026 (#104): number has the shape of the answer, the log of a bell NUMBER_SIGMA_KPH
+  wide around the number in force, on every class, and nothing on a frame without one:
+
+      number = max(-(class_kph - the number in force)^2 / (2 * NUMBER_SIGMA_KPH^2), NUMBER_FLOOR)
+
+  A trust of 1 adds the answer of a driver who holds the number, and the case above reaches 5.78 with speed_head as it
+  was, 58 said for the 60: the rest is for speed_head and the memory to learn. NUMBER_FLOOR (-18: 6 sigma, 12 km/h from
+  the number) takes the same from every class far from the number, so speed_head still says which of them, and keeps the
+  values small for the comma, which runs the network with half floats (they end at 65504): it is computed as the distance
+  cut at 12 km/h and then squared, the same number. For a number a sign or a map says nothing on the way is above 200 (a
+  distance in km/h), and past the cut nothing is above 144 (its square) whatever comes in; the square first would pass
+  65504 from 256 km/h off. Its trust starts at zero: it adds nothing until it has learnt to, and a brain that goes on
+  from one of the 'class' path starts saying what that one's speed_head says (brain_train.brain_start; from a brain of
+  the 'bell' path the trust is kept). brain_train.trust_size is what it learnt, in result.json.
+
+The network still decides, with either: trust comes from the memory and is 0 on a sign it has reason to doubt, and
+speed_head can say any speed. Below 0 the two differ: on the 'class' path it takes the number's one class out, on the
+'bell' path it lifts every class 12 km/h and more from the number by 18 x |trust| over the number's own, so the answer
+moves away from the number, to either side. It is all comparisons and arithmetic, which export as they are. A comparison with
+no signs among the groups has no number and no such path.
 
 The map's limit has the same path (map_path=True, a brain trained with the group map_limit since 14 Nov 2026 evening):
 
     speed = speed_head(h) + trust(h) * number + trust_map(h) * map_number
 
-with map_number 1 on the class of the limit the map has, all 0 with no map. The first brain with the map as one more value
+with map_number 1 on the class of the limit the map has, all 0 with no map; in a brain of the 'bell' path, the same bell
+around the map's limit. The first brain with the map as one more value
 among the GRU's inputs did not read it: with the map turned off its answer moved by more than 2 km/h on 4 % of the
 validation frames and its error stayed the same. trust_map starts at zero, so a brain that goes on from another starts
 saying what that one said, and it comes from the memory as trust does: the network decides where the map is to be believed.
@@ -98,7 +126,7 @@ with sign vision.SignDistance's metres to the sign ahead (sign_distance among th
 since 12 Nov 2026, his rule: the speed to hold is the brain's only word to openpilot, and it lowers that speed itself
 before a sign. So they have no answer and no loss here, and a new brain is built without them. They are still built for a
 checkpoint that has them (its 'ahead'), so that such a brain loads, replays and exports as it was (brain_export): the
-car leaves the two outputs unread.
+car leaves the two outputs unread. Their number is the 'class' path's: no brain of the 'bell' path has them.
 
 The picture's features. pool 'mean' is the road-type network's: the mean of the 8 x 5 map keeps what is in a frame and loses
 most of where, and a truck in the lane beside ours is a matter of where. pool 'grid' keeps the map: a 1 x 1 convolution to
@@ -127,6 +155,15 @@ APPLICABILITY_LOSS = 1.0  # whose road a sign is of: a reviewed sign weighs as a
 APPLICABILITY_POS_WEIGHT_MAX = 10.0  # the most a sign of another road is lifted (brain_train.applicability_pos_weight)
 APPLICABILITY_COLUMNS = BRAIN_INPUTS.BOX_COLUMNS  # applicability_head's outputs: the columns of sign_boxes
 SPEED_SIGMA_KPH = 2.0  # the width of the bell around his speed (speed_targets)
+# How the number in force reaches the answer (the module's text): added to its class alone, or as a bell around it.
+# The first is the path of a checkpoint that does not say: every brain trained before 16 Nov 2026 (#104).
+NUMBER_PATHS = ('class', 'bell')
+NUMBER_FLOOR = -18.0  # the least the 'bell' path gives a class: its bell 6 sigma from the number, and beyond
+# The width of the 'bell' path's bell: the answer's own width when the path was made (SPEED_SIGMA_KPH on 16 Nov 2026).
+# It and NUMBER_FLOOR belong to the brains trained with the path, as near_kph belongs to a table: a brain is built
+# again from the word alone, so another width or floor is another word of NUMBER_PATHS, never another number here. A
+# change of the loss's SPEED_SIGMA_KPH leaves them alone.
+NUMBER_SIGMA_KPH = 2.0
 POOLS = ('mean', 'grid')
 GRID_CHANNELS = 32
 GRID_CELLS = 8 * 5  # the encoder's map of a 256 x 144 frame
@@ -154,10 +191,20 @@ def _table(kph) -> list[float]:
     return values
 
 
+def number_path_of(saved: dict) -> str:
+    """The number path of a brain, from what its checkpoint or its result.json says of itself ('number_path'): 'class'
+    for one that does not say. A word this code does not know is refused: built as another path, the weights would say
+    other speeds without a word."""
+    path = saved.get('number_path') or NUMBER_PATHS[0]
+    if path not in NUMBER_PATHS:
+        raise ValueError(f'this brain has a number path this code does not know ({path!r}): one of {NUMBER_PATHS}')
+    return path
+
+
 def build_brain_net(groups: tuple[str, ...], *, pool: str = 'grid', works: bool = True, ahead: bool = False,
                     pretrained: bool = True, features: int = FEATURES, hidden: int = HIDDEN, kph=None, road_kinds: int = 0,
                     road_types: int = 0, users: bool = False, map_path: bool = False, applicability: bool = False,
-                    sizes: dict | None = None):
+                    sizes: dict | None = None, number_path: str = NUMBER_PATHS[0]):
     """The network (torch.nn.Module): forward(images (B, T, 3, H, W) float 0..1, extra (B, T, inputs of the groups), state
     (B, hidden) or None) -> (speed logits (B, T, classes), works logit (B, T) or None, state); with ahead=True asked of
     forward (a network built with ahead: only for a checkpoint of 7 to 11 Nov 2026 that has those heads, never for a
@@ -172,17 +219,28 @@ def build_brain_net(groups: tuple[str, ...], *, pool: str = 'grid', works: bool 
     and a number in force falls on the class within half the table's step of it. None: the table of today's training.
     map_path: the map's limit goes straight to the answer too (trust_map; the module's text): only with map_limit among
     the groups. A checkpoint has it when it has trust_map's weights. applicability: with applicability_head, whose
-    road the speed sign of each column of sign_boxes is of (the module's text): only with sign_boxes among the groups."""
+    road the speed sign of each column of sign_boxes is of (the module's text): only with sign_boxes among the groups.
+    number_path: how the number in force, and the map's limit of a network with map_path, reach the answer (the module's
+    text): 'class', the path of every checkpoint that does not say (number_path_of), or 'bell', a training of today's
+    (brain_train); never 'bell' with ahead."""
     torch = _torch()
     from torch import nn
     from torchvision.models import MobileNet_V3_Small_Weights, mobilenet_v3_small
 
     if pool not in POOLS:
         raise ValueError(f'pool must be one of {POOLS}')
+    if number_path not in NUMBER_PATHS:
+        raise ValueError(f'number_path must be one of {NUMBER_PATHS}')
+    if ahead and number_path != NUMBER_PATHS[0]:
+        raise ValueError('the heads of the limit ahead are of the brains of 7 to 11 Nov 2026, all of the class path')
     table = _table(kph)
     classes = len(table)
     # A plain number, no buffer: a checkpoint of before has none to load, and the export writes it as a constant.
     near_kph = (min(b - a for a, b in zip(table, table[1:])) if classes > 1 else table[0]) / 2
+    # The 'bell' path: how far from the number its bell reaches NUMBER_FLOOR (12 km/h), and what a squared distance is
+    # multiplied by. Plain numbers too.
+    far_kph = NUMBER_SIGMA_KPH * (-2 * NUMBER_FLOOR) ** 0.5
+    bell_scale = -1 / (2 * NUMBER_SIGMA_KPH ** 2)
     # The sizes of this brain's groups (brain_targets.brain_sizes): an earlier one has fewer kinds of other sign.
     sizes = INPUT_SIZES if sizes is None else sizes
     extra = sum(sizes[name] for name in groups)
@@ -210,6 +268,12 @@ def build_brain_net(groups: tuple[str, ...], *, pool: str = 'grid', works: bool 
             self.gru = nn.GRU(features + extra, hidden, batch_first=True)
             self.speed_head = nn.Linear(hidden, classes)
             self.trust = nn.Linear(hidden, 1)
+            self.number_path = number_path
+            if number_path == 'bell':
+                # At zero, as trust_map: the bell adds nothing until trust has learnt to, so what the layer holds at
+                # the end is what it learnt (brain_train.trust_size).
+                nn.init.zeros_(self.trust.weight)
+                nn.init.zeros_(self.trust.bias)
             self.trust_map = nn.Linear(hidden, 1) if map_path else None
             if self.trust_map is not None:
                 # At zero: the answer of a brain that goes on from another starts as that one's, the map adding nothing yet.
@@ -258,8 +322,33 @@ def build_brain_net(groups: tuple[str, ...], *, pool: str = 'grid', works: bool 
             near = (limit[..., :1] * BRAIN_INPUTS.SIGN_KPH_SCALE - self.class_kph).abs() < self.near_kph
             return (near & (limit[..., 1:2] > 0)).to(extra_input.dtype)
 
+        def bell(self, number, held):
+            """(B, T, 1) a number over SIGN_KPH_SCALE and whether it counts -> (B, T, classes): the 'bell' path's
+            number (the module's text), max(-(class_kph - number)^2 / (2 * NUMBER_SIGMA_KPH^2), NUMBER_FLOOR) where it
+            counts and 0 where not. The distance is cut at far_kph before its square, which is the same number: past
+            the cut no value is above 144, whatever comes in, for the comma's half floats."""
+            away = (self.class_kph - number * BRAIN_INPUTS.SIGN_KPH_SCALE).clamp(-far_kph, far_kph)
+            return away * away * bell_scale * held.to(number.dtype)
+
+        def number_bell(self, extra_input):
+            """(B, T, inputs) -> (B, T, classes): the bell around the number in force, all 0 with none. Only for a
+            network of the 'bell' path."""
+            if signs_at is None:
+                return extra_input.new_zeros(*extra_input.shape[:-1], classes)
+            signs = extra_input[..., signs_at:signs_at + INPUT_SIZES['signs']]
+            return self.bell(signs[..., :1], (signs[..., 1:2] > 0) & (signs[..., 6:7] == 0))
+
+        def map_bell(self, extra_input):
+            """(B, T, inputs) -> (B, T, classes): the bell around the limit the map has, all 0 with no map. Only for a
+            network of the 'bell' path with the map's path (trust_map)."""
+            limit = extra_input[..., map_at:map_at + INPUT_SIZES[MAP_GROUP]]
+            return self.bell(limit[..., :1], limit[..., 1:2] > 0)
+
         def speed(self, out, extra_input):
             """The speed's logits from the memory's output and the inputs: forward's and the car's step (brain_export)."""
+            if self.number_path == 'bell':
+                said = self.speed_head(out) + self.trust(out) * self.number_bell(extra_input)
+                return said if self.trust_map is None else said + self.trust_map(out) * self.map_bell(extra_input)
             said = self.speed_head(out) + self.trust(out) * self.number_in_force(extra_input)
             return said if self.trust_map is None else said + self.trust_map(out) * self.map_number(extra_input)
 

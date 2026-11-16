@@ -2,9 +2,10 @@
 // The choices of the brain's training (brain-choices.ts) in one short row, in Train › Brain above its flow (which follows
 // them) and in its step of Train › Pipeline: the heads only the training has and the map's limit as an input (#85) as
 // switches that light up when on, the
-// picture's features as Mean or Grid, its seeds as Three or One, and its drives (every dashcam drive or those of an
+// picture's features as Mean or Grid, the number in force as a Bell or on its Class (#104), its seeds as Three or One, and
+// its drives (every dashcam drive or those of an
 // earlier brain run, runs: BrainLabels.same_drives; no choice while there is none).
-import {POOL_OPTIONS, SEEDS_OPTIONS, type BrainChoice} from './brain-choices';
+import {NUMBER_PATH_OPTIONS, POOL_OPTIONS, SEEDS_OPTIONS, type BrainChoice} from './brain-choices';
 import type {BrainRouteRun} from '../common/panel-types';
 import Segmented from './Segmented.vue';
 
@@ -30,6 +31,8 @@ function flip(key: Switch): void {
             :title="item.title" @click="flip(item.key)">{{ item.label }}</button>
     <span class="bc-pick" :title="choices.note"><span>Picture</span>
       <Segmented v-model="choices.pool" :options="POOL_OPTIONS" label="The picture’s features: Grid keeps where things are, Mean only what is in it"/></span>
+    <span class="bc-pick" :title="choices.numberNote"><span>Number</span>
+      <Segmented v-model="choices.numberPath" :options="NUMBER_PATH_OPTIONS" label="The number in force: Bell, as a bell around it; Class, on its class alone"/></span>
     <span class="bc-pick" :title="choices.seedsNote"><span>Seeds</span>
       <Segmented v-model="choices.seeds" :options="SEEDS_OPTIONS" label="The seeds: seed 0 alone, or three to compare in Models"/></span>
     <label v-if="runs?.length" class="bc-pick" :title="choices.drivesNote"><span>Drives</span>

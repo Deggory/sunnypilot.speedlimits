@@ -2129,7 +2129,7 @@ def make_handler(app: ReviewApp):
                     # the classifier's or the cutter's Mapillary signs ({"mapillary": "on", "region": "europe",
                     # "share": "5"}), the classifier that reads the signs for the scene network and its board input
                     # ({"classifier", "boards"}), what the brain learns ({"works", "road", "types", "pool", "seeds",
-                    # "users", "map", "applicability"}; "driver" only "off", from a page of before), the drives it takes ({"routes_from": an
+                    # "users", "map", "applicability", "number_path"}; "driver" only "off", from a page of before), the drives it takes ({"routes_from": an
                     # earlier brain run}) and the networks that read its signs ({"sign_cutter", "sign_classifier"}),
                     # the models of a regression ({"openpilot", "brains"}), the route, provider,
                     # save and limit of an AI action, the drive and the networks of a replay ({"route", "set",
@@ -2138,7 +2138,7 @@ def make_handler(app: ReviewApp):
                                                           'signnet', 'mapillary', 'region', 'share', 'cutter',
                                                           'classifier', 'boards', 'works', 'road', 'types', 'driver', 'pool',
                                                           'seeds', 'users', 'routes_from', 'rebuild', 'map',
-                                                          'applicability', 'openpilot',
+                                                          'applicability', 'number_path', 'openpilot',
                                                           'brains', 'sign_cutter', 'sign_classifier')
                                if isinstance(body, dict) and isinstance(body.get(key), str)}
                     # [ai-reviewer] - START
@@ -2164,6 +2164,10 @@ def make_handler(app: ReviewApp):
                     # UserNet's stage ({"stage": "bdd" | "drives"}), the same way: a stage sent as something else must be
                     # refused, never dropped into a training on BDD100K.
                     options.update((key, body[key]) for key in ('stage',)
+                                   if isinstance(body, dict) and body.get(key) is not None)
+                    # The brain's number path ({"number_path": "bell" | "class"}, #104), the same way: sent as something
+                    # else it must be refused, never dropped into a training of the other path.
+                    options.update((key, body[key]) for key in ('number_path',)
                                    if isinstance(body, dict) and body.get(key) is not None)
                     options = options or None
                     # [ai-reviewer] - END

@@ -1802,11 +1802,17 @@ def build_parser() -> argparse.ArgumentParser:
                                   "(#85); without it the brain never reads the map")
     p_brain_net.add_argument("--pool", choices=("mean", "grid"), default="grid",
                              help="grid keeps where things are in the frame, mean only what is there")
+    p_brain_net.add_argument("--number-path", choices=("bell", "class"), default="bell",
+                             help="how the number in force reaches the answer (#104): bell, as a bell around the "
+                                  "number, the shape of the answer; class, on its class alone, as every brain before "
+                                  "16 Nov 2026 (the comparison). result.json keeps the word and what the path's trust "
+                                  "holds (trust), beside test_swapped")
     p_brain_net.add_argument("--epochs", type=int, default=None)
     p_brain_net.add_argument("--seed", type=int, default=0)
     p_brain_net.add_argument("--init-from", default=None,
                              help="an earlier brain's brain-last.pt to go on from, stepped as this one and on the same "
-                                  "split (scripts/run_brain.sh: NNSLR_BRAIN_INIT_FROM). Default: ImageNet and random weights")
+                                  "split (scripts/run_brain.sh: NNSLR_BRAIN_INIT_FROM). Default: ImageNet and random "
+                                  "weights. From a brain of the other number path the trust in the number starts again")
     p_brain_net.add_argument("--sign-networks", default=None,
                              help="a run's networks.json (nnslr brain-networks; scripts/run_brain.sh): the signs of "
                                   "its inputs and labels read by those networks. Default: the car's release of the "
@@ -2970,11 +2976,12 @@ def _cmd_train_brain(args: argparse.Namespace) -> int:
                                      epochs=args.epochs or brain_train.EPOCHS, seed=args.seed,
                                      init_from=Path(args.init_from) if args.init_from else None,
                                      sign_networks=_sign_networks(args), map_limit=args.map_limit,
-                                     applicability=not args.no_applicability)
+                                     applicability=not args.no_applicability, number_path=args.number_path)
     print(json.dumps({**{part: {**{key: result[part][key] for key in ('speed', 'speeds_said', 'one_speed', 'follow_the_sign')},
                                 'applicability': result[part].get('applicability')}
                          for part in ('train', 'validation', 'test')},
                       **{part: result[part] for part in ('validation_swapped', 'test_swapped')},
+                      **{part: result[part] for part in ('number_path', 'trust') if part in result},
                       **{part: {'speed': result[part]['speed']} for part in ('validation_no_map', 'test_no_map')
                          if part in result}}, indent=2))
     return 0

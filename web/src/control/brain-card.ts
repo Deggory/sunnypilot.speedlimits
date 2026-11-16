@@ -57,7 +57,8 @@ export const BRAIN_GROUPS: BrainGroup[] = [
 
 /** What it says on the car (the head the car's network keeps): the speed to hold and nothing else, since 12 Nov 2026. */
 export const BRAIN_OUTPUTS: BrainFact[] = [
-  {name: 'speed = speed_head(h) + trust(h) · number', what: 'the speed to hold, a class from 1 to 200 km/h; number is the limit confirmed of signs'},
+  {name: 'speed = speed_head(h) + trust(h) · number', what: 'the speed to hold, a class from 1 to 200 km/h; number is the limit confirmed of signs, '
+    + 'as a bell around it (Number: Bell) or on its class alone (Class, every brain before 16 Nov 2026)'},
 ];
 
 /** The answers its training compares with what it says: never inputs, none of them reaches the car. */

@@ -788,7 +788,8 @@ def run_training(torch, tmp_path, monkeypatch, scores, change=lambda _drive: Non
     monkeypatch.setattr(brain_train, 'dataset', dataset)
     monkeypatch.setattr(brain_train, 'read_split', lambda _root: {'sha256': 'split'})
     monkeypatch.setattr(brain_train, '_pictures', lambda *_args, **_options: {drive['route']: pictures(drive)})
-    model = tiny(torch, groups=brain_train.learned_inputs(map_limit))
+    # The network of the number path the training asks for (the bell unless number_path says the class, #104).
+    model = tiny(torch, groups=brain_train.learned_inputs(map_limit), number_path=training.get('number_path', 'bell'))
 
     def build(*_args, **options):
         BUILT[:] = [options]
@@ -851,6 +852,81 @@ def test_a_training_teaches_and_keeps_no_limit_ahead(tmp_path, monkeypatch):
     # And the step exported for the car says the speed alone.
     from nnslr_tools.brain_export import load_brain, output_names
     assert output_names(load_brain(tmp_path / 'run' / 'brain-last.pt')[0]) == ['speed', 'hidden_out']
+
+
+def test_a_training_takes_the_bell_path_unless_asked_for_the_class_and_says_what_its_trust_holds(tmp_path, monkeypatch):
+    """#104: the number path is a choice of the training, the bell unless the class is asked. The checkpoint keeps the
+    word, for whoever builds the network from it, and result.json keeps it with what the trust layer holds at the start
+    and at the epoch kept; the last line of the log says it beside moved of test_swapped."""
+    torch = torch_or_skip()
+    from nnslr_tools.brain_export import load_brain
+    from nnslr_tools.brain_train import NUMBER_PATH, trust_size
+    assert NUMBER_PATH == 'bell'
+    lines = []
+    result, saved, model = run_training(torch, tmp_path, monkeypatch, [1.0, 1.0], log=lines.append)
+    assert BUILT[0]['number_path'] == 'bell' and saved['number_path'] == 'bell' and result['number_path'] == 'bell'
+    assert load_brain(tmp_path / 'run' / 'brain-last.pt')[0].number_path == 'bell'
+    # The bell's trust starts at zero: whatever it holds at the end, it learnt.
+    assert result['trust']['start'] == {'trust': {'weights_l2': 0.0, 'weights_l1': 0.0, 'bias': 0.0}}
+    assert result['trust']['kept'] == trust_size(model)
+    assert set(result['trust']['kept']['trust']) == {'weights_l2', 'weights_l1', 'bias'}
+    swapped = result['test_swapped']
+    assert lines[-1].startswith("The number’s path (bell), trust in the sign’s number: weights L2 0.00 -> ")
+    assert lines[-1].endswith(f"A swapped number moved the answer on {swapped['moved']} of "
+                              f"{swapped['network']['frames']} test frames.")
+    lines.clear()
+    result, saved, model = run_training(torch, tmp_path / 'class', monkeypatch, [1.0], number_path='class', log=lines.append)
+    assert BUILT[0]['number_path'] == 'class' and saved['number_path'] == 'class' and result['number_path'] == 'class'
+    assert load_brain(tmp_path / 'class' / 'run' / 'brain-last.pt')[0].number_path == 'class'
+    assert result['trust']['start']['trust']['weights_l2'] > 0  # a fresh layer of the class path: its random start
+    assert lines[-1].startswith("The number’s path (class), trust in the sign’s number: weights L2 ")
+    # A path this code does not know is refused before anything is written.
+    from nnslr_tools import brain_train
+    with pytest.raises(ValueError, match='number path'):
+        brain_train.train_brain(tmp_path, tmp_path / 'wrong', None, number_path='gauss', device='cpu')
+    assert not (tmp_path / 'wrong').exists()
+
+
+def test_the_command_line_gives_the_number_path_to_the_training(tmp_path, monkeypatch, capsys):
+    """nnslr train-brain --number-path, the last step of the choice of Train › Brain (the panel's option, the
+    script's NNSLR_BRAIN_NUMBER_PATH): the bell when not given, and what it prints at the end names the path and its
+    trust beside test_swapped."""
+    import json
+
+    from nnslr_tools import brain_train, cli
+    asked = []
+
+    def train(_root, _run_dir, _merged_of, **options):
+        asked.append(options)
+        part = {'speed': {}, 'speeds_said': [], 'one_speed': {}, 'follow_the_sign': {}}
+        return {'train': part, 'validation': part, 'test': part, 'validation_swapped': {}, 'test_swapped': {'moved': 3},
+                'number_path': options['number_path'], 'trust': {'start': {}, 'kept': {}}}
+
+    monkeypatch.setattr(brain_train, 'train_brain', train)
+    run = ['train-brain', '--run-dir', str(tmp_path / 'run'), '--data-root', str(tmp_path), '--dry-run']
+    assert cli.main(run) == 0
+    assert json.loads(capsys.readouterr().out)['number_path'] == 'bell'
+    assert cli.main([*run, '--number-path', 'class']) == 0
+    printed = json.loads(capsys.readouterr().out)
+    assert printed['number_path'] == 'class' and 'trust' in printed and printed['test_swapped'] == {'moved': 3}
+    assert [options['number_path'] for options in asked] == ['bell', 'class']
+    with pytest.raises(SystemExit):
+        cli.main([*run, '--number-path', 'gauss'])
+    assert len(asked) == 2
+
+
+def test_the_trust_size_is_the_layers_norms_and_bias_for_the_sign_and_for_the_map():
+    torch = torch_or_skip()
+    from nnslr_tools.brain_train import learned_inputs, trust_size
+    model = tiny(torch, groups=learned_inputs(True), map_path=True, number_path='bell')
+    with torch.no_grad():
+        model.trust.weight.fill_(0.5)
+        model.trust.bias.fill_(-1.0)
+        model.trust_map.weight[0, 0] = 2.0
+    found = trust_size(model)
+    assert found['trust'] == {'weights_l2': pytest.approx(0.5 * 128 ** 0.5), 'weights_l1': pytest.approx(64.0), 'bias': -1.0}
+    assert found['trust_map'] == {'weights_l2': 2.0, 'weights_l1': 2.0, 'bias': 0.0}
+    assert set(trust_size(tiny(torch))) == {'trust'}  # no map's path: no trust in the map
 
 
 def test_a_brain_never_learns_the_driver(tmp_path, monkeypatch):
@@ -1121,9 +1197,12 @@ def test_the_swap_is_measured_on_validation_and_on_test_each_on_its_own(tmp_path
     from nnslr_tools import brain_train
     real = brain_train.predict
     monkeypatch.setattr(brain_train, 'predict', lambda *args, cold=False, **options: {**real(*args, cold=cold, **options), 'cold': cold})
-    monkeypatch.setattr(brain_train, '_swapped_measure', lambda *found, **_options: [found[3], found[2][0]['cold']])
+    # With what the training's last line reads of it (moved and the frames, #104).
+    monkeypatch.setattr(brain_train, '_swapped_measure', lambda *found, **_options: {
+        'asked': [found[3], found[2][0]['cold']], 'moved': 0, 'network': {'frames': 0}})
     result, _saved, _model = run_training(torch, tmp_path, monkeypatch, [1.0])
-    assert result['validation_swapped'] == ['validation', False] and result['test_swapped'] == ['test', False]
+    assert result['validation_swapped']['asked'] == ['validation', False]
+    assert result['test_swapped']['asked'] == ['test', False]
 
 
 def test_test_swapped_with_no_passage_to_change_has_no_frames(monkeypatch):
@@ -1405,6 +1484,77 @@ def test_a_brain_goes_on_with_the_road_users_from_one_without_and_without_them_f
     assert torch.equal(again.users_head.weight, with_users.users_head.weight)
 
 
+def number_drive(kph=60):
+    """A drive of train with the number kph in force on every frame (brain_inputs: known, no end read since)."""
+    from nnslr_tools.brain_targets import BRAIN_INPUTS
+    drive = fake_drive(['train'] * T)
+    drive['inputs']['signs'][:, 0], drive['inputs']['signs'][:, 1] = kph / BRAIN_INPUTS.SIGN_KPH_SCALE, 1.0
+    return drive
+
+
+def test_a_brain_of_the_bell_path_going_on_from_one_of_the_class_path_starts_from_what_its_speed_head_says(tmp_path):
+    """#104: the trust of the class path multiplies one class, the bell's a bell over all of them: taken over, a trust
+    of 5 would take 90 from every class far from the number. So the new trust starts at zero, as trust_map does, and
+    with a number in force the new brain says what the start's speed_head says there."""
+    import copy
+
+    from nnslr_tools.brain_train import _start_text, brain_start
+    torch = torch_or_skip()
+    old = tiny(torch, road_kinds=1)
+    for value in old.parameters():  # not the fresh numbers both start from
+        value.data.add_(torch.randn_like(value) * 0.05)
+    with torch.no_grad():
+        old.trust.bias.fill_(5.0)
+    path = start_file(torch, tmp_path, old)  # a checkpoint of before 16 Nov 2026: it does not say its path
+    new = tiny(torch, road_kinds=1, number_path='bell')
+    start = brain_start(torch, new, path, source_of(GROUPS, number_path='bell'))
+    assert not new.trust.weight.any() and not new.trust.bias.any()
+    assert sorted(start['fresh']) == ['trust.bias', 'trust.weight']
+    assert (start['number_path'], start['same_number_path']) == ('class', False)
+    assert 'its number path is another (class): the trust in the number starts again' in _start_text(start)
+    drive = number_drive(60)
+    array = pictures(drive)
+    silent = copy.deepcopy(old)  # the start with its trust taken away: its speed_head alone
+    with torch.no_grad():
+        silent.trust.weight.zero_()
+        silent.trust.bias.zero_()
+    for got, wanted in zip(said_by(torch, new, GROUPS, drive, array), said_by(torch, silent, GROUPS, drive, array)):
+        assert torch.allclose(got, wanted, atol=1e-5)
+    # And not what the start says with its trust: 5 more on the class of the 60.
+    from nnslr_tools.brain_targets import speed_class
+    there = speed_class(60)
+    gap = said_by(torch, old, GROUPS, drive, array)[0][0, :, there] - said_by(torch, new, GROUPS, drive, array)[0][0, :, there]
+    assert float(gap.min()) > 4.0
+
+
+def test_the_trust_in_the_number_is_kept_from_a_start_of_the_same_number_path(tmp_path):
+    from nnslr_tools.brain_train import _start_text, brain_start
+    torch = torch_or_skip()
+    old = tiny(torch, road_kinds=1, number_path='bell')
+    with torch.no_grad():
+        old.trust.weight.normal_()
+        old.trust.bias.fill_(0.8)
+    path = start_file(torch, tmp_path, old, number_path='bell')
+    new = tiny(torch, road_kinds=1, number_path='bell')
+    start = brain_start(torch, new, path, source_of(GROUPS, number_path='bell'))
+    assert start['fresh'] == [] and (start['number_path'], start['same_number_path']) == ('bell', True)
+    assert torch.equal(new.trust.weight, old.trust.weight) and torch.equal(new.trust.bias, old.trust.bias)
+    assert 'number path' not in _start_text(start)
+    drive = number_drive(60)
+    array = pictures(drive)
+    for got, wanted in zip(said_by(torch, new, GROUPS, drive, array), said_by(torch, old, GROUPS, drive, array)):
+        assert torch.allclose(got, wanted, atol=1e-5)
+    # The other way, the comparison trained from a brain of the bell path: the class path's trust starts fresh too.
+    back = tiny(torch, road_kinds=1)
+    fresh = back.trust.weight.clone()
+    start = brain_start(torch, back, path, source_of(GROUPS))
+    assert sorted(start['fresh']) == ['trust.bias', 'trust.weight'] and torch.equal(back.trust.weight, fresh)
+    # A start that says a path this code does not know is refused, never built as another.
+    with pytest.raises(ValueError, match='number path'):
+        brain_start(torch, tiny(torch, road_kinds=1), start_file(torch, tmp_path / 'odd', old, number_path='gauss'),
+                    source_of(GROUPS))
+
+
 def numpy_random(shape):
     import numpy
     return numpy.random.default_rng(1).random(shape).astype(numpy.float32)
@@ -1464,3 +1614,78 @@ def test_a_file_that_is_not_a_brain_is_refused(tmp_path):
     torch.save({'state_dict': {}}, path)
     with pytest.raises(ValueError, match='not a brain'):
         brain_start(torch, tiny(torch), path, source_of(GROUPS))
+
+
+def _a_number_in_force(drive):
+    """A toy drive whose every frame has the 60 in force and the driver at 60: the number's path has something to learn."""
+    from nnslr_tools import brain_train
+    from nnslr_tools.brain_targets import BRAIN_INPUTS, pack_inputs, speed_class
+    drive['inputs']['signs'][:, 0], drive['inputs']['signs'][:, 1] = 60 / BRAIN_INPUTS.SIGN_KPH_SCALE, 1.0
+    drive['speed'][:] = speed_class(60)
+    if 'extra' in drive:
+        drive['extra'] = pack_inputs(drive['inputs'], brain_train.learned_inputs(False))
+
+
+def test_the_trust_result_json_calls_kept_is_the_one_after_the_training(tmp_path, monkeypatch):
+    """#104: he reads trust.start and trust.kept to judge a run. With a number in force the bell's trust leaves zero,
+    kept is the model's at the end, the checkpoint's own, and never the start's."""
+    torch = torch_or_skip()
+    from nnslr_tools.brain_train import trust_size
+    lines = []
+    result, saved, model = run_training(torch, tmp_path, monkeypatch, [1.0, 1.0], change=_a_number_in_force,
+                                        log=lines.append)
+    assert result['trust']['start']['trust']['weights_l2'] == 0.0
+    assert result['trust']['kept'] == trust_size(model)
+    assert result['trust']['kept']['trust']['weights_l2'] > 0.0
+    assert float(saved['weights']['trust.weight'].float().norm()) == pytest.approx(
+        result['trust']['kept']['trust']['weights_l2'])
+
+
+def test_the_trust_at_the_start_is_read_after_the_start_is_taken(tmp_path, monkeypatch):
+    """#104: a training that goes on from a brain says, as its trust at the start, the trust it took from that brain
+    (the same number path) or zero (the other path), and the log says which."""
+    torch = torch_or_skip()
+    from nnslr_tools import brain_train
+    groups = brain_train.learned_inputs(False)
+    old = tiny(torch, groups=groups, number_path='bell')
+    with torch.no_grad():
+        old.trust.weight.fill_(0.25)
+        old.trust.bias.fill_(0.5)
+    shared = dict(groups=groups, split='split', rate_hz=1.0, picture='road_type', road_kinds=[],
+                  inputs_sha256=brain_train.inputs_sha256(), road_sign_kinds=brain_train.ROAD_SIGN_KINDS)
+    bell = start_file(torch, tmp_path / 'bell', old, number_path='bell', **shared)
+    lines = []
+    result, saved, model = run_training(torch, tmp_path / 'a', monkeypatch, [1.0], init_from=bell, log=lines.append)
+    assert result['start']['same_number_path'] is True and result['start']['number_path'] == 'bell'
+    assert result['trust']['start']['trust']['weights_l2'] == pytest.approx(0.25 * 128 ** 0.5)
+    assert result['trust']['start']['trust']['bias'] == pytest.approx(0.5)
+    assert 'weights L2 2.83 -> ' in lines[-1]
+    # The same weights saved without the word, a brain of before: the bell's trust starts at zero and the log says so.
+    before = start_file(torch, tmp_path / 'class', old, **shared)
+    lines.clear()
+    result, saved, model = run_training(torch, tmp_path / 'b', monkeypatch, [1.0], init_from=before, log=lines.append)
+    assert result['start']['same_number_path'] is False and result['start']['number_path'] == 'class'
+    assert result['trust']['start']['trust'] == {'weights_l2': 0.0, 'weights_l1': 0.0, 'bias': 0.0}
+    assert any('its number path is another (class): the trust in the number starts again' in line for line in lines)
+    assert saved['number_path'] == 'bell'
+
+
+def test_the_trust_in_the_maps_limit_of_the_other_path_starts_again(tmp_path):
+    """#104: trust_map multiplies another thing on the other number path, as trust does: it is not carried over."""
+    from nnslr_tools.brain_train import brain_start
+    torch = torch_or_skip()
+    groups = (*GROUPS, 'map_limit')
+    old = tiny(torch, road_kinds=1, groups=groups, map_path=True)
+    with torch.no_grad():
+        old.trust_map.weight.normal_()
+        old.trust_map.bias.fill_(3.0)
+        old.trust.bias.fill_(5.0)
+    path = start_file(torch, tmp_path, old, groups=groups)
+    new = tiny(torch, road_kinds=1, groups=groups, map_path=True, number_path='bell')
+    start = brain_start(torch, new, path, source_of(groups, number_path='bell'))
+    assert not new.trust_map.weight.any() and not new.trust_map.bias.any()
+    assert not new.trust.weight.any() and not new.trust.bias.any()
+    assert sorted(start['fresh']) == ['trust.bias', 'trust.weight', 'trust_map.bias', 'trust_map.weight']
+    again = tiny(torch, road_kinds=1, groups=groups, map_path=True)
+    start = brain_start(torch, again, path, source_of(groups))
+    assert torch.equal(again.trust_map.weight, old.trust_map.weight) and float(again.trust_map.bias) == 3.0

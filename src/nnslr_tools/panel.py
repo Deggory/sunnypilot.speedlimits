@@ -92,7 +92,7 @@ CUTTER_SCRIPT = 'scripts/run_signnet.sh'
 DECIDER_SCRIPT = 'scripts/run_experiment_b.sh'
 # The brain, the network that says the speed to hold: its three seeds on runs of their own (start() adds <time>-brain, the
 # script -s0, -s1, -s2), or seed 0 alone. What it learns: {'works': 'on'|'off', 'road', 'types', 'pool': 'grid'|'mean',
-# 'seeds': 'all'|'one'}, the variables
+# 'number_path': 'bell'|'class', 'seeds': 'all'|'one'}, the variables
 # of the script, the first of each the usual one. The driver's inputs are gone since 10 Nov 2026 (brain_targets.LEFT_OUT):
 # 'driver' is still taken as 'off', the only value, so that a page loaded before can start a training.
 BRAIN_SCRIPT = 'scripts/run_brain.sh'
@@ -114,6 +114,10 @@ BRAIN_MAP = {'off': '0', 'on': '1'}
 # boxes, a head only the training has (brain_net.applicability_head), and is given the boxes of every sign read, those
 # the applicability network gives to another road too; off: --no-applicability, the signs taken as the brains before.
 BRAIN_APPLICABILITY = {'on': '1', 'off': '0'}
+# Train › Brain's Number (#104, 16 Nov 2026): how the number in force reaches the answer (brain_net.NUMBER_PATHS). bell,
+# the usual one: as a bell around the number, the shape of the answer; class: on its class alone, as every brain
+# before, to train both and compare (the script's NNSLR_BRAIN_NUMBER_PATH, --number-path).
+BRAIN_NUMBER_PATHS = ('bell', 'class')
 # Train › Brain's Drives: every dashcam drive (none given), or the drives of an earlier brain run, by its NAME (its
 # routes.json, in runs/NAME/ or in a seed's runs/NAME-sN/): two trainings on the same drives, compared fairly in Models.
 BRAIN_SEED_RUN = re.compile(r'(.+)-s[0-9]')
@@ -225,7 +229,7 @@ BRAIN_SIGN_NETWORKS = {'sign_cutter': ('cutter', 'NNSLR_BRAIN_CUTTER'),
 QWEN_GPU_MB = 18 * 1024
 ACTION_OPTIONS = {'train_cutter': ('families', 'start', 'mapillary', 'region', 'share'), 'train_decider': ('start',),
                   'train_brain': ('works', 'road', 'types', 'driver', 'pool', 'seeds', 'start', 'sign_cutter',
-                                  'sign_classifier', 'users', 'routes_from', 'map', 'applicability'),
+                                  'sign_classifier', 'users', 'routes_from', 'map', 'applicability', 'number_path'),
                   'train_users': ('stage', 'start'),
                   'regression': ('openpilot', 'brains'),
                   'simulate': ('route', 'set', 'certified', 'map'),
@@ -380,6 +384,9 @@ def _settings_of(log: Path, action: str) -> list[str]:
         chips.append('no driver’s inputs')
     if flags.get('--pool') == 'mean':
         chips.append('picture as a mean')
+    # The number path when not the usual one of today (a run of before 16 Nov 2026 had this one and does not say).
+    if flags.get('--number-path') == 'class':
+        chips.append('number on its class')
     if '--map-limit' in flags:
         chips.append('map’s limit')
     if flags.get('--batch-size') or flags.get('--batch'):
@@ -2483,8 +2490,9 @@ class Panel:
 
     def _brain_choices(self, options: dict, check_only: bool = False) -> dict:
         """The variables of scripts/run_brain.sh from the options of Train › Brain ({'works', 'road', 'types', 'pool',
-        'seeds', 'users', 'map', 'applicability'}), the usual ones when not given: the roadworks, the kinds of road, the
-        road types, the road users and the applicability on, the map's limit off, the picture as a grid, the three seeds.
+        'seeds', 'users', 'map', 'applicability', 'number_path'}), the usual ones when not given: the roadworks, the
+        kinds of road, the road types, the road users and the applicability on, the map's limit off, the picture as a
+        grid, the number in force as a bell, the three seeds.
         'driver' is only 'off' (a page loaded before 10 Nov 2026 sends it): the brain never takes his pedals nor the
         car's speed."""
         if options.get('driver', 'off') != 'off':
@@ -2493,15 +2501,19 @@ class Panel:
         works, road, types = options.get('works', 'on'), options.get('road', 'on'), options.get('types', 'on')
         pool, seeds, users = options.get('pool', BRAIN_POOLS[0]), options.get('seeds', 'all'), options.get('users', 'on')
         map_limit, applicability = options.get('map', 'off'), options.get('applicability', 'on')
-        if not all(isinstance(value, str) for value in (works, road, types, pool, seeds, users, map_limit, applicability)) \
+        number_path = options.get('number_path', BRAIN_NUMBER_PATHS[0])
+        if not all(isinstance(value, str) for value in (works, road, types, pool, seeds, users, map_limit, applicability,
+                                                        number_path)) \
                 or works not in BRAIN_WORKS or road not in BRAIN_ROAD or types not in BRAIN_TYPES \
                 or pool not in BRAIN_POOLS or seeds not in BRAIN_SEEDS or users not in BRAIN_USERS \
-                or map_limit not in BRAIN_MAP or applicability not in BRAIN_APPLICABILITY:
+                or map_limit not in BRAIN_MAP or applicability not in BRAIN_APPLICABILITY \
+                or number_path not in BRAIN_NUMBER_PATHS:
             raise PanelError(400, 'bad_option', 'Roadworks, the kinds of road, the road types, the road users, the '
                                                 'applicability and the map’s limit are on or off, the picture mean or '
-                                                'grid, the seeds all or one.')
+                                                'grid, the number bell or class, the seeds all or one.')
         found = {'NNSLR_BRAIN_WORKS': BRAIN_WORKS[works], 'NNSLR_BRAIN_ROAD': BRAIN_ROAD[road],
                  'NNSLR_BRAIN_TYPES': BRAIN_TYPES[types], 'NNSLR_BRAIN_POOL': pool,
+                 'NNSLR_BRAIN_NUMBER_PATH': number_path,
                  'NNSLR_BRAIN_SEEDS': BRAIN_SEEDS[seeds], 'NNSLR_BRAIN_USERS': BRAIN_USERS[users],
                  'NNSLR_BRAIN_MAP': BRAIN_MAP[map_limit],
                  'NNSLR_BRAIN_APPLICABILITY': BRAIN_APPLICABILITY[applicability],
@@ -2731,7 +2743,7 @@ class Panel:
         if action in NETWORK_STARTS:
             start_env.update(self._network_start(action, (options or {}).get('start')))
         for key in ('works', 'road', 'types', 'driver', 'pool', 'seeds', 'users', 'routes_from', 'map', 'applicability',
-                    *BRAIN_SIGN_NETWORKS):
+                    'number_path', *BRAIN_SIGN_NETWORKS):
             # The map is also a choice of a replay (simulate: {'map': 'off'}, checked with its other options).
             if (options or {}).get(key) is not None and action != 'train_brain' \
                     and key not in ACTION_OPTIONS.get(action, ()):

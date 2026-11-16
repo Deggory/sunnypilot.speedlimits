@@ -419,3 +419,143 @@ def test_a_file_that_lost_the_numbers_path_does_not_pass_the_comparison_with_pyt
     monkeypatch.setattr(brain_export, '_export', without_the_number)
     with pytest.raises(ValueError, match='brain ONNX differs from PyTorch'):
         brain_export.export_brain_onnx(path, tmp_path / 'brain.onnx')
+
+
+# -- the number path (#104, 16 Nov 2026): a checkpoint says which it has; one that does not is of the class path --------
+# The ONNX operators of the brain published on 15 Nov 2026 (2026-11-15_1851-brain-s0), which the comma compiles and
+# runs; the one of 16 Nov (2026-11-16_1353-brain-s2, the picture as a mean) has the same without Reshape.
+PUBLISHED_OPERATORS = {'Abs', 'Add', 'And', 'Cast', 'Concat', 'Conv', 'Div', 'Equal', 'Gemm', 'Greater', 'HardSigmoid',
+                       'HardSwish', 'LayerNormalization', 'Less', 'Mul', 'ReduceMean', 'Relu', 'Reshape', 'Sigmoid',
+                       'Slice', 'Split', 'Sub', 'Tanh'}
+
+
+def path_brain(path, number_path=None, map_path=False, trust=1.5):
+    """A checkpoint as brain_train writes it, with a trust that is not zero, so that the number's path says something.
+    number_path None: a checkpoint of before 16 Nov 2026, built as it was then and without the word."""
+    import torch
+
+    from nnslr_tools.brain_net import build_brain_net
+    groups = (*GROUPS, 'map_limit') if map_path else GROUPS
+    torch.manual_seed(0)
+    model = build_brain_net(groups, pool='grid', works=True, pretrained=False, map_path=map_path,
+                            **({} if number_path is None else {'number_path': number_path}))
+    with torch.no_grad():
+        model.trust.weight.normal_(std=0.1)
+        model.trust.bias.fill_(trust)
+        if map_path:
+            model.trust_map.weight.normal_(std=0.1)
+            model.trust_map.bias.fill_(0.7)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save({'weights': model.state_dict(), 'epoch': 0, 'groups': groups, 'pool': 'grid', 'works': True,
+                'road_kinds': [], 'features': 128, 'hidden': 128, 'rate_hz': 4.0, 'picture': 'brain', 'split': 'x',
+                'reader': None, 'inputs_sha256': inputs_sha256(),
+                **({} if number_path is None else {'number_path': number_path})}, path)
+    return model.eval(), groups
+
+
+def numbered(groups, kph=60, map_kph=None):
+    """(1, inputs): random inputs with the number kph in force and, with map_kph, that limit on the map."""
+    import torch
+
+    from nnslr_tools.brain_targets import BRAIN_INPUTS, INPUT_SIZES
+    extra = torch.rand(1, sum(INPUT_SIZES[name] for name in groups), generator=torch.Generator().manual_seed(5))
+    brain_export._sign_in_force(extra, sum(INPUT_SIZES[name] for name in groups[:groups.index('signs')]), kph)
+    if map_kph is not None:
+        extra[0, -2:] = torch.from_numpy(BRAIN_INPUTS.map_limit_row(map_kph))
+    return extra
+
+
+def test_a_checkpoint_that_does_not_say_its_number_path_is_built_as_before_and_says_what_it_said(tmp_path):
+    """Every brain trained or published before 16 Nov 2026: no word in its checkpoint. It is built with the class path
+    and its step says, with a number in force, what the arithmetic of before says: speed_head(h), and trust(h) more on
+    the class of the number alone."""
+    import torch
+
+    from nnslr_tools.brain_targets import speed_class
+    from nnslr_tools.road_type_net import gru_step
+    path = tmp_path / 'brain-last.pt'
+    trained, groups = path_brain(path)
+    model, saved = brain_export.load_brain(path)
+    assert 'number_path' not in saved and model.number_path == 'class'
+    image, extra, hidden = torch.rand(1, 3, 144, 256), numbered(groups, 60), torch.rand(1, 128)
+    with torch.no_grad():
+        stepped = brain_export.step_module(model)(image, extra, hidden)[0]
+        memory = gru_step(trained.gru, torch.cat([trained.encode(image), extra], dim=-1), hidden)
+        before = trained.speed_head(memory)
+        before[0, speed_class(60)] += trained.trust(memory)[0, 0]
+    assert torch.equal(stepped, before)
+    assert float(trained.trust(memory)) > 1.0  # the path was on: one class lifted, the others as speed_head says
+    # The same file with the word of today's trainings is another network on the same weights: never read by default.
+    saved = torch.load(path, weights_only=False)
+    torch.save({**saved, 'number_path': 'bell'}, path)
+    other = brain_export.load_brain(path)[0]
+    assert other.number_path == 'bell'
+    with torch.no_grad():
+        assert not torch.allclose(brain_export.step_module(other)(image, extra, hidden)[0], before, atol=1.0)
+    # And a word this code does not know is refused: built as another path it would say other speeds without a word.
+    torch.save({**saved, 'number_path': 'gauss'}, path)
+    with pytest.raises(ValueError, match='number path'):
+        brain_export.load_brain(path)
+
+
+@pytest.mark.parametrize('map_path', [False, True])
+def test_the_step_of_a_brain_of_the_bell_path_says_what_pytorch_says_with_a_number_in_force(tmp_path, map_path):
+    """The bell goes to the car inside the file (BrainNet.speed in the exported step): with a number in force, and the
+    map's limit of a brain with that path, onnxruntime says what PyTorch's forward says, the export's own comparison
+    passes, and the file has one operator the published brain has not, Clip, the cut of the distance at 12 km/h."""
+    import numpy as np
+    import onnx
+    import onnxruntime
+    import torch
+
+    path = tmp_path / 'brain-last.pt'
+    trained, groups = path_brain(path, number_path='bell', map_path=map_path)
+    model, saved = brain_export.load_brain(path)
+    assert saved['number_path'] == 'bell' and model.number_path == 'bell'
+    done = brain_export.export_brain_onnx(path, tmp_path / 'brain.onnx')
+    assert done['verification']['passed']
+    operators = {node.op_type for node in onnx.load(str(tmp_path / 'brain.onnx')).graph.node}
+    assert operators - PUBLISHED_OPERATORS == {'Clip'}
+    session = brain_export.check_session(onnxruntime, tmp_path / 'brain.onnx')
+    image, hidden = torch.rand(1, 3, 144, 256), torch.rand(1, 128) * 2 - 1
+    for kph, map_kph in ((60, 50), (30, None), (130, 120)):
+        extra = numbered(groups, kph, map_kph if map_path else None)
+        with torch.no_grad():
+            whole = trained(image[None], extra[None], hidden)[0][0].numpy()
+            added = model.number_bell(extra)
+        got = session.run(None, {'image': image.numpy(), 'extra': extra.numpy(), 'hidden': hidden.numpy()})[0]
+        assert np.allclose(got, whole, rtol=brain_export.RTOL, atol=brain_export.ATOL)
+        # The path was on, and it weighed: 18 * trust taken from the classes far from the number.
+        assert float(added.min()) == -18.0 and float(whole.max() - whole.min()) > 18.0
+
+
+def test_a_file_of_the_bell_path_that_lost_the_bell_does_not_pass_the_comparison_with_pytorch(tmp_path, monkeypatch):
+    """The comparison of the export carries a number in force (5cb483d): a file that says speed_head alone is refused."""
+    path = tmp_path / 'brain-last.pt'
+    path_brain(path, number_path='bell')
+    export = brain_export._export
+
+    def without_the_number(step, example, output, names):
+        real = step.model.speed
+        step.model.speed = lambda out, extra: step.model.speed_head(out)
+        try:
+            export(step, example, output, names)
+        finally:
+            step.model.speed = real
+
+    monkeypatch.setattr(brain_export, '_export', without_the_number)
+    with pytest.raises(ValueError, match='differs from PyTorch'):
+        brain_export.export_brain_onnx(path, tmp_path / 'brain.onnx')
+
+
+def test_the_lines_of_the_step_stay_where_the_published_file_has_them():
+    """The exporter writes into the file, for every node, the line of Step.forward it comes from, by its number in
+    brain_export.py and its text. The brains published on 15 and 16 Nov 2026 have them at 90, 91, 93 and 102: a line
+    added or taken away above them changes the bytes, and the sha256, of every brain exported again. Change this test
+    only with that decided."""
+    import inspect
+    lines = inspect.getsource(brain_export).splitlines()
+    assert lines[89].strip() == 'x = torch.cat([self.model.encode(image), extra], dim=-1)'
+    assert lines[90].strip() == 'hidden_out = gru_step(self.model.gru, x, hidden)'
+    assert lines[92].strip() == 'speed = self.model.speed(hidden_out, extra)'
+    assert lines[101].strip() == 'found += (self.model.type_head(hidden_out),)'

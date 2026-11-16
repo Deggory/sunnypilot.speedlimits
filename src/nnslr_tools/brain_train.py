@@ -102,6 +102,15 @@ decides which signs are taken; the result says which of the two tells a sign of 
 A training can go on from an earlier brain (brain_start, nnslr train-brain --init-from, Train › Brain's "Start from"):
 its weights instead of ImageNet's and random ones, the rest of the training the same. Only a brain stepped as this one
 (rate, picture, pool, sizes) on the same split; an input it lacks starts at zero, so the new one starts as the old.
+
+The number's path (number_path, since 16 Nov 2026, #104; brain_net's text): a training gives the number in force to the
+answer as a bell around it ('bell', the usual one), or on its class alone as every brain before ('class': nnslr
+train-brain --number-path class, Train › Brain's Number, the comparison). The checkpoint and result.json keep the word.
+Going on from a brain of the other path, the trust in the number starts again (at zero for 'bell', so the new brain
+starts from what the start's speed_head says); from one of the same path it is kept. Whether the path was learnt is read
+from two things in result.json: moved of test_swapped, and trust (trust_size: the L2 norm of the weights of the trust
+layer and its bias, at the start and at the epoch kept; trust(h) lies within the bias plus or minus the L1 norm), which
+the training says together in the last line it logs.
 """
 from __future__ import annotations
 
@@ -115,8 +124,8 @@ from pathlib import Path
 import numpy as np
 
 from nnslr_tools import road_type_data as data
-from nnslr_tools.brain_net import (APPLICABILITY_POS_WEIGHT_MAX, USER_COLUMNS, USER_KINDS, USERS_POS_WEIGHT_MAX, brain_loss,
-                                   build_brain_net, outputs)
+from nnslr_tools.brain_net import (APPLICABILITY_POS_WEIGHT_MAX, NUMBER_PATHS, USER_COLUMNS, USER_KINDS,
+                                   USERS_POS_WEIGHT_MAX, brain_loss, build_brain_net, number_path_of, outputs)
 from nnslr_tools.brain_targets import (INPUT_SIZES, LEFT_OUT, MAP_GROUP, METRES_SCALE, NO_TYPE, NS, OPTIONAL, RATE_HZ,
                                        ROAD_SIGN_KINDS, brain_sizes,
                                        applicability_counts, applicability_counts_text, applicability_weights,
@@ -146,6 +155,9 @@ AFTER_PERCENTILE = 90  # the speed he reaches after the end of works (_site)
 DRY_FRAMES = 12
 DRY_STEPS = 2
 LEARNED_INPUTS = tuple(name for name in INPUT_SIZES if name not in LEFT_OUT and name not in OPTIONAL)
+NUMBER_PATH = NUMBER_PATHS[1]  # a training of today: the number in force as a bell (brain_net, #104)
+# The layers that say how far a number is believed, the sign's and the map's: what they multiply is the number path's.
+NUMBER_TRUSTS = ('trust.', 'trust_map.')
 
 
 def learned_inputs(map_limit: bool = False) -> tuple[str, ...]:
@@ -732,10 +744,14 @@ def brain_start(torch, model, path: Path, source: dict) -> dict:
     this one does not left out, so the network starts saying what the start said. A group that grew at its end since the
     start (road_signs: a kind of other sign more) keeps the start's columns and has the new ones at zero. A head the start has not stays fresh,
     and a head only the start has is not taken: the next limit and the metres of a brain of 7 to 11 Nov 2026.
+    The trust in the number (NUMBER_TRUSTS) is taken only from a start of this brain's number path (the start's
+    'number_path', 'class' when it does not say; source['number_path']): on the other path the same layer multiplies
+    another thing, so it stays as this brain was built, at zero for the 'bell' path (#104), and the brain starts from
+    what the start's speed_head says wherever a number is in force.
     Refuses a start stepped otherwise (rate, picture, pool, features, memory), learnt on another split, or whose inputs
     are not as wide as its groups say. Returns what result.json records of it: its file and sha256, run, epoch, split,
-    the layers left fresh, the inputs added, grown (name: [columns of the start, columns now]) and left out, and whether
-    the car's file of the inputs was the same."""
+    the layers left fresh, the inputs added, grown (name: [columns of the start, columns now]) and left out, whether
+    the car's file of the inputs was the same, and the start's number path."""
     path = Path(path)
     saved = torch.load(path, map_location='cpu', weights_only=False)
     if not isinstance(saved, dict) or not isinstance(saved.get('weights'), dict) or not saved.get('groups'):
@@ -749,6 +765,7 @@ def brain_start(torch, model, path: Path, source: dict) -> dict:
     if saved.get('split') and saved['split'] != source['split']:
         raise ValueError(f'the start learnt on another split: its train may hold the frames of this test: {path}')
     weights = saved['weights']
+    their_path, our_path = number_path_of(saved), number_path_of(source)
     state = {key: value.detach().clone() for key, value in model.state_dict().items()}
     # The memory's input: the picture's features, then each group's columns in its order (pack_inputs).
     columns, at = {}, source['features']
@@ -796,6 +813,8 @@ def brain_start(torch, model, path: Path, source: dict) -> dict:
                     current[row] = weights[key][found[name]]
             if missing:
                 fresh.append(f'{key} ({", ".join(missing[:5])}{"..." if len(missing) > 5 else ""})')
+        elif key.startswith(NUMBER_TRUSTS) and their_path != our_path:
+            fresh.append(key)  # the trust of another number path: as this brain was built
         elif key in weights and tuple(weights[key].shape) == tuple(current.shape):
             state[key] = weights[key]
         else:
@@ -808,7 +827,8 @@ def brain_start(torch, model, path: Path, source: dict) -> dict:
             'epoch': saved.get('epoch'), 'split_sha256': saved.get('split'), 'fresh': fresh, 'inputs_added': added,
             'inputs_grown': grown,
             'inputs_left_out': [name for name in columns if name not in ours],
-            'same_inputs_file': saved.get('inputs_sha256') == source['inputs_sha256']}
+            'same_inputs_file': saved.get('inputs_sha256') == source['inputs_sha256'],
+            'number_path': their_path, 'same_number_path': their_path == our_path}
 
 
 def _start_text(start: dict) -> str:
@@ -820,14 +840,42 @@ def _start_text(start: dict) -> str:
             + ''.join(f'; {name} grew from {before} to {now} numbers, the new ones at zero'
                       for name, (before, now) in (start.get('inputs_grown') or {}).items())
             + (f'; inputs it took, left out: {", ".join(start["inputs_left_out"])}' if start['inputs_left_out'] else '')
+            + ('' if start.get('same_number_path', True) else
+               f'; its number path is another ({start["number_path"]}): the trust in the number starts again')
             + ('' if start['same_inputs_file'] else '; the car’s file of the inputs has changed since') + '.')
+
+
+def trust_size(model) -> dict:
+    """How much the number's path holds (brain_net's text): for the trust in the sign's number, and in the map's limit
+    of a brain with that path ('trust_map'), the L2 and L1 norms of the layer's weights and its bias. The memory's
+    output is within -1 and 1, so trust(h) lies within the bias plus or minus the L1 norm; a layer of the 'bell' path
+    starts at zero, so all of it was learnt, and a fresh one of the 'class' path starts near 0.58 (L2)."""
+    found = {}
+    for name in ('trust', 'trust_map'):
+        layer = getattr(model, name, None)
+        if layer is not None:
+            weight = layer.weight.detach().float()
+            found[name] = {'weights_l2': float(weight.norm()), 'weights_l1': float(weight.abs().sum()),
+                           'bias': float(layer.bias.detach().float().sum())}
+    return found
+
+
+def _trust_text(path: str, before: dict, after: dict, swapped_test: dict) -> str:
+    """The log's last line of a training: what the number's path holds at its start and at the epoch kept, and on how
+    many test frames a swapped number moved the answer."""
+    parts = [f"{'the map’s limit' if name == 'trust_map' else 'the sign’s number'}: weights L2 "
+             f"{before[name]['weights_l2']:.2f} -> {size['weights_l2']:.2f}, bias {before[name]['bias']:+.2f} -> "
+             f"{size['bias']:+.2f}" for name, size in after.items()]
+    frames = swapped_test['network']['frames']
+    return (f"The number’s path ({path}), trust in " + '; '.join(parts)
+            + f". A swapped number moved the answer on {swapped_test['moved']} of {frames} test frames.")
 
 
 def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid', works: bool = True,
                 road: bool = True, types: bool = True, users: bool = True, epochs: int = EPOCHS, chunk: int = CHUNK, device: str | None = None,
                 dry_run: bool = False, seed: int = 0, routes: list[str] | None = None, init_from: Path | None = None,
                 sign_networks: dict | None = None, map_limit: bool = False, applicability: bool = True,
-                log=_print) -> dict:
+                number_path: str = NUMBER_PATH, log=_print) -> dict:
     """Train on train, keep the last epoch, measure once. Writes routes.json (the drives it takes, ROUTES), brain-last.pt
     and result.json into run_dir; the checkpoint
     says what it came from, its table of the speeds too (the class_kph of its weights), and its kinds of road. Refuses what
@@ -844,7 +892,11 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
     unless asked); the brain is then the one case where the vision side reads the map. applicability: with whose road
     a sign is of as a task of its own (applicability_head, brain_net), and sign_boxes with every speed sign read, those
     of another road too (the checkpoint's other_road_boxes); False, the comparison: the signs taken, as every brain of
-    before, and only the applicability network measured."""
+    before, and only the applicability network measured. number_path: how the number in force reaches the answer
+    (brain_net.NUMBER_PATHS, #104): 'bell', the usual one, or 'class', the path of every brain before 16 Nov 2026, the
+    comparison; the checkpoint and result.json keep the word, and result.json what its trust holds (trust_size)."""
+    if number_path not in NUMBER_PATHS:
+        raise ValueError(f'the number path is one of {NUMBER_PATHS}: {number_path}')
     torch = _torch()
     root, run_dir = Path(data_root), Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -917,7 +969,7 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
     # A brain that learns the map's limit has its path straight to the answer (brain_net: trust_map).
     model = build_brain_net(groups, pool=pool, works=works, pretrained=not dry_run, road_kinds=len(kinds),
                             road_types=len(ROAD_TYPES) if types else 0, users=users, map_path=map_limit,
-                            applicability=applicability).to(device)
+                            applicability=applicability, number_path=number_path).to(device)
     pos_weight = None if lift is None else torch.from_numpy(lift).to(device)
     sign_pos_weight = None if sign_lift is None else torch.tensor(sign_lift, device=device)
     optimizer = torch.optim.AdamW([value for value in model.parameters() if value.requires_grad], lr=LEARNING_RATE,
@@ -939,11 +991,15 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
               'split': read_split(root)['sha256'], 'reader': drives[0]['reader'], 'inputs_sha256': inputs_sha256(),
               # The kinds of other sign of road_signs (brain_targets.brain_sizes): the export tells the car, which gives a
               # brain the kinds it was trained with when more are added.
-              'road_sign_kinds': ROAD_SIGN_KINDS}
+              'road_sign_kinds': ROAD_SIGN_KINDS,
+              # How the number in force reaches the answer (brain_net.NUMBER_PATHS, #104): whoever builds the network
+              # from this file reads it (brain_net.number_path_of); a checkpoint of before 16 Nov 2026 does not say.
+              'number_path': number_path}
     start = None
     if init_from is not None:
         start = brain_start(torch, model, Path(init_from), source)
         log(_start_text(start))
+    trust_start = trust_size(model)
     log(f'Frames with a night answer: {sum(int(night_frames(drive)[0].sum()) for drive in drives)}')
     history = []
     name = 'dry_run' if dry_run else f'brain_s{seed}'
@@ -977,8 +1033,11 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
         said = [predict(model, drive, store, chunk=chunk, device=device) for drive in blind]
         no_map = {'validation_no_map': measure(blind, said, 'validation'), 'test_no_map': measure(blind, said, 'test')}
     table = [int(round(value)) for value in model.class_kph.tolist()]
+    # What the number's path holds, at the start and at the epoch kept: beside test_swapped, whether it was learnt.
+    trust = {'start': trust_start, 'kept': trust_size(model)}
     # rate_hz, hidden and kph: how the car steps it and what it says, for Models (model_roles.brain_digest).
     result = {'groups': list(groups), 'road_sign_kinds': source['road_sign_kinds'], 'map_limit': map_limit, 'map_path': map_limit, 'pool': pool, 'works': works, 'road_kinds': kinds,
+              'number_path': number_path, 'trust': trust,
               'road_types': list(ROAD_TYPES) if types else [], 'users': users, 'user_kinds': source['user_kinds'],
               'users_pos_weight': None if lift is None else lift.round(3).tolist(),
               'users_answers': users_counts(drives), 'applicability': applicability, 'other_road_boxes': applicability,
@@ -996,4 +1055,5 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
               'test_cold': measure(drives, cold, 'test'),
               'validation_swapped': swapped_measure('validation'), 'test_swapped': swapped_measure('test'), **no_map}
     (run_dir / RESULT).write_text(json.dumps(result, indent=2), encoding='utf-8')
+    log(_trust_text(number_path, trust['start'], trust['kept'], result['test_swapped']))
     return result

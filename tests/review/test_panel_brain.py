@@ -68,6 +68,7 @@ def brain_script(checkout):
                       'echo "users: ${NNSLR_BRAIN_USERS-unset}"\n'
                       'echo "map: ${NNSLR_BRAIN_MAP-unset}"\n'
                       'echo "applicability: ${NNSLR_BRAIN_APPLICABILITY-unset}"\n'
+                      'echo "number path: ${NNSLR_BRAIN_NUMBER_PATH-unset}"\n'
                       'echo "routes from: ${NNSLR_BRAIN_ROUTES_FROM-unset}"\n')
     script.chmod(0o755)
     return script
@@ -327,6 +328,71 @@ def test_the_applicability_head_is_on_unless_turned_off(root, checkout, monkeypa
     assert refused.value.status == 400
 
 
+def test_the_number_path_is_the_bell_unless_the_class_is_asked(root, checkout, monkeypatch):
+    """#104, 16 Nov 2026: Train › Brain's Number, how the number in force reaches the answer: the bell unless the class
+    is chosen (the script's NNSLR_BRAIN_NUMBER_PATH), only for the brain, and a run of the class says so on its job."""
+    panel = Panel(root, repo=checkout)
+    brain_script(checkout)
+    scanned(root)
+    monkeypatch.setattr(panel, 'activities', lambda: [])
+
+    def told(options):
+        job = panel.start('train_brain', options)
+        finished(panel, job['id'])
+        time.sleep(1.1)  # a job's log is named by its second
+        return {line for line in full_log(panel, job['id']).splitlines() if line.startswith('number path:')}
+
+    assert told({}) == {'number path: bell'} and told({'number_path': 'bell'}) == {'number path: bell'}
+    assert told({'number_path': 'class'}) == {'number path: class'}
+    for wrong in ('gauss', 'on', True, ['class']):
+        with pytest.raises(PanelError) as refused:
+            panel.start('train_brain', {'number_path': wrong})
+        assert refused.value.status == 400 and refused.value.reason == 'bad_option'
+    with pytest.raises(PanelError) as refused:
+        panel.start('train_decider', {'number_path': 'class'})
+    assert refused.value.status == 400
+    # The job's chip, from the settings line of the script: only the path that is not the usual one.
+    log = root / 'brain.log'
+    log.write_text('== scripts/run_brain.sh r\nrun:          r\nsettings:     --epochs 40 --pool grid --number-path class\n')
+    assert _settings_of(log, 'train_brain') == ['40 epochs', 'number on its class']
+    log.write_text('== scripts/run_brain.sh r\nrun:          r\nsettings:     --epochs 40 --pool grid --number-path bell\n')
+    assert _settings_of(log, 'train_brain') == ['40 epochs']
+
+
+def test_the_number_path_goes_through_the_site_and_is_never_dropped(root, checkout, monkeypatch):
+    """review.py's list of options: a key missing there is dropped without a word and the job starts with the usual
+    path. One sent as something else than a word is refused, never dropped into a training of the bell."""
+    from nnslr_tools import brain_targets
+    brain_script(checkout)
+    scanned(root)
+    monkeypatch.setattr(brain_targets, 'dataset', lambda *args, **kwargs: [])
+    server = RunningServer(root)
+    server.app.panel = Panel(root, repo=checkout)
+    server.app.panel.activities = list
+    try:
+        for body in ({'number_path': 'gauss'}, {'number_path': True}, {'number_path': 1}):
+            status, _, data = server.request('POST', '/api/panel/run/train_brain', body=body)
+            assert status == 400 and json_of(data)['error'] == 'bad_option', body
+        assert server.app.panel.jobs() == []
+        status, _, data = server.request('POST', '/api/panel/run/train_brain', body={'number_path': 'class'})
+        assert status == 200, data
+        job = json_of(data)['id']
+        finished(server.app.panel, job)
+        assert 'number path: class' in full_log(server.app.panel, job).splitlines()
+    finally:
+        server.close()
+
+
+def test_models_say_the_number_path_of_a_brain():
+    """One key of brain_digest: bell for a result that says so, class for one that says it and for every brain of
+    before 16 Nov 2026, whose result does not say."""
+    from nnslr_tools.model_roles import brain_digest
+    result = {'groups': ['signs'], 'test': {}}
+    assert brain_digest(result)['number_path'] == 'class'
+    assert brain_digest({**result, 'number_path': 'class'})['number_path'] == 'class'
+    assert brain_digest({**result, 'number_path': 'bell'})['number_path'] == 'bell'
+
+
 def test_the_road_users_and_the_drives_of_an_earlier_brain_reach_the_script(root, checkout, monkeypatch):
     """Road users on unless turned off (NNSLR_BRAIN_USERS); Drives every dashcam drive unless an earlier brain run that
     kept its drives is chosen (NNSLR_BRAIN_ROUTES_FROM), its seeds counted as that run, newest first; the job says
@@ -398,7 +464,7 @@ def test_bad_choices_are_refused_before_it_starts(root, checkout, monkeypatch, o
 
 
 @pytest.mark.parametrize('key,value', [('works', 'off'), ('road', 'off'), ('driver', 'off'), ('pool', 'mean'),
-                                       ('users', 'off'), ('routes_from', 'b1')])
+                                       ('users', 'off'), ('routes_from', 'b1'), ('number_path', 'class')])
 def test_its_choices_are_refused_on_another_training(root, checkout, key, value):
     with pytest.raises(PanelError) as refused:
         Panel(root, repo=checkout).start('train_decider', {key: value})
@@ -702,3 +768,40 @@ def test_models_keep_the_two_networks_a_brain_records_since_15_nov():
     assert brain_digest({**base, 'sign_networks': {**networks, 'decider': None}})['sign_networks'] == networks
     assert brain_digest({**base, 'sign_networks': {'classifier': networks['classifier'],
                                                    'decider': 'decider:d1/x'}})['sign_networks'] is None
+
+
+def test_a_step_of_the_pipeline_takes_the_number_path(root, checkout, monkeypatch):
+    """#104: the page sends number_path with every brain step; the pipeline's own list of a step's options must have it."""
+    panel = Panel(root, repo=checkout)
+    brain_script(checkout)
+    scanned(root)
+    monkeypatch.setattr(panel, 'activities', lambda: [])
+    monkeypatch.setattr(panel, 'system', lambda: {'gpu': {'processes': 0}})
+    view = panel.start_pipeline({'steps': [{'action': 'train_brain', 'options': {
+        'works': 'on', 'road': 'on', 'types': 'on', 'pool': 'grid', 'number_path': 'class', 'users': 'on',
+        'applicability': 'on'}}]}, 'admin')
+    done = finished(panel, view['steps'][0]['job'])
+    assert done['state'] == 'ok'
+    assert 'number path: class' in full_log(panel, view['steps'][0]['job']).splitlines()
+    assert view['steps'][0]['options']['number_path'] == 'class'
+    with pytest.raises(PanelError) as refused:
+        panel.start_pipeline({'steps': [{'action': 'train_brain', 'options': {'number_path': 'gauss'}}]}, 'admin')
+    assert refused.value.status == 400
+
+
+def test_the_models_tab_gets_the_number_path_of_a_brain(root, checkout):
+    """#104: Models › Brain › Details tells the two kinds of brain apart by the version's number_path."""
+    panel = Panel(root, repo=checkout)
+    brain_run(root, 'b1-s0')
+    run = root / 'runs' / 'b2-s0'
+    run.mkdir(parents=True)
+    (run / 'brain-last.pt').write_text('weights')
+    (run / 'result.json').write_text(json.dumps({
+        'groups': ['signs'], 'seed': 0, 'test': {}, 'number_path': 'bell',
+        'trust': {'start': {}, 'kept': {'trust': {'weights_l2': 1.0, 'weights_l1': 2.0, 'bias': 0.1}}}}))
+    found = {entry['id']: entry for entry in panel.models_index.artifacts(('brain',))['brain']}
+    assert found['brain:b2-s0/brain']['number_path'] == 'bell' and found['brain:b1-s0/brain']['number_path'] == 'class'
+    versions = {version['id']: version for role in panel.models_index.index()['roles'] if role['role'] == 'brain'
+                for version in role['versions']}
+    assert versions['brain:b2-s0/brain']['number_path'] == 'bell'
+    assert versions['brain:b1-s0/brain']['number_path'] == 'class'

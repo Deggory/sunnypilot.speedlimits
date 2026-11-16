@@ -670,6 +670,170 @@ def test_the_maps_path_needs_the_map_among_the_groups_and_goes_to_the_car():
     assert build_brain_net(MAP_GROUPS, pretrained=False).trust_map is None  # the brain of 14 Nov 20:23: the input alone
 
 
+# -- the number path (#104, 16 Nov 2026): the number in force on its class alone, or as a bell around it ----------------
+def bell_at(model, kph):
+    """A network whose speed_head says a bell around kph whatever the memory holds, and whose trust is its bias alone."""
+    from nnslr_tools.brain_net import SPEED_SIGMA_KPH
+    trusting(model, 0.0)
+    with torch.no_grad():
+        model.speed_head.bias.copy_(-0.5 * ((model.class_kph - kph) / SPEED_SIGMA_KPH) ** 2)
+    return model.eval()
+
+
+def best_trust(model, his):
+    """(the loss with no trust, the least loss any trust reaches, that trust, the speed said with it) on a frame with the
+    number 60 in force and his speed as the answer: trust from -5 to 40 in steps of 0.05."""
+    from nnslr_tools.brain_net import brain_loss
+    from nnslr_tools.brain_targets import speed_class
+    out, extra = torch.zeros(1, 1, 128), number_row(60)[:, :1]
+    answer = (torch.tensor([[speed_class(his)]]), torch.ones(1, 1), torch.zeros(1, 1), torch.zeros(1, 1))
+    found = []
+    with torch.no_grad():
+        for trust in torch.linspace(-5, 40, 901):
+            model.trust.bias.fill_(float(trust))
+            logits = model.speed(out, extra)
+            found.append((float(brain_loss(logits, None, *answer)), float(trust), float(model.class_kph[int(logits.argmax())])))
+        model.trust.bias.fill_(0.0)
+        none = float(brain_loss(model.speed(out, extra), None, *answer))
+    return (none, *min(found))
+
+
+def test_the_bell_path_takes_the_loss_where_the_class_path_cannot_and_moves_the_speed_towards_the_number():
+    """#104: speed_head says 50 (the scene), the sign says 60 and he drives 60. The answer is a bell 2 km/h wide on a
+    class a km/h, of which one class holds 0.2: a trust added to the class of the 60 alone takes the loss from 14.61 to
+    12.30 and no further, so little gradient reaches it. The same trust on a bell around the 60 reaches 5.78 with
+    speed_head as it is, and the speed said moves from 50 to 58."""
+    none, least, trust, said = best_trust(bell_at(net(), 50), 60)
+    assert (none, least) == (pytest.approx(14.61, abs=0.01), pytest.approx(12.30, abs=0.01))
+    assert said == 60 and trust == pytest.approx(12.7, abs=0.1)  # one class lifted above the bell at 50, nothing between
+    none, least_bell, trust, said = best_trust(bell_at(net(number_path='bell'), 50), 60)
+    assert (none, least_bell) == (pytest.approx(14.61, abs=0.01), pytest.approx(5.78, abs=0.01))
+    assert least_bell < least - 6
+    assert said == 58 and 50 < said <= 60 and trust == pytest.approx(4.5, abs=0.1)
+
+
+def test_a_trust_of_one_on_the_bell_path_is_the_answer_of_a_driver_who_holds_the_number():
+    """With speed_head saying nothing, the bell at trust 1 scores the least an answer can: the answer's own entropy
+    (2.112 at SPEED_SIGMA_KPH 2). The class path cannot come near it at any trust."""
+    from nnslr_tools.brain_net import brain_loss, speed_targets
+    from nnslr_tools.brain_targets import speed_class
+    answer = speed_targets(torch.tensor([speed_class(60)]))
+    floor = float(torch.special.entr(answer).sum())
+    model = trusting(net(number_path='bell'), 1.0).eval()
+    with torch.no_grad():
+        said = model.speed(torch.zeros(1, 1, 128), number_row(60)[:, :1])
+    loss = brain_loss(said, None, torch.tensor([[speed_class(60)]]), torch.ones(1, 1), torch.zeros(1, 1), torch.zeros(1, 1))
+    assert float(loss) == pytest.approx(floor, abs=1e-3) and floor == pytest.approx(2.112, abs=1e-3)
+    assert best_trust(trusting(net(), 0.0).eval(), 60)[1] > 4.7  # the class path, speed_head silent: 4.74 at its best
+
+
+def test_a_frame_that_says_the_number_pushes_the_bells_trust_far_harder_than_the_class_paths():
+    """Why the trust of the class path stayed near its random start (#104): from a brain that knows nothing yet, a frame
+    where he drives the number in force asks 0.19 of the trust on one class (the share of the answer that class holds,
+    less 1 in 200) and 16 of the trust on the bell, 80 times as much."""
+    from nnslr_tools.brain_net import brain_loss
+    from nnslr_tools.brain_targets import speed_class
+    pushes = {}
+    for path in ('class', 'bell'):
+        model = trusting(net(number_path=path), 0.0)
+        said = model.speed(torch.zeros(1, 1, 128), number_row(60)[:, :1])
+        brain_loss(said, None, torch.tensor([[speed_class(60)]]), torch.ones(1, 1), torch.zeros(1, 1), torch.zeros(1, 1)).backward()
+        pushes[path] = -float(model.trust.bias.grad)  # above 0: the loss falls as the trust rises
+    assert pushes['class'] == pytest.approx(0.19, abs=0.01) and pushes['bell'] == pytest.approx(16.1, abs=0.1)
+    assert pushes['bell'] > 80 * pushes['class']
+
+
+@pytest.mark.parametrize('kph', [30, 50, 60, 100, 120, 130])
+def test_the_bell_path_adds_the_bell_around_the_number_and_never_less_than_its_floor(kph):
+    from nnslr_tools.brain_net import NUMBER_FLOOR, SPEED_SIGMA_KPH
+    from nnslr_tools.brain_targets import speed_class
+    model = trusting(net(number_path='bell'), 1.0).eval()
+    with torch.no_grad():
+        speed = model(batch(2)[0], number_row(kph))[0][0, 0]
+    wanted = (-(model.class_kph - kph) ** 2 / (2 * SPEED_SIGMA_KPH ** 2)).clamp_min(NUMBER_FLOOR)
+    assert torch.allclose(speed, wanted, atol=1e-4)
+    assert int(speed.argmax()) == speed_class(kph) and float(speed.max()) == pytest.approx(0.0, abs=1e-5)
+    # 12 km/h from the number and beyond, every class gets the floor: speed_head still says which of them.
+    assert float(speed.min()) == NUMBER_FLOOR == -18.0
+    assert speed[speed_class(kph) - 12].item() == NUMBER_FLOOR and speed[speed_class(kph) - 11].item() > NUMBER_FLOOR
+    # As much as the network trusts it, and against it with a trust below zero.
+    with torch.no_grad():
+        doubted = trusting(net(number_path='bell'), -0.5).eval()(batch(2)[0], number_row(kph))[0][0, 0]
+    assert torch.allclose(doubted, -0.5 * wanted, atol=1e-4)
+
+
+@pytest.mark.parametrize('changes', [{'kph': 0, 'known': 0.0}, {'kph': 100, 'known': 0.0}, {'kph': 100, 'ended': 1.0}])
+def test_a_number_not_in_force_adds_no_bell(changes):
+    # No number yet (the car's row is all zeros then), a number not known, an end read since.
+    assert trusting(net(number_path='bell'), 3.0)(batch(2)[0], number_row(**changes))[0].abs().sum() == 0
+
+
+@pytest.mark.parametrize('kph', [0.0, 250.0, 1000.0, 60000.0])
+def test_no_value_of_the_bell_is_out_of_a_half_floats_reach_whatever_number_comes_in(kph):
+    """The comma runs the network with half floats, which end at 65504: the distance is cut at 12 km/h before its
+    square, so the bell stays within 0 and the floor for a number no sign says too (the square first, 1000 km/h from a
+    class, would be a million)."""
+    from nnslr_tools.brain_net import NUMBER_FLOOR
+    model = net(number_path='bell').eval()
+    with torch.no_grad():
+        added = model.number_bell(number_row(kph))
+    assert float(added.max()) <= 0.0 and float(added.min()) >= NUMBER_FLOOR
+    assert torch.isfinite(added.half()).all()
+
+
+def test_the_trust_of_the_bell_path_starts_at_zero_and_learns_from_a_frame_that_says_the_number():
+    from nnslr_tools.brain_net import brain_loss
+    from nnslr_tools.brain_targets import speed_class
+    model = net(number_path='bell')
+    assert model.number_path == 'bell' and not model.trust.weight.any() and not model.trust.bias.any()
+    images, extra = batch(2)[0], number_row(60)
+    # At zero the number adds nothing: with a number in force the brain says what its speed_head says.
+    out = torch.rand(1, 2, 128)
+    with torch.no_grad():
+        assert torch.equal(model.speed(out, extra), model.speed_head(out))
+    speed, works, _state = model(images, extra)
+    brain_loss(speed, works, torch.full((1, 2), speed_class(60)), torch.ones(1, 2), torch.zeros(1, 2), torch.zeros(1, 2)).backward()
+    assert gradient_of(model, 'trust') > 0
+    # The path of every brain before starts where it always did.
+    assert net().number_path == 'class' and net().trust.weight.any()
+
+
+def test_a_number_path_is_one_of_the_two_and_the_limit_ahead_has_only_the_class():
+    from nnslr_tools.brain_net import NUMBER_PATHS, build_brain_net, car_weights, number_path_of
+    assert NUMBER_PATHS == ('class', 'bell')
+    with pytest.raises(ValueError, match='number_path'):
+        build_brain_net(GROUPS, pretrained=False, number_path='gauss')
+    with pytest.raises(ValueError, match='limit ahead'):
+        build_brain_net(GROUPS, pretrained=False, ahead=True, number_path='bell')
+    # The word of a checkpoint: one that does not say is of the class path, one this code does not know is refused.
+    assert number_path_of({}) == 'class' and number_path_of({'number_path': None}) == 'class'
+    assert number_path_of({'number_path': 'bell'}) == 'bell' and number_path_of({'number_path': 'class'}) == 'class'
+    with pytest.raises(ValueError, match='number path'):
+        number_path_of({'number_path': 'gauss'})
+    # The same weights for the car, by the same names: the path is arithmetic, not a layer.
+    assert set(car_weights(net(number_path='bell'))) == set(car_weights(net()))
+
+
+def test_the_maps_limit_of_a_brain_of_the_bell_path_adds_its_own_bell():
+    from nnslr_tools.brain_net import NUMBER_FLOOR, SPEED_SIGMA_KPH, build_brain_net
+    from nnslr_tools.brain_targets import speed_class
+    torch.manual_seed(0)
+    model = build_brain_net(MAP_GROUPS, pretrained=False, map_path=True, number_path='bell').eval()
+    assert not model.trust_map.weight.any() and not model.trust_map.bias.any()
+    trusting(model, 3.0)
+    with torch.no_grad():
+        model.trust_map.bias.fill_(2.0)
+        out = torch.zeros(1, 2, 128)
+        both, same, none = (model.speed(out, row)[0, 0] for row in (map_row(80, sign=50), map_row(50, sign=50), map_row(None)))
+
+    def bell(kph):
+        return (-(model.class_kph - kph) ** 2 / (2 * SPEED_SIGMA_KPH ** 2)).clamp_min(NUMBER_FLOOR)
+
+    assert torch.allclose(both, 3.0 * bell(50) + 2.0 * bell(80), atol=1e-4)
+    assert torch.allclose(same, 5.0 * bell(50), atol=1e-4) and int(same.argmax()) == speed_class(50)
+    assert not none.any() and not model.map_bell(map_row(None)).any()
+
+
 # -- whose road a sign is of (#89): applicability_head, a logit a column of sign_boxes ------------------------------------
 BOX_GROUPS = (*GROUPS, 'sign_boxes')
 
@@ -768,3 +932,22 @@ def test_the_speed_does_not_depend_on_the_applicability_head_and_the_car_does_no
     assert torch.equal(speed, again) and 'applicability_head.' in TRAINING_ONLY
     without = build_brain_net(BOX_GROUPS, pretrained=False, works=False)
     assert set(car_weights(model)) == set(without.state_dict())
+
+
+def test_the_bell_of_the_number_path_keeps_its_own_width(monkeypatch):
+    """#104: a brain of the 'bell' path is built again from its word alone, so the bell's width and floor are the
+    path's own (NUMBER_SIGMA_KPH, NUMBER_FLOOR): another width of the answer's bell (SPEED_SIGMA_KPH, the loss's) must
+    not change what a trained brain says."""
+    from nnslr_tools import brain_net
+    assert brain_net.NUMBER_SIGMA_KPH == 2.0 and brain_net.NUMBER_FLOOR == -18.0
+
+    def bell():
+        extra = torch.zeros(1, 1, SIZE)
+        extra[..., 0], extra[..., 1] = 60 / brain_net.BRAIN_INPUTS.SIGN_KPH_SCALE, 1.0  # signs is the first group
+        return net(number_path='bell').number_bell(extra)[0, 0]
+
+    before = bell()
+    assert before.tolist()[59] == 0.0 and before.tolist()[61] == pytest.approx(-0.5)  # the classes of 60 and 62 km/h
+    assert before.tolist()[71] == pytest.approx(-18.0) and before.tolist()[119] == pytest.approx(-18.0)
+    monkeypatch.setattr(brain_net, 'SPEED_SIGMA_KPH', 3.0)
+    assert torch.equal(bell(), before)

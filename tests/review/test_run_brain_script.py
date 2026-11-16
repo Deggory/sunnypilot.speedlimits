@@ -98,6 +98,27 @@ def test_an_earlier_brain_to_go_on_from_reaches_the_check_and_every_seed(tmp_pat
     assert not (tmp_path / 'data' / 'runs' / 'n3').exists()
 
 
+def test_the_number_path_reaches_the_check_and_every_seed(tmp_path):
+    """#104: NNSLR_BRAIN_NUMBER_PATH, the bell unless the class is asked, said to the dry run and to each seed, and in the
+    head of the log, where the panel reads the job's chip."""
+    process = run_script(tmp_path)
+    assert process.returncode == 0, process.stderr + process.stdout
+    lines = (tmp_path / 'data' / 'runs' / 'n1' / 'brain.log').read_text().splitlines()
+    trainings = [line for line in lines if line.startswith('args: train-brain')]
+    assert len(trainings) == 4 and all('--number-path bell' in line for line in trainings)
+    assert [line for line in lines if line.startswith('number path:')] == ['number path:  bell (a bell around the number in force)']
+    assert [line for line in lines if line.startswith('settings:')][0].endswith('--number-path bell')
+    process = run_script(tmp_path, name='n2', env={'NNSLR_BRAIN_NUMBER_PATH': 'class', 'NNSLR_BRAIN_SEEDS': '0'})
+    assert process.returncode == 0, process.stderr + process.stdout
+    lines = (tmp_path / 'data' / 'runs' / 'n2' / 'brain.log').read_text().splitlines()
+    trainings = [line for line in lines if line.startswith('args: train-brain')]
+    assert len(trainings) == 2 and all('--number-path class' in line and '--number-path bell' not in line for line in trainings)
+    # Another word stops before anything runs.
+    process = run_script(tmp_path, name='n3', env={'NNSLR_BRAIN_NUMBER_PATH': 'gauss'})
+    assert process.returncode == 2 and 'NNSLR_BRAIN_NUMBER_PATH must be bell or class' in process.stderr
+    assert not (tmp_path / 'data' / 'runs' / 'n3').exists()
+
+
 def test_the_usual_training_keeps_the_roadworks_and_the_kinds_of_road_and_leaves_the_driver_out(tmp_path):
     assert run_script(tmp_path).returncode == 0
     log = (tmp_path / 'data' / 'runs' / 'n1' / 'brain.log').read_text()

@@ -53,7 +53,9 @@ set -euo pipefail
 # is of from the reviewed boxes, a head only the training has, #89, #90; 0: not),
 # NNSLR_BRAIN_ROUTES_FROM (an earlier brain run's NAME: its drives instead of every dashcam drive; a run started again
 # keeps its own),
-# NNSLR_BRAIN_POOL (grid: the picture's features keep where they are; mean: not), NNSLR_BRAIN_INIT_FROM (an earlier
+# NNSLR_BRAIN_POOL (grid: the picture's features keep where they are; mean: not), NNSLR_BRAIN_NUMBER_PATH (bell, the
+# default since 16 Nov 2026, #104: the number in force reaches the answer as a bell around it, the shape of the answer;
+# class: on its class alone, as every brain before, the comparison; Train › Brain's Number), NNSLR_BRAIN_INIT_FROM (an earlier
 # brain's brain-last.pt every seed goes on from, instead of ImageNet and random weights: Train › Brain's "Start from";
 # the dry run of step 1 refuses one stepped otherwise or learnt on another split), NNSLR_BRAIN_CUTTER,
 # NNSLR_BRAIN_CLASSIFIER (the networks its signs are read with, ids of the Models tab: a SignNet, a classifier; empty:
@@ -79,6 +81,9 @@ MAP="${NNSLR_BRAIN_MAP:-0}"
 APPLICABILITY="${NNSLR_BRAIN_APPLICABILITY:-1}"
 ROUTES_FROM="${NNSLR_BRAIN_ROUTES_FROM:-}"
 POOL="${NNSLR_BRAIN_POOL:-grid}"
+# A NAME started again takes the path of that moment, as it takes the pool: give the same NNSLR_BRAIN_NUMBER_PATH, or
+# its remaining seeds are of the other path (each result.json says its own).
+NUMBER_PATH="${NNSLR_BRAIN_NUMBER_PATH:-bell}"
 INIT_FROM="${NNSLR_BRAIN_INIT_FROM:-}"
 SIGN_CUTTER="${NNSLR_BRAIN_CUTTER:-}"
 SIGN_CLASSIFIER="${NNSLR_BRAIN_CLASSIFIER:-}"
@@ -156,6 +161,11 @@ fi
 
 if [[ "$POOL" != "mean" && "$POOL" != "grid" ]]; then
   echo "error: NNSLR_BRAIN_POOL must be mean or grid: $POOL" >&2
+  exit 2
+fi
+
+if [[ "$NUMBER_PATH" != "bell" && "$NUMBER_PATH" != "class" ]]; then
+  echo "error: NNSLR_BRAIN_NUMBER_PATH must be bell or class: $NUMBER_PATH" >&2
   exit 2
 fi
 
@@ -241,6 +251,8 @@ fi
 if [[ "$APPLICABILITY" == "0" ]]; then
   SETTINGS+=(--no-applicability)
 fi
+# Always said, so that the log of a run names its number path (the panel's chip reads it there).
+SETTINGS+=(--number-path "$NUMBER_PATH")
 if [[ -n "$INIT_FROM" ]]; then
   SETTINGS+=(--init-from "$INIT_FROM")
 fi
@@ -251,6 +263,7 @@ echo "seeds:        ${SEEDS[*]}"
 echo "road users:   $([[ "$USERS" == "1" ]] && echo on || echo off)"
 echo "map's limit:  $([[ "$MAP" == "1" ]] && echo "on (an input of the brain)" || echo off)"
 echo "applicability: $([[ "$APPLICABILITY" == "1" ]] && echo "on (a head of the brain, every sign's box)" || echo off)"
+echo "number path:  $([[ "$NUMBER_PATH" == "bell" ]] && echo "bell (a bell around the number in force)" || echo "class (the number's class alone, as before 16 Nov 2026)")"
 if [[ -n "$ROUTES_FROM" ]]; then
   echo "drives:       the same as $ROUTES_FROM"
 else

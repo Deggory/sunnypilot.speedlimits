@@ -31,7 +31,7 @@ import numpy as np
 
 from nnslr_tools import road_type_data as data
 from nnslr_tools import onnx_device
-from nnslr_tools.brain_net import build_brain_net, car_weights
+from nnslr_tools.brain_net import build_brain_net, car_weights, number_path_of
 from nnslr_tools.brain_targets import BRAIN_INPUTS, METRES_SCALE, brain_sizes, dataset, inputs_sha256, pack_inputs
 from nnslr_tools.brain_train import CHECKPOINT, CHUNK, _pictures, predict
 from nnslr_tools.road_type_net import FrameStore, _torch, gru_step
@@ -49,12 +49,12 @@ TIE = 1e-3
 def load_brain(checkpoint: Path):
     """(the network on the CPU in eval mode, without works_head, road_head and users_head, with type_head when it learnt the road
     type; what the checkpoint says of itself). The network has the table of its checkpoint (class_kph): a brain of 5 km/h
-    classes stays one. A checkpoint with the limit ahead (its 'ahead': the brains of 7 to 11 Nov 2026) keeps those heads."""
+    classes stays one. A checkpoint with the limit ahead (its 'ahead': the brains of 7 to 11 Nov 2026) keeps those heads. Its number path is its 'number_path', and 'class' when it does not say (brain_net.number_path_of, #104)."""
     torch = _torch()
     saved = torch.load(checkpoint, map_location='cpu', weights_only=False)
     table = saved['weights'].get('class_kph')
     model = build_brain_net(tuple(saved['groups']), pool=saved['pool'], works=False, ahead=saved.get('ahead', False),
-                            pretrained=False, features=saved['features'], hidden=saved['hidden'],
+                            pretrained=False, features=saved['features'], hidden=saved['hidden'], number_path=number_path_of(saved),
                             kph=None if table is None else table.tolist(), road_types=len(road_types_of(saved)),
                             map_path='trust_map.weight' in saved['weights'], sizes=brain_sizes(saved))
     weights = {name: value for name, value in saved['weights'].items()
@@ -258,7 +258,10 @@ def export_brain_onnx(checkpoint: Path, output: Path, *, data_root: Path | None 
 
     # Two of the four comparisons carry a number in force, a number of the network's own table (#104): random inputs
     # never turn the number's direct path on. The example given to the exporter above stays the random one it always
-    # was, so the file of a brain keeps its bytes and the sha256 recorded for the car.
+    # was, so the file of a brain keeps its bytes and the sha256 recorded for the car. The exporter also writes into
+    # the file, for every node, the line of Step.forward it comes from (its number in this file and its text): a line
+    # added or taken away above step_module's end changes the bytes of every brain exported again, the published one
+    # too (tests/dataset/test_brain_export.py keeps the lines where the published file has them).
     sizes, numbers = brain_sizes(saved), table_of(model)
     signs_at = sum(sizes[name] for name in groups[:groups.index('signs')]) if 'signs' in groups else None
     generator, worst, passed = torch.Generator().manual_seed(0), 0.0, True

@@ -513,6 +513,9 @@ def brain_digest(result: Any) -> dict:
     return {'groups': result['groups'], 'road_sign_kinds': _int(result.get('road_sign_kinds')), 'seed': result.get('seed'), 'works': result.get('works'), 'pool': result.get('pool'),
             'rate_hz': _num(result.get('rate_hz')) or 1.0, 'ahead': bool(result.get('ahead')), 'hidden': _int(result.get('hidden')),
             'kph': {key: _int(kph.get(key)) for key in ('from', 'to', 'step')},
+            # How the number in force reaches its answer (brain_net.NUMBER_PATHS, #104): 'bell', or 'class', which is
+            # also every brain of before 16 Nov 2026, whose result does not say.
+            'number_path': 'bell' if result.get('number_path') == 'bell' else 'class',
             'road_kinds': list(result.get('road_kinds') or []), 'road_types': list(result.get('road_types') or []),
             'plates': bool(result.get('plates')), 'hours': bool(result.get('hours')), 'wet': bool(result.get('wet')), 'dry_run': bool(result.get('dry_run')), 'epochs': len(result.get('history') or []),
             'users': _brain_users(result), 'applicability': _brain_applicability(result),
@@ -1083,7 +1086,7 @@ class ModelIndex:
                       # How the car steps it and what it says (Models › How it works, model-flow.ts).
                       **{key: trained.get(key) for key in ('rate_hz', 'ahead', 'hidden', 'kph', 'road_kinds', 'road_types',
                                                            'pool', 'sign_networks', 'users', 'applicability',
-                                                           'road_sign_kinds')},
+                                                           'road_sign_kinds', 'number_path')},
                       'epochs': trained.get('epochs'), 'epochs_run': trained.get('epochs'),
                       'validation': trained.get('validation'), 'test': trained.get('test'),
                       'test_no_map': trained.get('test_no_map')})

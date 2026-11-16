@@ -84,6 +84,9 @@ export interface ActionOptions {
   road?: 'on' | 'off';
   types?: 'on' | 'off';
   pool?: 'mean' | 'grid';
+  /** How the number in force reaches the brain's speed (train_brain, #104): bell when not given, a bell around the
+   * number; class, on its class alone, as every brain before 16 Nov 2026. */
+  number_path?: 'bell' | 'class';
   seeds?: 'all' | 'one';
   /** The brain's road users head (train_brain, on when not given; off: --no-users), and the drives of an earlier brain
    * run it takes instead of every dashcam drive (BrainLabels.same_drives). */
@@ -1678,6 +1681,9 @@ export interface BrainModel extends ModelBase {
   seed: number | null;
   /** The picture's features as a grid or as a mean: a training that goes on from it takes the same. */
   pool?: 'grid' | 'mean' | null;
+  /** How the number in force reaches its speed (#104): class for every brain of before 16 Nov 2026; missing from a
+   * server not restarted since. */
+  number_path?: 'class' | 'bell' | null;
   /** The brain's frozen split it learnt on (null: not recorded in its result), and the brain it went on from (null:
    * ImageNet). */
   split_sha256?: string | null;
