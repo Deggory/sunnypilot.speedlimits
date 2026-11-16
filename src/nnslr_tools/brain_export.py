@@ -19,7 +19,7 @@ road a sign is of was given the boxes of every speed sign read, those of another
 step.other_road_boxes says so (the checkpoint's), and the car gives it the same (brain.BrainReader); the check along a
 drive makes its inputs so too. A brain that learnt the road type also gives road_type (1,
 types), the logits of output.road_types: the car only shows it on the screen, the speed is the same with or without it. What comes out of the export is checked twice: against PyTorch
-with onnxruntime on random inputs, and along a whole real drive against what training measured (brain_train.predict), the
+with onnxruntime on random inputs (two with a number in force), and along a whole real drive against what training measured (brain_train.predict), the
 memory fed back as on the car. The contract keeps the hash of the car's file of the inputs: the car refuses a network made with another.
 """
 from __future__ import annotations
@@ -108,6 +108,16 @@ def step_module(model):
 def _random_inputs(torch, width: int, hidden: int, generator) -> tuple:
     return (torch.rand(1, 3, data.FRAME_HEIGHT, data.FRAME_WIDTH, generator=generator),
             torch.rand(1, width, generator=generator), torch.rand(1, hidden, generator=generator) * 2 - 1)
+
+
+def _sign_in_force(extra, signs_at: int, kph: float) -> None:
+    """Into a row of inputs (1, inputs), a number in force as the car gives it in signs (brain_inputs): the number
+    confirmed over SIGN_KPH_SCALE, known, no end confirmed since. The network counts the number only there
+    (BrainNet.number_in_force), and "no end" is an exact 0, which a random float never is: on random inputs alone the
+    number's direct path to the speed is off in every comparison (#104)."""
+    extra[0, signs_at] = kph / BRAIN_INPUTS.SIGN_KPH_SCALE
+    extra[0, signs_at + 1] = 1.0
+    extra[0, signs_at + 6] = 0.0
 
 
 def table_of(model) -> list[int]:
@@ -246,9 +256,16 @@ def export_brain_onnx(checkpoint: Path, output: Path, *, data_root: Path | None 
     def run(image, extra, memory):
         return session.run(None, {'image': image, 'extra': extra, 'hidden': memory})
 
+    # Two of the four comparisons carry a number in force, a number of the network's own table (#104): random inputs
+    # never turn the number's direct path on. The example given to the exporter above stays the random one it always
+    # was, so the file of a brain keeps its bytes and the sha256 recorded for the car.
+    sizes, numbers = brain_sizes(saved), table_of(model)
+    signs_at = sum(sizes[name] for name in groups[:groups.index('signs')]) if 'signs' in groups else None
     generator, worst, passed = torch.Generator().manual_seed(0), 0.0, True
-    for _ in range(4):
+    for at in range(4):
         inputs = _random_inputs(torch, width, hidden, generator)
+        if signs_at is not None and at % 2:
+            _sign_in_force(inputs[1], signs_at, numbers[len(numbers) * at // 4])
         with torch.no_grad():
             expected = [value.numpy() for value in step(*inputs)]
         for wanted, got in zip(expected, run(*(value.numpy() for value in inputs))):

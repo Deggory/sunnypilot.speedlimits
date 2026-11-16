@@ -338,3 +338,84 @@ def test_a_brain_with_the_maps_path_steps_on_the_car_as_in_its_training(tmp_path
                 'road_kinds': [], 'features': 128, 'hidden': 128, 'rate_hz': 4.0, 'picture': 'brain', 'split': 'x',
                 'reader': None, 'inputs_sha256': inputs_sha256()}, path)
     assert brain_export.load_brain(path)[0].trust_map is None
+
+
+@pytest.mark.parametrize('kinds, kph', [(None, None), (50, list(range(5, 205, 5)))])
+def test_two_of_the_four_comparisons_with_pytorch_carry_a_number_in_force(tmp_path, monkeypatch, kinds, kph):
+    """#104: the number counts only where signs says no end was read since, an exact 0 that a random float never is, so
+    its direct path to the speed (BrainNet.number_in_force) was off in every comparison of the export. Two of the four
+    now carry a number of the brain's own table, wherever its signs are among the inputs (#103: its own sizes); the
+    example the exporter is given stays the random one, so the file of a brain keeps the bytes recorded for the car."""
+    import torch
+
+    from nnslr_tools.brain_net import build_brain_net
+    from nnslr_tools.brain_targets import BRAIN_INPUTS, brain_sizes
+    groups = ('lead', 'road_signs', 'signs', 'country')
+    said = {} if kinds is None else {'road_sign_kinds': kinds}
+    sizes = brain_sizes(said)
+    model = build_brain_net(groups, works=False, pretrained=False, sizes=sizes, kph=kph).eval()
+    saved = {'groups': groups, 'hidden': model.gru.hidden_size, 'inputs_sha256': inputs_sha256(), 'epoch': 0, 'split': 'x',
+             'reader': None, **said}
+    path = tmp_path / 'brain-last.pt'
+    path.write_bytes(b'weights')
+    monkeypatch.setattr(brain_export, 'load_brain', lambda _: (model, saved))
+    export, session_of, traced, compared = brain_export._export, brain_export.check_session, [], []
+
+    def heard_export(step, example, output, names):
+        traced.append([value.clone() for value in example])
+        export(step, example, output, names)
+
+    class Heard:
+        def __init__(self, session):
+            self.session = session
+
+        def run(self, names, feed):
+            compared.append(torch.from_numpy(feed['extra'].copy()))
+            return self.session.run(names, feed)
+
+        def get_providers(self):
+            return self.session.get_providers()
+
+    monkeypatch.setattr(brain_export, '_export', heard_export)
+    monkeypatch.setattr(brain_export, 'check_session', lambda ort, file: Heard(session_of(ort, file)))
+    assert brain_export.export_brain_onnx(path, tmp_path / 'brain.onnx')['verification']['passed']
+    marked = [model.number_in_force(extra)[0] for extra in compared]
+    assert [int(row.sum()) for row in marked] == [0, 1, 0, 1]
+    table = brain_export.table_of(model)
+    signs_at = sizes['lead'] + sizes['road_signs']
+    for extra, row in zip(compared[1::2], marked[1::2]):
+        number = table[int(row.argmax())]
+        assert extra[0, signs_at].item() == pytest.approx(number / BRAIN_INPUTS.SIGN_KPH_SCALE)
+        assert (extra[0, signs_at + 1].item(), extra[0, signs_at + 6].item()) == (1.0, 0.0)
+    # What the exporter traced: the random example of always, with no number in force.
+    width = sum(sizes[name] for name in groups)
+    example = brain_export._random_inputs(torch, width, model.gru.hidden_size, torch.Generator().manual_seed(1))
+    assert len(traced) == 1 and all(torch.equal(given, made) for given, made in zip(traced[0], example))
+    assert int(model.number_in_force(traced[0][1]).sum()) == 0
+
+
+def test_a_file_that_lost_the_numbers_path_does_not_pass_the_comparison_with_pytorch(tmp_path, monkeypatch):
+    """#104: what the number in force of the comparisons is for. A file that says the speed of the memory alone, the
+    number adding nothing, passed as long as every comparison was random: only Publish's check along a drive saw it, and
+    the set exported for Models › Drive has none."""
+    import torch
+    path = checkpoint(tmp_path / 'brain-last.pt', monkeypatch)
+    model, _saved = brain_export.load_brain(path)
+    with torch.no_grad():
+        model.trust.weight.zero_()
+        model.trust.bias.fill_(2.0)                         # a number in force adds 2 to its class, whatever the memory
+    assert brain_export.export_brain_onnx(path, tmp_path / 'brain.onnx')['verification']['passed']
+    export = brain_export._export
+
+    def without_the_number(step, example, output, names):
+        with torch.no_grad():
+            step.model.trust.bias.zero_()
+        try:
+            export(step, example, output, names)
+        finally:
+            with torch.no_grad():
+                step.model.trust.bias.fill_(2.0)
+
+    monkeypatch.setattr(brain_export, '_export', without_the_number)
+    with pytest.raises(ValueError, match='brain ONNX differs from PyTorch'):
+        brain_export.export_brain_onnx(path, tmp_path / 'brain.onnx')
