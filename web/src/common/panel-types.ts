@@ -294,6 +294,9 @@ export interface EpochPoint {
   val_other_road_recall?: number;
   val_other_road_f1?: number;
   val_selection_score?: number;
+  /** A SignNet or an applicability variant that goes on from an earlier run, when its best epoch is chosen on the
+   * validation rows no network it descends from trained on (#104): the choosing measure on those rows. */
+  val_chosen?: number;
   /** The brain: how far its speed is from the labels, in km/h (val_accuracy: the frames it says right). */
   val_error_kph?: number;
   /** The brain: the frames whose road type its type_head names right on validation, on all and on each type. */
@@ -1543,6 +1546,10 @@ export interface CutterModel extends ModelBase {
   /** A SignNet: the split it learnt on, and the SignNet it went on from (null: random weights). */
   split_sha256?: string | null;
   start?: NetworkStart | null;
+  /** A SignNet with a start: the networks before it and the validation frames they trained on, and its numbers on the
+   * validation frames none of them trained on (null: not measured, as in every run before #104). */
+  lineage?: NetworkLineage | null;
+  validation_clean?: CutterNumbers | null;
 }
 
 export interface ClassifierModel extends ModelBase {
@@ -1575,11 +1582,30 @@ export interface ClassifierStart {
 }
 
 /** The earlier run a SignNet, an applicability variant or a brain went on from (--init-from): its run, that run's epoch, and
- * whether it learnt on another split, so its test may hold frames the start saw. */
+ * whether it learnt on another split. For a SignNet and an applicability variant, also whether any network before that
+ * run did (NetworkLineage): their validation may then hold rows those networks trained on (the lineage's counts say how
+ * many, when its training counted them); the test areas are pinned, and the test is counted too. For a brain: its test
+ * may hold frames the start saw. */
 export interface NetworkStart {
   run: string | null;
   epoch: number | null;
   another_split: boolean;
+}
+
+/** What a SignNet or an applicability variant with a start descends from (nnslr_tools.start_lineage, #104): how many
+ * networks, and whether the chain was followed to its end. Counted by its training (null for a run trained before
+ * #104): how many of its validation frames (a SignNet) or rows (a variant) those networks trained on and how many are
+ * clean, the same count on the test, and whether its best epoch was chosen on the clean ones (why not, when it was
+ * not though some were trained on: too few clean boxes or rows, too few of the signs of another road among them, or a
+ * lineage that could not be followed, in which case nothing is counted and complete is false). */
+export interface NetworkLineage {
+  ancestors: number;
+  complete: boolean;
+  counted: 'frames' | 'rows' | null;
+  validation: {all: number | null; trained_on: number | null; clean: number | null} | null;
+  test: {all: number | null; trained_on: number | null} | null;
+  best_epoch_on: 'validation' | 'clean_validation';
+  why: string | null;
 }
 
 export interface DeciderModel extends ModelBase {
@@ -1594,6 +1620,10 @@ export interface DeciderModel extends ModelBase {
   /** The split it learnt on, and the run whose same variant it went on from (null: ImageNet or random weights). */
   split_sha256?: string | null;
   start?: NetworkStart | null;
+  /** With a start: the networks before it and the validation rows they trained on, and its numbers on the validation
+   * rows none of them trained on (null: not measured, as in every run before #104). */
+  lineage?: NetworkLineage | null;
+  validation_clean?: DeciderNumbers | null;
 }
 
 /** The speed a brain says against the labels of Speed review on one partition (nnslr_tools.model_roles.brain_digest). */

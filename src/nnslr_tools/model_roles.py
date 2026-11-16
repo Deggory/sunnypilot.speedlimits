@@ -64,6 +64,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from nnslr_tools import start_lineage
 from nnslr_tools.checkpoints import DEFAULT_DETECTOR_ANCHOR_MIN_RATIO, DEFAULT_DETECTOR_INPUT_SIZE
 from nnslr_tools.runs import (CHAIN_WEIGHTS, EXPERIMENT_DIR, INPUT_NAMES, RUN_NAME, SIZE_BUCKETS, UNREADABLE,
                               VARIANT_LABELS, VARIANTS, RunsIndex, _dig, _int, _iso, _mtime, _num, _ratio, _size_table,
@@ -314,10 +315,14 @@ def cutter_digest(report: Any) -> dict:
     }
 
 
-def network_start_digest(start: Any, split_sha256: Any) -> dict | None:
-    """The start of a SignNet or an applicability variant (their result.json "start", --init-from) without its
-    path: the run it went on from, that run's epoch, and whether it learnt on another split than this one (its test
-    may then hold frames it saw); an old result may say instead whether it was tested on other drives."""
+def network_start_digest(start: Any, split_sha256: Any, lineage: Any = None) -> dict | None:
+    """The start of a SignNet, an applicability variant or a brain (their result.json "start", --init-from) without
+    its path: the run it went on from, that run's epoch, and whether it learnt on another split than this one; an old
+    result may say instead whether it was tested on other drives. ``lineage``: result.json's "start_lineage" of a
+    SignNet or an applicability variant (start_lineage.account, #104); another_split is then true as well when any
+    network before the start learnt our frames on another split: validation rows of this run may have been train
+    rows for it (the lineage's counts say how many). A result.json without one says what its direct start says;
+    ModelIndex follows the rest (_lineage)."""
     if not isinstance(start, dict):
         return None
     run = start.get('run')
@@ -326,8 +331,43 @@ def network_start_digest(start: Any, split_sha256: Any) -> dict | None:
     else:
         theirs = start.get('split_sha256')
         another = isinstance(theirs, str) and isinstance(split_sha256, str) and theirs != split_sha256
+    if isinstance(lineage, dict):
+        another = another or start_lineage.another_split(lineage.get('ancestors'), split_sha256)
     return {'run': run if isinstance(run, str) and RUN_NAME.fullmatch(run) else None,
             'epoch': _int(start.get('epoch')), 'another_split': another}
+
+
+def lineage_digest(lineage: Any) -> dict | None:
+    """result.json's "start_lineage" of a SignNet or an applicability variant for Models (start_lineage.account):
+    how many networks it descends from and whether the chain was followed to its end, what is counted (frames or
+    rows), how many of its validation those networks trained on and how many are clean, the same count on the test,
+    and whether the best epoch was chosen on the clean ones, with why not when rows were left out. None for a
+    result.json without one (written before #104, or of a network from random weights)."""
+    if not isinstance(lineage, dict) or not isinstance(lineage.get('ancestors'), list):
+        return None
+
+    def counts(name: str, keys: tuple[str, ...]) -> dict | None:
+        found = lineage.get(name)
+        return {key: _int(found.get(key)) for key in keys} if isinstance(found, dict) else None
+
+    why = lineage.get('why')
+    return {'ancestors': len(lineage['ancestors']), 'complete': lineage.get('complete') is True,
+            'counted': lineage.get('counted') if lineage.get('counted') in ('frames', 'rows') else None,
+            'validation': counts('validation', ('all', 'trained_on', 'clean')),
+            'test': counts('test', ('all', 'trained_on')),
+            'best_epoch_on': 'clean_validation' if lineage.get('best_epoch_on') == 'clean_validation' else 'validation',
+            'why': why[:300] if isinstance(why, str) else None}
+
+
+def start_link(result: Any) -> dict:
+    """What following a lineage reads of an ancestor's result.json (start_lineage.lineage): its split and its own
+    start, the next one of the chain."""
+    if not isinstance(result, dict):
+        raise ValueError('not a result')
+    start, split = result.get('start'), result.get('split_sha256')
+    return {'split_sha256': split if isinstance(split, str) else None,
+            'start': {key: start.get(key) for key in ('run', 'path', 'epoch', 'split_sha256', 'mapillary_only')}
+            if isinstance(start, dict) else None}
 
 
 def signnet_digest(result: Any) -> dict:
@@ -336,13 +376,15 @@ def signnet_digest(result: Any) -> dict:
     among its BOX_BUDGET best boxes a frame at any score (by_box_budget) and ``car``: what the car reads, those best
     boxes of score 0.3 or more (signnet.car_measure: found, reviewed, recall, boxes and false boxes per frame, by
     family, at score_threshold with max_boxes), and ``car_centre``: the same with the lenient match (IoU 0.5, or the
-    found box's centre on the sign and its size 0.5 to 2 times it; None for a result.json written before it)."""
+    found box's centre on the sign and its size 0.5 to 2 times it; None for a result.json written before it).
+    ``validation_clean``: the same on the validation frames no network it descends from trained on, and ``lineage``
+    (lineage_digest) how many those are; None when its result.json has none."""
     if not isinstance(result, dict) or result.get('task') != 'signnet':
         raise ValueError('not a SignNet result')
     band = _size_label(result.get('band'))
     families = _families(result.get('families'))
     measured: dict[str, dict | None] = {}
-    for partition in DECIDER_PARTITIONS:
+    for partition in (*DECIDER_PARTITIONS, 'validation_clean'):
         report = result.get(partition)
         if not isinstance(report, dict):
             measured[partition] = None
@@ -370,7 +412,8 @@ def signnet_digest(result: Any) -> dict:
         'best_epoch': _int(result.get('best_epoch')), 'epochs': _int(result.get('epochs')),
         'epochs_run': len(history) if isinstance(history, list) and history else None,
         'split_sha256': result.get('split_sha256') if isinstance(result.get('split_sha256'), str) else None,
-        'start': network_start_digest(result.get('start'), result.get('split_sha256')),
+        'start': network_start_digest(result.get('start'), result.get('split_sha256'), result.get('start_lineage')),
+        'lineage': lineage_digest(result.get('start_lineage')),
         **measured,
     }
 
@@ -493,13 +536,15 @@ def brain_digest(result: Any) -> dict:
 
 def decider_digest(result: Any) -> dict:
     """result.json of an experiment B variant: whom the sign applies to (the "Another" road found and right,
-    macro-F1, abstentions) and the reading, on validation and test."""
+    macro-F1, abstentions) and the reading, on validation and test; under ``validation_clean`` the same on the
+    validation rows no network it descends from trained on, and ``lineage`` (lineage_digest) how many those are;
+    None when its result.json has none."""
     if not isinstance(result, dict):
         raise ValueError('not a result')
     metrics = result.get('metrics') if isinstance(result.get('metrics'), dict) else {}
     partitions: dict[str, dict | None] = {}
-    for name in DECIDER_PARTITIONS:
-        report = metrics.get(name)
+    for name in (*DECIDER_PARTITIONS, 'validation_clean'):
+        report = result.get(name) if name == 'validation_clean' else metrics.get(name)
         if not isinstance(report, dict):
             partitions[name] = None
             continue
@@ -528,7 +573,8 @@ def decider_digest(result: Any) -> dict:
         'epochs_run': len(result['history']) if isinstance(result.get('history'), list) and result['history'] else None,
         'limit': _int(result.get('limit')),
         'split_sha256': text('split_sha256'),
-        'start': network_start_digest(result.get('start'), result.get('split_sha256')),
+        'start': network_start_digest(result.get('start'), result.get('split_sha256'), result.get('start_lineage')),
+        'lineage': lineage_digest(result.get('start_lineage')),
     }
 
 
@@ -838,7 +884,44 @@ class ModelIndex:
         })
         return entry
 
-    def _signnet(self, name: str, run: Path) -> dict | None:
+    def _record(self, run: str, stage: str) -> dict | None:
+        """start_lineage.lineage's reader on this data root: start_link of <runs>/<run>/<stage>/result.json, the
+        run by its strict name and the file inside it (cached with the other digests); None when it is not there."""
+        folder = self.runs._run_dir(run)
+        if folder is None:
+            return None
+        found = self.runs._load(self.runs._file(folder, (stage + '/' if stage else '') + 'result.json'), start_link)
+        return found if isinstance(found, dict) else None
+
+    def _lineage(self, run: Path, folder: str, trained: dict, links: dict | None = None) -> dict:
+        """``start`` and ``lineage`` of a SignNet's or an applicability variant's entry. A result.json written since
+        #104 records its lineage (lineage_digest). For an older one with a start the chain is followed here, by run
+        name through the cached result.json of each ancestor (a few small files, no split read): another_split is
+        true when any network of it learnt our frames on another split, not only the direct start (the second stage
+        of a two-stage cutter starts from its own first stage, of its own split, and never showed it). Its
+        ``lineage`` then has the number of ancestors and whether the chain is whole; the rows they trained on were
+        not counted for such a run, so validation, test and counted are None. ``links``: the records read so far in
+        one listing (the runs share their ancestors)."""
+        start, lineage = trained.get('start'), trained.get('lineage')
+        if start is None or lineage is not None:
+            return {'start': start, 'lineage': lineage}
+        links = {} if links is None else links
+
+        def read(name: str, stage: str) -> dict | None:
+            if (name, stage) not in links:
+                links[name, stage] = self._record(name, stage)
+            return links[name, stage]
+
+        link = read(run.name, folder)
+        if link is None:
+            return {'start': start, 'lineage': None}
+        found = start_lineage.lineage(link['start'], read)
+        another = start['another_split'] or start_lineage.another_split(found['ancestors'], link['split_sha256'])
+        return {'start': {**start, 'another_split': another},
+                'lineage': {'ancestors': len(found['ancestors']), 'complete': found['complete'], 'counted': None,
+                            'validation': None, 'test': None, 'best_epoch_on': 'validation', 'why': None}}
+
+    def _signnet(self, name: str, run: Path, links: dict | None = None) -> dict | None:
         """A SignNet of ``nnslr train-signnet``: THE cutter, the small finder the comma runs, judged on the cutter's
         test frames with the cutter's scoring. Finished and of the car's band and grid (fits_the_car, read from
         result.json: the review server has no torch to open the weights), it can be the cutter in use; another band
@@ -862,8 +945,9 @@ class ModelIndex:
                       + (f' · {round(share * 100)} % of the training drives' if share else ''),
             'fits_the_car': fits,
             'architecture': None, 'initialization': 'start' if trained.get('start') else None,
-            # The split it learnt on, for the Train tab's "Start from", and the SignNet it went on from, if one.
-            'split_sha256': trained.get('split_sha256'), 'start': trained.get('start'),
+            # The split it learnt on, for the Train tab's "Start from", and the SignNet it went on from, if one, with
+            # the networks before that one (_lineage).
+            'split_sha256': trained.get('split_sha256'), **self._lineage(run, '', trained, links),
             'best_epoch': trained.get('best_epoch'), 'epochs': trained.get('epochs'),
             'epochs_run': trained.get('epochs_run'),
             'input_size': band, 'input_size_recorded': band is not None,
@@ -871,6 +955,8 @@ class ModelIndex:
             'stride': trained.get('stride'), 'parameters': trained.get('parameters'), 'train_share': share,
             'families': trained.get('families') or 'all', 'families_recorded': trained.get('families') is not None,
             'test': trained.get('test'), 'validation': trained.get('validation'),
+            # The validation frames no network it descends from trained on (#104), when its training measured them.
+            'validation_clean': trained.get('validation_clean'),
         })
         return entry
 
@@ -936,7 +1022,7 @@ class ModelIndex:
         })
         return entry
 
-    def _deciders(self, name: str, run: Path) -> list[dict]:
+    def _deciders(self, name: str, run: Path, links: dict | None = None) -> list[dict]:
         base = run / EXPERIMENT_DIR
         names = list(VARIANTS)
         try:
@@ -963,9 +1049,12 @@ class ModelIndex:
                 'epochs_run': trained.get('epochs_run'),
                 # A smoke run of experiment B (--limit): a few frames per partition, not a measure.
                 'smoke_limit': trained.get('limit'),
-                'split_sha256': trained.get('split_sha256'), 'start': trained.get('start'),
+                'split_sha256': trained.get('split_sha256'),
+                **self._lineage(run, f'{EXPERIMENT_DIR}/{variant}', trained, links),
                 'validation': (trained.get('partitions') or {}).get('validation'),
                 'test': (trained.get('partitions') or {}).get('test'),
+                # The validation rows no network it descends from trained on (#104), when its training measured them.
+                'validation_clean': (trained.get('partitions') or {}).get('validation_clean'),
             })
             found.append(entry)
         return found
@@ -1029,6 +1118,7 @@ class ModelIndex:
     def artifacts(self, roles: tuple[str, ...] = ROLES) -> dict[str, list[dict]]:
         """Every trained artifact by role (of the roles asked), newest first (by the time of its weights)."""
         found: dict[str, list[dict]] = {role: [] for role in ROLES}
+        links: dict = {}  # the ancestors' records read while following the starts (_lineage)
         for name in self.runs.names():
             run = self.runs._run_dir(name)
             if run is None:
@@ -1037,7 +1127,7 @@ class ModelIndex:
                 found['classifier'] += [entry for entry in (self._classifier(name, run), self._classifier_v2(name, run))
                                         if entry is not None]
             if 'decider' in roles:
-                found['decider'] += self._deciders(name, run)
+                found['decider'] += self._deciders(name, run, links)
             if 'brain' in roles:
                 found['brain'] += [entry for entry in (self._brain(name, run),) if entry is not None]
             if 'users' in roles:
@@ -1055,7 +1145,7 @@ class ModelIndex:
             for size in folders:
                 folder = 'detector-sizes/' + size
                 cutters.append(self._cutter(name, run, folder, folder + '/evaluation', folder, size))
-            cutters.append(self._signnet(name, run))
+            cutters.append(self._signnet(name, run, links))
             found['cutter'] += [entry for entry in cutters if entry is not None]
         for versions in found.values():
             versions.sort(key=lambda entry: (entry['_mtime'], entry['id']), reverse=True)

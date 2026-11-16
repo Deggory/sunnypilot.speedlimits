@@ -12,7 +12,10 @@
 // #72 the ownership macro F1 in its place), and its validation loss; for the brain, its three seeds in the same way: how far its speed is from the labels on validation, the frames it says
 // right, and its train loss; for UserNet (the road users' detector), the validation road users it finds at score 0.5 (which
 // chooses its best epoch), its false boxes per frame there, and its train loss. Data: progress.curves of the job, one
-// point per finished epoch.
+// point per finished epoch. A SignNet or an applicability variant that goes on from an earlier run may choose its best
+// epoch on the validation rows no network before it trained on (#104, val_chosen in its points): its Best tile and the
+// mark on its curve are then that epoch and that measure, while the curves and the other numbers of the tile stay the
+// whole validation's, and each says which it is.
 import {computed} from 'vue';
 import type {BrainNet, CurveNet, DeciderNet, EpochPoint, JobProgress, TrainingCurve} from '../common/panel-types';
 import LineChart, {type ChartSeries} from './charts/LineChart.vue';
@@ -117,15 +120,17 @@ const detectorRecall = computed(() => hasPoints(detector.value) && detector.valu
 const detectorBestRecall = computed(() => shows('detector') && detectorRecall.value && hasPoints(detector.value)
   ? best(detector.value, (point) => point.val_recall, true) : null);
 /** SignNet's best epoch: the most validation signs found in its 5 best boxes of each frame, at any score (the weights
- * it keeps). */
-const signnetBest = computed(() => shows('signnet') && hasPoints(signnet.value) ? best(signnet.value, (point) => point.val_recall, true) : null);
+ * it keeps); with a start, on the validation frames no network it descends from trained on when the log says so
+ * (val_chosen, #104). */
+const signnetBest = computed(() => shows('signnet') && hasPoints(signnet.value)
+  ? best(signnet.value, (point) => point.val_chosen ?? point.val_recall, true) : null);
 const signnetLowest = computed(() => hasPoints(signnet.value) ? best(signnet.value, (point) => point.train_loss, false) : null);
 /** Its first stage on the Mapillary windows alone (Mapillary, then ours): the speed signs of our validation it finds in
  * its 5 best boxes choose that stage's best epoch, the weights the second one starts from. */
 const pretrainSpeed = computed(() => hasPoints(signnetPretrain.value)
   && signnetPretrain.value.points.some((point) => point.val_speed_recall !== undefined));
 const signnetPretrainBest = computed(() => shows('signnet_pretrain') && hasPoints(signnetPretrain.value)
-  ? best(signnetPretrain.value, (point) => pretrainSpeed.value ? point.val_speed_recall : point.val_recall, true) : null);
+  ? best(signnetPretrain.value, (point) => point.val_chosen ?? (pretrainSpeed.value ? point.val_speed_recall : point.val_recall), true) : null);
 const signnetPretrainLowest = computed(() => hasPoints(signnetPretrain.value)
   ? best(signnetPretrain.value, (point) => point.train_loss, false) : null);
 /** UserNet's best epoch: the most validation road users found at score 0.5 (nnslr_tools.usernet keeps those weights). */
@@ -171,7 +176,7 @@ interface NetCard {net: Net; curve: TrainingCurve | null; best: Best; lowest: Be
 const deciderCards = computed((): NetCard[] => nets.value.filter(isDecider).map((net) => {
   const curve = curves.value[net];
   if (!hasPoints(curve)) return {net, curve: null, best: null, lowest: null, validation: [], scored: false};
-  return {net, curve, scored: true, best: best(curve, (point) => point.val_selection_score, true),
+  return {net, curve, scored: true, best: best(curve, (point) => point.val_chosen ?? point.val_selection_score, true),
     lowest: best(curve, (point) => point.val_loss, false), validation: []};
 }));
 /** The brain's seeds: each keeps its last epoch (brain_train), so that epoch is what its tile says. */
@@ -279,13 +284,16 @@ const tables = computed(() => nets.value.flatMap((net) => {
         <div v-if="signnetBest" class="tile" id="signnet-best">
           <span class="tile-label">Best 5 boxes, any score</span>
           <span class="tile-value">{{ percent(signnetBest.value * 100) }}</span>
-          <span class="tile-note">SignNet on validation, epoch {{ signnetBest.epoch }}<template v-if="signnetBest.val_false_per_frame !== undefined">,
-            {{ signnetBest.val_false_per_frame.toFixed(2) }} false boxes per frame</template></span>
+          <span class="tile-note">SignNet on {{ signnetBest.val_chosen === undefined ? 'validation' : 'the validation frames no earlier network trained on'
+            }}, epoch {{ signnetBest.epoch }}<template v-if="signnetBest.val_false_per_frame !== undefined">,
+            {{ signnetBest.val_false_per_frame.toFixed(2) }} false boxes per frame{{ signnetBest.val_chosen === undefined ? ''
+            : ' on the whole validation' }}</template></span>
         </div>
         <div v-if="signnetPretrainBest && !signnetBest" class="tile" id="signnet-pretrain-best">
           <span class="tile-label">{{ pretrainSpeed ? 'Best on our speed signs' : 'Best 5 boxes, any score' }}</span>
           <span class="tile-value">{{ percent(signnetPretrainBest.value * 100) }}</span>
-          <span class="tile-note">Mapillary stage on validation, epoch {{ signnetPretrainBest.epoch }}: the start of the second stage</span>
+          <span class="tile-note">Mapillary stage on {{ signnetPretrainBest.val_chosen === undefined ? 'validation' : 'the validation frames no earlier network trained on'
+            }}, epoch {{ signnetPretrainBest.epoch }}: the start of the second stage</span>
         </div>
         <div v-if="usernetBest" class="tile" id="usernet-best">
           <span class="tile-label">Road users found at 0.5</span>
@@ -323,7 +331,9 @@ const tables = computed(() => nets.value.flatMap((net) => {
         <div v-for="card in bestCards" :key="'best-' + card.net" class="tile" :id="card.net + '-best'">
           <span class="tile-label">Best on validation</span>
           <span class="tile-value">{{ percent(card.best.value * 100) }}</span>
-          <span class="tile-note">{{ NET_NAME[card.net] }}, epoch {{ card.best.epoch }}<template v-if="card.best.val_accuracy !== undefined">:
+          <span class="tile-note">{{ NET_NAME[card.net] }}, epoch {{ card.best.epoch }}<template v-if="card.best.val_chosen !== undefined">, on
+            the validation rows no earlier network trained on</template><template v-if="card.best.val_accuracy !== undefined">{{
+            card.best.val_chosen === undefined ? ':' : '; on the whole validation:' }}
             read right {{ percent(card.best.val_accuracy * 100) }}, <template v-if="card.best.val_other_road_f1 !== undefined">another
             road {{ percent(card.best.val_other_road_f1 * 100) }}</template><template v-else>whose sign {{ card.best.val_ownership_macro_f1 === undefined ? '–'
             : percent(card.best.val_ownership_macro_f1 * 100) }}</template></template></span>
@@ -361,7 +371,9 @@ const tables = computed(() => nets.value.flatMap((net) => {
         </div>
         <p v-else class="net-wait">The Mapillary stage’s curves appear at the end of its first epoch.</p>
         <p v-if="hasPoints(signnetPretrain)" class="note">The windows hold speed signs only, so it keeps the epoch that finds the
-          most speed signs of our validation; the second stage, on our drives, starts from those weights.</p>
+          most speed signs of our validation; the second stage, on our drives, starts from those weights. With a start, it
+          chooses on the validation frames no earlier network trained on when they hold enough speed signs (its log says
+          which): the mark is then that epoch, which may not be the top of the line drawn on the whole validation.</p>
       </div>
 
       <div v-if="shows('signnet')" class="net" id="signnet-curves">
@@ -380,7 +392,9 @@ const tables = computed(() => nets.value.flatMap((net) => {
         <p v-else class="net-wait">SignNet’s curves appear at the end of its first epoch.</p>
         <p v-if="hasPoints(signnet)" class="note">It keeps the weights of the epoch that finds the most validation signs in its 5
           best boxes of each frame, at any score; then it is measured on validation and test, also as the car reads it (its best
-          5 boxes of score 0.3 or more): those numbers are on the run's SignNet card.</p>
+          5 boxes of score 0.3 or more): those numbers are on the run's SignNet card. With a start, it chooses on the
+          validation frames no earlier network trained on when they hold enough signs: the tile above then says so, and the
+          mark is that epoch, which may not be the top of the line drawn on the whole validation.</p>
       </div>
 
       <div v-if="shows('usernet')" class="net" id="usernet-curves">
@@ -484,8 +498,10 @@ const tables = computed(() => nets.value.flatMap((net) => {
           : 'No variant reached its first epoch.' }}</p>
         <p class="note" id="decider-score-note">Chosen measure: the mean of the signs read right and the F1 of the signs of
           another road; it chooses the epoch whose weights each variant keeps. Abstain (unclear) is measured, out of the choice.
-          The two apart are in the tiles above and in the values per epoch. A training of before 11 Nov 2026 chose on the macro
-          F1 of whose sign it is (our road, another road, abstain) in place of the other-road F1.</p>
+          The two apart are in the tiles above and in the values per epoch. A variant that goes on from an earlier run chooses
+          on the validation rows no earlier network trained on when they are enough: its tile then says so, and the mark is
+          that epoch, which may not be the top of its line, drawn on the whole validation. A training of before 11 Nov 2026
+          chose on the macro F1 of whose sign it is (our road, another road, abstain) in place of the other-road F1.</p>
       </div>
 
       <div v-if="brainCards.length" class="net" id="brain-curves">

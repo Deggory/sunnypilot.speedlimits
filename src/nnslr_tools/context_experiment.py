@@ -22,6 +22,9 @@ taught as other_road: it is no sign for our road, and the scene shows the vehicl
 
 The best epoch is chosen on validation (SELECTION_METRIC: the reading and the F1 of another road); validation
 and test are then measured, and again on the rows a person confirmed (provenance.label_basis human_review).
+A variant that goes on from an earlier run (--init-from) chooses it on the validation rows no network it descends
+from trained on when they are enough (chooses_on_clean), and both the whole validation and those rows are measured
+(#104, train_experiment_b).
 Train, validation and test are the only partitions read: buffer and the partitions of older split policies
 are ignored.
 
@@ -40,7 +43,7 @@ import random
 import time
 from typing import Any
 
-from nnslr_tools import tracking
+from nnslr_tools import start_lineage, tracking
 from nnslr_tools.annotations import load_jsonl, validate_dataset
 from nnslr_tools.checkpoints import atomic_torch_save, model_weights, torch_load
 from nnslr_tools.evaluation import human_reviewed_metrics, label_basis_counts, reader_metrics
@@ -533,6 +536,30 @@ def selection_score(metrics: dict[str, Any]) -> float:
     return (metrics["reading"]["accuracy"] + (metrics["ownership"]["other_road"]["f1"] or 0.0)) / 2
 
 
+def epoch_scores(samples: list[dict[str, Any]], classes: list[str], clean: set[str] | None,
+                 on_clean: bool) -> tuple[dict[str, Any], dict[str, Any] | None, float]:
+    """One epoch on validation: experiment_metrics of every box, the same of the boxes no ancestor of the start
+    trained on (``clean``: their annotation ids, start_lineage.account; None when none was trained on), and the
+    score the epoch is chosen by: selection_score of the clean boxes when ``on_clean``, else of them all (#104)."""
+    validation = experiment_metrics(samples, classes)
+    cleaned = None if clean is None else experiment_metrics([s for s in samples if s["annotation_id"] in clean],
+                                                            classes)
+    return validation, cleaned, selection_score(cleaned if on_clean and cleaned is not None else validation)
+
+
+def chooses_on_clean(lineage: dict[str, Any], checked: list[dict[str, Any]], rows: list[int]) -> bool:
+    """Whether the validation rows no ancestor of the start trained on choose the epoch (#104), written into
+    ``lineage`` with why not (start_lineage.choose_on). ``checked``: the plan's validation records, ``rows``: the
+    indexes of the clean ones (start_lineage.account). Two conditions, one for each half of selection_score: the
+    clean rows are start_lineage.CLEAN_FLOOR or more (the reading counts every row), and they hold at least half of
+    the validation's signs of another road (start_lineage.short_of: the F1 of those signs counts them alone, and a
+    few would let one sign choose the epoch). A validation with no sign of another road has only the first."""
+    another = [record["ownership"] == "other_road" for record in checked]
+    return start_lineage.choose_on(
+        lineage, len(rows), "boxes to read",
+        start_lineage.short_of(sum(another[index] for index in rows), sum(another), "signs of another road"))
+
+
 def _number(value: Any) -> str:
     return "-" if value is None else f"{value:.3f}"
 
@@ -767,6 +794,18 @@ def train_experiment_b(
 
     Writes into the new output_dir: <variant>-best.pt, experiment-plan.json, samples.jsonl (every
     validation and test box with its predictions) and result.json.
+
+    With config.init_from (Start from), the validation rows a network it descends from trained on do not choose the
+    epoch (#104: every import grows the validation again, so rows of it were train rows for the start or for what
+    the start went on from). start_lineage.account follows the starts back and marks those rows by annotation id;
+    the epoch is chosen on the others when they are start_lineage.CLEAN_FLOOR or more and hold at least half of the
+    validation's signs of another road (chooses_on_clean); the whole validation and the clean rows are both
+    measured (the line's clean_val_*, with val_chosen when the clean rows choose; the history's
+    clean_validation_*; result.json's ``validation_clean``), and result.json's ``start_lineage`` has the
+    ancestors, the counts and which of the two chose. best_validation_selection_score stays the score of the best
+    epoch on the whole validation. With too few clean rows, too few signs of another road among them, or a lineage
+    that cannot be followed, the whole validation chooses as before and the log and ``start_lineage`` say why. A
+    start whose ancestors trained on none of these rows changes nothing.
     """
     if config.variant not in VARIANTS:
         raise ValueError(f"unknown_variant: {config.variant}")
@@ -904,13 +943,26 @@ def train_experiment_b(
 
     weights = Weights.IMAGENET1K_V1 if config.pretrained else None
     model = _build_model(torch, mobilenet_v3_small, weights, roi_align, variant, len(classes))
-    start = None
+    # lineage: result.json's start_lineage; clean: the annotation ids of the validation rows no ancestor trained on,
+    # when some were (measured apart); on_clean: whether they choose the epoch.
+    start, lineage, clean, on_clean = None, None, None, False
     if config.init_from:
         start = decider_start(torch, model, Path(config.init_from), variant, classes)
         print(f"{task_name} starts from {start['run']}: every layer, and the reading of "
               f"{len(classes) - len(start['new_classes'])} of its {len(classes)} classes"
               + (f" (new: {', '.join(start['new_classes'])})" if start["new_classes"] else "")
               + ("" if start["split_sha256"] == plan["split_sha256"] else "; learnt on another split"), flush=True)
+        checked = [record for record in records if record["split"] == VALIDATION_SPLIT]
+        lineage, rows = start_lineage.account(
+            start, plan["split_sha256"], root / "splits", counted="rows",
+            validation=[(record["annotation_id"],) for record in checked],
+            test=[(record["annotation_id"],) for record in records if record["split"] == TEST_SPLIT])
+        if rows is not None:
+            clean = {checked[index]["annotation_id"] for index in rows}
+            on_clean = chooses_on_clean(lineage, checked, rows)
+        said = start_lineage.words(lineage)
+        if said:
+            print(f"{task_name} {said}", flush=True)
     model.to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
     use_amp = bool(config.amp and device.type == "cuda")
@@ -1011,7 +1063,8 @@ def train_experiment_b(
         "boxes_by_partition": plan["counts"]["boxes_by_partition"],
     })
     history = []
-    best_score = -1.0
+    # best_score: of the rows that choose the epoch; best_validation: the best epoch's score on the whole validation.
+    best_score = best_validation = -1.0
     best_epoch = 0
     global_step = 0
     try:
@@ -1063,7 +1116,7 @@ def train_experiment_b(
                 step_start = step_end
 
             validation_samples, validation_loss = predict(VALIDATION_SPLIT)
-            validation = experiment_metrics(validation_samples, classes)
+            validation, cleaned, chosen = epoch_scores(validation_samples, classes, clean, on_clean)
             score = selection_score(validation)
             other_road = validation["ownership"]["other_road"]
             epoch_result = {
@@ -1078,10 +1131,25 @@ def train_experiment_b(
                 "validation_other_road_f1": other_road["f1"],
                 "validation_selection_score": score,
             }
+            clean_words = ""
+            if cleaned is not None:
+                clean_other = cleaned["ownership"]["other_road"]
+                epoch_result.update({
+                    "clean_validation_accuracy": cleaned["reading"]["accuracy"],
+                    "clean_validation_other_road_recall": clean_other["recall"],
+                    "clean_validation_other_road_f1": clean_other["f1"],
+                    "clean_validation_selection_score": selection_score(cleaned),
+                })
+                clean_words = (f"clean_val_accuracy {cleaned['reading']['accuracy']:.4f} "
+                               f"clean_val_other_road_recall {_number(clean_other['recall'])} "
+                               f"clean_val_other_road_f1 {_number(clean_other['f1'])} "
+                               f"clean_val_selection_score {selection_score(cleaned):.4f} "
+                               + (f"val_chosen {chosen:.4f} " if on_clean else ""))
             history.append(epoch_result)
 
-            if score > best_score:
-                best_score = score
+            if chosen > best_score:
+                best_score = chosen
+                best_validation = score
                 best_epoch = epoch_number
                 atomic_torch_save({
                     "format_version": 1,
@@ -1103,7 +1171,7 @@ def train_experiment_b(
                     "dataset_sha256": plan["dataset_sha256"],
                     "split_sha256": plan["split_sha256"],
                     "epoch": epoch_number,
-                    "validation_selection_score": best_score,
+                    "validation_selection_score": best_validation,
                     "selection_metric": SELECTION_METRIC,
                     "initialization": initialization,
                     "initialization_source": initialization_source,
@@ -1125,7 +1193,7 @@ def train_experiment_b(
                     "validation/other_road_f1": other_road["f1"],
                     "validation/abstain_rate": validation["ownership"]["abstain_rate"],
                     "validation/selection_score": score,
-                    "validation/best_selection_score": best_score,
+                    "validation/best_selection_score": best_validation,
                     "epoch_time": time.perf_counter() - epoch_start,
                 }, step=global_step)
             # One line per epoch, in the format the panel of the review site reads (job_progress).
@@ -1136,12 +1204,13 @@ def train_experiment_b(
                   f"val_ownership_macro_f1 {_number(epoch_result['validation_ownership_macro_f1'])} "
                   f"val_other_road_recall {_number(other_road['recall'])} "
                   f"val_other_road_f1 {_number(other_road['f1'])} "
-                  f"val_selection_score {score:.4f} "
-                  f"{time.perf_counter() - epoch_start:.0f}s", flush=True)
+                  f"val_selection_score {score:.4f} " + clean_words
+                  + f"{time.perf_counter() - epoch_start:.0f}s", flush=True)
 
         # The measure is the best validation epoch, reloaded from its checkpoint.
         model.load_state_dict(model_weights(torch_load(best_path)), strict=True)
         metrics: dict[str, Any] = {}
+        validation_clean = None
         samples_path = output_dir / "samples.jsonl"
         with samples_path.open("w", encoding="utf-8") as handle:
             for partition in (VALIDATION_SPLIT, TEST_SPLIT):
@@ -1150,6 +1219,8 @@ def train_experiment_b(
                     continue
                 samples, loss = predict(partition)
                 metrics[partition] = {"loss": loss, **partition_report(samples, classes)}
+                if partition == VALIDATION_SPLIT and clean is not None:
+                    validation_clean = partition_report([s for s in samples if s["annotation_id"] in clean], classes)
                 for sample in samples:
                     handle.write(json.dumps(sample, sort_keys=True) + "\n")
 
@@ -1171,7 +1242,7 @@ def train_experiment_b(
             "ownership_families": list(OWNERSHIP_FAMILIES),
             "ownership_class_weights": plan["ownership_class_weights"],
             "best_epoch": best_epoch,
-            "best_validation_selection_score": best_score,
+            "best_validation_selection_score": best_validation,
             "selection_metric": SELECTION_METRIC,
             "metrics": metrics,
             "counts": plan["counts"],
@@ -1199,6 +1270,12 @@ def train_experiment_b(
             "warnings": plan["warnings"],
             "limitations": plan["limitations"],
         }
+        if lineage is not None:
+            # What the start descends from, the validation rows those networks trained on, and which rows chose the
+            # epoch (start_lineage.account); validation_clean: metrics.validation on the rows none of them trained on.
+            result["start_lineage"] = lineage
+            if validation_clean is not None:
+                result["validation_clean"] = validation_clean
         (output_dir / "result.json").write_text(
             json.dumps(result, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
@@ -1206,7 +1283,7 @@ def train_experiment_b(
         test = metrics.get(TEST_SPLIT)
         tracker.set_summary({
             "best_epoch": best_epoch,
-            "best_validation_selection_score": best_score,
+            "best_validation_selection_score": best_validation,
             "checkpoint": str(best_path),
             "test/reading_accuracy": test["reading"]["accuracy"] if test else None,
             "test/ownership_macro_f1": test["ownership"]["macro_f1"] if test else None,

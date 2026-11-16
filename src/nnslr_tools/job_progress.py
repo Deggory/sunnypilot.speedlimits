@@ -279,10 +279,12 @@ EARLY = re.compile(r'^(detector|reader|classifier|pretrain) stops early after ep
 # in its Mapillary stage val_speed_recall, the speed signs found, which chooses that stage's best epoch; experiment B
 # val_ownership_macro_f1, whose sign it is, val_other_road_recall and val_other_road_f1, a "-" when it has no case, and
 # since #72 val_selection_score, the measure that chose its best epoch; the brain
-# val_error_kph, how far its speed is from the labels, and val_accuracy, the frames it says right).
+# val_error_kph, how far its speed is from the labels, and val_accuracy, the frames it says right). SignNet and
+# experiment B with a start also write val_chosen when their best epoch is chosen on the validation rows no network
+# they descend from trained on (#104): the choosing measure on those rows; their clean_val_* are not read here).
 METRIC = re.compile(r'\b(train_loss|val_loss|train_accuracy|val_accuracy|val_recall|val_speed_recall|val_sign_accuracy|'
                     r'val_rejection|val_balanced_accuracy|val_false_per_frame|'
-                    r'val_ownership_macro_f1|val_other_road_recall|val_other_road_f1|val_selection_score|val_error_kph|val_types|val_on_person) (-?[0-9.]+(?:e-?[0-9]+)?)\b')
+                    r'val_ownership_macro_f1|val_other_road_recall|val_other_road_f1|val_selection_score|val_chosen|val_error_kph|val_types|val_on_person) (-?[0-9.]+(?:e-?[0-9]+)?)\b')
 # The brain's road type named right on validation on each type ("val_type_motorway 0.9500", brain_train._types_words).
 TYPE_METRIC = re.compile(r'\bval_type_([a-z0-9_]+) (-?[0-9.]+)\b')
 SECONDS = re.compile(r'\b([0-9]+)s$')
@@ -416,7 +418,7 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
     ('stopped_early': epoch,) 'points': [{'epoch', 'train_loss', 'val_loss', ('train_accuracy', 'val_accuracy',)
     ('val_recall',) ('val_false_per_frame', 'val_speed_recall',) ('val_sign_accuracy', 'val_rejection',
     'val_balanced_accuracy',) ('val_ownership_macro_f1', 'val_other_road_recall', 'val_other_road_f1',
-    'val_selection_score',) 'seconds'}]}}}
+    'val_selection_score', 'val_chosen',) 'seconds'}]}}}
     (also experiment B's variants and the brain's seeds, by the names of their epoch lines) for an
     action in state running, ok, failed or interrupted; with 'seconds_left' (the server's time left, None while
     unknown) for Propose again running, 'signnet' (is_signnet) for the cutter's training and 'failure' (failure_text,

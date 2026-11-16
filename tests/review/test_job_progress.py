@@ -481,6 +481,33 @@ def test_the_experiment_b_curves_have_the_measure_that_chooses_their_best_epoch(
     assert result['detail'] == 'The crop alone · epoch 3 of 20'
 
 
+def test_the_lines_of_a_start_keep_the_whole_validation_and_say_what_chose_the_epoch():
+    """#104: with a start the epoch lines also measure the validation rows no ancestor trained on (clean_val_*); the
+    curves keep the whole validation under its names, and val_chosen is the measure that chose, when it is the clean
+    rows'."""
+    log = ('== scripts/run_signnet.sh k1\n== 3/3 Train SignNet ==\n'
+           'signnet 1038 of the 1629 validation frames were train frames of a network it descends from (20 before it): '
+           'the best epoch is chosen on the other 591, and both are measured\n'
+           'signnet epoch 1/40 train_loss 0.6010 val_recall 0.733 val_false_per_frame 4.18 clean_val_recall 0.650 '
+           'clean_val_false_per_frame 4.02 val_chosen 0.650 12s\n'
+           'signnet epoch 2/40 train_loss 0.5000 val_recall 0.700 val_false_per_frame 4.00 clean_val_recall 0.700 '
+           'clean_val_false_per_frame 3.90 12s\n')
+    first, second = progress('train_cutter', 'running', log)['curves']['signnet']['points']
+    assert first == {'epoch': 1, 'train_loss': 0.601, 'val_recall': 0.733, 'val_false_per_frame': 4.18, 'val_chosen': 0.65,
+                     'seconds': 12}
+    # The whole validation chose (too few clean rows): no val_chosen, and the clean numbers never stand in for it.
+    assert second == {'epoch': 2, 'train_loss': 0.5, 'val_recall': 0.7, 'val_false_per_frame': 4.0, 'seconds': 12}
+    log = ('== 3/5 Train variant crop ==\n'
+           'experiment_b_crop epoch 3/20 train_loss 0.8000 val_loss 2.2000 train_accuracy 0.8000 val_accuracy 0.7000 '
+           'val_ownership_macro_f1 0.500 val_other_road_recall 0.750 val_other_road_f1 0.857 val_selection_score 0.7786 '
+           'clean_val_accuracy 0.6000 clean_val_other_road_recall 0.500 clean_val_other_road_f1 0.667 '
+           'clean_val_selection_score 0.6335 val_chosen 0.6335 30s\n')
+    point = progress('train_decider', 'running', log)['curves']['experiment_b_crop']['points'][0]
+    assert (point['val_selection_score'], point['val_accuracy'], point['val_other_road_f1'], point['val_chosen']) == (
+        0.7786, 0.7, 0.857, 0.6335)
+    assert not any(key.startswith('clean') for key in point)
+
+
 # scripts/run_usernet.sh: UserNet, the road users' detector (one stage a run).
 USERNET_LOG = """== scripts/run_usernet.sh 2026-11-12_1200-users
 run:          2026-11-12_1200-users

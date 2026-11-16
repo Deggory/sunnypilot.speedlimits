@@ -1062,6 +1062,40 @@ def test_the_detail_of_a_signnet_run(root, index):
     assert index.detail('r1')['signnet_run'] is None
 
 
+def test_a_signnet_chosen_on_its_clean_frames_marks_that_epoch_without_its_log(root, index):
+    """#104: a SignNet with a start whose best epoch was chosen on the validation frames no network it descends
+    from trained on. Its log says the choosing measure in each epoch line (val_chosen); without the log the curve of
+    result.json's history says the same, so the charts mark the epoch result.json kept."""
+    from nnslr_tools.runs import signnet_run_digest
+    result = signnet_result()
+    result['best_epoch'] = 2
+    # The whole validation is best at epoch 1, the clean frames at epoch 2.
+    for epoch, whole, clean, speed in ((0, 0.9, 0.2, 0.6), (1, 0.5, 0.7, 0.3)):
+        result['history'][epoch].update(validation_recall_at_5=whole, clean_validation_recall_at_5=clean,
+                                        clean_validation_false_positives_per_image_at_5=4.0,
+                                        clean_validation_speed_recall_at_5=speed)
+    lineage = {'ancestors': [], 'complete': True, 'best_epoch_on': 'clean_validation'}
+    points = signnet_run_digest({**result, 'start_lineage': lineage})['history']
+    assert [(point['val_recall'], point['val_chosen']) for point in points] == [(0.9, 0.2), (0.5, 0.7)]
+    assert max(points, key=lambda point: point['val_chosen'])['epoch'] == result['best_epoch']
+    assert not any(key.startswith('clean') for point in points for key in point)
+    # A Mapillary stage is chosen on the speed signs of those frames.
+    stage = signnet_run_digest({**result, 'mapillary_only': True, 'start_lineage': lineage})['history']
+    assert [point['val_chosen'] for point in stage] == [0.6, 0.3]
+    # The whole validation chose (too few clean boxes, or no start): no val_chosen, though both were measured.
+    for other in ({**result, 'start_lineage': {**lineage, 'best_epoch_on': 'validation'}}, result,
+                  {**result, 'start_lineage': None}):
+        assert all('val_chosen' not in point and point['val_recall'] in (0.9, 0.5)
+                   for point in signnet_run_digest(other)['history'])
+    # In the run's detail: the curve of the log first, of result.json when there is no log.
+    run = make_signnet_run(root)
+    write(run / 'result.json', {**result, 'start_lineage': lineage})
+    (run / 'signnet.log').unlink()
+    assert index.detail(run.name)['curves']['signnet']['points'] == [
+        {'epoch': 1, 'train_loss': 4.08, 'val_recall': 0.9, 'val_false_per_frame': 4.98, 'seconds': 80.3, 'val_chosen': 0.2},
+        {'epoch': 2, 'train_loss': 2.93, 'val_recall': 0.5, 'val_false_per_frame': 4.9, 'seconds': 81.0, 'val_chosen': 0.7}]
+
+
 def test_a_signnet_of_another_band_does_not_fit_the_car(root, index):
     run = make_signnet_run(root, 'wide', band=(1344, 416), stride=4)
     signnet = index.detail(run.name)['signnet_run']

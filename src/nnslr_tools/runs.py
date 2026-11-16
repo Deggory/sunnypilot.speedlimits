@@ -1255,7 +1255,12 @@ def signnet_run_digest(result: Any) -> dict:
     whether the car runs it as it is (signnet.fits_the_car), and on validation and test the signs found and the false
     boxes per frame among its 5 best boxes of a frame at any score (SIGNNET_BUDGET), with ``car``: the same as the car
     reads it, the best 5 of score 0.3 or more (signnet.car_measure, with the found and reviewed boxes, the speed
-    signs' recall and the boxes passed on per frame for the run's cutter line); its epochs as a curve."""
+    signs' recall and the boxes passed on per frame for the run's cutter line); its epochs as a curve, with the
+    names of the log's epoch lines (job_progress). A SignNet with a start whose best epoch was chosen on the
+    validation frames no network it descends from trained on (start_lineage.best_epoch_on 'clean_validation', #104)
+    has that measure in each point as ``val_chosen``, as its log has: the recall on those frames, in a Mapillary
+    stage the speed signs' recall there. The curve then marks the epoch result.json kept, not the best of the whole
+    validation."""
     from nnslr_tools import signnet
     if not isinstance(result, dict) or result.get('task') != 'signnet':
         raise ValueError('not a SignNet result')
@@ -1286,12 +1291,17 @@ def signnet_run_digest(result: Any) -> dict:
         return {'recall': _num(found.get('recall_iou')), 'false_per_frame': _num(found.get('false_positives_per_image')),
                 'car': at_car}
     points = []
+    names = [('loss', 'train_loss'), ('validation_recall_at_5', 'val_recall'),
+             ('validation_false_positives_per_image_at_5', 'val_false_per_frame'), ('seconds', 'seconds')]
+    if _dig(result, ('start_lineage', 'best_epoch_on')) == 'clean_validation':
+        # What train_signnet chose its epoch by (signnet.epoch_score of the clean frames).
+        names.append(('clean_validation_speed_recall_at_5' if result.get('mapillary_only') is True
+                      else 'clean_validation_recall_at_5', 'val_chosen'))
     for item in result.get('history') if isinstance(result.get('history'), list) else []:
         if not isinstance(item, dict) or _int(item.get('epoch')) is None:
             continue
         point: dict = {'epoch': _int(item['epoch'])}
-        for key, name in (('loss', 'train_loss'), ('validation_recall_at_5', 'val_recall'),
-                          ('validation_false_positives_per_image_at_5', 'val_false_per_frame'), ('seconds', 'seconds')):
+        for key, name in names:
             if _num(item.get(key)) is not None:
                 point[name] = _num(item[key])
         points.append(point)

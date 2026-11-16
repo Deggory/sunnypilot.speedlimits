@@ -518,3 +518,271 @@ def test_remeasure_refuses_another_plan(tmp_path):
         signnet.remeasure_car_centre({**plan, 'split_sha256': 'x' * 64}, tmp_path, run, device='cpu', workers=0)
     with pytest.raises(ValueError, match='remeasure_not_a_finished_signnet'):
         signnet.remeasure_car_centre(plan, tmp_path, tmp_path / 'nothing', device='cpu', workers=0)
+
+
+# -- a start, and the validation frames what it descends from trained on (#104) -------------------------------------
+def test_the_epoch_score_is_the_recall_of_the_frames_given():
+    from nnslr_tools.signnet import chosen_boxes, epoch_score
+    whole = {'recall_iou': 0.9, 'recall_by_family': {'speed': {'recall': 0.6}, 'other_sign': {'recall': 1.0}}}
+    clean = {'recall_iou': 0.5, 'recall_by_family': {'speed': {'recall': 0.75}}}
+    assert (epoch_score(whole, False), epoch_score(clean, False)) == (0.9, 0.5)
+    # A Mapillary stage: the speed signs' recall, of the frames given; every sign's when the frames tell no family.
+    assert (epoch_score(whole, True), epoch_score(clean, True)) == (0.6, 0.75)
+    assert epoch_score({'recall_iou': 0.4}, True) == 0.4
+    # Two epochs: the first flattered on the whole validation, the second better on the clean frames.
+    epochs = [({'recall_iou': 0.9}, {'recall_iou': 0.5}), ({'recall_iou': 0.8}, {'recall_iou': 0.7})]
+    assert max(range(2), key=lambda index: epoch_score(epochs[index][0], False)) == 0
+    assert max(range(2), key=lambda index: epoch_score(epochs[index][1], False)) == 1
+    frames = [{'boxes': [[0, 0, 1, 1], [1, 1, 2, 2]], 'box_families': ['maximum_speed', 'other_sign']},
+              {'boxes': [[0, 0, 1, 1]], 'box_families': ['variable_display']}, {'boxes': []}]
+    assert (chosen_boxes(frames, False), chosen_boxes(frames, True)) == (3, 2)
+
+
+SPLIT_A, SPLIT_B = 'a' * 64, 'b' * 64
+
+
+def _lineage_frames(tmp_path):
+    """Four train frames, three of validation and one of test, each with a speed sign and its annotation id (id0 to
+    id7); and the split file A of an earlier cutter, in which the first validation frame of today (id4) was a train
+    frame. The second validation frame has another sign too (id5b): the two validation frames no earlier cutter
+    trained on hold three reviewed boxes, two of them of speed signs."""
+    import json
+
+    from PIL import Image
+    frames = []
+    for index, split in enumerate(['train'] * 4 + ['validation'] * 3 + ['test']):
+        image = Image.new('RGB', (128, 96), (90, 90, 90))
+        image.paste((240, 20, 20), (40 + index, 6, 56 + index, 22))
+        frame = {'image_path': f'f{index}.jpg', 'split': split, 'width': 128, 'height': 96,
+                 'boxes': [[40.0 + index, 6.0, 56.0 + index, 22.0]], 'box_families': ['maximum_speed'],
+                 'label_basis': 'human_review', 'annotation_ids': [f'id{index}']}
+        if index == 5:
+            image.paste((20, 20, 240), (90, 6, 106, 22))
+            frame.update(boxes=[*frame['boxes'], [90.0, 6.0, 106.0, 22.0]], box_families=['maximum_speed', 'other_sign'],
+                         annotation_ids=['id5', 'id5b'])
+        image.save(tmp_path / f'f{index}.jpg')
+        frames.append(frame)
+    (tmp_path / 'splits').mkdir()
+    (tmp_path / 'splits' / f'{SPLIT_A}.json').write_text(json.dumps({'assignments': {
+        'id0': 'train', 'id4': 'train', 'id5': 'validation', 'id6': 'test', 'id7': 'test'}}), encoding='utf-8')
+    return frames
+
+
+def _train(tmp_path, frames, name, split, lines, *, stage=False, **more):
+    """Two epochs of a toy SignNet on the CPU into runs/<name>; ``stage``: as a stage on the Mapillary windows alone."""
+    plan = {'frames': frames, 'dataset_sha256': 'd' * 64, 'split_sha256': split, 'families': 'all', 'trainable': True,
+            'mapillary_only': stage}
+    return train_signnet(plan, tmp_path, tmp_path / 'runs' / name, widths=(4, 4, 4, 4), epochs=2, batch=2, workers=0,
+                         band_width=96, log=lines.append, device='cpu', **more)
+
+
+def _scripted(monkeypatch, whole, clean, whole_speed=None, clean_speed=None):
+    """signnet.measure as it is, with the numbers an epoch is chosen by replaced on the validation, call by call
+    (one an epoch, then the kept epoch measured again): the recall at 5 boxes of the whole validation and of its
+    clean frames, and for a Mapillary stage the speed signs' recall of both. The toy network finds nothing in two
+    epochs, so without this every epoch would score the same on either. Returns the ``clean`` of each call."""
+    from nnslr_tools import signnet
+    real, calls = getattr(signnet.measure, 'real', signnet.measure), []
+
+    def measure(model, frames, *arguments, **named):
+        measured = real(model, frames, *arguments, **named)
+        if named.get('store') is None:  # the test frames, measured once at the end
+            return measured
+        index = len(calls)
+        calls.append(named.get('clean'))
+        for part, recall, speed in ((measured, whole, whole_speed), (measured.get('clean'), clean, clean_speed)):
+            if part is not None:
+                part['by_box_budget']['5']['recall_iou'] = recall[index]
+                if speed is not None:
+                    part['by_box_budget']['5']['recall_by_family'] = {'speed': {'recall': speed[index]}}
+        return measured
+
+    measure.real = real
+    monkeypatch.setattr(signnet, 'measure', measure)
+    return calls
+
+
+def test_with_a_start_the_validation_frames_its_ancestors_trained_on_are_measured_apart(tmp_path, monkeypatch):
+    import json
+
+    from nnslr_tools import start_lineage
+    frames = _lineage_frames(tmp_path)
+    first = _train(tmp_path, frames, 'first', SPLIT_A, [])
+    assert 'start_lineage' not in first and 'validation_clean' not in first  # random weights: as ever
+    start = tmp_path / 'runs' / 'first' / 'signnet-best.pt'
+    lines = []
+    second = _train(tmp_path, frames, 'second', SPLIT_B, lines, init_from=start)
+    record = second['start_lineage']
+    assert [(entry['run'], entry['stage'], entry['split_sha256'], entry['learnt_ours']) for entry in record['ancestors']] == [
+        ('first', '', SPLIT_A, True)]
+    assert (record['complete'], record['another_split'], record['counted']) == (True, True, 'frames')
+    assert record['validation'] == {'all': 3, 'trained_on': 1, 'clean': 2} and record['test'] == {'all': 1, 'trained_on': 0}
+    # Three reviewed boxes on the two clean frames (the floor counts boxes, not frames): fewer than the floor, the
+    # whole validation chooses as before.
+    assert (record['best_epoch_on'], record['clean_cases'], record['floor']) == ('validation', 3, 200)
+    assert record['why'] == 'the 2 clean frames hold 3 reviewed boxes, fewer than the 200 a choice needs'
+    assert lines[0] == 'signnet starts from first: every layer of its epoch %d, learnt on another split' % first['best_epoch']
+    assert lines[1] == ('signnet 1 of the 3 validation frames were train frames of a network it descends from (1 before '
+                        'it): the 2 clean frames hold 3 reviewed boxes, fewer than the 200 a choice needs, so the best '
+                        'epoch is chosen on the whole validation; both are measured')
+    assert all(' val_recall ' in line and ' clean_val_recall ' in line and ' clean_val_false_per_frame ' in line
+               and ' val_chosen ' not in line and line.endswith('s') for line in lines[2:4])
+    # Both are measured: the whole validation as ever, the clean frames beside it.
+    assert second['validation']['by_box_budget']['5']['image_count'] == 3 and 'clean' not in second['validation']
+    assert second['validation_clean']['by_box_budget']['5']['image_count'] == 2
+    assert set(second['validation_clean']) == set(second['validation'])
+    assert all({'clean_validation_recall_at_5', 'clean_validation_false_positives_per_image_at_5'} <= set(epoch)
+               for epoch in second['history'])
+    best = max(second['history'], key=lambda epoch: epoch['validation_recall_at_5'])
+    assert second['best_epoch'] == next(epoch['epoch'] for epoch in second['history']
+                                        if epoch['validation_recall_at_5'] == best['validation_recall_at_5'])
+    assert json.loads((tmp_path / 'runs' / 'second' / 'result.json').read_text())['start_lineage'] == record
+    # The start record and the weights' file stay as they were: the lineage is result.json's alone.
+    saved = torch.load(tmp_path / 'runs' / 'second' / 'signnet-best.pt', map_location='cpu', weights_only=True)
+    assert saved['start'] == second['start'] and 'start_lineage' not in saved and 'lineage' not in second['start']
+
+    # With enough clean boxes (the floor lowered to the three boxes of these two frames) the clean frames choose the
+    # epoch.
+    monkeypatch.setattr(start_lineage, 'CLEAN_FLOOR', 3)
+    lines = []
+    third = _train(tmp_path, frames, 'third', SPLIT_B, lines, init_from=start)
+    assert third['start_lineage']['best_epoch_on'] == 'clean_validation' and third['start_lineage']['why'] is None
+    assert lines[1] == ('signnet 1 of the 3 validation frames were train frames of a network it descends from (1 before '
+                        'it): the best epoch is chosen on the other 2, and both are measured')
+    assert all(' clean_val_recall ' in line and ' val_chosen ' in line for line in lines[2:4])
+    best = max(epoch['clean_validation_recall_at_5'] for epoch in third['history'])
+    assert third['best_epoch'] == next(epoch['epoch'] for epoch in third['history']
+                                       if epoch['clean_validation_recall_at_5'] == best)
+    assert third['best_epoch_by'] == 'validation_recall_at_5'
+
+    # The start's record gone: the lineage is not known, the whole validation chooses and the log says so.
+    (tmp_path / 'runs' / 'first' / 'result.json').rename(tmp_path / 'runs' / 'first' / 'result.kept')
+    lines = []
+    fourth = _train(tmp_path, frames, 'fourth', SPLIT_B, lines, init_from=start)
+    record = fourth['start_lineage']
+    assert (record['complete'], record['validation'], record['best_epoch_on']) == (False, None, 'validation')
+    assert 'the record of first is gone' in record['unknown'] and 'validation_clean' not in fourth
+    assert lines[1].startswith('signnet the lineage is not known: the record of first is gone (its result.json); ')
+    assert lines[1].endswith('the best epoch is chosen on the whole validation')
+    assert all(' clean_val_recall ' not in line for line in lines)
+
+    # ``second`` was trained with its lineage recorded: what goes on from it takes the lineage from its result.json,
+    # and the record of ``first``, still gone, is not needed. Its split file is, and is there.
+    lines = []
+    fifth = _train(tmp_path, frames, 'fifth', SPLIT_B, lines, init_from=tmp_path / 'runs' / 'second' / 'signnet-best.pt')
+    record = fifth['start_lineage']
+    assert (record['complete'], record['unknown']) == (True, None)
+    assert [(entry['run'], entry['split_sha256']) for entry in record['ancestors']] == [('second', SPLIT_B), ('first', SPLIT_A)]
+    assert record['validation'] == {'all': 3, 'trained_on': 1, 'clean': 2} and record['best_epoch_on'] == 'clean_validation'
+    assert lines[1] == ('signnet 1 of the 3 validation frames were train frames of a network it descends from (2 before '
+                        'it): the best epoch is chosen on the other 2, and both are measured')
+
+
+def test_the_cutter_keeps_the_epoch_its_clean_validation_frames_choose(tmp_path, monkeypatch):
+    """#104, the loop of train_signnet itself: the whole validation is best at epoch 1 (the frames an ancestor
+    trained on flatter it), the clean frames at epoch 2. The weights kept and best_epoch are the clean frames'."""
+    from nnslr_tools import start_lineage
+    frames = _lineage_frames(tmp_path)
+    _train(tmp_path, frames, 'first', SPLIT_A, [])
+    start = tmp_path / 'runs' / 'first' / 'signnet-best.pt'
+    script = dict(whole=[0.9, 0.5, 0.125], clean=[0.2, 0.7, 0.25])
+
+    def kept(name):
+        return torch.load(tmp_path / 'runs' / name / 'signnet-best.pt', map_location='cpu', weights_only=True)['epoch']
+
+    # Fewer clean boxes than the floor: the whole validation chooses, epoch 1, as before #104.
+    calls = _scripted(monkeypatch, **script)
+    below = _train(tmp_path, frames, 'below', SPLIT_B, [], init_from=start)
+    assert below['start_lineage']['best_epoch_on'] == 'validation' and (below['best_epoch'], kept('below')) == (1, 1)
+    # One measure of the validation an epoch and one of the kept epoch, each with the clean frames (the second and
+    # the third of the validation).
+    assert calls == [[1, 2]] * 3
+    # From the floor on: the clean frames choose, epoch 2.
+    monkeypatch.setattr(start_lineage, 'CLEAN_FLOOR', 3)
+    calls, lines = _scripted(monkeypatch, **script), []
+    second = _train(tmp_path, frames, 'second', SPLIT_B, lines, init_from=start)
+    assert second['start_lineage']['best_epoch_on'] == 'clean_validation' and second['start_lineage']['clean_cases'] == 3
+    assert (second['best_epoch'], kept('second')) == (2, 2) and calls == [[1, 2]] * 3
+    assert ' val_recall 0.900 ' in lines[2] and ' clean_val_recall 0.200 ' in lines[2] and ' val_chosen 0.200 ' in lines[2]
+    assert ' val_recall 0.500 ' in lines[3] and ' clean_val_recall 0.700 ' in lines[3] and ' val_chosen 0.700 ' in lines[3]
+    assert lines[4] == 'signnet measure the best epoch 2 on validation and test'
+    assert [(epoch['validation_recall_at_5'], epoch['clean_validation_recall_at_5']) for epoch in second['history']] == [
+        (0.9, 0.2), (0.5, 0.7)]
+    # The kept epoch measured again: the whole validation under its name, the clean frames beside it.
+    assert second['validation']['by_box_budget']['5']['recall_iou'] == 0.125
+    assert second['validation_clean']['by_box_budget']['5']['recall_iou'] == 0.25
+
+
+def test_a_mapillary_stage_with_a_start_is_chosen_on_the_speed_signs_of_its_clean_frames(tmp_path, monkeypatch):
+    """The first stage of a two-stage cutter keeps the epoch with the best recall of the speed signs: with a start,
+    of the speed signs on the clean frames, and the floor counts the reviewed speed boxes there."""
+    from nnslr_tools import start_lineage
+    frames = _lineage_frames(tmp_path)
+    _train(tmp_path, frames, 'first', SPLIT_A, [])
+    start = tmp_path / 'runs' / 'first' / 'signnet-best.pt'
+    # The speed signs: best at epoch 1 on the whole validation, at epoch 2 on the clean frames. Every sign together
+    # says the opposite on both, and must not choose.
+    script = dict(whole=[0.3, 0.6, 0.3], clean=[0.8, 0.1, 0.1], whole_speed=[0.9, 0.5, 0.9], clean_speed=[0.2, 0.7, 0.7])
+
+    def kept(name):
+        return torch.load(tmp_path / 'runs' / name / 'signnet-best.pt', map_location='cpu', weights_only=True)['epoch']
+
+    # The clean frames hold three reviewed boxes, two of them of speed signs: at a floor of 3 the stage has too few.
+    monkeypatch.setattr(start_lineage, 'CLEAN_FLOOR', 3)
+    _scripted(monkeypatch, **script)
+    below = _train(tmp_path, frames, 'below', SPLIT_B, [], init_from=start, stage=True)
+    record = below['start_lineage']
+    assert (record['best_epoch_on'], record['clean_cases']) == ('validation', 2)
+    assert record['why'] == 'the 2 clean frames hold 2 reviewed speed boxes, fewer than the 3 a choice needs'
+    assert (below['best_epoch'], kept('below')) == (1, 1)
+    monkeypatch.setattr(start_lineage, 'CLEAN_FLOOR', 2)
+    _scripted(monkeypatch, **script)
+    lines = []
+    stage = _train(tmp_path, frames, 'stage', SPLIT_B, lines, init_from=start, stage=True)
+    assert stage['start_lineage']['best_epoch_on'] == 'clean_validation' and stage['mapillary_only'] is True
+    assert (stage['best_epoch'], kept('stage')) == (2, 2) and stage['best_epoch_by'] == 'validation_speed_recall_at_5'
+    assert lines[2] == ('signnet_pretrain 1 of the 3 validation frames were train frames of a network it descends '
+                        'from (1 before it): the best epoch is chosen on the other 2, and both are measured')
+    assert ' val_speed_recall 0.900 ' in lines[3] and ' clean_val_speed_recall 0.200 val_chosen 0.200 ' in lines[3]
+    assert ' val_speed_recall 0.500 ' in lines[4] and ' clean_val_speed_recall 0.700 val_chosen 0.700 ' in lines[4]
+    assert [(epoch['validation_speed_recall_at_5'], epoch['clean_validation_speed_recall_at_5'],
+             epoch['clean_validation_recall_at_5']) for epoch in stage['history']] == [(0.9, 0.2, 0.8), (0.5, 0.7, 0.1)]
+
+
+def test_a_start_whose_ancestors_trained_on_none_of_the_validation_changes_nothing(tmp_path):
+    """Start from on the same split: result.json keeps its keys and their values, and gains start_lineage alone."""
+    frames = _lineage_frames(tmp_path)
+    lines = []
+    alone = _train(tmp_path, frames, 'first', SPLIT_A, lines)
+    assert len(lines) == 4  # two epochs, the measure, complete
+    lines = []
+    again = _train(tmp_path, frames, 'again', SPLIT_A, lines, init_from=tmp_path / 'runs' / 'first' / 'signnet-best.pt')
+    assert set(again) == set(alone) | {'start_lineage'}
+    assert all(set(epoch) == set(alone['history'][0]) for epoch in again['history'])
+    assert set(again['validation']) == set(alone['validation'])
+    record = again['start_lineage']
+    assert record['validation'] == {'all': 3, 'trained_on': 0, 'clean': 3} and record['test'] == {'all': 1, 'trained_on': 0}
+    assert (record['another_split'], record['best_epoch_on'], record['why'], record['clean_cases']) == (False, 'validation',
+                                                                                                        None, None)
+    # The log has the start's line and nothing more than before; no clean numbers in the epochs' lines.
+    assert len(lines) == 5 and lines[0].startswith('signnet starts from first: every layer of its epoch ')
+    assert lines[0].endswith(str(alone['best_epoch'])) and all(' clean_val' not in line for line in lines)
+    # An ancestor of another split that trained on none of these frames: the same.
+    other = _train(tmp_path, [{**frame, 'annotation_ids': [f'new{index}']} for index, frame in enumerate(frames)],
+                   'other', SPLIT_B, [], init_from=tmp_path / 'runs' / 'first' / 'signnet-best.pt')
+    assert other['start_lineage']['validation'] == {'all': 3, 'trained_on': 0, 'clean': 3}
+    assert other['start_lineage']['another_split'] is True and 'validation_clean' not in other
+
+
+def test_measure_gives_the_same_measures_on_the_clean_frames(tmp_path):
+    from nnslr_tools import signnet
+    plan, run, _ = _tiny_run(tmp_path)
+    model, checkpoint = signnet.load_signnet(run / 'signnet-best.pt')
+    frames = [frame for frame in plan['frames'] if frame['split'] != 'train']
+    arguments = dict(data_root=tmp_path, stride=checkpoint['stride'], device=torch.device('cpu'), workers=0,
+                     band_width=checkpoint['band'][0])
+    whole = signnet.measure(model, frames, **arguments)
+    assert 'clean' not in whole
+    both = signnet.measure(model, frames, clean=[1, 2], **arguments)
+    assert {key: value for key, value in both.items() if key != 'clean'} == whole
+    assert both['clean'] == signnet.measure(model, frames[1:], **arguments)

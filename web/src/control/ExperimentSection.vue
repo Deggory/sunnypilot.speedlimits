@@ -111,7 +111,9 @@ const notes = computed(() => variants.value.flatMap((variant) => {
       </div>
     </div>
 
-    <p v-if="experiment.selection_metric" class="note">Each variant keeps its best epoch by the {{ experiment.selection_metric }}.</p>
+    <p v-if="experiment.selection_metric" class="note">Each variant keeps its best epoch by the {{ experiment.selection_metric }}.
+      A variant that went on from an earlier run takes that measure on the validation rows no earlier network trained on, when
+      they are enough: its version in Models says which chose.</p>
     <p v-for="(line, index) in notes" :key="index" class="note ds-note">{{ line }}</p>
     <p class="note">Results: <template v-for="(variant, index) in variants" :key="variant.key">{{ index ? ', ' : '' }}<code>{{ variant.key }}</code>
       {{ variant.at ? isoWhen(variant.at) : 'missing' }}</template>.</p>

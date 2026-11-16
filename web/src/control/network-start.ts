@@ -98,6 +98,21 @@ export function useNetworkStart(role: StartRole, status: Ref<PanelStatus | null>
       : role === 'cutter' ? 'It goes on from that SignNet’s weights'
       : role === 'decider' ? 'Each version goes on from its own of that run (one it lacks from ImageNet)'
         : 'Each network goes on from its own of that run (one it lacks from ImageNet)';
+    // A SignNet or an applicability run that learnt on another split, or went on from one that did (#104): today's
+    // validation may hold rows it trained on (the page does not count them, the training does). The training chooses
+    // its best epoch on the other rows only when they are enough (nnslr_tools.start_lineage: CLEAN_FLOOR, 200 reviewed
+    // boxes for a SignNet, of speed signs in its stage on Mapillary alone; 200 rows with half of the signs of another
+    // road, CLEAN_SHARE, for applicability) and its lineage can be followed; else on the whole validation, as before.
+    if ((role === 'cutter' || role === 'decider') && (split === 'another' || (split === 'same' && version.value.start?.another_split))) {
+      const rows = role === 'cutter' ? 'frames' : 'rows';
+      const enough = role === 'cutter'
+        ? 'they hold 200 reviewed boxes or more (in a stage on Mapillary alone, boxes of speed signs)'
+        : 'they are 200 or more and hold at least half of the validation’s signs of another road';
+      return {text: what + '. It' + (split === 'another' ? '' : ', learnt on today’s split, went on from a network that')
+        + ' learnt on another split: validation ' + rows + ' of today may have been train ' + rows + ' for it. If some were, the '
+        + 'new one chooses its best epoch on the other ' + rows + ' when ' + enough + ', else on them all, as it does when the '
+        + 'record of a network before it is gone; its log says which. The test areas are pinned, so the test stays fair.', warn: true};
+    }
     if (split === 'another') return {text: 'Trained on another split: it may have seen some of today’s test frames, so the test '
       + 'of the new one is not fair.', warn: true};
     if (split === 'unknown') return {text: 'Its split is not recorded: it may have seen some of today’s test frames, so the test '

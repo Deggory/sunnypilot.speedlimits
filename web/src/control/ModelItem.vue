@@ -53,6 +53,42 @@ const USERS_STAGE = {bdd: 'BDD100K’s pictures', drives: 'Your drives'} as cons
 /** The earlier run a SignNet, an applicability variant, a brain or a UserNet went on from (Train › Start from). */
 const networkStart = computed(() => props.version.role === 'cutter' || props.version.role === 'decider'
   || props.version.role === 'brain' || props.version.role === 'users' ? props.version.start ?? null : null);
+/** What follows “Went on from …” when the start, or a network before it, learnt on another split. A SignNet and an
+ * applicability variant (#104): the validation rows those networks trained on, which may flatter it, and where its best
+ * epoch was chosen; a run trained before they were counted only says there may be some. The test areas are pinned: the
+ * test has none, unless its training counted some. A lineage that could not be followed to its end is said whether an
+ * ancestor of another split is known or not: nothing was counted then, on the validation or on the test. A brain or
+ * a UserNet: its test may hold frames the start saw. */
+const startWarning = computed((): string => {
+  const another = networkStart.value?.another_split === true;
+  const version = cutter.value ?? decider.value;
+  if (!version) return another ? ': trained on another split, so this test is not fair' : '';
+  const lineage = version.lineage ?? null;
+  const unit = lineage?.counted ?? (cutter.value ? 'frames' : 'rows');
+  const unknown = lineage !== null && !lineage.complete;
+  if (!another) {
+    return unknown ? '. Its lineage is not known in full: its validation may hold ' + unit
+      + ' an earlier network trained on; the test should not, its areas are pinned' : '';
+  }
+  const counts = lineage?.validation ?? null;
+  if (!counts) {
+    return '. A network it descends from learnt on another split: its validation may hold ' + unit
+      + ' that network trained on, which would flatter it; the test ' + (unknown
+        ? 'should not, its areas are pinned (its lineage is not known in full)' : 'does not, its areas are pinned');
+  }
+  const onTest = lineage?.test?.trained_on ?? 0;
+  if (!counts.trained_on) {
+    return '. A network it descends from learnt on another split, but none of its validation ' + unit + ' were train '
+      + unit + ' for it; ' + (onTest > 0 ? thousands(onTest) + ' of its test ' + unit + ' were, so this test is not fair'
+        : 'none of its test ' + unit + ' were either');
+  }
+  return '. ' + thousands(counts.trained_on) + ' of its ' + thousands(counts.all ?? 0) + ' validation ' + unit
+    + ' were train ' + unit + ' for a network it descends from, and may flatter it: its best epoch was chosen on '
+    + (lineage?.best_epoch_on === 'clean_validation' ? 'the other ' + thousands(counts.clean ?? 0)
+      : 'them all' + (lineage?.why ? ' (' + lineage.why + ')' : '')) + '; '
+    + (onTest > 0 ? thousands(onTest) + ' of its test ' + unit + ' were as well, so this test is not fair'
+      : 'none of its test ' + unit + ' were');
+});
 /** The cutter's numbers: on the test, else on validation (a size compared before its test was measured). */
 const cut = computed(() => cutter.value?.test ?? cutter.value?.validation ?? null);
 const cutterMetrics = computed((): Metric[] => cutter.value ? metricsOf(cutter.value) : []);
@@ -154,6 +190,8 @@ const noOtherOnTest = computed(() => decider.value?.test?.other_road_support ===
           <div><dt>Default box</dt><dd>{{ cutter.anchor_min_ratio ?? '–' }}<span v-if="!cutter.anchor_recorded" class="muted"> (default)</span></dd></div>
           </template>
           <div><dt>Best epoch</dt><dd>{{ epoch }}</dd></div>
+          <div v-if="cutter.validation_clean" data-clean><dt title="Signs found among its 5 best boxes of each validation frame, the measure that chooses its best epoch: on every frame, then on the frames no network it descends from trained on">Validation</dt><dd>{{
+            pct(cutter.validation?.budget?.recall) }} · clean {{ pct(cutter.validation_clean.budget?.recall) }}</dd></div>
           <div><dt>Finds</dt><dd>{{ cutter.families === 'all' ? 'speed and other signs' : 'speed signs' }}<span v-if="!cutter.families_recorded"
             class="muted"> (not recorded)</span></dd></div>
         </dl>
@@ -226,11 +264,13 @@ const noOtherOnTest = computed(() => decider.value?.test?.other_road_support ===
         </div>
         <details class="model-more"><summary>Details</summary>
         <div class="table-wrap"><table class="model-table">
-          <thead><tr><th></th><th class="num">Validation</th><th class="num">Test</th></tr></thead>
+          <thead><tr><th></th><th class="num">Validation</th><th v-if="decider.validation_clean" class="num"
+            title="The validation rows no network it descends from trained on">Clean</th><th class="num">Test</th></tr></thead>
           <tbody>
             <tr v-for="row in DECIDER_ROWS" :key="row.key" :data-metric="row.key">
               <th scope="row" :title="row.title">{{ row.label }}</th>
               <td class="num">{{ deciderCell(decider.validation, row.key) }}</td>
+              <td v-if="decider.validation_clean" class="num" data-clean>{{ deciderCell(decider.validation_clean, row.key) }}</td>
               <td class="num">{{ deciderCell(decider.test, row.key) }}</td>
             </tr>
           </tbody>
@@ -291,9 +331,9 @@ const noOtherOnTest = computed(() => decider.value?.test?.other_road_support ===
       <p v-if="users.uses_bdd" class="note">It learnt BDD100K’s pictures: their licence goes with these weights.</p>
     </template>
 
-    <p v-if="networkStart" class="note" :class="{'warn-text': networkStart.another_split}" data-start>Went on from
-      {{ networkStart.run ?? 'an earlier run' }}<template v-if="networkStart.epoch !== null">, its epoch {{ networkStart.epoch }}</template><template
-      v-if="networkStart.another_split">: trained on another split, so this test is not fair</template>.</p>
+    <p v-if="networkStart" class="note" :class="{'warn-text': networkStart.another_split || startWarning !== ''}" data-start>Went on from
+      {{ networkStart.run ?? 'an earlier run' }}<template v-if="networkStart.epoch !== null">, its epoch {{ networkStart.epoch }}</template>{{
+      startWarning }}.</p>
     <p v-if="!evaluated" class="model-wait">{{ version.finished ? 'Not evaluated: no numbers on the test yet.' : 'Still training, or stopped before its end.' }}</p>
     <p v-for="problem in version.problems" :key="problem" class="note ds-note">{{ problem }}.</p>
     <p v-if="notSelectable" class="note model-why-not">{{ notSelectable }}</p>

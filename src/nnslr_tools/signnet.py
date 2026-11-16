@@ -53,6 +53,7 @@ from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Any
 
+from nnslr_tools import start_lineage
 from nnslr_tools import synthetic_signs
 from nnslr_tools import onnx_device
 
@@ -627,7 +628,7 @@ def _in_ignore(box: list[float], ignore: list[list[float]]) -> bool:
 
 def measure(model, frames: list[dict], data_root: Path, stride: int, device, *, batch: int = 16,
             workers: int = 8, band_width: int = BAND_WIDTH, cached: dict[str, Path] | None = None,
-            store: Resident | None = None) -> dict[str, Any]:
+            store: Resident | None = None, clean: list[int] | None = None) -> dict[str, Any]:
     """The cutter's measures on ``frames``: per score threshold (detector_size_metrics, reviewed boxes of the whole
     frame, those below the band count as missed), per box budget (the best N boxes of each frame, at any score) and
     ``car``: what the car reads, the best CAR_MAX_BOXES boxes of score CAR_MIN_SCORE or more. All of them match a found
@@ -635,7 +636,9 @@ def measure(model, frames: list[dict], data_root: Path, stride: int, device, *, 
     or the found box's centre on the reviewed box and its size 0.5 to 2 times it), fairer to the far, small signs. A
     box found on an ignore box of the frame (a switched-off display) is dropped before any of them: neither found nor
     false. ``cached``: band_cache's files, the bands read from there; ``store``: the frames' Resident, the bands read
-    from memory (a training's validation, every epoch), without new processes."""
+    from memory (a training's validation, every epoch), without new processes. ``clean``: indexes of ``frames``
+    (start_lineage.account: the validation frames no ancestor of the start trained on, #104); the same measures on
+    those alone come back under ``clean``, from the one pass over the frames."""
     torch, _ = _torch()
     from torch.utils.data import DataLoader
 
@@ -647,7 +650,7 @@ def measure(model, frames: list[dict], data_root: Path, stride: int, device, *, 
         loader = DataLoader(_dataset(frames, data_root, band_width=band_width, cached=cached), batch_size=batch,
                             shuffle=False, num_workers=workers, pin_memory=torch.device(device).type == 'cuda')
     predictions: dict[int, list[dict]] = {}
-    ignored = 0
+    ignored: dict[int, int] = {}
     model.eval()
     with torch.no_grad():
         for image, indexes in loader:
@@ -661,7 +664,7 @@ def measure(model, frames: list[dict], data_root: Path, stride: int, device, *, 
                 for p in frame_boxes_of(heat[b:b + 1], shape[b:b + 1], stride, band_width, frames[index]['width'],
                                         limit=MAX_DETECTIONS, min_score=0.01):
                     if ignore and _in_ignore(p['box'], ignore):
-                        ignored += 1
+                        ignored[index] = ignored.get(index, 0) + 1
                         continue
                     kept.append(p)
                 predictions[index] = kept
@@ -669,25 +672,32 @@ def measure(model, frames: list[dict], data_root: Path, stride: int, device, *, 
     def car_boxes(found: list[dict]) -> list[dict]:
         return [p for p in found if p['score'] >= CAR_MIN_SCORE][:CAR_MAX_BOXES]
 
-    def scored(select, match: str = 'iou') -> dict[str, Any]:
-        items = []
-        for index, frame in enumerate(frames):
-            chosen = select(predictions.get(index, []))
-            item = score_frame(frame['boxes'], chosen, score_threshold=0.0, iou_threshold=0.5, match=match)
-            item['truth_families'] = list(frame.get('box_families') or [])
-            item['label_basis'] = frame.get('label_basis')
-            items.append(item)
-        return detector_size_metrics(items)
+    def measured(rows) -> dict[str, Any]:
+        def scored(select, match: str = 'iou') -> dict[str, Any]:
+            items = []
+            for index in rows:
+                frame = frames[index]
+                chosen = select(predictions.get(index, []))
+                item = score_frame(frame['boxes'], chosen, score_threshold=0.0, iou_threshold=0.5, match=match)
+                item['truth_families'] = list(frame.get('box_families') or [])
+                item['label_basis'] = frame.get('label_basis')
+                items.append(item)
+            return detector_size_metrics(items)
 
-    return {
-        'by_score_threshold': {str(t): scored(lambda found, t=t: [p for p in found if p['score'] >= t])
-                               for t in SCORE_THRESHOLDS},
-        'by_box_budget': {str(n): scored(lambda found, n=n: found[:n]) for n in BOX_BUDGETS},
-        'car': scored(car_boxes),
-        'car_centre': scored(car_boxes, 'centre'),
-        'ignore_boxes': sum(len(f.get('ignore_boxes') or []) for f in frames),
-        'found_on_ignore_boxes': ignored,
-    }
+        return {
+            'by_score_threshold': {str(t): scored(lambda found, t=t: [p for p in found if p['score'] >= t])
+                                   for t in SCORE_THRESHOLDS},
+            'by_box_budget': {str(n): scored(lambda found, n=n: found[:n]) for n in BOX_BUDGETS},
+            'car': scored(car_boxes),
+            'car_centre': scored(car_boxes, 'centre'),
+            'ignore_boxes': sum(len(frames[index].get('ignore_boxes') or []) for index in rows),
+            'found_on_ignore_boxes': sum(ignored.get(index, 0) for index in rows),
+        }
+
+    whole = measured(range(len(frames)))
+    if clean is not None:
+        whole['clean'] = measured(clean)
+    return whole
 
 
 def car_measure(measured: Any, *, match: str = 'iou') -> dict[str, Any] | None:
@@ -778,6 +788,22 @@ def signnet_start(path: Path, *, widths, stride: int, fuse_kernel: int, band_wid
                                  'mapillary_only': bool(saved.get('mapillary_only')), 'uses_mapillary': uses}
 
 
+def epoch_score(checked: dict[str, Any], speed: bool) -> float:
+    """What an epoch is chosen by, of measure's by_box_budget['5'] on the frames the choice is made on: the recall,
+    and in a Mapillary stage (``speed``) the recall of the speed signs when the frames tell the families."""
+    found = ((checked.get('recall_by_family') or {}).get('speed') or {}).get('recall') if speed else None
+    return checked['recall_iou'] if found is None else found
+
+
+def chosen_boxes(frames: list[dict[str, Any]], speed: bool) -> int:
+    """The reviewed boxes epoch_score's recall counts on ``frames``: all of them, in a Mapillary stage those of the
+    speed signs (start_lineage.choose_on's cases)."""
+    from nnslr_tools.evaluation import family_group
+    if not speed:
+        return sum(len(frame['boxes']) for frame in frames)
+    return sum(family_group(family) == 'speed' for frame in frames for family in frame.get('box_families') or [])
+
+
 def train_signnet(plan: dict[str, Any], data_root: Path, run_dir: Path, *, widths=CAR_WIDTHS,
                   stride: int = CAR_STRIDE, epochs: int = 40, batch: int = 16, learning_rate: float = 3e-3,
                   workers: int = 8, seed: int = 1, band_width: int = CAR_BAND[0], fuse_kernel: int = CAR_FUSE_KERNEL,
@@ -793,6 +819,18 @@ def train_signnet(plan: dict[str, Any], data_root: Path, run_dir: Path, *, width
     signnet_pretrain in those lines and ends with "Mapillary stage complete: <dir>". Its windows have speed signs
     only, so it keeps the epoch with the best validation recall of the speed signs (val_speed_recall in its line):
     its recall over every family, the other signs of our validation included, is low by design.
+
+    With a start, the validation frames a network it descends from trained on do not choose the epoch (#104: every
+    import grows the validation again, so frames of it were train frames for the start or for what the start went on
+    from). start_lineage.account follows the starts back and marks those frames by their annotation ids; the epoch
+    is chosen on the others when they hold start_lineage.CLEAN_FLOOR reviewed boxes or more (chosen_boxes: in a
+    Mapillary stage the boxes of the speed signs, which its epoch is chosen by), the whole validation and the clean
+    frames are both measured (the line's clean_val_recall and clean_val_false_per_frame, in a Mapillary stage
+    clean_val_speed_recall too, with val_chosen when the clean ones choose; the history's clean_validation_*;
+    result.json's ``validation_clean``), and result.json's ``start_lineage`` has the ancestors, the counts and which
+    of the two chose. With too few clean boxes the whole validation chooses as before and both are still measured;
+    with a lineage that cannot be followed it chooses too, and nothing is measured apart. The log and
+    ``start_lineage`` say why. A start whose ancestors trained on none of these frames changes nothing.
 
     The train and validation bands are read once into memory (Resident) before the first epoch, and every batch comes
     from there: only the frames drawn over with an end of limit in an epoch are cut again, on ``workers`` processes,
@@ -838,7 +876,9 @@ def train_signnet(plan: dict[str, Any], data_root: Path, run_dir: Path, *, width
     paintable = {index for index, frame in enumerate(train_frames) if _paintable(frame)}
     painter = _painter(train_frames, data_root, stride, band_width, workers if paintable else 0)
     model = build_signnet(widths, stride, fuse_kernel)
-    start = None
+    # lineage: result.json's start_lineage; clean: the validation frames no ancestor trained on, when some were
+    # (measured apart); on_clean: whether they choose the epoch.
+    start, lineage, clean, on_clean = None, None, None, False
     if init_from is not None:
         weights, start = signnet_start(init_from, widths=widths, stride=stride, fuse_kernel=fuse_kernel,
                                        band_width=band_width)
@@ -846,6 +886,16 @@ def train_signnet(plan: dict[str, Any], data_root: Path, run_dir: Path, *, width
         log(f"{name} starts from {start['run']}" + ("'s Mapillary stage" if start['mapillary_stage'] else '')
             + f": every layer of its epoch {start['epoch']}"
             + ('' if start['split_sha256'] == plan.get('split_sha256') else ', learnt on another split'))
+        lineage, clean = start_lineage.account(
+            start, plan.get('split_sha256'), data_root / 'splits', counted='frames',
+            validation=[frame.get('annotation_ids') or () for frame in validation],
+            test=[frame.get('annotation_ids') or () for frame in test])
+        if clean is not None:
+            on_clean = start_lineage.choose_on(lineage, chosen_boxes([validation[index] for index in clean], pretrain),
+                                               'reviewed speed boxes' if pretrain else 'reviewed boxes')
+        said = start_lineage.words(lineage)
+        if said:
+            log(f'{name} {said}')
     model = model.to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-4)
     steps = len(store) // batch
@@ -874,8 +924,10 @@ def train_signnet(plan: dict[str, Any], data_root: Path, run_dir: Path, *, width
             total += value.item()
             for key in parts:
                 parts[key] += detail[key]
-        checked = measure(model, validation, data_root, stride, device, band_width=band_width,
-                          store=checking)['by_box_budget']['5']
+        checked = measure(model, validation, data_root, stride, device, band_width=band_width, store=checking,
+                          clean=clean)
+        cleaned = checked['clean']['by_box_budget']['5'] if clean is not None else None
+        checked = checked['by_box_budget']['5']
         speed = ((checked.get('recall_by_family') or {}).get('speed') or {}).get('recall')
         history.append({'epoch': epoch, 'loss': total / steps, 'focal': parts['focal'] / steps,
                         'shape': parts['shape'] / steps, 'validation_recall_at_5': checked['recall_iou'],
@@ -883,11 +935,20 @@ def train_signnet(plan: dict[str, Any], data_root: Path, run_dir: Path, *, width
                         'seconds': round(time.monotonic() - started, 1)})
         if pretrain:
             history[-1]['validation_speed_recall_at_5'] = speed
+        chosen = epoch_score(cleaned if on_clean else checked, pretrain)
+        if cleaned is not None:
+            history[-1]['clean_validation_recall_at_5'] = cleaned['recall_iou']
+            history[-1]['clean_validation_false_positives_per_image_at_5'] = cleaned['false_positives_per_image']
+            if pretrain:
+                history[-1]['clean_validation_speed_recall_at_5'] = epoch_score(cleaned, True)
         log(f"{name} epoch {epoch}/{epochs} train_loss {total / steps:.4f} val_recall {checked['recall_iou']:.3f} "
             f"val_false_per_frame {checked['false_positives_per_image']:.2f} "
             + (f"val_speed_recall {speed if speed is not None else checked['recall_iou']:.3f} " if pretrain else '')
+            + ('' if cleaned is None else f"clean_val_recall {cleaned['recall_iou']:.3f} clean_val_false_per_frame "
+               f"{cleaned['false_positives_per_image']:.2f} "
+               + (f"clean_val_speed_recall {epoch_score(cleaned, True):.3f} " if pretrain else '')
+               + (f"val_chosen {chosen:.3f} " if on_clean else ''))
             + f"{history[-1]['seconds']:.0f}s")
-        chosen = speed if pretrain and speed is not None else checked['recall_iou']
         if chosen > best:
             best, best_epoch = chosen, epoch
             torch.save(checkpoint_of(model, plan, widths=widths, stride=stride, fuse_kernel=fuse_kernel,
@@ -895,6 +956,8 @@ def train_signnet(plan: dict[str, Any], data_root: Path, run_dir: Path, *, width
     log(f"{name} measure the best epoch {best_epoch} on validation and test")
     checkpoint = torch.load(run_dir / 'signnet-best.pt', map_location=device, weights_only=True)
     model.load_state_dict(checkpoint['state_dict'])
+    on_validation = measure(model, validation, data_root, stride, device, band_width=band_width, store=checking,
+                            clean=clean)
     result = {
         'task': 'signnet', 'widths': list(widths), 'stride': stride, 'fuse_kernel': fuse_kernel,
         'band': list(band_size(band_width)),
@@ -909,9 +972,15 @@ def train_signnet(plan: dict[str, Any], data_root: Path, run_dir: Path, *, width
         'synthetic_end_of_limit': {**synthetic_signs.summary(), 'paintable_train_boxes': paintable_train_boxes(
             train_frames)},
         'history': history,
-        'validation': measure(model, validation, data_root, stride, device, band_width=band_width, store=checking),
+        'validation': {key: value for key, value in on_validation.items() if key != 'clean'},
         'test': measure(model, test, data_root, stride, device, workers=workers, band_width=band_width, cached=cached),
     }
+    if lineage is not None:
+        # What the start descends from, the validation frames those networks trained on, and which frames chose the
+        # epoch (start_lineage.account); validation_clean: the measures on the frames none of them trained on.
+        result['start_lineage'] = lineage
+        if clean is not None:
+            result['validation_clean'] = on_validation['clean']
     (run_dir / 'result.json').write_text(json.dumps(result, indent=2, sort_keys=True) + '\n', encoding='utf-8')
     log(f"Mapillary stage complete: {run_dir}" if pretrain else f"SignNet complete: {run_dir}")
     return result
