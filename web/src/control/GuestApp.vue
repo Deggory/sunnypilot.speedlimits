@@ -31,7 +31,7 @@ const kinds = computed(() => mine.value?.drives.find((drive) => drive.route === 
 const minutesOf = (minutes: number | null): string => minutes === null ? '' : plural(minutes, 'minute');
 async function complete(drive: GivenDrive): Promise<void> {
   const ok = await askConfirm({title: 'Review completed?', action: 'Completed',
-    text: 'Your work on this drive is collected and the drive leaves your list within a few minutes.'});
+    text: 'Your work on this drive is handed in and the drive leaves your list.'});
   if (!ok) return;
   try {
     mine.value = await post<MyWork>('/api/reviewer/done', {route: drive.route});
@@ -62,9 +62,7 @@ async function complete(drive: GivenDrive): Promise<void> {
             </div>
             <div class="gr-links">
               <a v-for="item in drive.work" :key="item.kind" class="btn small" :href="item.href">{{ item.label }}</a>
-              <span v-if="drive.completed" class="gr-done">Completed</span>
-              <button v-else-if="mine.can_complete" type="button" class="btn small primary" @click="complete(drive)">Review
-                completed</button>
+              <button type="button" class="btn small primary" @click="complete(drive)">Review completed</button>
             </div>
           </li>
         </ul>

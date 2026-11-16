@@ -52,8 +52,7 @@ from nnslr_tools.preannotate import PreannotationError, _inside, resolve_data_ro
 from nnslr_tools.review_auth import SESSION_MAX_SECONDS, AdminAuth, auth_dir
 # [site-login] - END
 # [guest-reviewers] - START
-from nnslr_tools import review_box
-from nnslr_tools.review_access import (GUEST_PREFIX, KIND_KEYS, NOT_ASSIGNED, REVIEW_BOX_ENV, SIGN_OUT_ADDRESS, WORK_KINDS, WORK_LINKS, Assignments,
+from nnslr_tools.review_access import (GUEST_PREFIX, KIND_KEYS, NOT_ASSIGNED, SIGN_OUT_ADDRESS, WORK_KINDS, WORK_LINKS, Assignments,
                                        GuestAccess, guest_rule, scrubbed)
 # [guest-reviewers] - END
 from nnslr_tools.pages import (CONTROL_TABS, GUEST_HOME, OLD_ADDRESSES, render_account, render_control, render_guest,
@@ -466,19 +465,16 @@ class ReviewApp(ReviewService):
     def guest_work(self, name: str) -> dict:
         """The list of a reviewer: their drives, the latest first, each with the pages of the work given on it."""
         drives = []
-        done = self.assignments.done_of(name)
         for route, kinds in self.assignments.work_of(name).items():
             drive = drive_of(self.root, route)
             labels = dict(WORK_KINDS)
             drives.append({'route': route, 'when': drive['when'], 'start': drive['start'], 'minutes': drive['minutes'],
-                           'completed': all(kind in done.get(route, {}) for kind in kinds),
                            # The signs on the Signs side of Speed review; a drive it cannot show keeps its page.
                            'work': [{'kind': kind, 'label': labels[kind],
                                      'href': self.signs_url(route) if kind == 'signs' else WORK_LINKS[kind].format(route=route)}
                                     for kind in kinds]})
         drives.sort(key=lambda item: (item['start'] or '', item['route']), reverse=True)
-        return {'ok': True, 'user': name, 'read_only': not self.panel.actions_enabled, 'drives': drives,
-                'can_complete': os.environ.get(REVIEW_BOX_ENV) == '1'}
+        return {'ok': True, 'user': name, 'read_only': not self.panel.actions_enabled, 'drives': drives}
 
     def assignable_drives(self) -> list[dict]:
         """Every drive with the work it can give today, the latest first: Sign review needs its report, Sign distance
@@ -943,8 +939,7 @@ def make_handler(app: ReviewApp):
             if path == '/api/reviewers':
                 self._json(200, {'ok': True, 'open': app.access.enabled, 'can_edit': self._can_use_ai(),
                                  'kinds': [{'key': key, 'label': label} for key, label in WORK_KINDS],
-                                 **app.assignments.view(), 'drives': app.assignable_drives(),
-                                 'box': review_box.view(app.root)})
+                                 **app.assignments.view(), 'drives': app.assignable_drives()})
                 return
             if path in REVIEWER_POSTS:
                 self._problem(405, 'method_not_allowed', 'Use POST.', True)

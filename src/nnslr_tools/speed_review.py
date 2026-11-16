@@ -99,7 +99,7 @@ FIRST_ROAD_KINDS = (('narrow', 'Narrow road'), ('country', 'Country road'), ('gr
 MAX_KIND_LABEL = 40
 # The names a kind of road may not take: the page's own roadworks ("works", its taps go to speed_works), a name every
 # object of the page has already ("constructor"), and the fields a guest's copy drops as places
-# (review_access.PLACE_FIELDS: its "checked to here" would be lost on the box).
+# (review_access.PLACE_FIELDS: its "checked to here" would be lost in the answers to a guest).
 RESERVED_KINDS = frozenset({'works', 'constructor', 'gps', 'latitude', 'longitude', 'lat', 'lon', 'lng', 'road_name',
                             'title', 'way_id'})
 # The labels a kind may not take: the roadworks' own, as the page names them.

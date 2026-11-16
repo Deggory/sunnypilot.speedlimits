@@ -350,6 +350,39 @@ def test_work_taken_back_closes_at_once_and_a_person_removed_has_nothing(outside
     assert json_of(server.request('GET', '/api/reviewer/work', headers=proof())[2])['drives'] == []
 
 
+def test_review_completed_hands_the_drive_back_at_once_and_the_administrator_sees_it(outside):
+    server, _ = outside
+    give_all(server)
+    admin = sign_in(server)
+    # Not a drive of theirs, and not a drive at all.
+    assert server.request('POST', '/api/reviewer/done', body={'route': OTHER_ROUTE}, headers=proof())[0] == 403
+    assert server.request('POST', '/api/reviewer/done', body={}, headers=proof())[0] == 403
+    status, _, body = server.request('POST', '/api/reviewer/done', body={'route': ROUTE}, headers=proof())
+    assert status == 200 and json_of(body)['drives'] == []
+    assert server.request('GET', f'/route/{ROUTE}/', headers=proof())[0] == 403
+    assert server.request('POST', '/api/reviewer/done', body={'route': ROUTE}, headers=proof())[0] == 403
+    answer = json_of(server.request('GET', '/api/reviewers', headers=admin)[2])
+    assert answer['work']['ana'] == {}
+    assert [(item['route'], item['kind']) for item in answer['completed']['ana']] == [
+        (ROUTE, 'signs'), (ROUTE, 'distance'), (ROUTE, 'speed')]
+    assert all(re.fullmatch(r'\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ', item['at']) for item in answer['completed']['ana'])
+    # Given again, a kind is no longer completed; the others stay said.
+    assign = {'user': 'ana', 'route': ROUTE, 'kind': 'signs', 'on': True}
+    answer = json_of(server.request('POST', '/api/reviewers/assign', body=assign, headers=admin)[2])
+    assert answer['work']['ana'] == {ROUTE: ['signs']}
+    assert [item['kind'] for item in answer['completed']['ana']] == ['distance', 'speed']
+    assert server.request('GET', f'/route/{ROUTE}/', headers=proof())[0] == 200
+    # A person removed takes what they completed off the page.
+    answer = json_of(server.request('POST', '/api/reviewers/people/remove', body={'name': 'ana'}, headers=admin)[2])
+    assert answer['completed'] == {}
+
+
+def test_only_a_reviewer_says_completed(outside):
+    server, _ = outside
+    assert server.request('POST', '/api/reviewer/done', body={'route': ROUTE}, headers=sign_in(server))[0] in (403, 404, 405)
+    assert server.app.assignments.view()['work'] == {'ana': {ROUTE: ['signs']}}
+
+
 def test_my_list_holds_my_drives_by_date_with_their_pages(outside, tmp_path):
     server, _ = outside
     real_previews(tmp_path)
@@ -558,7 +591,8 @@ def test_the_administrator_sees_people_work_and_drives(outside):
     answer = json_of(server.request('GET', '/api/reviewers', headers=sign_in(server))[2])
     assert answer['open'] is True and answer['can_edit'] is True
     assert [person['name'] for person in answer['people']] == ['ana']
-    assert answer['work'] == {'ana': {ROUTE: ['signs']}}
+    assert answer['work'] == {'ana': {ROUTE: ['signs']}} and answer['completed'] == {}
+    assert 'box' not in answer
     assert {drive['route'] for drive in answer['drives']} >= {ROUTE, OTHER_ROUTE}
     assert 'signs' in next(drive for drive in answer['drives'] if drive['route'] == ROUTE)['kinds']
     assert [kind['key'] for kind in answer['kinds']] == ['signs', 'distance', 'speed']

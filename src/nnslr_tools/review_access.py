@@ -19,6 +19,9 @@ someone adds it here. A row with kinds holds a drive: the server checks, on ever
 is given to this person (Assignments). The answers lose the places of the drive (scrubbed): the positions, the names of
 roads and towns, the paths of this server.
 
+"Review completed" of a guest's list hands a drive back: the work on it is taken back at once, and the administrator's
+page keeps who completed what and when (Assignments.complete).
+
 Files (<data root>/web/auth/, next to the administrator's): assignments.json, 600, written all at once. Standard library
 only.
 """
@@ -39,8 +42,6 @@ from nnslr_tools.review_db import ReviewRejected
 PROXY_IPS_ENV = 'NNSLR_PROXY_IPS'
 PROXY_SECRET_ENV = 'NNSLR_PROXY_SECRET'
 PUBLIC_HOSTS_ENV = 'NNSLR_PUBLIC_HOSTS'
-# Set on the machine of the outside reviewers: only there a person can say a review is completed.
-REVIEW_BOX_ENV = 'NNSLR_REVIEW_BOX'
 REVIEWER_GROUP_ENV = 'NNSLR_REVIEWER_GROUP'
 DEFAULT_REVIEWER_GROUP = 'reviewers'
 PROXY_SECRET_HEADER = 'X-Speedlimits-Proxy-Secret'
@@ -195,7 +196,7 @@ class Assignments:
     def _read(self) -> dict:
         text = read_private(self.path)
         if not text:
-            return {'people': {}, 'work': {}}
+            return {'people': {}, 'work': {}, 'done': {}}
         try:
             data = json.loads(text)
         except ValueError:
@@ -208,17 +209,27 @@ class Assignments:
         work = {name: {route: [kind for kind in kinds if kind in KIND_KEYS] for route, kinds in drives.items()}
                 for name, drives in data['work'].items()}
         data['work'] = {name: {route: kinds for route, kinds in drives.items() if kinds} for name, drives in work.items()}
+        # What people called completed: by person, by drive, by kind, when. Anything else there is left out.
+        done = data.get('done') if isinstance(data.get('done'), dict) else {}
+        data['done'] = {name: {route: {kind: at for kind, at in kinds.items() if kind in KIND_KEYS and isinstance(at, str)}
+                               for route, kinds in drives.items() if isinstance(kinds, dict)}
+                        for name, drives in done.items() if isinstance(drives, dict)}
         return data
 
     def _write(self, data: dict) -> None:
         write_private(self.path, json.dumps(data, ensure_ascii=False, indent=1, sort_keys=True) + '\n')
 
     def view(self) -> dict:
-        """Everything, for the page of the administrator: {'people': [{'name', 'added', 'last_seen'}], 'work'}."""
+        """Everything, for the page of the administrator: {'people': [{'name', 'added', 'last_seen'}], 'work',
+        'completed': by person, [{'route', 'kind', 'at'}], the latest first}."""
         data = self._read()
         people = [{'name': name, 'added': item.get('added'), 'last_seen': item.get('last_seen')}
                   for name, item in sorted(data['people'].items(), key=lambda pair: pair[0].lower())]
-        return {'people': people, 'work': data['work']}
+        # The latest first; the kinds of one moment in the order of the pages.
+        completed = {name: sorted(({'route': route, 'kind': kind, 'at': kinds[kind]} for route, kinds in sorted(drives.items())
+                                   for kind in KIND_KEYS if kind in kinds), key=lambda item: item['at'], reverse=True)
+                     for name, drives in data['done'].items() if name in data['people']}
+        return {'people': people, 'work': data['work'], 'completed': {name: items for name, items in completed.items() if items}}
 
     def add_person(self, name) -> None:
         check_name(name)
@@ -234,6 +245,7 @@ class Assignments:
             data = self._read()
             data['people'].pop(name, None)
             data['work'].pop(name, None)
+            data['done'].pop(name, None)
             self._write(data)
             self._seen.pop(name, None)
 
@@ -253,6 +265,8 @@ class Assignments:
             kinds = set(drives.get(route, ()))
             if on:
                 kinds.add(kind)
+                # Given again: it is no longer completed.
+                data['done'].get(name, {}).get(route, {}).pop(kind, None)
             else:
                 kinds.discard(kind)
             if kinds:
@@ -262,59 +276,19 @@ class Assignments:
             self._write(data)
 
     def complete(self, name, route) -> None:
-        """A person says their work on a drive is finished. It stays theirs until a copy from the review box has taken the
-        results (nnslr_tools.review_box), which then takes it back."""
+        """A person says their work on a drive is finished: all of it on that drive goes back at once, and the
+        administrator's page keeps who completed what and when (view)."""
         with self._lock:
             data = self._read()
             kinds = data['work'].get(name, {}).get(route) if isinstance(route, str) else None
             if not kinds:
                 raise ReviewRejected(403, 'not_assigned', NOT_ASSIGNED)
-            done = data.setdefault('done', {}).setdefault(name, {}).setdefault(route, {})
+            done = data['done'].setdefault(name, {}).setdefault(route, {})
+            now = _now()
             for kind in kinds:
-                done.setdefault(kind, _now())
+                done[kind] = now
+            del data['work'][name][route]
             self._write(data)
-
-    def done_of(self, name: str) -> dict:
-        """By drive, by kind, when a person called it finished."""
-        return self._read().get('done', {}).get(name, {})
-
-    def visits(self) -> dict:
-        """What the review box tells this server: who came, when, and what they called finished."""
-        data = self._read()
-        return {'people': data['people'], 'done': data.get('done', {})}
-
-    def replace_work(self, names: list[str], work: dict) -> None:
-        """On the review box: the people and the work this server gives. A visit keeps its time, and a finished work
-        stays said only while it is still given."""
-        with self._lock:
-            data = self._read()
-            people = data['people']
-            data['people'] = {name: people.get(name, {'added': _now(), 'last_seen': None}) for name in names}
-            data['work'] = work
-            data['done'] = {name: {route: {kind: at for kind, at in kinds.items() if kind in work.get(name, {}).get(route, ())}
-                                   for route, kinds in drives.items()}
-                            for name, drives in data.get('done', {}).items()}
-            self._write(data)
-
-    def take_visits(self, visits: dict, known: list[str]) -> None:
-        """On this server: the last visits seen on the review box, and the people new there. Known: the people the box
-        was last told, so that someone removed here is not brought back by the box."""
-        with self._lock:
-            data = self._read()
-            changed = False
-            for name, item in visits.items():
-                last = item.get('last_seen') if isinstance(item, dict) else None
-                if not isinstance(last, str) or not re.fullmatch(r'[0-9TZ:+.-]{10,35}', last):
-                    last = None
-                if name in data['people']:
-                    if last and last > (data['people'][name].get('last_seen') or ''):
-                        data['people'][name]['last_seen'] = last
-                        changed = True
-                elif name not in known and USERNAME_RE.fullmatch(name):
-                    data['people'][name] = {'added': _now(), 'last_seen': last}
-                    changed = True
-            if changed:
-                self._write(data)
 
     def work_of(self, name: str) -> dict:
         """The drives of a person, with the kinds of each."""

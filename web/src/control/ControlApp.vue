@@ -109,7 +109,7 @@ watch(busyPaths, markBusy);
     <SignDistanceTab v-else-if="currentTab === 'signdistance'" :read-only="status ? !status.actions_enabled : null"/>
     <CrossingsTab v-else-if="currentTab === 'crossings'" :read-only="status ? !status.actions_enabled : null"/>
     <PublishTab v-else-if="currentTab === 'publish'" :status="status" @run="run" @stop="stop" @details="details"/>
-    <ReviewersTab v-else-if="currentTab === 'reviewers'" :status="status" @run="run" @stop="stop" @details="details"/>
+    <ReviewersTab v-else-if="currentTab === 'reviewers'"/>
     <ModelsTab v-else :status="status" @run="run" @stop="stop" @details="details"/>
   </main>
   <LogSheet :job="shownJob" @close="shownId = null" @stop="stop"/>

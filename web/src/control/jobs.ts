@@ -17,7 +17,7 @@ export const ACTION_GROUP: Record<ActionName, string> = {
   measure_ai_reviewer: 'ai',
   networks_prepare: 'publish', networks_publish: 'publish', road_types: 'prepare', send_to_car: 'publish',
   try_on_comma: 'publish', comma_restore: 'publish', mapillary_locations: 'mapillary', mapillary_windows: 'mapillary',
-  review_box: 'review_box', road_labeler_train: 'train', road_labeler_predict: 'train',
+  road_labeler_train: 'train', road_labeler_predict: 'train',
   box_fit_train: 'box_fit', simulate: 'train', networks_github_save: 'backup', networks_github_restore: 'restore',
 };
 
@@ -28,7 +28,7 @@ export const ACTION_ICON: Record<ActionName, IconName> = {
   regression: 'train', update: 'update', ai_review: 'ai',
   measure_ai_reviewer: 'ai', networks_prepare: 'package', networks_publish: 'upload', road_types: 'routes', send_to_car: 'upload',
   try_on_comma: 'upload', comma_restore: 'resume', mapillary_locations: 'routes', mapillary_windows: 'prepare',
-  review_box: 'upload', road_labeler_train: 'train', road_labeler_predict: 'routes',
+  road_labeler_train: 'train', road_labeler_predict: 'routes',
   box_fit_train: 'train', simulate: 'resume', networks_github_save: 'upload', networks_github_restore: 'download',
 };
 
@@ -38,7 +38,7 @@ export const ACTION_ICON: Record<ActionName, IconName> = {
  */
 export const ACTION_TAB: Record<ActionName, string | null> = {
   fetch: '/prepare', prepare: '/prepare', prepare_again: '/prepare', setup_vlm: '/prepare',
-  dataset: '/dataset', road_types: '/prepare', review_box: '/reviewers',
+  dataset: '/dataset', road_types: '/prepare',
   train: '/train', train_continue: '/train', train_resume: '/train', train_classifier: '/train', train_brain: '/train',
   train_users: '/train', train_cutter: '/train', train_decider: '/models', ai_review: '/train', mapillary_locations: '/train', mapillary_windows: '/train',
   measure_proposer: '/evaluate', measure_ai_reviewer: '/evaluate', regression: '/drive', simulate: '/drive',

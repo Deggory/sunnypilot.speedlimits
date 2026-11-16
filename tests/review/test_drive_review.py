@@ -405,6 +405,32 @@ def test_the_timeline_says_why_the_vision_limit_is_what_it_is(tmp_path):
     assert at('vis_reason', 170) is None and at('vis_raw_class', 170) is None
 
 
+def test_the_timeline_never_sends_another_forks_directions_as_the_road_type(tmp_path, monkeypatch):
+    comma_drive(tmp_path)
+    fake_video(tmp_path)
+    store = drive_review.store_for(tmp_path)
+    store.scan(ROUTE)
+    merged_of, episodes_of = drive_review.DriveReviewStore.merged, drive_review.DriveReviewStore.episodes
+
+    def merged(self, route):
+        data = merged_of(self, route)
+        t0 = data['t0']
+        data['series']['vis_road'] = [(t0, 'town'), (t0 + 5 * 10 ** 9, 'Turn left onto Butts Road'), (t0 + 9 * 10 ** 9, '')]
+        return data
+
+    def episodes(self, route, **options):
+        found = episodes_of(self, route, **options)
+        assert found, 'the made-up drive has episodes'
+        return [{**found[0], 'before': {**(found[0].get('before') or {}), 'road_type': 'Take Exit 208 MO 19'}},
+                {**found[0], 'before': {**(found[0].get('before') or {}), 'road_type': 'motorway'}}]
+    monkeypatch.setattr(drive_review.DriveReviewStore, 'merged', merged)
+    monkeypatch.setattr(drive_review.DriveReviewStore, 'episodes', episodes)
+    view = drive_review.timeline(store, ROUTE, None)
+    assert [value for _s, value in view['series']['vis_road']] == ['town', '', '']
+    assert [episode['before']['road_type'] for episode in view['episodes']] == [None, 'motorway']
+    assert 'Butts' not in json.dumps(view) and 'Exit 208' not in json.dumps(view)
+
+
 def test_the_car_ahead_has_numbers_only_while_it_is_there(tmp_path):
     comma_drive(tmp_path, segments=(0,))
     store = drive_review.store_for(tmp_path)

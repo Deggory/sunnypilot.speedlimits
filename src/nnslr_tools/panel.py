@@ -449,8 +449,6 @@ ACTIONS = {
     # The map's limit of every frame of the prepared drives, from their GPS and the map, read offline (Data › Speed
     # review); in the prepare group: it reads the reports a preparation writes.
     'road_types': {'label': 'Read the map', 'group': 'prepare', 'command': [ROAD_TYPES_SCRIPT]},
-    # One round with the machine of the outside reviewers (nnslr_tools.review_box); a timer does the same every 5 minutes.
-    'review_box': {'label': 'Update the review machine', 'group': 'review_box', 'command': ['helpers/review_box.sh']},
     # Where each Mapillary photo was taken, for the region of "Train the classifier": network only, a few minutes.
     'mapillary_locations': {'label': 'Locate the Mapillary photos', 'group': 'mapillary', 'command': [LOCATIONS_SCRIPT]},
     # The Mapillary photos cut into windows for "Train the cutter": the CPU for a while, the share read once; the
@@ -587,7 +585,7 @@ RUNNING_NAMES = {'fetch': 'a download from the comma', 'prepare': 'a preparation
                  'simulate': 'a replay of a drive',
                  'road_labeler_train': 'a road labeler training', 'road_labeler_predict': 'a road labeler run',
                  'box_fit_train': 'a training of Fit box',
-                 'update': 'a code update', 'review_box': 'a copy with the review machine',
+                 'update': 'a code update',
                  'networks_prepare': 'the preparation of a package', 'networks_publish': 'a publication',
                  'send_to_car': 'a publication to the car', 'try_on_comma': 'a trial on the comma',
                  'comma_restore': "a return to the build's networks",
@@ -625,10 +623,9 @@ ACTIVITY_NAMES = {'download from the comma': 'a download from the comma', 'prepa
 # or write: never beside them.
 CONFLICTS = {'fetch': ('prepare', 'update'), 'prepare': ('fetch', 'update', 'ai', 'restore'),
              'train': ('update', 'restore'),
-             'update': ('fetch', 'prepare', 'train', 'ai', 'publish', 'mapillary', 'review_box', 'box_fit', 'backup',
-                        'restore'),
+             'update': ('fetch', 'prepare', 'train', 'ai', 'publish', 'mapillary', 'box_fit', 'backup', 'restore'),
              'ai': ('prepare', 'update'), 'publish': ('update', 'restore'), 'mapillary': ('update',),
-             'review_box': ('update',), 'box_fit': ('update', 'backup', 'restore'),
+             'box_fit': ('update', 'backup', 'restore'),
              'backup': ('update', 'restore', 'box_fit'),
              'restore': ('backup', 'update', 'train', 'publish', 'prepare', 'box_fit')}
 # The two V100s (issue #29): one GPU job per card, so two trainings can run at once. The groups whose actions may run

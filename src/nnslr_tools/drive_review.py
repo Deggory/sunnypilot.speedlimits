@@ -604,6 +604,14 @@ TIMELINE_SERIES = ('v_ego', 'v_cruise', 'cruise_speed', 'cruise_enabled', 'v_tar
                    'vis_sign_dist', 'vis_sign_size', 'map_valid', 'map_limit', 'map_ahead', 'map_ahead_dist', 'road_name')
 
 
+def _road_type(value):
+    """The comma's road type as the pages show it: one of ours, or none. Another fork's build writes its navigation's
+    instruction in that field ("Turn left onto ..."), with the names of the roads: it is no road type, and a reviewer
+    from outside must not read where a drive went."""
+    from nnslr_tools.road_types import ROAD_TYPES
+    return value if not isinstance(value, str) or value in ROAD_TYPES else ''
+
+
 def timeline(store: DriveReviewStore, route: str, video: dict | None) -> dict:
     """Everything the episode view draws, on seconds from the drive's first video frame (t0): the comma's series,
     its signs and events, the sync of each segment with the video and the episodes."""
@@ -619,7 +627,7 @@ def timeline(store: DriveReviewStore, route: str, video: dict | None) -> dict:
     for name in TIMELINE_SERIES:
         points = merged['series'].get(name)
         if points:
-            series[name] = [[_seconds(t, t0), value] for t, value in points]
+            series[name] = [[_seconds(t, t0), _road_type(value) if name == 'vis_road' else value] for t, value in points]
     events = []
     for event in merged['events']:
         if event[1] == 'sign':
@@ -642,6 +650,9 @@ def timeline(store: DriveReviewStore, route: str, video: dict | None) -> dict:
     for episode in store.episodes(route, active=False):
         if episode['channel'] == 'spot_check':
             continue
+        before = episode.get('before')
+        if isinstance(before, dict) and before.get('road_type'):
+            episode = {**episode, 'before': {**before, 'road_type': _road_type(before['road_type']) or None}}
         episodes.append({**episode, 'start_s': _seconds(episode['start_ns'], t0),
                          'end_s': _seconds(episode['end_ns'], t0), 'anchor_s': _seconds(episode['anchor_ns'], t0)})
     return {'route': route, 'scan': state, 't0_ns': t0, 'span_s': [0, _seconds(merged['span'][1], t0)],
