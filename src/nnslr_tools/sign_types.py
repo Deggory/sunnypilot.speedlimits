@@ -5,7 +5,8 @@ Some give a limit without a number (town entry, motorway, expressway), some carr
 speed (weight, height, width, minimum speed): the model has to know them apart from the speed signs.
 Direction signs say where they point; a green one (a board with places or an arrow: in Switzerland the way to a
 motorway or an expressway) is ``motorway_direction`` whatever its arrow, a hint that a motorway is near for the
-road-type network. The motorway sign itself is ``motorway_start``: the green square with the motorway pictogram
+road-type network. So is a blue board with the motorway's green inset (places on green and the motorway pictogram, often
+with the metres to the junction: "250 m" goes in the plate's Distance), before the motorway and on it, gantries too. The motorway sign itself is ``motorway_start``: the green square with the motorway pictogram
 alone, no places and no arrow. ``motorway_exit`` is the sign at the gore of a motorway or expressway exit (the blue arrow up to the right, "Ausfahrt"): ours when the car takes that exit, another road when it stays on. ``no_vehicles`` is a round ban with a red ring and a white disc, empty or
 with pictograms (motor vehicles, motorcycles, lorries, bicycles...): the sign that looks most like a speed limit.
 A traffic light is a kind too, one for what is lit in the picture: ``traffic_light_red`` (red, also red with amber),
