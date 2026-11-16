@@ -763,3 +763,30 @@ def test_no_more_than_max_decodes_ffmpeg_at_once(drive, monkeypatch):
     for thread in threads:
         thread.join()
     assert video_frames.settle() and most[0] == 1 and cached(root) == list(range(0, 60))
+
+
+def test_a_frame_given_has_the_next_gops_decoded_ahead_and_the_minutes_index_kept_on_disk(drive, monkeypatch):
+    """Fast steps outran one GOP decoded ahead: a frame given has the next AHEAD_GOPS GOPs decoded, and stepping back the
+    ones before. The index of a minute (ffprobe over the whole file) is kept on disk, so a server started again does not
+    read it again."""
+    root, video, _rows, _server = drive
+    started = []
+    real = video_frames._decode
+    monkeypatch.setattr(video_frames, '_decode', lambda *args, **kwargs: started.append(args[3]) or real(*args, **kwargs))
+    video_frames.prune(root, budget=0)
+    assert video_frames.preview(root, ROUTE, 0, 12).is_file() and video_frames.settle()
+    started.clear()
+    video_frames.read_ahead(root, ROUTE, 0, 12)
+    assert video_frames.settle()
+    assert sorted(started) == [20, 40] and cached(root) == list(range(60))
+    # Stepping back from 45 to 44: the GOPs before 40 are in the cache already, none is decoded again.
+    video_frames.read_ahead(root, ROUTE, 0, 45)
+    started.clear()
+    video_frames.read_ahead(root, ROUTE, 0, 44)
+    assert video_frames.settle() and started == []
+    kept = video_frames._index_file(str(video))
+    assert kept is not None and kept.is_file()
+    probed = []
+    monkeypatch.setattr(video_frames, '_probe_index', lambda path: probed.append(path))
+    video_frames._index.cache_clear()
+    assert video_frames.frame_count(video) == 60 and probed == []

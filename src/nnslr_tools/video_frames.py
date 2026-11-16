@@ -20,6 +20,7 @@ Only the camera: no map, no logs.
 from __future__ import annotations
 
 import bisect
+import hashlib
 import json
 import os
 import shutil
@@ -47,14 +48,20 @@ PRUNE_TO = 0.9
 POLL_S = 0.005
 # The niceness of a GOP decoded ahead, before any page asks for it (the server's requests run at 0, the trainings at 10).
 AHEAD_NICE = 5
+# GOPs decoded ahead in the direction of the steps, and how many are decoded at once. One GOP at a time, one ahead, was
+# outrun by fast steps (Shift+arrow is a second, two thirds of a 30-frame GOP): a GOP at 2688 x 1520 takes about 0.8 s and
+# more ffmpeg threads do not shorten it, its frames each waiting for the one before (0.86 s with 4, 0.88 s with 16 on
+# CT 131's EPYC, 16 Nov 2026); GOPs side by side do.
+AHEAD_GOPS = 3
+AHEAD_WORKERS = 3
 # GOPs waiting to be decoded ahead: the newest first, the oldest forgotten.
-AHEAD_KEPT = 4
+AHEAD_KEPT = 8
 # ffmpeg's JPEG quality (2 best .. 31): about the quality 92 of the report's previews.
 JPEG_QUALITY = '3'
 # ffmpeg processes decoding at once, and the threads of each: one decode of a GOP at 2688 x 1520 takes about 700 MB with
 # ffmpeg's own threads (one per core), 450 MB with 4, as fast. Without a limit a page playing or scrubbing started 55 at
-# once and the container ran out of memory (#60).
-MAX_DECODES = 4
+# once and the container ran out of memory (#60). AHEAD_WORKERS of them may be decodes ahead: the rest are a page's.
+MAX_DECODES = 6
 DECODE_THREADS = '4'
 _decode_slots = threading.BoundedSemaphore(MAX_DECODES)
 # The parameter sets of fcamera.hevc are at its start, before the first slice: never more than this.
@@ -127,11 +134,46 @@ def _rows(path: Path) -> list[dict]:
     return [json.loads(line) for line in text.splitlines() if line.strip()]
 
 
+INDEX_DIR = 'index'
+
+
+def _index_file(path: str) -> Path | None:
+    """Where the index of a drive's video is kept (derived/video_cache/index/), the video being
+    <root>/raw/routes/<route>/<segment>/<name>.hevc; None for a video elsewhere."""
+    video = Path(path)
+    if len(video.parents) < 5 or video.parents[2].name != 'routes' or video.parents[3].name != 'raw':
+        return None
+    name = hashlib.sha1(str(video).encode()).hexdigest()[:20] + '.json'
+    return video.parents[4] / CACHE_DIR / INDEX_DIR / name
+
+
 @lru_cache(maxsize=512)
 def _index(path: str, mtime_ns: int, size: int) -> tuple[tuple[int, ...], tuple[int, ...], bytes]:
     """(byte offset of every packet, decoded indices of the keyframes, the parameter sets) of a raw HEVC video, whose
-    packets are its frames in decoded order (no B-frames: the comma's encoder never makes them)."""
-    del mtime_ns, size
+    packets are its frames in decoded order (no B-frames: the comma's encoder never makes them). Kept on disk too
+    (_index_file): ffprobe reads the whole minute, about 0.5 s at 2688 x 1520, which the first frame shown of every
+    minute waited for again after each start of the server."""
+    kept = _index_file(path)
+    try:
+        saved = json.loads(kept.read_text()) if kept is not None else None
+        if saved and saved.get('path') == path and saved.get('mtime_ns') == mtime_ns and saved.get('size') == size:
+            return tuple(saved['offsets']), tuple(saved['keys']), bytes.fromhex(saved['header'])
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    found = _probe_index(path)
+    if kept is not None:
+        try:
+            kept.parent.mkdir(parents=True, exist_ok=True)
+            spare = kept.with_name('.' + kept.name + '-' + uuid.uuid4().hex[:8])
+            spare.write_text(json.dumps({'path': path, 'mtime_ns': mtime_ns, 'size': size, 'offsets': found[0],
+                                         'keys': found[1], 'header': found[2].hex()}))
+            spare.replace(kept)
+        except OSError:
+            pass
+    return found
+
+
+def _probe_index(path: str) -> tuple[tuple[int, ...], tuple[int, ...], bytes]:
     probe = subprocess.run(['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries',
                             'packet=pos,flags:stream=has_b_frames', '-of', 'json', path],
                            capture_output=True, text=True, check=False)
@@ -412,21 +454,24 @@ def gop_started(root: Path, route: str, segment: int, decoded: int, *, wide: boo
     return first, last
 
 
-# The GOPs to decode ahead, by (cache folder, first frame), the newest last; one decoded at a time.
+# The GOPs to decode ahead, by (cache folder, first frame), the newest last; AHEAD_WORKERS decoded at a time.
 _ahead: dict[tuple[str, int], tuple] = {}
 _ahead_ready = threading.Condition()
-_ahead_state = {'thread': None, 'busy': False}
+_ahead_state = {'workers': 0, 'busy': 0}
+# The videos whose index is being read ahead, or was (index_of keeps it): the minutes either side of a frame given.
+_indexed: set[str] = set()
 # The last frame given of each video (its cache folder): a frame before it is a step back.
 _last_given: dict[str, int] = {}
 LAST_GIVEN_KEPT = 64
 
 
 def read_ahead(root: Path, route: str, segment: int, decoded: int, *, wide: bool = False) -> None:
-    """After a page was given a frame: the next GOP of its video decoded in the background (niced), and the one before
-    while the frame is in the first third of its GOP or the page steps back (a frame before the last one given of the
-    video), so that a step into either finds its frames ready: stepping back, the GOP before had only the first third of
-    a GOP (6 frames) to be decoded in and the step waited for it. The GOP in the direction of the steps is decoded
-    first. Only GOPs the cache does not have; nothing is waited for."""
+    """After a page was given a frame: the next AHEAD_GOPS GOPs of its video decoded in the background (niced), and the
+    one before while the frame is in the first third of its GOP; stepping back (a frame before the last one given of the
+    video), the AHEAD_GOPS GOPs before it and the one after. So a step into either finds its frames ready: stepping back,
+    the GOP before had only the first third of a GOP (6 frames) to be decoded in and the step waited for it. The GOPs in
+    the direction of the steps are decoded first, the nearest first, AHEAD_WORKERS at once. The index of the minutes
+    either side is read too. Only GOPs the cache does not have; nothing is waited for."""
     root = Path(root)
     try:
         video = wide_video_of(root, route, segment) if wide else video_of(root, route, segment)
@@ -441,12 +486,16 @@ def read_ahead(root: Path, route: str, segment: int, decoded: int, *, wide: bool
         while len(_last_given) > LAST_GIVEN_KEPT:
             del _last_given[next(iter(_last_given))]
     back = before is not None and decoded < before
-    # The newest queued is decoded first (_ahead_loop): the GOP the steps go to last.
-    wanted = []
-    if last + 1 < count:
-        wanted.append(gop_of(video, last + 1))
-    if first > 0 and (back or decoded - first < (last - first + 1) / 3):
-        wanted.insert(len(wanted) if back else 0, gop_of(video, first - 1))
+    after, earlier = [], []
+    while (after[-1][1] if after else last) + 1 < count and len(after) < (1 if back else AHEAD_GOPS):
+        after.append(gop_of(video, (after[-1][1] if after else last) + 1))
+    while (earlier[-1][0] if earlier else first) > 0 and len(earlier) < (
+            AHEAD_GOPS if back else 1 if decoded - first < (last - first + 1) / 3 else 0):
+        earlier.append(gop_of(video, (earlier[-1][0] if earlier else first) - 1))
+    # The newest queued is decoded first (_ahead_loop): the other way first, then the steps' way from the farthest GOP
+    # to the nearest.
+    wanted = (after + earlier[::-1]) if back else (earlier + after[::-1])
+    _index_soon(root, route, segment, wide)
     with _ahead_ready:
         for gop in wanted:
             if _gop_cached(folder, *gop):
@@ -456,19 +505,18 @@ def read_ahead(root: Path, route: str, segment: int, decoded: int, *, wide: bool
             _ahead[key] = (root, video, folder, *gop)
         while len(_ahead) > AHEAD_KEPT:
             del _ahead[next(iter(_ahead))]
-        if _ahead_state['thread'] is None:
-            _ahead_state['thread'] = threading.Thread(target=_ahead_loop, name='video-ahead', daemon=True)
-            _ahead_state['thread'].start()
-        _ahead_ready.notify()
+        while _ahead_state['workers'] < AHEAD_WORKERS:
+            _ahead_state['workers'] += 1
+            threading.Thread(target=_ahead_loop, name='video-ahead', daemon=True).start()
+        _ahead_ready.notify_all()
 
 
 def _ahead_loop() -> None:
     while True:
         with _ahead_ready:
             while not _ahead:
-                _ahead_state['busy'] = False
                 _ahead_ready.wait()
-            _ahead_state['busy'] = True
+            _ahead_state['busy'] += 1
             _key, (root, video, folder, first, last) = _ahead.popitem()
         try:
             job = _decode(root, video, folder, first, last, None, ahead=True)
@@ -476,6 +524,37 @@ def _ahead_loop() -> None:
                 job.done.wait()
         except Exception:  # noqa: BLE001 - a GOP not decoded ahead is decoded when a page asks for it
             pass
+        finally:
+            with _ahead_ready:
+                _ahead_state['busy'] -= 1
+
+
+def _index_soon(root: Path, route: str, segment: int, wide: bool) -> None:
+    """The index of the minutes before and after `segment` read in the background (index_of), so that a step into the
+    next minute does not wait for ffprobe."""
+    videos = []
+    for other in (segment - 1, segment + 1):
+        # The path alone: wide_video_of would read both indices here, in the request.
+        video = Path(root) / 'raw/routes' / route / str(int(other)) / (WIDE_VIDEO if wide else 'fcamera.hevc')
+        if other < 0 or not video.is_file():
+            continue
+        with _ahead_ready:
+            if str(video) in _indexed:
+                continue
+            _indexed.add(str(video))
+            while len(_indexed) > LAST_GIVEN_KEPT * 4:
+                _indexed.pop()
+        videos.append(video)
+
+    def read() -> None:
+        for video in videos:
+            try:
+                index_of(video)
+            except (VideoFrameError, OSError):
+                with _ahead_ready:
+                    _indexed.discard(str(video))
+    if videos:
+        threading.Thread(target=read, name='video-index', daemon=True).start()
 
 
 def settle(timeout: float = 30.0) -> bool:
@@ -484,7 +563,7 @@ def settle(timeout: float = 30.0) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         with _ahead_ready:
-            queued = bool(_ahead) or _ahead_state['busy']
+            queued = bool(_ahead) or _ahead_state['busy'] > 0
         with _locks_guard:
             running = list(_decodes.values())
         if not queued and not running and not _prune_guard.locked():
