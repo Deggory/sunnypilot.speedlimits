@@ -2680,6 +2680,10 @@ def make_handler(app: ReviewApp):
 
 class _ReviewServer(ThreadingHTTPServer):
     daemon_threads = True
+    # The connections waiting to be accepted (Python's default is 5). A page opening sends 8 requests at once through
+    # traefik, one connection each, and a burst past the queue lost its connections for a second each: the client sent
+    # them again after 1 s (#107). The IPv6 server takes it too.
+    request_queue_size = 128
 
     def __init__(self, server_address, handler_class):
         self._connection_slots = threading.BoundedSemaphore(MAX_CONNECTIONS)

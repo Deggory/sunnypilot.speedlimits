@@ -496,10 +496,10 @@ def read_ahead(root: Path, route: str, segment: int, decoded: int, *, wide: bool
     # to the nearest.
     wanted = (after + earlier[::-1]) if back else (earlier + after[::-1])
     _index_soon(root, route, segment, wide)
+    # Neither a GOP the cache has nor one being decoded now (a page asked for it, or a worker took it).
+    wanted = [gop for gop in wanted if not _gop_cached(folder, *gop) and not _decoding((str(folder), gop[0]))]
     with _ahead_ready:
         for gop in wanted:
-            if _gop_cached(folder, *gop):
-                continue
             key = (str(folder), gop[0])
             _ahead.pop(key, None)
             _ahead[key] = (root, video, folder, *gop)
@@ -511,14 +511,24 @@ def read_ahead(root: Path, route: str, segment: int, decoded: int, *, wide: bool
         _ahead_ready.notify_all()
 
 
+def _decoding(key: tuple[str, int]) -> bool:
+    """Whether the GOP (cache folder, first frame) is being decoded now."""
+    with _locks_guard:
+        return key in _decodes
+
+
 def _ahead_loop() -> None:
     while True:
         with _ahead_ready:
             while not _ahead:
                 _ahead_ready.wait()
             _ahead_state['busy'] += 1
-            _key, (root, video, folder, first, last) = _ahead.popitem()
+            key, (root, video, folder, first, last) = _ahead.popitem()
         try:
+            # A GOP already on its way (a page asked for it, or another worker took it) is not waited for: the worker
+            # goes on to the next GOP queued. Waiting left it idle while fast steps ran past the GOPs decoding (#107).
+            if _decoding(key):
+                continue
             job = _decode(root, video, folder, first, last, None, ahead=True)
             if job is not None:
                 job.done.wait()

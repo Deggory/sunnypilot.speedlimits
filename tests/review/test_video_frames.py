@@ -802,6 +802,32 @@ def test_no_more_than_max_decodes_ffmpeg_at_once(drive, monkeypatch):
     assert video_frames.settle() and most[0] == 1 and cached(root) == list(range(0, 60))
 
 
+def test_a_decode_ahead_goes_on_to_the_next_gop_while_a_page_decodes_one(drive):
+    """A GOP a page is decoding is not waited for by the decodes ahead: they go on to the GOP after it, so fast steps
+    find more of the video ready (#107). A worker that waited sat idle until the page's decode was done."""
+    root, video, _rows, _server = drive
+    video_frames.prune(root, budget=0)
+    assert video_frames.preview(root, ROUTE, 0, 12).is_file() and video_frames.settle()
+    folder = video_frames._cache_dir(root, ROUTE, 0, video)
+    held = video_frames._Decode(folder, 20, 39)
+    with video_frames._locks_guard:
+        video_frames._decodes[(str(folder), 20)] = held
+    try:
+        video_frames.read_ahead(root, ROUTE, 0, 12)
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline and not (
+                cached(root) == [*range(20), *range(40, 60)] and video_frames._ahead_state['busy'] == 0
+                and not video_frames._ahead):
+            time.sleep(0.01)
+        assert cached(root) == [*range(20), *range(40, 60)]
+        assert video_frames._ahead_state['busy'] == 0 and not video_frames._ahead
+    finally:
+        with video_frames._locks_guard:
+            video_frames._decodes.pop((str(folder), 20), None)
+        held.done.set()
+    assert video_frames.settle()
+
+
 def test_a_frame_given_has_the_next_gops_decoded_ahead_and_the_minutes_index_kept_on_disk(drive, monkeypatch):
     """Fast steps outran one GOP decoded ahead: a frame given has the next AHEAD_GOPS GOPs decoded, and stepping back the
     ones before. The index of a minute (ffprobe over the whole file) is kept on disk, so a server started again does not

@@ -116,6 +116,14 @@ def test_cookies_of_other_web_apps_do_not_hide_the_review_cookie(tokened):
     assert status == 401
 
 
+def test_the_server_queues_a_page_opening_burst_instead_of_dropping_connections():
+    """A page opening sends about 8 requests at once; with Python's listen queue of 5 the ones past it waited a second
+    for the client to try again (#107)."""
+    from nnslr_tools import review
+    assert review._ReviewServer.request_queue_size >= 128
+    assert review._ReviewServerIPv6.request_queue_size == review._ReviewServer.request_queue_size
+
+
 def test_idle_connections_are_closed_and_their_number_is_bounded(report, monkeypatch):
     import socket
     import time
