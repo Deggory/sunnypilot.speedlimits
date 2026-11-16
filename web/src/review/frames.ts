@@ -248,10 +248,17 @@ export function visibleRows(): FrameRow[] {
 /** Frames confirmed here and not stored on the server yet (a frame of the video between the seconds too: the
  * server takes it into the report when it is saved). */
 export function unsavedKeys(): string[] {
-  const keys = report.rows.map((row) => row.frame_key)
-    .concat(Object.keys(state.edits).filter((key) => indexOf(key) < 0 && isVirtual(key)));
-  return keys.filter((key) => {
+  // From the edits, not from every row of the report: this runs on every step and every render of the editor, and a
+  // walk of the report's rows took about 10 ms of a step (#107). The order stays the report's, the video's frames last.
+  const rows: [number, string][] = [];
+  const loose: string[] = [];
+  for (const key of Object.keys(state.edits)) {
     const s = state.edits[key];
-    return s && s.saved === false && s.review_state === 'reviewed';
-  });
+    if (!s || s.saved !== false || s.review_state !== 'reviewed') continue;
+    const at = indexOf(key);
+    if (at >= 0) rows.push([at, key]);
+    else if (isVirtual(key)) loose.push(key);
+  }
+  rows.sort((a, b) => a[0] - b[0]);
+  return rows.map(([, key]) => key).concat(loose);
 }

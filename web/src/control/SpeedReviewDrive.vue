@@ -47,7 +47,7 @@ import {askConfirm} from '../composables/confirm';
 import {toast} from '../composables/toast';
 import {boxColor, describe, plateTag, shortName} from '../review/catalog';
 import {row as editRow} from '../review/current';
-import {frameKeyAt, loadSignEditor, stopSignEditor, videoFrameOf} from '../review/embed';
+import {frameKeyAt, loadSignEditor, pictureBaseOf, stopSignEditor, videoFrameOf} from '../review/embed';
 import {frameStatus} from '../review/frames';
 import {linkedFrame, openFrame} from '../review/navigation';
 import SignEditorPanel from '../review/SignEditorPanel.vue';
@@ -1008,7 +1008,7 @@ function worksIn(from: number, to: number) {
 
 <template>
   <DriveReviewDrive ref="player" class="sr-view" :class="{'sr-signs-on': showSigns && panel === 'signs'}" :route="route" :read-only="readOnly" tab="speedreview" :back-label="isGuest() ? 'My reviews' : 'Speed review'" simple-lanes
-                    :arrows="!(editing && onFrame)"
+                    :arrows="!(editing && onFrame)" :sharp-base="editing ? pictureBaseOf(route) + 'video/' : null"
                     sharp :rates="RATES" start-zoom="ten" :car-kph="driverKph" :pick-map="!readOnly && !speedOff" @time="follow"
                     @pick-map="fromMap" @segments="(value) => { segments = value; }" @index="(value) => { videoIndex = value ?? null; }"
                     @frame="(value) => { presented = value; }" @scan="onScan">

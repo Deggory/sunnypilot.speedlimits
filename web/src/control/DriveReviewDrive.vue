@@ -41,8 +41,8 @@ import {type ControlTab, goTo} from './tabs';
 
 const props = withDefaults(defineProps<{route: string; readOnly: boolean; tab: ControlTab; backLabel: string;
   simpleLanes?: boolean; rates?: readonly number[]; startZoom?: Zoom; sharp?: boolean; carKph?: number | null;
-  pickMap?: boolean; arrows?: boolean; limits?: boolean; fullScreen?: boolean}>(), {simpleLanes: false, rates: () => [], sharp: false,
-  startZoom: 'one', pickMap: false, arrows: true, limits: true, fullScreen: false});
+  pickMap?: boolean; arrows?: boolean; limits?: boolean; fullScreen?: boolean; sharpBase?: string | null}>(), {simpleLanes: false,
+  rates: () => [], sharp: false, startZoom: 'one', pickMap: false, arrows: true, limits: true, fullScreen: false, sharpBase: null});
 const guest = isGuest();
 const emit = defineEmits<{time: [seconds: number, t0Ns: number]; pickMap: [from: number, to: number, kph: number];
   segments: [segments: SyncSegment[]]; index: [index: VideoState['index']];
@@ -285,9 +285,10 @@ function pause(): void {
   player.value?.pause();
 }
 const toggle = (): void => (playing.value ? pause() : play());
-/** One frame of the video on or back, paused (Shift+← →): to the middle of that frame, as a time on the edge between two
- * shows either. Where the video has no picture of the time, a frame's time of the logs. */
+/** One frame of the video on or back, paused (← →; ⇧ ← → is a second, seek): to the middle of that frame, as a time on
+ * the edge between two shows either. Where the video has no picture of the time, a frame's time of the logs. */
 function stepFrame(direction: number): void {
+  stepSeconds = false;
   pause();
   const at = plainVideo.value ? cursor.value : videoTime.value;
   if (player.value && at !== null) {
@@ -355,18 +356,36 @@ const sharpFrame = computed(() => {
     || (!plainVideo.value && videoTime.value === null)) return null;
   return rawFrameOf(video.value?.index, at);
 });
+/** Where the HD frames are: the page's own place for them (sharpBase: the Signs side asks at the URL of its editor's
+ * picture, the same JPEG, so the browser downloads each frame once, #107), else Speed review's. */
 const sharpUrl = (segment: number, frame: number): string =>
-  '/api/speed-review/drives/' + encodeURIComponent(props.route) + '/frames/' + segment + '/' + frame + '.jpg';
+  (props.sharpBase ?? '/api/speed-review/drives/' + encodeURIComponent(props.route) + '/frames/') + segment + '/' + frame + '.jpg';
 const wantedSharp = computed(() => sharpFrame.value ? sharpUrl(sharpFrame.value.segment, sharpFrame.value.frame) : null);
 const shownSharp = ref<string | null>(null);
 const sharpFailed = ref(false);
 const loadPicture = pictureCache();
-/** One frame asked of the server at a time, the latest wanted winning; then the next two in the direction of the last
- * step (not five on either side: 200 kB each at full definition), so that a step on finds its frame in the browser. The
- * next group of pictures (a GOP) is the server's to read ahead (video_frames.read_ahead). */
+/** One frame asked of the server at a time, the latest wanted winning (in the order asked: the server reads the
+ * direction of the steps from it, video_frames.read_ahead); then two frames the next step may want, in the direction of
+ * the last one, so that it finds its frame in the browser: after ← → the next two frames, after ⇧ ← → the next second and
+ * the next frame (a frame each: 200 kB at full definition). The next GOPs are the server's to read ahead. */
 let lastSharp: {segment: number; frame: number} | null = null;
 let sharpDirection = 1;
+/** The last step of the keys here: a second (⇧ ← →) or a frame (← →, and anything else). */
+let stepSeconds = false;
 let pumping = false;
+/** The HD frame a seek to this time of the logs would ask for (seek, sharpFrame). */
+function sharpFrameAt(seconds: number): {segment: number; frame: number; frames: number} | null {
+  const target = clamp(seconds);
+  const at = plainVideo.value ? target : videoTimeOf(segments.value, target);
+  return at === null ? null : rawFrameOf(video.value?.index, at);
+}
+function prefetchSharp(at: {segment: number; frame: number; frames: number}): void {
+  const frames = [at.frame + sharpDirection, ...(stepSeconds ? [] : [at.frame + 2 * sharpDirection])]
+    .filter((frame) => frame >= 0 && frame < at.frames).map((frame) => ({segment: at.segment, frame}));
+  const second = stepSeconds ? sharpFrameAt(cursor.value + sharpDirection) : null;
+  if (second) frames.push(second);
+  for (const next of frames) void loadPicture(sharpUrl(next.segment, next.frame));
+}
 async function pumpSharp(): Promise<void> {
   if (pumping) return;
   pumping = true;
@@ -381,11 +400,9 @@ async function pumpSharp(): Promise<void> {
       if (ok) {
         shownSharp.value = url;
         if (lastSharp?.segment === at.segment && lastSharp.frame !== at.frame) sharpDirection = Math.sign(at.frame - lastSharp.frame);
+        else if (lastSharp && lastSharp.segment !== at.segment) sharpDirection = Math.sign(at.segment - lastSharp.segment);
         lastSharp = {segment: at.segment, frame: at.frame};
-        for (const step of [1, 2]) {
-          const next = at.frame + sharpDirection * step;
-          if (next >= 0 && next < at.frames) void loadPicture(sharpUrl(at.segment, next));
-        }
+        prefetchSharp(at);
       }
       break;
     }
@@ -431,6 +448,8 @@ function onKey(event: KeyboardEvent): void {
     event.preventDefault();
     const direction = event.key === 'ArrowLeft' ? -1 : 1;
     // ← → a frame, ⇧ ← → a second.
+    stepSeconds = event.shiftKey;
+    sharpDirection = direction;
     if (event.shiftKey) seek(cursor.value + direction);
     else stepFrame(direction);
   } else if ((event.key === 'f' || event.key === 'F') && props.fullScreen && !event.shiftKey) {
@@ -867,9 +886,9 @@ watch(() => props.route, () => {
                 {{ presentedFrame.segment }}/{{ presentedFrame.frame }}</small></span>
             <button type="button" class="btn small" aria-label="Back 5 seconds" @click="seek(cursor - 5)">−5 s</button>
             <button type="button" class="btn small" aria-label="On 5 seconds" @click="seek(cursor + 5)">+5 s</button>
-            <button type="button" class="btn small dr-bar-icon" aria-label="Back one frame" title="Back one frame (Shift+←)"
+            <button type="button" class="btn small dr-bar-icon" aria-label="Back one frame" title="Back one frame (←; ⇧← a second)"
                     @click="stepFrame(-1)"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path :d="MARKS.frameBack" fill="currentColor"/></svg></button>
-            <button type="button" class="btn small dr-bar-icon" aria-label="On one frame" title="On one frame (Shift+→)"
+            <button type="button" class="btn small dr-bar-icon" aria-label="On one frame" title="On one frame (→; ⇧→ a second)"
                     @click="stepFrame(1)"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path :d="MARKS.frameOn" fill="currentColor"/></svg></button>
             <button v-if="sharp" type="button" class="btn small" :aria-pressed="sharpOn" aria-label="Full definition when paused"
                     title="Paused, the frame at the comma's full definition; tap the picture to zoom" @click="sharpOn = !sharpOn">HD</button>
