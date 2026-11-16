@@ -1644,6 +1644,13 @@ def build_parser() -> argparse.ArgumentParser:
                        help="Propose again on a route in review: the frames confirmed on its current report stay "
                             "confirmed on the new one (copied before it becomes the current one)")
     p_pre.set_defaults(func=_cmd_preannotate)
+    p_prune = sub.add_parser("prune-proposals",
+                             help="remove the pictures of every drive's earlier proposal runs (only the latest run is "
+                                  "read) and the folders of runs that stopped; records and the review database stay")
+    p_prune.add_argument("--route", help="one drive only; default: every drive")
+    p_prune.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+    p_prune.add_argument("--dry-run", action="store_true", help="say what would go and how much, remove nothing")
+    p_prune.set_defaults(func=_cmd_prune_proposals)
     p_review = sub.add_parser("review", help="serve the review pages; confirmed frames are saved in <data-root>/annotations/review.sqlite")
     p_review.add_argument("--route", help="open this route directly; default: the index of every route with a report")
     p_review.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
@@ -2768,6 +2775,15 @@ def _cmd_preannotate(args: argparse.Namespace) -> int:
     from nnslr_tools.preannotate import run_preannotation
     result = run_preannotation(args.route, data_root=Path(args.data_root) if args.data_root else None,
                                confidence=args.confidence, proposer=args.proposer, keep_reviews=args.keep_reviews)
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+def _cmd_prune_proposals(args: argparse.Namespace) -> int:
+    from nnslr_tools.preannotate import resolve_data_root
+    from nnslr_tools.proposal_runs import prune_old_runs
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    result = prune_old_runs(root, args.route, dry_run=args.dry_run)
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 

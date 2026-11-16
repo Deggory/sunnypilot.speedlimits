@@ -461,6 +461,12 @@ def run_preannotation(route: str, *, data_root: Path | None = None, confidence: 
     (destination/'run.json').write_text(json.dumps(summary,indent=2,allow_nan=False))
     pointer=base/('.latest-'+uuid.uuid4().hex+'.json')
     pointer.write_text(json.dumps({'run_id':run_id})); pointer.replace(base/'latest.json')
+    # The pictures of the drive's earlier runs are read by nobody once this one is the latest (proposal_runs).
+    try:
+        from nnslr_tools.proposal_runs import prune_route
+        prune_route(base)
+    except OSError as exc:
+        print(f'old proposal runs of {route} not pruned: {exc}', file=sys.stderr)
     return {**summary,'output':str(destination),'report':str(destination/'index.html'),
             'review_command':f'nnslr review --route {route}'}
 # [preannotation] - END
