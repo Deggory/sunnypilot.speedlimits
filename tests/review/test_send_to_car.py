@@ -1020,3 +1020,118 @@ def test_a_brain_goes_on_the_car_only_with_the_networks_that_read_its_signs():
         car_release._check_sign_networks(found)
     found['brain']['sign_networks'] = None
     car_release._check_sign_networks(found)
+
+
+def result_of_a_training(folder: Path, ids: dict) -> dict:
+    """A brain's result.json with the networks of its signs as its training records them since #90: the run's choice as
+    scripts/run_brain.sh writes it (networks.json, read by sign_networks.load) and train_brain's own line, which keeps
+    the parts there are: the cutter and the classifier, no applicability network."""
+    from nnslr_tools import sign_networks
+    chosen = sign_networks.load(sign_networks.write(folder / 'choice', ids, folder / 'set'))
+    return {'groups': ['signs', 'lead'], 'seed': 1, 'works': True, 'history': [{}], 'test': {}, 'validation': {},
+            'sign_networks': {part: chosen[part] for part in ('cutter', 'classifier', 'decider') if chosen.get(part)}}
+
+
+def test_a_brain_trained_since_15_nov_goes_on_the_car_only_with_the_two_networks_it_records(tmp_path):
+    """#104: Models kept a brain's networks only with an applicability network among them, and a brain records none
+    since #90: Publish checked nothing, and its next run would have paired the brain of 15 Nov 2026 with the classifier
+    chosen after it, one it never learnt from. Its result.json as the training writes it, read through Models: refused
+    with another cutter or classifier, taken with its own two."""
+    data = tmp_path / 'data'
+    servers_runs(data)
+    pipeline(data, 'r2')
+    make_signnet(data, 's2')
+    ids = {'cutter': 'cutter:s1/signnet', 'classifier': 'classifier:r1/reader'}
+    result = result_of_a_training(tmp_path, ids)
+    assert result['sign_networks'] == ids
+    use_brain(data, brain_run(data, 'b1', result=result))
+    runs = RunsIndex(data)
+    runs.running_runs = dict
+    index = ModelIndex(runs)
+    assert index.in_use('brain')[0]['sign_networks'] == ids
+    assert car_release.choose(data, 's1')['brain']['sign_networks'] == ids
+    assert car_release.brain_refused(index) == ''  # its own two are the ones in use
+    with pytest.raises(ValueError, match='the brain brain:b1/brain learnt from the signs read by cutter:s1/signnet; '
+                                         'this release reads them with cutter:s2/signnet'):
+        car_release.choose(data, 's2')
+    with pytest.raises(ValueError, match='classifier:r1/reader; this release reads them with classifier:r2/reader'):
+        car_release.choose(data, 's1', 'classifier:r2/reader')
+    # Another classifier chosen on the Models tab after the training, as on 15 Nov 2026.
+    index.set_active('classifier', 'classifier:r2/reader', who=None, via='local')
+    with pytest.raises(ValueError, match='classifier:r1/reader; this release reads them with classifier:r2/reader: '
+                                         'choose those networks, or a brain trained with these'):
+        car_release.choose(data, 's1')
+    # The panel says it before Publish starts, not only its job.
+    assert car_release.brain_refused(index) == (
+        'the brain in use, brain:b1/brain, learnt from the signs read by classifier:r1/reader; in use now: '
+        'classifier:r2/reader. Choose those on the Models tab, or a brain trained with these')
+    # Models › Drive's replay puts nothing on the car: it still takes the brain.
+    assert car_release.choose(data, 's1', brain_on_car=False)['brain']['id'] == 'brain:b1/brain'
+    # A brain trained with the networks now in use goes.
+    in_use = {**ids, 'classifier': 'classifier:r2/reader'}
+    use_brain(data, brain_run(data, 'b2', result=result_of_a_training(tmp_path, in_use)))
+    assert car_release.choose(data, 's1')['brain']['id'] == 'brain:b2/brain'
+    assert car_release.brain_refused(index) == ''
+
+
+def test_the_brains_check_along_a_drive_is_read_with_the_two_networks_it_records(tmp_path, monkeypatch):
+    """#104: Publish's check along a drive reads the drive with the networks the brain learnt from
+    (sign_networks.of_brain). Without the record of a brain trained since #90 it read the drive with the release of the
+    sunnypilot clone."""
+    import sys
+    import types
+
+    from nnslr_tools import sign_networks
+    data = tmp_path / 'data'
+    servers_runs(data)
+    ids = {'cutter': 'cutter:s1/signnet', 'classifier': 'classifier:r1/reader'}
+    use_brain(data, brain_run(data, 'b1', result=result_of_a_training(tmp_path, ids)))
+    given = {}
+    monkeypatch.setitem(sys.modules, 'nnslr_tools.brain_export', types.SimpleNamespace(
+        export_brain_onnx=lambda weights, output, **options: given.update(options)))
+    monkeypatch.setattr(sign_networks, 'exported', lambda root, chosen: tmp_path / 'set' if chosen == ids else None)
+    monkeypatch.setattr(car_release, 'check_device', lambda: 'cuda')
+    car_release.export_brain(car_release.choose(data, 's1'), tmp_path)
+    assert given['networks'] == {**ids, 'models': tmp_path / 'set'}
+
+
+@pytest.mark.parametrize('file, how', [('brain_inputs.py', 'edited'), ('vision.py', 'edited'), ('brain_inputs.py', 'behind')])
+def test_a_brain_inputs_or_vision_py_that_is_not_the_pushed_one_stops_publish_before_step_1(car, tmp_path, file, how):
+    """#104: step 1 checks the brain against the brain_inputs.py on disk in the sunnypilot clone, and the comma, built
+    from the pushed branch, refuses a brain made with another file. One edited in the clone and not pushed, or pushed
+    from elsewhere and not pulled yet, went through Publish; the other files of the clone still stay somebody else's."""
+    sp = car['sp']
+    package = Path(SUBMODULE).parent
+    for name in ('brain_inputs.py', 'vision.py'):
+        (sp / package / name).write_text(f'# {name} as pushed\n')
+        git(sp, 'add', str(package / name))
+    git(sp, 'commit', '-q', '-m', 'the car files of the brain')
+    git(sp, 'push', '-q', 'origin', 'speed-limits')
+    (sp / 'README.md').write_text('somebody else\n')        # no file of the brain: Publish goes
+    assert send(car, '--signnet', 's1').returncode == 0
+    if how == 'edited':
+        (sp / package / file).write_text(f'# {file} edited here, not pushed\n')
+    else:
+        other = tmp_path / 'sp-other'
+        git(tmp_path, 'clone', '-q', '-b', 'speed-limits', str(car['sp_origin']), str(other))
+        (other / package / file).write_text(f'# {file} pushed from elsewhere\n')
+        git(other, 'commit', '-q', '-am', 'another file of the inputs')
+        git(other, 'push', '-q', 'origin', 'speed-limits')
+    before = git(car['sp_origin'], 'rev-parse', 'speed-limits')
+    models = git(car['clone'], 'rev-parse', 'HEAD')
+    for args in (('--signnet', 's1'), ('--signnet', 's1', '--dry-run')):
+        done = send(car, *args, FAKE_PUBLISH='new networks')
+        assert done.returncode == 1, done.stdout + done.stderr
+        assert f'brain_inputs.py or vision.py in {sp} is not the one pushed to speed-limits' in done.stderr
+        # Refused before step 1: nothing exported, published, moved or built.
+        assert 'nnslr send-to-car' not in done.stdout and 'build sunny' not in done.stdout
+        assert git(car['clone'], 'rev-parse', 'HEAD') == models
+        assert git(car['sp_origin'], 'rev-parse', 'speed-limits') == before
+    # The clone's file the pushed one again (the change dropped, or origin's pulled): Publish goes.
+    if how == 'edited':
+        (sp / package / file).write_text(f'# {file} as pushed\n')
+    else:
+        git(sp, 'merge', '-q', '--ff-only', 'refs/remotes/origin/speed-limits')
+    done = send(car, '--signnet', 's1', FAKE_PUBLISH='new networks')
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert f'moved: {SUBMODULE}' in done.stdout

@@ -480,11 +480,14 @@ def brain_digest(result: Any) -> dict:
             # not recorded).
             'split_sha256': result.get('split_sha256') if isinstance(result.get('split_sha256'), str) else None,
             'start': network_start_digest(result.get('start'), result.get('split_sha256')),
-            # The networks its signs were read with (sign_networks, #31: the cutter, the classifier, the applicability
-            # network); None before 10 Nov 2026, when no applicability network left out the signs of other roads.
-            'sign_networks': {part: result['sign_networks'][part] for part in ('cutter', 'classifier', 'decider')}
+            # The networks its signs were read with (sign_networks, #31): the cutter and the classifier, and the
+            # applicability network only in a brain of 10 to 15 Nov 2026, whose signs it filtered. A brain records the
+            # two alone since #90 and they are kept (#104: asking for all three dropped them, and Publish checked no
+            # network of such a brain). None before 10 Nov 2026, when none was recorded.
+            'sign_networks': {part: result['sign_networks'][part] for part in ('cutter', 'classifier', 'decider')
+                              if isinstance(result['sign_networks'].get(part), str)}
             if isinstance(result.get('sign_networks'), dict) and all(isinstance(result['sign_networks'].get(part), str)
-                                                                     for part in ('cutter', 'classifier', 'decider'))
+                                                                     for part in ('cutter', 'classifier'))
             else None}
 
 

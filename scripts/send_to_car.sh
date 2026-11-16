@@ -22,7 +22,9 @@
 #   4/5 Move     the submodule openpilot/sunnypilot/speed_limits/models of the sunnypilot clone (branch speed-limits)
 #                to that commit, one commit of that path alone pushed to speed-limits; nothing when it is there.
 #                Refuses a clone on another branch, a submodule with changes of its own, a branch with commits not
-#                pushed or diverged (fast-forwarded first when it is only behind): checked before step 1, so a
+#                pushed or diverged (fast-forwarded first when it is only behind), and a brain_inputs.py or vision.py
+#                that is not the pushed one (step 1 checks the brain against the file on disk, the comma is built
+#                from the pushed one and refuses a brain made with another, #104): checked before step 1, so a
 #                refusal publishes nothing.
 #   5/5 Build    cristianku/openpilot psa-torque-sunny-testing again (openpilot_scripts' setup_psa_torque.sh sunny,
 #                pushed) when step 2 or 4 changed something or a build is still owed (models/send-to-car.pending),
@@ -53,6 +55,8 @@ WORKSPACE="${NNSLR_CAR_WORKSPACE:-/root/work/op-setup-ws}"
 BUILD="$OP_SCRIPTS/OP-setup-psa-torque-testing/scripts/setup_psa_torque.sh"
 BRANCH="speed-limits"
 SUBMODULE="openpilot/sunnypilot/speed_limits/models"
+# The car's files a brain is made with: its contract holds the hash of each (inputs_sha256, and vision.py's in reader).
+BRAIN_FILES=(openpilot/sunnypilot/speed_limits/brain_inputs.py openpilot/sunnypilot/speed_limits/vision.py)
 TESTING_REPO="${NNSLR_TESTING_REPO:-https://github.com/cristianku/openpilot.git}"
 TESTING_BRANCH="psa-torque-sunny-testing"
 PENDING="$DATA_ROOT/models/send-to-car.pending"
@@ -111,6 +115,11 @@ head="$(git -C "$SUNNYPILOT" symbolic-ref --quiet --short HEAD || true)"
 [ -z "$(git -C "$SUNNYPILOT" status --porcelain -- "$SUBMODULE")" ] \
   || die "$SUBMODULE in $SUNNYPILOT has changes of its own: commit or drop them first"
 git -C "$SUNNYPILOT" fetch --quiet origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+# Step 1 checks the brain against the brain_inputs.py on disk here, and the comma is built from the pushed branch: a
+# file edited here and not pushed, or pushed from elsewhere and not pulled yet, would pass Publish and leave the comma
+# with a brain it refuses, and no vision limit at all (#104).
+git -C "$SUNNYPILOT" diff --quiet "refs/remotes/origin/$BRANCH" -- "${BRAIN_FILES[@]}" \
+  || die "brain_inputs.py or vision.py in $SUNNYPILOT is not the one pushed to $BRANCH: push the change or drop it first (pull, when origin's is the newer)"
 counts="$(git -C "$SUNNYPILOT" rev-list --left-right --count "$BRANCH...refs/remotes/origin/$BRANCH")"
 read -r ahead behind <<< "$counts"
 [ "$ahead" -eq 0 ] || [ "$behind" -eq 0 ] || die "$BRANCH of $SUNNYPILOT and origin's have diverged: reconcile them first"

@@ -122,7 +122,22 @@ def brain_refused(index: ModelIndex) -> str:
     if entry is None:
         return ''
     return (_driver_refused(entry) if takes_the_driver(entry) else
-            _filtered_refused(entry) or _map_refused(entry) or _boxes_refused(entry))
+            _filtered_refused(entry) or _networks_refused(index, entry) or _map_refused(entry) or _boxes_refused(entry))
+
+
+def _networks_refused(index: ModelIndex, entry: dict) -> str:
+    """Why a brain cannot go on the car with the cutter and the classifier in use, '' when it can: it learnt from the
+    signs its own two read (sign_networks, #31), and the car would give it signs read by others. Said before Publish
+    starts, not only by its job (_check_sign_networks, #104). A brain from before 10 Nov 2026 records none and is not
+    checked."""
+    read = entry.get('sign_networks') or {}
+    used = {part: (index.in_use(part)[0] or {}).get('id') for part in ('cutter', 'classifier')}
+    other = [part for part in used if read.get(part) and used[part] and read[part] != used[part]]
+    if not other:
+        return ''
+    return (f'the brain in use, {entry["id"]}, learnt from the signs read by ' + ', '.join(read[part] for part in other)
+            + '; in use now: ' + ', '.join(used[part] for part in other)
+            + '. Choose those on the Models tab, or a brain trained with these')
 
 
 def _filtered_refused(entry: dict) -> str:

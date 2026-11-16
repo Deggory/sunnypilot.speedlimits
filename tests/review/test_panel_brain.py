@@ -689,3 +689,16 @@ def test_models_say_which_networks_read_a_brains_signs():
     networks = {'cutter': 'cutter:c1/signnet', 'classifier': 'classifier:k1/classifier', 'decider': 'decider:d1/x'}
     assert brain_digest({**base, 'sign_networks': networks})['sign_networks'] == networks
     assert brain_digest({**base, 'sign_networks': {'cutter': 'cutter:c1/signnet'}})['sign_networks'] is None
+
+
+def test_models_keep_the_two_networks_a_brain_records_since_15_nov():
+    """#104: a brain records the cutter and the classifier alone since #90 (no applicability network). Models asked for
+    all three and kept nothing, so Publish checked no network of such a brain."""
+    from nnslr_tools.model_roles import brain_digest
+    base = {'groups': ['signs'], 'test': {}}
+    networks = {'cutter': 'cutter:c1/signnet', 'classifier': 'classifier:k1/classifier'}
+    assert brain_digest({**base, 'sign_networks': networks})['sign_networks'] == networks
+    # A part that is no id is left out; without the cutter or the classifier nothing is kept.
+    assert brain_digest({**base, 'sign_networks': {**networks, 'decider': None}})['sign_networks'] == networks
+    assert brain_digest({**base, 'sign_networks': {'classifier': networks['classifier'],
+                                                   'decider': 'decider:d1/x'}})['sign_networks'] is None
