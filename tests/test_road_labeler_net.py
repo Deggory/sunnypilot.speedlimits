@@ -164,7 +164,8 @@ def test_prepare_speed_review_writes_the_heads_that_earned_it_and_says_what_it_w
     if 'tunnel' not in {row['kind'] for row in store.road_kinds()}:
         store.add_road_kind('tunnel', 'test')
     span = (int(drive['ns'][0]), int(drive['ns'][-1]))
-    found = road_labeler.predict_labeler(tmp_path, run_dir, lambda r: {'x': 1}, lambda r: span, [route], log=lambda t: None)
+    found = road_labeler.predict_labeler(tmp_path, run_dir, lambda r: {'x': 1}, lambda r: span, [route], device='cpu',
+                                         log=lambda t: None)
     assert found[0]['prepared']['tunnel'] == {'written': 1, 'removed': 0, 'kept': 0, 'left': 0}
     assert [(row['kind'], row['reviewer']) for row in store.road(route)] == [('tunnel', 'net/' + run_dir.name)]
     assert store.works(route) == []                         # held back: nothing, however sure
@@ -176,7 +177,7 @@ def test_prepare_speed_review_writes_the_heads_that_earned_it_and_says_what_it_w
     # The chances only: nothing more into Speed review, and the last Prepare's prepared.json stays.
     revision = store.revision(route)
     road_labeler.predict_labeler(tmp_path, run_dir, lambda r: {'x': 1}, lambda r: span, [route], marks=False,
-                                 log=lambda t: None)
+                                 device='cpu', log=lambda t: None)
     assert store.revision(route) == revision and json.loads((run_dir / road_labeler.PREPARED).read_text()) == prepared
     # A drive that stops the job part-way: what was written so far is still said, by this run.
     (run_dir / road_labeler.PREPARED).unlink()
@@ -189,7 +190,7 @@ def test_prepare_speed_review_writes_the_heads_that_earned_it_and_says_what_it_w
     monkeypatch.setattr(data, 'drive_data', drive_data)
     with pytest.raises(ValueError):
         road_labeler.predict_labeler(tmp_path, run_dir, lambda r: {'x': 1}, lambda r: span, [route, 'broken'],
-                                     log=lambda t: None)
+                                     device='cpu', log=lambda t: None)
     prepared = json.loads((run_dir / road_labeler.PREPARED).read_text())
     assert (prepared['run'], prepared['drives'], prepared['heads']['tunnel']['written']) == (run_dir.name, 1, 0)
     # Written after each drive prepared, before the next one starts: a Prepare stopped by the panel (SIGTERM, which
@@ -204,15 +205,52 @@ def test_prepare_speed_review_writes_the_heads_that_earned_it_and_says_what_it_w
 
     monkeypatch.setattr(data, 'drive_data', drive_data)
     road_labeler.predict_labeler(tmp_path, run_dir, lambda r: {'x': 1}, lambda r: span, [route, '00000002--0123456789'],
-                                 log=lambda t: None)
+                                 device='cpu', log=lambda t: None)
     assert seen == [True]
     # A Prepare that prepared no drive (no scan, or the store refused each): the run Speed review shows stays as it was.
     before = (run_dir / road_labeler.PREPARED).read_bytes()
-    road_labeler.predict_labeler(tmp_path, run_dir, lambda r: None, lambda r: span, [route], log=lambda t: None)
+    road_labeler.predict_labeler(tmp_path, run_dir, lambda r: None, lambda r: span, [route], device='cpu',
+                                 log=lambda t: None)
     assert (run_dir / road_labeler.PREPARED).read_bytes() == before
     other = run_dir.parent / '2026-11-09_0200-road-labeler'
     other.mkdir()
     torch.save({'dry_run': False}, other / road_labeler.CHECKPOINT)
     monkeypatch.setattr(road_labeler, 'prepare_drive', lambda *args: (_ for _ in ()).throw(OSError('disk full')))
-    found = road_labeler.predict_labeler(tmp_path, other, lambda r: {'x': 1}, lambda r: span, [route], log=lambda t: None)
+    found = road_labeler.predict_labeler(tmp_path, other, lambda r: {'x': 1}, lambda r: span, [route], device='cpu',
+                                         log=lambda t: None)
     assert 'error' in found[0] and not (other / road_labeler.PREPARED).exists()
+
+
+def test_a_real_prepare_stops_without_a_card_and_only_a_dry_run_takes_the_cpu(tmp_path, monkeypatch):
+    """#104: a heavy job that finds no card stops and says so. A real Prepare Speed review went on on the CPU by itself
+    when torch saw no card; the CPU is a dry run's alone, or a device asked for by name."""
+    run_dir = tmp_path / 'runs' / '2026-11-16_0100-road-labeler'
+    run_dir.mkdir(parents=True)
+    checkpoint = {'run': run_dir.name, 'kinds': [], 'trained': [], 'encoder': net.ENCODER_TINY, 'encoder_id': 'tiny',
+                  'window': 240, 'earned': {}}
+    devices = []
+
+    def load_labeler(run, device):
+        devices.append(str(device))
+        return None, None, checkpoint
+
+    def prepare(**asked):
+        return road_labeler.predict_labeler(tmp_path, run_dir, lambda r: None, lambda r: None, [], log=lambda t: None,
+                                            **asked)
+
+    monkeypatch.setattr(road_labeler, 'load_labeler', load_labeler)
+    monkeypatch.setattr(data, 'tunnel_ways', lambda root: set())
+    monkeypatch.setattr(torch.cuda, 'is_available', lambda: False)
+    torch.save({'dry_run': False}, run_dir / road_labeler.CHECKPOINT)
+    with pytest.raises(ValueError, match='no GPU: Prepare Speed review does not run on the CPU'):
+        prepare()
+    assert devices == []                                    # stopped before the network is loaded
+    assert prepare(dry_run=True) == [] and prepare(device='cpu') == [] and devices == ['cpu', 'cpu']
+    # With a card the real Prepare is on it, and a dry run stays on the CPU.
+    monkeypatch.setattr(torch.cuda, 'is_available', lambda: True)
+    assert prepare() == [] and prepare(dry_run=True) == [] and devices[2:] == ['cuda', 'cpu']
+    # The run of a dry training is a dry run whatever is asked: the CPU, with a card or without.
+    torch.save({'dry_run': True}, run_dir / road_labeler.CHECKPOINT)
+    assert prepare() == [] and devices[4:] == ['cpu']
+    monkeypatch.setattr(torch.cuda, 'is_available', lambda: False)
+    assert prepare() == [] and devices[5:] == ['cpu']

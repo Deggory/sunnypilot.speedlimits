@@ -347,6 +347,8 @@ FAILURES = (
      'The GPU was busy with another job: wait for it to finish, or start a dry run on the CPU.'),
     (re.compile(r'^helpers/road_labeler\.sh: (?:no nvidia-smi|the GPU \d+ does not answer)', re.M),
      'No GPU answered: a dry run runs on the CPU.'),
+    (re.compile(r'no GPU: Prepare Speed review does not run on the CPU'),
+     'No GPU answered: Prepare Speed review never runs on the CPU, and nothing was written.'),
     # helpers/simulate_drive.sh and nnslr simulate: the replay is always on a V100, never on the CPU.
     (re.compile(r'^helpers/simulate_drive\.sh: GPU \d+ has only', re.M),
      'No card had the room for the replay: it needs about 2 GB of a V100 and never runs on the CPU. Free some memory on '

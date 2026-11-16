@@ -620,12 +620,18 @@ def predict_labeler(data_root: Path, run_dir: Path, merged_of, span_of, routes: 
     nothing written into Speed review. What a run wrote, head by head, goes to <run>/prepared.json (PREPARED) for the
     portal's card, again after each drive prepared (a job stopped part-way, by a drive or by the panel's SIGTERM, which
     skips any finally, still says what it wrote), and only once a drive is prepared: a Prepare that prepared none leaves
-    the run that Speed review shows as it was. Returns a summary a drive."""
+    the run that Speed review shows as it was. Returns a summary a drive.
+    device None: the GPU, and the CPU only for a dry run. A real Prepare that finds no card stops and says so, before
+    a drive is read and before anything is written: it never moves to the CPU on its own (#104), as train_labeler
+    never does. A device named is the caller's choice (the tests give 'cpu')."""
     import torch
     root, run_dir = Path(data_root), Path(run_dir)
     made_dry = torch.load(run_dir / CHECKPOINT, map_location='cpu', weights_only=False)['dry_run']
     trial = dry_run or made_dry
-    device = torch.device(device or ('cuda' if torch.cuda.is_available() and not trial else 'cpu'))
+    if device is None and not trial and not torch.cuda.is_available():
+        raise ValueError('no GPU: Prepare Speed review does not run on the CPU, and torch sees no card (nvidia-smi, '
+                         '.venv-gpu). Nothing was written.')
+    device = torch.device(device or ('cpu' if trial else 'cuda'))
     model, encoder, checkpoint = load_labeler(run_dir, device)
     target = run_dir / 'chances' if trial else Path(out_dir) if out_dir else root / CHANCES_RELATIVE
     cache = run_dir / 'features' if trial else root / FEATURES_RELATIVE / checkpoint['encoder_id']

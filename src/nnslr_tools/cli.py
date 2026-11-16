@@ -1846,7 +1846,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_labeler_predict.add_argument("--no-marks", action="store_true", help="the chances only: nothing written into "
                                                                            "Speed review")
     p_labeler_predict.add_argument("--out-dir", help="default: <data root>/derived/road_labeler")
-    p_labeler_predict.add_argument("--device", help="default: cuda when there is one")
+    p_labeler_predict.add_argument("--device", help="default: cuda; the CPU for a dry run")
     p_labeler_predict.add_argument("--dry-run", action="store_true", help="the start of the drives on the CPU, the "
                                                                           "chances into <run>/chances, nothing "
                                                                           "written into Speed review")

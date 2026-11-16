@@ -210,6 +210,8 @@ The Road labeler card is at the bottom of Models (`/models`, `web/src/control/Ro
   helper checks again before it starts (`nvidia-smi`: another compute process, or more than `NNSLR_GPU_BUSY_PERCENT`, 10,
   percent of its memory taken), with one line and exit code 3. A dry run is never refused for the GPU: it runs on the
   CPU, so the **Dry run** buttons stay usable on a busy GPU, and **Train** and **Prepare Speed review** are greyed.
+  A real Prepare Speed review also stops when torch sees no card (`error: no GPU: ...`, exit 2): it never moves to the
+  CPU on its own (#104).
 - **Progress** (`nnslr_tools.job_progress`), from the helper's own lines:
   - for train, Check the GPU, Read the drives and their pictures (drive k of N, from `drives: N` and one
     `<route>: features of ...` or `left out` line a drive), then Train and measure (the `road_labeler epoch` lines, with
