@@ -78,6 +78,7 @@ export const SIGN_KIND_GROUPS: readonly {label: string; kinds: readonly SignKind
     {id: 'cyclists', label: 'Danger: cyclists', chip: 'Cyclists', short: 'cyclists'},
     {id: 'traffic_queue', label: 'Danger: traffic queue', chip: 'Traffic queue', short: 'queue'},
     {id: 'roadworks', label: 'Roadworks', chip: 'Roadworks', short: 'works'},
+    {id: 'merging_traffic', label: 'Merging traffic (a road or a ramp joins)', chip: 'Merging traffic', short: 'merging'},
     {id: 'danger_other', label: 'Other danger', chip: 'Other danger', short: 'danger'},
   ]},
   {label: 'Priority', kinds: [

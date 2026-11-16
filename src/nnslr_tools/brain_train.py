@@ -118,6 +118,7 @@ from nnslr_tools import road_type_data as data
 from nnslr_tools.brain_net import (APPLICABILITY_POS_WEIGHT_MAX, USER_COLUMNS, USER_KINDS, USERS_POS_WEIGHT_MAX, brain_loss,
                                    build_brain_net, outputs)
 from nnslr_tools.brain_targets import (INPUT_SIZES, LEFT_OUT, MAP_GROUP, METRES_SCALE, NO_TYPE, NS, OPTIONAL, RATE_HZ,
+                                       ROAD_SIGN_KINDS, brain_sizes,
                                        applicability_counts, applicability_counts_text, applicability_weights,
                                        check_drives, class_kph, dataset, epoch_drives, hours_in_train, inputs_sha256,
                                        learning_pieces, loss_weights, night_frames, pack_inputs, plates_in_train, read_split,
@@ -717,20 +718,24 @@ def _spoken(speeds: list[int]) -> str:
     return f'{len(speeds)} speed{"s" if len(speeds) > 1 else ""}, {speeds[0]}-{speeds[-1]} km/h'
 
 
-def _group_sizes(groups) -> list[tuple[str, int]]:
-    """A checkpoint's groups with the columns of each: names (their INPUT_SIZES), or [name, size]."""
-    return [(group[0], int(group[1])) if isinstance(group, (list, tuple)) else (group, INPUT_SIZES[group]) for group in groups]
+def _group_sizes(said: dict) -> list[tuple[str, int]]:
+    """The groups of a brain with the columns of each, as its checkpoint says of itself (brain_sizes: an earlier one has
+    fewer kinds of other sign)."""
+    sizes = brain_sizes(said)
+    return [(name, sizes[name]) for name in said['groups']]
 
 
 def brain_start(torch, model, path: Path, source: dict) -> dict:
     """The weights of an earlier brain (its brain-last.pt, nnslr train-brain --init-from) in this fresh one: every layer of
     the same name and shape; the rows of the speed head by km/h, of the road and type heads by name (one the
     start lacks keeps the fresh row); the memory's input by group, an input the start lacks at zero and one it took and
-    this one does not left out, so the network starts saying what the start said. A head the start has not stays fresh,
+    this one does not left out, so the network starts saying what the start said. A group that grew at its end since the
+    start (road_signs: a kind of other sign more) keeps the start's columns and has the new ones at zero. A head the start has not stays fresh,
     and a head only the start has is not taken: the next limit and the metres of a brain of 7 to 11 Nov 2026.
     Refuses a start stepped otherwise (rate, picture, pool, features, memory), learnt on another split, or whose inputs
     are not as wide as its groups say. Returns what result.json records of it: its file and sha256, run, epoch, split,
-    the layers left fresh, the inputs added and left out, and whether the car's file of the inputs was the same."""
+    the layers left fresh, the inputs added, grown (name: [columns of the start, columns now]) and left out, and whether
+    the car's file of the inputs was the same."""
     path = Path(path)
     saved = torch.load(path, map_location='cpu', weights_only=False)
     if not isinstance(saved, dict) or not isinstance(saved.get('weights'), dict) or not saved.get('groups'):
@@ -747,10 +752,15 @@ def brain_start(torch, model, path: Path, source: dict) -> dict:
     state = {key: value.detach().clone() for key, value in model.state_dict().items()}
     # The memory's input: the picture's features, then each group's columns in its order (pack_inputs).
     columns, at = {}, source['features']
-    for name, size in _group_sizes(saved['groups']):
+    for name, size in _group_sizes(saved):
         columns[name] = (at, size)
         at += size
     memory = 'gru.weight_ih_l0'
+    # This brain's own groups: those of a training of today when its source does not say its kinds of other sign.
+    ours = _group_sizes(source if source.get('road_sign_kinds') is not None else {**source, 'road_sign_kinds': ROAD_SIGN_KINDS})
+    if model.state_dict()[memory].shape[1] != source['features'] + sum(size for _name, size in ours):
+        raise ValueError(f'this brain takes {model.state_dict()[memory].shape[1] - source["features"]} inputs, its groups say '
+                         f'{sum(size for _name, size in ours)}')
     if weights[memory].shape[1] != at:
         raise ValueError(f'the start takes {weights[memory].shape[1] - source["features"]} inputs, its groups say '
                          f'{at - source["features"]}: {path}')
@@ -759,7 +769,7 @@ def brain_start(torch, model, path: Path, source: dict) -> dict:
     rows = {'speed_head.': ({kph: row for row, kph in enumerate(table)}, own),
             'road_head.': ({kind: row for row, kind in enumerate(saved.get('road_kinds') or [])}, source['road_kinds']),
             'type_head.': ({kind: row for row, kind in enumerate(saved.get('road_types') or [])}, source['road_types'])}
-    fresh, added = [], []
+    fresh, added, grown = [], [], {}
     for key, current in state.items():
         if key in ('class_kph', 'mean', 'std'):
             continue  # its own table and the ImageNet constants
@@ -767,11 +777,15 @@ def brain_start(torch, model, path: Path, source: dict) -> dict:
         if key == memory:
             current[:, :source['features']] = weights[key][:, :source['features']]
             at = source['features']
-            for name, size in _group_sizes(source['groups']):
-                if name in columns and columns[name][1] == size:
-                    current[:, at:at + size] = weights[key][:, columns[name][0]:columns[name][0] + size]
+            for name, size in ours:
+                current[:, at:at + size] = 0
+                if name in columns:
+                    # The start's columns, the first of this group: one that grew at its end has its new ones at zero.
+                    theirs, kept = columns[name][0], min(columns[name][1], size)
+                    current[:, at:at + kept] = weights[key][:, theirs:theirs + kept]
+                    if columns[name][1] != size:
+                        grown[name] = [columns[name][1], size]
                 else:
-                    current[:, at:at + size] = 0
                     added.append(name)
                 at += size
         elif head is not None and key in weights:
@@ -789,9 +803,10 @@ def brain_start(torch, model, path: Path, source: dict) -> dict:
     if any(key.startswith('backbone.') for key in fresh):
         raise ValueError(f'the start has another picture encoder: {path}')
     model.load_state_dict(state, strict=True)
-    ours = {name for name, _ in _group_sizes(source['groups'])}
+    ours = set(source['groups'])
     return {'path': str(path), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest(), 'run': path.parent.name,
             'epoch': saved.get('epoch'), 'split_sha256': saved.get('split'), 'fresh': fresh, 'inputs_added': added,
+            'inputs_grown': grown,
             'inputs_left_out': [name for name in columns if name not in ours],
             'same_inputs_file': saved.get('inputs_sha256') == source['inputs_sha256']}
 
@@ -802,6 +817,8 @@ def _start_text(start: dict) -> str:
     return (f'Starts from the brain {start["run"]}{epoch}: every layer'
             + (f' but {", ".join(start["fresh"])}' if start['fresh'] else '')
             + (f'; new inputs at zero: {", ".join(start["inputs_added"])}' if start['inputs_added'] else '')
+            + ''.join(f'; {name} grew from {before} to {now} numbers, the new ones at zero'
+                      for name, (before, now) in (start.get('inputs_grown') or {}).items())
             + (f'; inputs it took, left out: {", ".join(start["inputs_left_out"])}' if start['inputs_left_out'] else '')
             + ('' if start['same_inputs_file'] else '; the car’s file of the inputs has changed since') + '.')
 
@@ -919,7 +936,10 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
               'features': FEATURES, 'hidden': HIDDEN, 'plates': plates,
               'hours': hours, 'wet': wet,
               'rate_hz': drives[0].get('rate', 1.0), 'picture': 'brain' if drives[0].get('rate', 1.0) == RATE_HZ else 'road_type',
-              'split': read_split(root)['sha256'], 'reader': drives[0]['reader'], 'inputs_sha256': inputs_sha256()}
+              'split': read_split(root)['sha256'], 'reader': drives[0]['reader'], 'inputs_sha256': inputs_sha256(),
+              # The kinds of other sign of road_signs (brain_targets.brain_sizes): the export tells the car, which gives a
+              # brain the kinds it was trained with when more are added.
+              'road_sign_kinds': ROAD_SIGN_KINDS}
     start = None
     if init_from is not None:
         start = brain_start(torch, model, Path(init_from), source)
@@ -958,7 +978,7 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
         no_map = {'validation_no_map': measure(blind, said, 'validation'), 'test_no_map': measure(blind, said, 'test')}
     table = [int(round(value)) for value in model.class_kph.tolist()]
     # rate_hz, hidden and kph: how the car steps it and what it says, for Models (model_roles.brain_digest).
-    result = {'groups': list(groups), 'map_limit': map_limit, 'map_path': map_limit, 'pool': pool, 'works': works, 'road_kinds': kinds,
+    result = {'groups': list(groups), 'road_sign_kinds': source['road_sign_kinds'], 'map_limit': map_limit, 'map_path': map_limit, 'pool': pool, 'works': works, 'road_kinds': kinds,
               'road_types': list(ROAD_TYPES) if types else [], 'users': users, 'user_kinds': source['user_kinds'],
               'users_pos_weight': None if lift is None else lift.round(3).tolist(),
               'users_answers': users_counts(drives), 'applicability': applicability, 'other_road_boxes': applicability,

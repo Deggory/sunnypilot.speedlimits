@@ -1623,6 +1623,8 @@ export interface BrainModel extends ModelBase {
   role: 'brain';
   /** What it is given beside the picture (signs, plate, plate_hours, plate_wet, hour, lead, country). */
   groups: string[] | null;
+  /** The kinds of other sign of its road_signs, two numbers each; null for a brain of before 16 Nov 2026: 49. */
+  road_sign_kinds?: number | null;
   /** It learnt the plates of hours: frames of train with a speed to answer had one. */
   plates: boolean;
   /** It learnt which hours a plate says: frames of train with a speed to answer had them read. */

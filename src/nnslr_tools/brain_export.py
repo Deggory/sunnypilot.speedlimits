@@ -32,7 +32,7 @@ import numpy as np
 from nnslr_tools import road_type_data as data
 from nnslr_tools import onnx_device
 from nnslr_tools.brain_net import build_brain_net, car_weights
-from nnslr_tools.brain_targets import BRAIN_INPUTS, INPUT_SIZES, METRES_SCALE, dataset, inputs_sha256, pack_inputs
+from nnslr_tools.brain_targets import BRAIN_INPUTS, METRES_SCALE, brain_sizes, dataset, inputs_sha256, pack_inputs
 from nnslr_tools.brain_train import CHECKPOINT, CHUNK, _pictures, predict
 from nnslr_tools.road_type_net import FrameStore, _torch, gru_step
 
@@ -56,7 +56,7 @@ def load_brain(checkpoint: Path):
     model = build_brain_net(tuple(saved['groups']), pool=saved['pool'], works=False, ahead=saved.get('ahead', False),
                             pretrained=False, features=saved['features'], hidden=saved['hidden'],
                             kph=None if table is None else table.tolist(), road_types=len(road_types_of(saved)),
-                            map_path='trust_map.weight' in saved['weights'])
+                            map_path='trust_map.weight' in saved['weights'], sizes=brain_sizes(saved))
     weights = {name: value for name, value in saved['weights'].items()
                if name in car_weights(model) or name.startswith('type_head.')}
     model.load_state_dict(weights, strict=True)
@@ -170,13 +170,15 @@ def drive_rollout(model, step_run, drive: dict, store: FrameStore, device: str =
 
 
 def rollout_drive(root: Path, merged_of, groups: tuple[str, ...], route: str | None = None, device: str = 'cpu',
-                  rate: float = 1.0, networks: dict | None = None, other_road_boxes: bool = False) -> tuple[dict, FrameStore]:
+                  rate: float = 1.0, networks: dict | None = None, other_road_boxes: bool = False,
+                  sizes: dict | None = None) -> tuple[dict, FrameStore]:
     """A drive of the labels at the brain's rate, with its pictures: route, or the one with the most frames in test. With
     no route, among the drives the brain learns from (training_routes), the ones with their pictures (a drive added after
     the training has none until the next one: it is passed by). A drive without the brain's pictures is refused: the
     check would run on black pictures and say nothing. networks: the ones the brain's signs were read with
     (sign_networks.of_brain), None for the car's release of the sunnypilot clone. other_road_boxes: the brain learnt
-    with the boxes of every sign read in sign_boxes (its checkpoint's)."""
+    with the boxes of every sign read in sign_boxes (its checkpoint's). sizes: the brain's own (brain_sizes of its
+    checkpoint), None for a brain of today: an earlier one is given the kinds of other sign it was trained with."""
     drives = dataset(root, merged_of, [route] if route else None, rate=rate, networks=networks,
                      other_road_boxes=other_road_boxes)
     if not drives:
@@ -187,7 +189,7 @@ def rollout_drive(root: Path, merged_of, groups: tuple[str, ...], route: str | N
         raise ValueError(f"{route or 'every dashcam drive'}: the brain's pictures are not made. Run "
                          f"nnslr road-type-signs --labelled {names}")
     drive = max(pictured, key=lambda item: sum(partition == 'test' for partition in item['partitions']))
-    drive['extra'] = pack_inputs(drive['inputs'], groups)
+    drive['extra'] = pack_inputs(drive['inputs'], groups, sizes)
     return drive, FrameStore(_pictures(root, [drive], dry_run=False, log=lambda text: None), device)
 
 
@@ -233,7 +235,7 @@ def export_brain_onnx(checkpoint: Path, output: Path, *, data_root: Path | None 
     groups = tuple(saved['groups'])
     if not set(groups) <= set(BRAIN_INPUTS.INPUT_SIZES):
         raise ValueError(f'this network has inputs the car does not give: {groups}')
-    width, hidden = sum(INPUT_SIZES[name] for name in groups), saved['hidden']
+    width, hidden = sum(brain_sizes(saved)[name] for name in groups), saved['hidden']
     step, names = step_module(model), output_names(model)
     rate = float(saved.get('rate_hz', 1.0))
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -257,7 +259,8 @@ def export_brain_onnx(checkpoint: Path, output: Path, *, data_root: Path | None 
         raise ValueError(f'brain ONNX differs from PyTorch: max abs error {worst}')
     if data_root is not None:
         drive, store = rollout_drive(Path(data_root), merged_of, groups, route, device=device, rate=rate,
-                                     networks=networks, other_road_boxes=bool(saved.get('other_road_boxes', False)))
+                                     networks=networks, other_road_boxes=bool(saved.get('other_road_boxes', False)),
+                                     sizes=brain_sizes(saved))
         verification['rollout'] = drive_rollout(model, run, drive, store, device=device, log=log)
         if verification['rollout']['other_speed'] or verification['rollout'].get('other_ahead'):
             raise ValueError(f'brain ONNX says another speed than PyTorch along a drive: {verification["rollout"]}')
@@ -299,7 +302,10 @@ def export_brain_onnx(checkpoint: Path, output: Path, *, data_root: Path | None 
                  'inputs': INPUT_NAMES, 'outputs': names, 'plates': bool(saved.get('plates', False)),
                  'hours': bool(saved.get('hours', False)), 'wet': bool(saved.get('wet', False)),
                  # sign_boxes held every sign read, those the applicability network gives to another road too
-                 'other_road_boxes': bool(saved.get('other_road_boxes', False))},
+                 'other_road_boxes': bool(saved.get('other_road_boxes', False)),
+                 # The kinds of other sign it was trained with: the car gives it the first so many (brain.py). A brain
+                 # of before 16 Nov 2026 does not say, and its contract stays as it was.
+                 **({'road_sign_kinds': int(saved['road_sign_kinds'])} if saved.get('road_sign_kinds') is not None else {})},
         'verification': verification,
     }
     contract_path = output.with_name(output.name + '.contract.json')

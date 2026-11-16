@@ -36,7 +36,7 @@ export const BRAIN_GROUPS: BrainGroup[] = [
     + 'boxes say, with no metres worked out: the picture in 8 columns and, for the speed signs and for the other signs, the tallest '
     + 'box of each column (its width, its height and the height of its centre, over the frame’s); then whether a sign was ever seen '
     + 'and the age of the last one (brain_inputs.BoxInputs). Every sign read, of another road too'},
-  {name: 'road_signs', size: 98, use: 'car', what: 'every other kind the classifier reads: the other signs (give way, stop, pedestrian '
+  {name: 'road_signs', size: 100, use: 'car', what: 'every other kind the classifier reads: the other signs (give way, stop, pedestrian '
     + 'crossing, roundabout…), the traffic light by what is lit (red, amber, green, off) and the road users (person, bicycle, car…): '
     + 'for each, confirmed, and the age of its last reading'},
   {name: 'light_boxes', size: 98, use: 'car', what: 'where the traffic lights of the last frame read are in the picture and how big, '

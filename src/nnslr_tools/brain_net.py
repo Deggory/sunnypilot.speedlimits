@@ -156,7 +156,8 @@ def _table(kph) -> list[float]:
 
 def build_brain_net(groups: tuple[str, ...], *, pool: str = 'grid', works: bool = True, ahead: bool = False,
                     pretrained: bool = True, features: int = FEATURES, hidden: int = HIDDEN, kph=None, road_kinds: int = 0,
-                    road_types: int = 0, users: bool = False, map_path: bool = False, applicability: bool = False):
+                    road_types: int = 0, users: bool = False, map_path: bool = False, applicability: bool = False,
+                    sizes: dict | None = None):
     """The network (torch.nn.Module): forward(images (B, T, 3, H, W) float 0..1, extra (B, T, inputs of the groups), state
     (B, hidden) or None) -> (speed logits (B, T, classes), works logit (B, T) or None, state); with ahead=True asked of
     forward (a network built with ahead: only for a checkpoint of 7 to 11 Nov 2026 that has those heads, never for a
@@ -182,13 +183,15 @@ def build_brain_net(groups: tuple[str, ...], *, pool: str = 'grid', works: bool 
     classes = len(table)
     # A plain number, no buffer: a checkpoint of before has none to load, and the export writes it as a constant.
     near_kph = (min(b - a for a, b in zip(table, table[1:])) if classes > 1 else table[0]) / 2
-    extra = sum(INPUT_SIZES[name] for name in groups)
-    signs_at = sum(INPUT_SIZES[name] for name in groups[:groups.index('signs')]) if 'signs' in groups else None
-    distance_at = (sum(INPUT_SIZES[name] for name in groups[:groups.index('sign_distance')])
+    # The sizes of this brain's groups (brain_targets.brain_sizes): an earlier one has fewer kinds of other sign.
+    sizes = INPUT_SIZES if sizes is None else sizes
+    extra = sum(sizes[name] for name in groups)
+    signs_at = sum(sizes[name] for name in groups[:groups.index('signs')]) if 'signs' in groups else None
+    distance_at = (sum(sizes[name] for name in groups[:groups.index('sign_distance')])
                    if 'sign_distance' in groups else None)
     if map_path and MAP_GROUP not in groups:
         raise ValueError(f'the map’s limit has a path to the answer only when {MAP_GROUP} is among the groups')
-    map_at = sum(INPUT_SIZES[name] for name in groups[:groups.index(MAP_GROUP)]) if map_path else None
+    map_at = sum(sizes[name] for name in groups[:groups.index(MAP_GROUP)]) if map_path else None
     if applicability and 'sign_boxes' not in groups:
         raise ValueError('whose road a sign is of is asked of the columns of sign_boxes: it must be among the groups')
 

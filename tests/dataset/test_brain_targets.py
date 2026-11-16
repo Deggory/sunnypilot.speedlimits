@@ -335,6 +335,10 @@ def test_every_other_sign_reaches_the_brain_once_confirmed():
     targets = _targets()
     from nnslr_tools.sign_types import SIGN_TYPES
     assert targets.BRAIN_INPUTS.ROAD_SIGNS == SIGN_TYPES  # all of them, none picked out
+    # A kind is only ever added at the end: a brain of before keeps its numbers (brain_sizes, #103).
+    assert SIGN_TYPES[48] == 'road_user_other' and SIGN_TYPES[49:] == ('merging_traffic',)
+    assert targets.brain_sizes({})['road_signs'] == 98 and targets.brain_sizes({'road_sign_kinds': 50})['road_signs'] == 100
+    assert targets.brain_sizes() == targets.INPUT_SIZES
     stop = 2 * SIGN_TYPES.index('stop')
     readings = [[10.0, [['other_sign:stop', .9]]], [10.2, [['other_sign:stop', .9]]], [30.0, [['other_sign:give_way', .9]]]]
     rows = targets.road_sign_inputs(numpy.array([9.0, 10.0, 10.2, 20.0, 31.0]), readings)

@@ -664,7 +664,9 @@ def _shared_cuts(was: dict, now: dict) -> tuple[list | None, list | None]:
     """Where each brain's input row has the groups both brains take, in one order: [(from, to)] of each, or None for the
     whole row when they take the same groups (brain_groups [[name, size]]). sign_boxes is not one they share when one
     brain is given the boxes of every sign read and the other those of the signs taken (brain_every_box, the contract's
-    other_road_boxes, #89): there the rows differ by the brains' own contracts, not by what is read before them."""
+    other_road_boxes, #89): there the rows differ by the brains' own contracts, not by what is read before them. A group
+    one brain has longer (road_signs: a kind of other sign added at its end, #103) is shared for its first numbers, those
+    both have."""
     mine, theirs = was.get('brain_groups'), now.get('brain_groups')
     apart = {'sign_boxes'} if bool(was.get('brain_every_box')) != bool(now.get('brain_every_box')) else set()
     if not mine or not theirs or (mine == theirs and not apart):
@@ -678,7 +680,11 @@ def _shared_cuts(was: dict, now: dict) -> tuple[list | None, list | None]:
 
     was_places, now_places = places(mine), places(theirs)
     shared = [name for name, _size in mine if name in now_places and name not in apart]
-    return [was_places[name] for name in shared], [now_places[name] for name in shared]
+
+    def first(found: dict, name: str) -> tuple[int, int]:
+        width = min(was_places[name][1] - was_places[name][0], now_places[name][1] - now_places[name][0])
+        return found[name][0], found[name][0] + width
+    return [first(was_places, name) for name in shared], [first(now_places, name) for name in shared]
 
 
 def _cut(row: list[float] | None, cuts: list | None) -> list[float] | None:
@@ -1162,7 +1168,9 @@ def replay(root: Path, route: str, set_key: str, *, device: str = 'cuda', packag
             'frame': [width, height], 'networks': networks, 'code': code_hashes(package), 'settings': files.settings,
             'videos': _video_stamp({segment: videos[segment] for segment in segments}),
             'brain_memory_gap': (files.brain_contract.get('step') or {}).get('memory_gap_seconds') if reader else None,
-            'brain_groups': [[name, car.brain.brain_inputs.INPUT_SIZES[name]] for name in reader.groups] if reader else None,
+            # The sizes the reader gave this brain (its kinds of other sign), not those of today's file.
+            'brain_groups': [[name, getattr(reader, 'sizes', car.brain.brain_inputs.INPUT_SIZES)[name]]
+                             for name in reader.groups] if reader else None,
             'brain_every_box': bool(getattr(reader, 'other_road_boxes', False)) if reader else None,
             'sources': {'video': video_sha, 'logs': [row for row in logs['files'] if row[0] in segments]},
             'frames': frames, 'out': out, 'signs': signs, 'in': {**inputs, 'brain': brain_rows},

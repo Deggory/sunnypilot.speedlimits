@@ -465,7 +465,9 @@ def brain_digest(result: Any) -> dict:
 
     # A result without rate_hz, ahead and kph is a brain of before 8 Nov 2026: 1 Hz, the speed alone, a class every 5 km/h.
     kph = result.get('kph') if isinstance(result.get('kph'), dict) else {'from': 5, 'to': 200, 'step': 5}
-    return {'groups': result['groups'], 'seed': result.get('seed'), 'works': result.get('works'), 'pool': result.get('pool'),
+    # road_sign_kinds: the kinds of other sign of its road_signs (brain_targets.brain_sizes); None for a brain of before
+    # 16 Nov 2026, which has the 49 there were.
+    return {'groups': result['groups'], 'road_sign_kinds': _int(result.get('road_sign_kinds')), 'seed': result.get('seed'), 'works': result.get('works'), 'pool': result.get('pool'),
             'rate_hz': _num(result.get('rate_hz')) or 1.0, 'ahead': bool(result.get('ahead')), 'hidden': _int(result.get('hidden')),
             'kph': {key: _int(kph.get(key)) for key in ('from', 'to', 'step')},
             'road_kinds': list(result.get('road_kinds') or []), 'road_types': list(result.get('road_types') or []),
@@ -988,7 +990,8 @@ class ModelIndex:
                       'hours': bool(trained.get('hours')), 'wet': bool(trained.get('wet')),
                       # How the car steps it and what it says (Models › How it works, model-flow.ts).
                       **{key: trained.get(key) for key in ('rate_hz', 'ahead', 'hidden', 'kph', 'road_kinds', 'road_types',
-                                                           'pool', 'sign_networks', 'users', 'applicability')},
+                                                           'pool', 'sign_networks', 'users', 'applicability',
+                                                           'road_sign_kinds')},
                       'epochs': trained.get('epochs'), 'epochs_run': trained.get('epochs'),
                       'validation': trained.get('validation'), 'test': trained.get('test'),
                       'test_no_map': trained.get('test_no_map')})

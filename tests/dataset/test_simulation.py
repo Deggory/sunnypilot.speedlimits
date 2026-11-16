@@ -158,6 +158,20 @@ def test_brains_with_other_groups_are_compared_on_the_groups_both_take():
     assert (found['same_input'], found['other_input']) == (0, 1)
 
 
+def test_brains_with_more_and_fewer_kinds_of_other_sign_are_compared_on_the_kinds_both_have():
+    """#103: road_signs grew at its end. The numbers both brains have are compared, and the groups after it too."""
+    was = brain_record([50, 50], {'0': [0.1, 0.2, 0.3], '1': [0.1, 0.2, 0.3]})
+    was['brain_groups'] = [['road_signs', 2], ['lead', 1]]
+    now = brain_record([50, 30], {'0': [0.1, 0.2, 0.9, 0.9, 0.3], '1': [0.1, 0.2, 0.9, 0.9, 0.3]}, brain_sha='e' * 64)
+    now['brain_groups'] = [['road_signs', 4], ['lead', 1]]
+    assert simulation._shared_cuts(was, now) == ([(0, 2), (2, 3)], [(0, 2), (4, 5)])
+    found = simulation.compare(was, now)
+    assert (found['same_input'], found['other_input']) == (1, 0)
+    now['in']['brain']['1'] = [0.1, 0.2, 0.9, 0.9, 0.4]
+    found = simulation.compare(was, now)
+    assert (found['same_input'], found['other_input']) == (0, 1)
+
+
 def test_a_brain_given_every_sign_s_box_and_one_given_the_signs_taken_do_not_share_the_sign_boxes():
     """#89: a box of another road in sign_boxes is there by the brain's own contract (other_road_boxes), not because
     what is read before the brain changed: next to a brain given the signs taken, another speed is the brain's."""

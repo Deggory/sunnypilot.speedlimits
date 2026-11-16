@@ -422,7 +422,7 @@ def run_brains(root: Path, runs: list[str], merged_of, *, device, log=print) -> 
     """Each brain along each certified drive still missing it; a drive or a brain that cannot run stops only itself.
     The drives that could not run, for the exit code."""
     from nnslr_tools.brain_export import load_brain
-    from nnslr_tools.brain_targets import BRAIN_INPUTS, inputs_sha256, pack_inputs
+    from nnslr_tools.brain_targets import BRAIN_INPUTS, brain_sizes, inputs_sha256, pack_inputs
     from nnslr_tools.brain_train import CHUNK, _pictures, predict
     from nnslr_tools.model_roles import BRAIN_WEIGHTS
     from nnslr_tools.road_type_net import FrameStore
@@ -476,7 +476,8 @@ def run_brains(root: Path, runs: list[str], merged_of, *, device, log=print) -> 
                     stores[key] = FrameStore(_pictures(root, [found], dry_run=False, log=log), device)
                     drives[key] = found
                 drive, store = drives[key], stores[key]
-                drive['extra'] = pack_inputs(drive['inputs'], tuple(saved['groups']))
+                # Each brain its own kinds of other sign (brain_sizes): the drive is shared by the brains of a set.
+                drive['extra'] = pack_inputs(drive['inputs'], tuple(saved['groups']), brain_sizes(saved))
                 said = predict(model.to(device), drive, store, chunk=CHUNK, device=device)
                 usable = [at for at, frame in enumerate(drive['frames']) if frame['ns'] is not None and frame['present']]
                 write_result(root, route, brain_spec(run), {

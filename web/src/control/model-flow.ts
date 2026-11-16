@@ -63,9 +63,13 @@ const DECIDER: FlowBlock[] = [
     facts: [{name: 'classes', what: 'the same classes as the classifier'}]},
 ];
 
-const group = (name: string) => {
+/** The kinds of other sign of a brain that does not say them: those there were until 16 Nov 2026. */
+const ROAD_SIGN_KINDS_BEFORE = 49;
+/** A group with its size for this brain: road_signs has two numbers for each kind it was trained with. */
+const group = (name: string, version: BrainModel) => {
   const found = BRAIN_GROUPS.find((item) => item.name === name);
-  return {name: name + (found ? ' · ' + found.size : ''), what: found?.what ?? name};
+  const size = name === 'road_signs' ? 2 * (version.road_sign_kinds ?? ROAD_SIGN_KINDS_BEFORE) : found?.size;
+  return {name: name + (found ? ' · ' + size : ''), what: found?.what ?? name};
 };
 
 /** The brain as the car steps it: its inputs are the groups it was trained with. */
@@ -88,7 +92,7 @@ function brainBlocks(version: BrainModel): FlowBlock[] {
   ];
   for (const [id, title, names] of sets) {
     if (!names.length) continue;
-    inputs.push({id, title, sub: names.join(' · '), kind: 'input', column: 0, facts: names.map(group), to: ['memory'],
+    inputs.push({id, title, sub: names.join(' · '), kind: 'input', column: 0, facts: names.map((name) => group(name, version)), to: ['memory'],
       ...(id === 'signs' ? {note: 'What SignNet and the classifier read on this car, mistakes included.'
         + (version.sign_networks?.decider ? ' Its signs passed the applicability network first: those it gave '
           + 'to another road were left out of the number in force.' : ' Every sign read, of another road too.')

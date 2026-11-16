@@ -163,6 +163,10 @@ def test_the_kind_of_an_other_sign_is_kept_and_checked(server):
     body['detections'][0].update(family='other_sign', value_kph=None, sign_type='lamp_post')
     status, response, data = running.post_frame(ROUTE, '0/2', body)
     assert status == 400 and 'sign_type must be one of' in json_of(data)['message']
+    # The merging-traffic triangle has its kind (#103).
+    body['detections'][0].update(sign_type='merging_traffic')
+    status, response, data = running.post_frame(ROUTE, '0/2', body)
+    assert status == 200 and json_of(data)['review']['detections'][0]['sign_type'] == 'merging_traffic'
 
 
 def test_a_not_a_sign_box_on_a_vehicle_is_kept_only_as_not_a_sign(server):

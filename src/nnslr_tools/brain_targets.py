@@ -294,6 +294,20 @@ LEFT_OUT = ('engaged', 'pedals', 'speed', 'sign_distance', 'country', 'hour')
 # the map before: such a brain does, any other still does not.
 OPTIONAL = ('map_limit',)
 pack_inputs = BRAIN_INPUTS.pack_inputs
+# The kinds of other sign a brain trained today learns (road_signs, two numbers a kind): all the car's file has.
+ROAD_SIGN_KINDS = len(BRAIN_INPUTS.ROAD_SIGNS)
+
+
+def brain_sizes(said: dict | None = None) -> dict:
+    """The size of each group for one brain, as its checkpoint, its result.json or its contract's step says of it: a kind
+    of other sign is only ever added at the end, and a brain keeps the first kinds it was trained with (road_sign_kinds;
+    one that does not say was trained with those of before 16 Nov 2026, the car's ROAD_SIGN_KINDS). None: a brain of
+    today. Every place that builds, loads, starts from, exports, checks or replays a brain takes its sizes from here,
+    never from INPUT_SIZES, which is only the size of today's."""
+    if said is None:
+        return BRAIN_INPUTS.input_sizes()
+    kinds = said.get('road_sign_kinds')
+    return BRAIN_INPUTS.input_sizes(BRAIN_INPUTS.ROAD_SIGN_KINDS if kinds is None else kinds)
 
 
 class FramesChanged(ValueError):

@@ -69,7 +69,7 @@ def main() -> int:
                         '--benchmark-runs', '1'], cwd=folder, check=True, capture_output=True, text=True,
                        env={**os.environ, 'PYTHONPATH': str(tinygrad), 'CACHELEVEL': '0'})
         drive, frames = brain_export.rollout_drive(root, lambda route: store.merged(route, keep=False), tuple(saved['groups']),
-                                                   args.route, 'cuda')
+                                                   args.route, 'cuda', sizes=brain_export.brain_sizes(saved))
         print(json.dumps({'flags': flags, **brain_export.drive_rollout(model, compiled_step(target), drive, frames, 'cuda')}))
     return 0
 

@@ -324,6 +324,18 @@ def test_the_brain_on_the_car_keeps_loading_after_the_motion_group():
     assert 'c2303311c6b92f362273754c88fe87321ac0a3ac71967c259c9ad1161be1366d' in brain.SAME_GROUPS
 
 
+def test_the_brain_on_the_car_keeps_loading_after_a_kind_of_other_sign_more():
+    """#103: the file the brain on the car of 15 Nov 2026 was trained with, and what a brain of before is given."""
+    brain, _ = _car()
+    assert '6e1960feffe03ca96cc6db3a884ff9d056a43aafe01c3c03001feebbd1102fb3' in brain.SAME_GROUPS
+    assert brain.ROAD_SIGN_KINDS == 49 and brain.ROAD_SIGNS[49:] == ('merging_traffic',)
+    import numpy
+    rows = {'road_signs': numpy.arange(2 * len(brain.ROAD_SIGNS), dtype=numpy.float32), 'lead': numpy.ones(3, dtype=numpy.float32)}
+    packed = brain.pack_inputs(rows, ('road_signs', 'lead'), brain.input_sizes(49))
+    assert packed.shape == (98 + 3,) and numpy.array_equal(packed[:98], rows['road_signs'][:98])
+    assert brain.pack_inputs(rows, ('road_signs', 'lead')).shape == (2 * len(brain.ROAD_SIGNS) + 3,)
+
+
 def test_a_flashing_blinker_is_on_and_its_age_counts_from_its_last_flash():
     brain, _ = _car()
     motion = brain.MotionInputs()

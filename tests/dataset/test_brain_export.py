@@ -205,6 +205,29 @@ def test_a_network_of_an_earlier_file_with_the_same_groups_exports_with_its_own_
     assert json.loads((tmp_path / 'brain.onnx.contract.json').read_text())['inputs_sha256'] == earlier
 
 
+@pytest.mark.parametrize('kinds', [None, 50])
+def test_a_brain_exports_with_the_kinds_of_other_sign_it_was_trained_with(tmp_path, monkeypatch, kinds):
+    """#103: a brain of before 16 Nov 2026 does not say its kinds: it exports 98 numbers of road_signs and a contract
+    without the word (the one on the car stays as it was). One trained since says them, and the contract tells the car."""
+    from nnslr_tools.brain_net import build_brain_net
+    from nnslr_tools.brain_targets import brain_sizes
+    groups = ('signs', 'road_signs', 'lead')
+    said = {} if kinds is None else {'road_sign_kinds': kinds}
+    sizes = brain_sizes(said)
+    model = build_brain_net(groups, works=False, pretrained=False, sizes=sizes).eval()
+    saved = {'groups': groups, 'hidden': model.gru.hidden_size, 'inputs_sha256': inputs_sha256(), 'epoch': 0, 'split': 'x',
+             'reader': None, **said}
+    path = tmp_path / 'brain-last.pt'
+    path.write_bytes(b'weights')
+    monkeypatch.setattr(brain_export, 'load_brain', lambda _: (model, saved))
+    brain_export.export_brain_onnx(path, tmp_path / 'brain.onnx')
+    contract = json.loads((tmp_path / 'brain.onnx.contract.json').read_text())
+    width = sum(sizes[name] for name in groups)
+    assert sizes['road_signs'] == 2 * (49 if kinds is None else kinds)
+    assert next(item for item in contract['inputs'] if item['name'] == 'extra')['shape'] == [1, width]
+    assert contract['step'].get('road_sign_kinds') == kinds and ('road_sign_kinds' in contract['step']) == (kinds is not None)
+
+
 @pytest.mark.parametrize('saved, hours', [({}, False), ({'hours': True}, True)])
 def test_the_contract_says_whether_the_car_gives_the_hours(tmp_path, monkeypatch, saved, hours):
     path = checkpoint(tmp_path / 'brain-last.pt', monkeypatch, **saved)

@@ -1199,7 +1199,7 @@ def test_the_log_says_the_dashcam_drives_and_a_train_without_them_says_how_to_ge
     # Dashcam drives, but none of them in train: the split put them in val and test, and the message says to drive more.
     monkeypatch.setattr(brain_train, 'dataset', lambda *_args, **_options: [{'route': 'r1', 'inputs': None}])
     monkeypatch.setattr(brain_train, '_short', lambda drive, _frames: drive)
-    monkeypatch.setattr(brain_train, 'pack_inputs', lambda _inputs, _groups: None)
+    monkeypatch.setattr(brain_train, 'pack_inputs', lambda _inputs, _groups, *_sizes: None)
     monkeypatch.setattr(brain_train, 'loss_weights', lambda _drive, _part: (brain_train.np.zeros(4, dtype=bool),))
     with pytest.raises(ValueError, match='fall in val and test of the split; drive more'):
         brain_train.train_brain(tmp_path, tmp_path / 'run', None, dry_run=True, log=lines.append)
@@ -1264,7 +1264,7 @@ def test_the_export_checks_the_brain_along_a_drive_it_learnt_from_with_its_pictu
         return [dict(drive) for drive in found]
 
     monkeypatch.setattr(brain_export, 'dataset', dataset)
-    monkeypatch.setattr(brain_export, 'pack_inputs', lambda _inputs, _groups: None)
+    monkeypatch.setattr(brain_export, 'pack_inputs', lambda _inputs, _groups, *_sizes: None)
     monkeypatch.setattr(brain_export, '_pictures', lambda *_args, **_options: None)
     monkeypatch.setattr(brain_export, 'FrameStore', lambda pictures, device: (pictures, device))
     assert brain_export.rollout_drive(tmp_path, None, ())[0]['route'] == 'r1'
@@ -1336,6 +1336,51 @@ def test_a_brain_going_on_from_another_says_what_it_said_without_the_inputs_it_d
     # The start with its dropped inputs at zero; the new one whatever its new input says.
     for got, wanted in zip(said_by(torch, new, groups, drive, array), said_by(torch, old, GROUPS, drive, array)):
         assert torch.allclose(got, wanted, atol=1e-5)
+
+
+def test_a_brain_goes_on_from_one_trained_with_fewer_kinds_of_other_sign_and_says_what_it_said(tmp_path):
+    """#103: a kind added at the end of road_signs. The start (no road_sign_kinds: the 49 of before) keeps its columns
+    in the new brain, whose new ones start at zero; nothing of the group is thrown away."""
+    from nnslr_tools.brain_targets import BRAIN_INPUTS, ROAD_SIGN_KINDS, brain_sizes, pack_inputs
+    from nnslr_tools.brain_train import _start_text, brain_start
+    torch = torch_or_skip()
+    assert ROAD_SIGN_KINDS == len(BRAIN_INPUTS.ROAD_SIGNS) > BRAIN_INPUTS.ROAD_SIGN_KINDS == 49
+    groups = ('signs', 'road_signs', 'lead')
+    before = brain_sizes({})
+    assert before['road_signs'] == 98 and brain_sizes()['road_signs'] == 2 * ROAD_SIGN_KINDS
+    old = tiny(torch, groups=groups, road_kinds=1, sizes=before)
+    for value in old.parameters():
+        value.data.add_(torch.randn_like(value) * 0.05)
+    path = start_file(torch, tmp_path, old, groups=groups)
+    new = tiny(torch, groups=groups, road_kinds=1)
+    assert new.gru.weight_ih_l0.shape[1] == old.gru.weight_ih_l0.shape[1] + 2 * (ROAD_SIGN_KINDS - 49)
+    start = brain_start(torch, new, path, source_of(groups, road_sign_kinds=ROAD_SIGN_KINDS))
+    assert (start['inputs_added'], start['inputs_left_out'], start['fresh']) == ([], [], [])
+    assert start['inputs_grown'] == {'road_signs': [98, 2 * ROAD_SIGN_KINDS]}
+    assert f'road_signs grew from 98 to {2 * ROAD_SIGN_KINDS} numbers' in _start_text(start)
+    drive = fake_drive(['train'] * T)
+    for name in groups:
+        drive['inputs'][name][:] = numpy_random(drive['inputs'][name].shape)
+    array = pictures(drive)
+    images = torch.from_numpy(array).permute(0, 3, 1, 2).float()[None] / 255
+
+    def says(model, sizes):
+        model.eval()
+        with torch.no_grad():
+            return model(images, torch.from_numpy(pack_inputs(drive['inputs'], groups, sizes))[None], road=True)[0]
+    # Whatever the new kind reads, the new brain starts saying what the start said on its own kinds.
+    assert torch.allclose(says(new, brain_sizes()), says(old, before), atol=1e-5)
+    # A source that does not say its kinds is a training of today's: the same layout, every new column at zero.
+    again = tiny(torch, groups=groups, road_kinds=1)
+    assert brain_start(torch, again, path, source_of(groups))['inputs_grown'] == {'road_signs': [98, 2 * ROAD_SIGN_KINDS]}
+    assert torch.equal(again.gru.weight_ih_l0, new.gru.weight_ih_l0)
+    # And a brain built otherwise than its source says is refused.
+    with pytest.raises(ValueError, match='this brain takes'):
+        brain_start(torch, tiny(torch, groups=groups, road_kinds=1, sizes=before), path, source_of(groups))
+    # A start that says more kinds than its inputs are wide is refused, as any start whose width is not its groups'.
+    wrong = start_file(torch, tmp_path, old, groups=groups, road_sign_kinds=ROAD_SIGN_KINDS)
+    with pytest.raises(ValueError, match='its groups say'):
+        brain_start(torch, tiny(torch, groups=groups, road_kinds=1), wrong, source_of(groups, road_sign_kinds=ROAD_SIGN_KINDS))
 
 
 def test_a_brain_goes_on_with_the_road_users_from_one_without_and_without_them_from_one_with(tmp_path):

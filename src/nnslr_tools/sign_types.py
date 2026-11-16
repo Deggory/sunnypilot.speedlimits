@@ -9,6 +9,8 @@ road-type network. So is a blue board with the motorway's green inset (places on
 with the metres to the junction: "250 m" goes in the plate's Distance), before the motorway and on it, gantries too. The motorway sign itself is ``motorway_start``: the green square with the motorway pictogram
 alone, no places and no arrow. ``motorway_exit`` is the sign at the gore of a motorway or expressway exit (the blue arrow up to the right, "Ausfahrt"): ours when the car takes that exit, another road when it stays on. ``no_vehicles`` is a round ban with a red ring and a white disc, empty or
 with pictograms (motor vehicles, motorcycles, lorries, bicycles...): the sign that looks most like a speed limit.
+``merging_traffic`` is the danger triangle of a road or a lane that joins ours, from the right or from the left, as
+where a ramp comes in; any other danger triangle without a kind of its own stays ``danger_other``.
 A traffic light is a kind too, one for what is lit in the picture: ``traffic_light_red`` (red, also red with amber),
 ``traffic_light_amber``, ``traffic_light_green``, ``traffic_light_off`` (no lamp lit). One box around the whole light of
 our lane. A flashing amber is amber on one frame and off on the next: each frame says what it shows, and the brain
@@ -58,6 +60,8 @@ SIGN_TYPES = (
     # Road users (added 12 Nov 2026): ROAD_USERS
     'road_user_person', 'road_user_bicycle', 'road_user_motorcycle', 'road_user_car', 'road_user_truck',
     'road_user_bus', 'road_user_tram', 'road_user_other',
+    # Added 16 Nov 2026 (#103), after the last one: the kinds before keep their place (the brain's road_signs columns)
+    'merging_traffic',
 )
 ROAD_USER_PREFIX = 'road_user_'
 # The kinds that are no sign: who is on the road.
