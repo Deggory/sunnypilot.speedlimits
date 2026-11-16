@@ -881,6 +881,18 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
                                          families=_evaluated_families(args))
         selected = [r for r in plan["frames"] if r["split"] == args.partition]
     else:
+        if args.classes == "v2" and args.checkpoint and not args.dry_run:
+            # The plan takes the checkpoint's classes as it takes those of a training's start (nnslr train
+            # --init-from), so that validation keeps every label the checkpoint has, those it has from its own start
+            # too, as its training's validation did (#104). What is no v2 classifier, or a Python without torch, goes
+            # on without them: evaluate_reader refuses it in its words, or reads it as before.
+            from nnslr_tools.training import reader_start
+            try:
+                evaluated = reader_start(Path(args.checkpoint))
+            except (ImportError, ValueError):
+                evaluated = {}
+            if evaluated.get("class_scheme") == "v2":
+                options["start"] = evaluated
         plan = prepare_reader_training(dataset, splits, root, dataset_kind=kind, **options)
         selected = [r for r in plan["records"] if r["split"] == args.partition]
 

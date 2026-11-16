@@ -14,7 +14,7 @@ from nnslr_tools import mapillary
 from nnslr_tools.mapillary import (CROPS_FILE, crops_state, make_crops, our_label, read_crops,
                                    training_records)
 from nnslr_tools.training import TrainConfig, prepare_reader_training, resume_arguments
-from test_classifier import _classifier_fixture
+from test_classifier import FRAMES, SIGN, _box, _classifier_fixture
 from test_detector_sizes import torch_python  # noqa: F401 (fixture)
 
 
@@ -499,6 +499,67 @@ def test_the_plan_of_the_second_stage_has_the_classes_of_its_start(tmp_path, cap
         prepare_reader_training(dataset, latest, tmp_path, start=start)
     with pytest.raises(ValueError, match="not a v2 classifier"):
         prepare_reader_training(dataset, latest, tmp_path, class_scheme="v2", start=dict(start, class_scheme="v1"))
+
+
+def _validation_signs(plan: dict) -> dict[str, int]:
+    """How many sign crops of each label the validation of a plan has."""
+    from collections import Counter
+    return dict(Counter(r["label"] for r in plan["records"]
+                        if r["split"] == "validation" and r["label"] != "not_a_sign"))
+
+
+def test_a_pretraining_from_a_classifier_keeps_in_validation_what_its_start_knows(tmp_path, capsys, monkeypatch):
+    """The pretraining on Mapillary alone, started from a classifier of ours (run_classifier.sh with
+    NNSLR_CLASSIFIER_MAPILLARY=pretrain and NNSLR_CLASSIFIER_INIT_FROM): validation keeps every class the start
+    knows, those Mapillary lacks too, where the start forgetting our signs would show. Before #104 they left, and
+    the epoch the second stage starts from was chosen on the classes Mapillary has alone."""
+    # One more frame: a 70 in validation, a label no train crop of ours has; the start knows it from its own start.
+    monkeypatch.setattr("test_classifier.FRAMES", FRAMES + [("validation", "human", [_box("s", SIGN, value=70)], [])])
+    dataset = _classifier_fixture(tmp_path, capsys)
+    latest = tmp_path / "splits" / "latest.json"
+    path = _two_stage_crops(tmp_path)
+    plain = prepare_reader_training(dataset, latest, tmp_path, class_scheme="v2")
+    assert plain["unseen_validation_labels"] == ["maximum_speed:70"]
+    everything = {"maximum_speed:30": 2, "maximum_speed:50": 1, "maximum_speed:70": 1, "other_sign": 1,
+                  "other_sign:give_way": 1}
+    assert _validation_signs(plain) == {label: n for label, n in everything.items() if label != "maximum_speed:70"}
+
+    # Without a start nothing changes: only the classes Mapillary has are measured.
+    alone = prepare_reader_training(dataset, latest, tmp_path, class_scheme="v2", mapillary_path=path,
+                                    mapillary_only=True)
+    assert _validation_signs(alone) == {"maximum_speed:50": 1, "other_sign": 1}
+    assert alone["unseen_validation_labels"] == ["maximum_speed:30", "maximum_speed:70", "other_sign:give_way"]
+    assert alone["skipped"]["validation_label_not_in_train"] == 4
+
+    start = {"path": "/runs/earlier/classifier/reader-best.pt", "sha256": "ab", "class_scheme": "v2",
+             "classes": sorted(plain["classes"] + ["maximum_speed:70"]), "split_sha256": plain["split_sha256"],
+             "mapillary_only": False}
+    first = prepare_reader_training(dataset, latest, tmp_path, class_scheme="v2", mapillary_path=path,
+                                    mapillary_only=True, start=start)
+    # Our classes are in the pretraining's list already: the start adds the 70 alone, and validation keeps them all.
+    assert first["classes_from_start"] == ["maximum_speed:70"]
+    assert first["classes"] == sorted(set(alone["classes"]) | {"maximum_speed:70"})
+    assert _validation_signs(first) == everything and first["unseen_validation_labels"] == []
+    assert "validation_label_not_in_train" not in first["skipped"]
+    assert set(_validation_signs(first)) <= set(first["classes"])
+    # Train is still Mapillary alone, and validation still has no not_a_sign crop.
+    assert {r["label_basis"] for r in first["records"] if r["split"] == "train"} == {"mapillary"}
+    assert not any(r["label"] == "not_a_sign" for r in first["records"] if r["split"] == "validation")
+    assert [r for r in first["records"] if r["split"] != "validation"] == [
+        r for r in alone["records"] if r["split"] != "validation"]
+
+    # A label that neither Mapillary nor the start has still leaves.
+    narrow = prepare_reader_training(dataset, latest, tmp_path, class_scheme="v2", mapillary_path=path,
+                                     mapillary_only=True, start=dict(start, classes=["maximum_speed:30", "not_a_sign"]))
+    assert narrow["unseen_validation_labels"] == ["maximum_speed:70", "other_sign:give_way"]
+    assert _validation_signs(narrow) == {"maximum_speed:30": 2, "maximum_speed:50": 1, "other_sign": 1}
+
+    # The second stage, from the first: the same classes and the same sign crops in validation, as it always had.
+    second = prepare_reader_training(dataset, latest, tmp_path, class_scheme="v2",
+                                     start=dict(start, classes=first["classes"], mapillary_only=True))
+    assert second["classes"] == first["classes"]
+    assert second["classes_from_start"] == ["maximum_speed:120", "maximum_speed:70"]
+    assert _validation_signs(second) == everything and second["unseen_validation_labels"] == []
 
 
 def test_the_two_stages_resume_with_their_start(tmp_path):

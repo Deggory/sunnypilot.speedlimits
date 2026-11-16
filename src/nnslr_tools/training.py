@@ -438,6 +438,8 @@ def prepare_reader_training(
     The two stages of a classifier pretrained on Mapillary (v2): mapillary_only is the first, every Mapillary crop of
     a v2 class in train and none of ours; start (reader_start of a reader-best.pt, nnslr train --init-from) is the
     second, whose classes are its own and those of the start, so both stages have the same list (_prepare_classifier).
+    Validation keeps every label the start knows, in either stage; nnslr evaluate gives the checkpoint it evaluates as
+    the start, so that validation keeps every label that checkpoint has (#104).
     """
     if class_scheme not in CLASS_SCHEMES:
         raise ValueError(f"unknown class scheme {class_scheme!r}: one of {', '.join(CLASS_SCHEMES)}")
@@ -725,8 +727,10 @@ def _prepare_classifier(loaded: dict[str, Any], dataset_path: Path, split_path: 
         classes_from_start = sorted(set(start.get("classes") or []) - set(classes))
         classes = sorted(set(classes) | set(classes_from_start))
     val_labels = sorted({r["label"] for r in records if r["split"] == VALIDATION_SPLIT})
-    # A validation label that nothing in this run or its start learnt cannot be read: it leaves validation.
-    unseen_validation = sorted(set(val_labels) - set(train_labels) - set(classes_from_start))
+    # A validation label that nothing in this run or its start learnt cannot be read: it leaves validation. Every
+    # class of the start counts, not only those it adds to the list: a pretraining on Mapillary alone has our classes
+    # in its list already, so from a classifier of ours it lost every label of validation Mapillary lacks (#104).
+    unseen_validation = sorted(set(val_labels) - set(train_labels) - set((start or {}).get("classes") or []))
     records, skipped = _without_unseen_validation(records, unseen_validation, skipped)
     counts_by_split = Counter(r["split"] for r in records)
     counts_by_class = Counter(r["label"] for r in records if r["split"] == TRAIN_SPLIT)

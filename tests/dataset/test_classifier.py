@@ -468,6 +468,68 @@ def test_cli_options_of_the_classifier(tmp_path, capsys):
     assert "torch" not in sys.modules
 
 
+def test_the_evaluation_keeps_in_validation_every_label_of_the_checkpoint(tmp_path, capsys, monkeypatch):
+    """nnslr evaluate hands the checkpoint's classes to the plan as nnslr train hands those of its start: a label
+    the checkpoint has from its own start and no train crop of ours has stays in validation, as it did in the
+    checkpoint's training. Before #104 the evaluation left those crops out and counted fewer than the training."""
+    from nnslr_tools import evaluation, training
+    # One more frame: a 70 in validation, a label no train crop of ours has.
+    monkeypatch.setattr(sys.modules[__name__], "FRAMES",
+                        FRAMES + [("validation", "human", [_box("s", SIGN, value=70)], [])])
+    dataset = _classifier_fixture(tmp_path, capsys)
+    plain = prepare_reader_training(dataset, tmp_path / "splits" / "latest.json", tmp_path, class_scheme="v2")
+    assert plain["unseen_validation_labels"] == ["maximum_speed:70"]
+    saved = {"sha256": "ab", "classes": sorted(plain["classes"] + ["maximum_speed:70"]), "class_scheme": "v2",
+             "split_sha256": plain["split_sha256"], "mapillary_only": False}
+    read, plans = [], []
+
+    def reader_start(path):
+        read.append(path)
+        return dict(saved, path=str(path))
+    monkeypatch.setattr(training, "reader_start", reader_start)
+    monkeypatch.setattr(evaluation, "evaluate_reader", lambda plan, checkpoint, root, *, partition, **settings:
+                        plans.append(plan) or {"task": "reader", "partition": partition})
+
+    def labels(plan):
+        return sorted(r["label"] for r in plan["records"] if r["split"] == "validation" and r["label"] != "not_a_sign")
+
+    checkpoint = tmp_path / "reader-best.pt"
+    base = ["evaluate", str(dataset), "--data-root", str(tmp_path), "--partition", "validation"]
+    code, out = invoke(capsys, *base, "--classes", "v2", "--checkpoint", str(checkpoint))
+    assert code == 0, out.err
+    assert read == [checkpoint] and plans[0]["start"]["path"] == str(checkpoint)
+    assert labels(plans[0]) == sorted(labels(plain) + ["maximum_speed:70"])
+    assert plans[0]["unseen_validation_labels"] == []
+    # The other partitions are as they were.
+    assert [r for r in plans[0]["records"] if r["split"] != "validation"] == [
+        r for r in plain["records"] if r["split"] != "validation"]
+
+    # A label the checkpoint lacks too still leaves.
+    saved["classes"] = plain["classes"]
+    code, out = invoke(capsys, *base, "--classes", "v2", "--checkpoint", str(checkpoint))
+    assert code == 0 and labels(plans[1]) == labels(plain) and plans[1]["start"]["path"] == str(checkpoint)
+    # A v1 checkpoint, one that is no classifier and a Python without torch go on to evaluate_reader, which refuses
+    # them in its own words (checkpoint_class_scheme_mismatch, checkpoint_task_mismatch, training_dependencies_missing).
+    saved["class_scheme"] = "v1"
+    code, out = invoke(capsys, *base, "--classes", "v2", "--checkpoint", str(checkpoint))
+    assert code == 0 and plans[2]["start"] is None and labels(plans[2]) == labels(plain)
+    for error in (ValueError("the start is not a reader/classifier checkpoint"), ModuleNotFoundError("torch")):
+        def refused(path, error=error):
+            raise error
+        monkeypatch.setattr(training, "reader_start", refused)
+        code, out = invoke(capsys, *base, "--classes", "v2", "--checkpoint", str(checkpoint))
+        assert code == 0 and plans[-1]["start"] is None and labels(plans[-1]) == labels(plain)
+
+    # The checkpoint is read for a v2 evaluation only: a dry run counts without it, the v1 reader has no start.
+    monkeypatch.setattr(training, "reader_start", reader_start)
+    del read[:]
+    code, out = invoke(capsys, *base, "--classes", "v2", "--checkpoint", str(checkpoint), "--dry-run")
+    assert code == 0 and "maximum_speed:70" not in json.loads(out.out)["counts_by_label"]
+    code, out = invoke(capsys, *base, "--checkpoint", str(checkpoint))
+    assert code == 0 and plans[-1].get("start") is None and len(plans) == 6 and read == []
+    assert "torch" not in sys.modules
+
+
 def _chain_report(recall, surviving, *, rejects=True):
     level = {"speed_signs": {"truth": 80, "found": 63, "correct": int(recall * 80), "recall": recall, "recall_found": 63 / 80,
                              "by_width": {key: {"truth": 20, "correct": 10, "recall": .5} for key in ("lt12", "12-20", "20-40", "ge40")},
