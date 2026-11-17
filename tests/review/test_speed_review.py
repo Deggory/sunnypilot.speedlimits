@@ -477,6 +477,29 @@ def test_the_first_kinds_of_road_are_there_in_their_order(store):
     assert SpeedReviewStore(store.root).road_kinds() == store.road_kinds()
 
 
+def test_the_crossings_reach_a_store_made_before_them_after_the_kinds_it_has(tmp_path, monkeypatch):
+    # The store of 17 Nov 2026: the five first kinds of then seeded, and tunnel added by a person when there were four.
+    first = dict(speed_review.FIRST_ROAD_KINDS)
+    with monkeypatch.context() as patch:
+        patch.setattr(speed_review, 'FIRST_ROAD_KINDS', tuple(item for item in speed_review.FIRST_ROAD_KINDS
+                                                              if item[0] not in speed_review.EVENT_KINDS))
+        before = SpeedReviewStore(tmp_path)
+    connection = sqlite3.connect(before.path)
+    connection.execute("INSERT INTO speed_road_kinds (kind, label, position, reviewer, at) "
+                       "VALUES ('tunnel', 'Tunnel', 4, 'cristianku', 'now')")
+    connection.commit()
+    connection.close()
+    assert [row['kind'] for row in before.road_kinds()] == ['narrow', 'country', 'gravel', 'potholes', 'speed_bump', 'tunnel']
+    again = SpeedReviewStore(tmp_path)
+    kinds = [row['kind'] for row in again.road_kinds()]
+    assert kinds == ['narrow', 'country', 'gravel', 'potholes', 'speed_bump', 'tunnel', 'person_crossing', 'vehicle_crossing']
+    assert {row['kind']: row['label'] for row in again.road_kinds()}['person_crossing'] == first['person_crossing']
+    # A kind a person adds after goes after them, and the marks of a kind stay its own.
+    assert again.add_road_kind('Cobbles', 'cristianku') == 'cobbles'
+    assert [row['kind'] for row in again.road_kinds()][-3:] == ['person_crossing', 'vehicle_crossing', 'cobbles']
+    assert set(speed_review.EVENT_KINDS) <= {kind for kind, _label in speed_review.FIRST_ROAD_KINDS}
+
+
 def test_marks_of_two_kinds_may_overlap_and_those_of_one_kind_may_not(store):
     store.tap_road(ROUTE, 'narrow', 'start', at(10), END, 0, 'a')
     store.tap_road(ROUTE, 'gravel', 'start', at(20), END, 1, 'a')

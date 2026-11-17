@@ -78,8 +78,8 @@ export interface ActionOptions {
   start?: string;
   /** What the brain learns (train_brain, brain-choices.ts): its roadworks head, its head of the kinds of road of Speed
    * review, its head of the road type (and only the seconds with one), the picture's features as a mean or as a grid, its
-   * three seeds or seed 0 alone. The driver's inputs are gone since 10 Nov 2026: the server still takes driver "off" from a
-   * page loaded before. */
+   * three seeds or seed 0 alone. The driver's inputs are gone since 10 Nov 2026 and the road users head since 17 Nov 2026
+   * (#112): the server still takes driver "off" and users "off" from a page loaded before, and no page sends them. */
   works?: 'on' | 'off';
   road?: 'on' | 'off';
   types?: 'on' | 'off';
@@ -88,13 +88,12 @@ export interface ActionOptions {
    * number; class, on its class alone, as every brain before 16 Nov 2026. */
   number_path?: 'bell' | 'class';
   seeds?: 'all' | 'one';
-  /** The brain's road users head (train_brain, on when not given; off: --no-users), and the drives of an earlier brain
-   * run it takes instead of every dashcam drive (BrainLabels.same_drives). */
-  users?: 'on' | 'off';
   /** The map's limit as an input of the brain (train_brain, #85): off when not given. */
   map?: 'on' | 'off';
   /** The brain's applicability head (train_brain, #89; on when not given; off: --no-applicability, the signs taken). */
   applicability?: 'on' | 'off';
+  /** The drives of an earlier brain run the brain takes instead of every dashcam drive (train_brain,
+   * BrainLabels.same_drives). */
   routes_from?: string;
   /** The networks that read the brain's signs (train_brain, sign-networks.ts): ids of Models, a SignNet the comma runs
    * and a classifier with “not a sign”; the server takes the one in use for one not given. No applicability network

@@ -38,10 +38,11 @@ says that a person went through the drive from its start to the frame shown and 
 is free of works. Saying where works are not is what lets the brain learn them at all (nnslr_tools.brain_targets).
 
 The kinds of road. The same taps mark what the road is, kind by kind: a narrow road, a country road, a gravel road,
-potholes, speed bumps (FIRST_ROAD_KINDS: a stretch from the first bump to past the last), and any kind a person adds
-from the page (speed_road_kinds, which only grows: a kind keeps
-its marks). Like the roadworks they say nothing of the speed and are never an input of the car: the brain learns to tell
-them (nnslr_tools.brain_net's road_head), and that changes the memory the speed shares. One stretch can be of several
+potholes, speed bumps (FIRST_ROAD_KINDS: a stretch from the first bump to past the last), a person or a vehicle crossing
+our path (EVENT_KINDS: a stretch of a few seconds, from when it starts to cross to when the way is free), and any kind a
+person adds from the page (speed_road_kinds, which only grows: a kind keeps its marks). Like the roadworks they say
+nothing of the speed and are never an input of the car: the brain learns to tell them (nnslr_tools.brain_net's
+road_head), and that changes the memory the speed shares. One stretch can be of several
 kinds at once, so the marks of one kind never overlap and those of two kinds may. "Checked to here" is a kind's own
 (speed_road_checked): a person went through the drive for that kind, and a kind added later starts with nothing checked.
 The taps go in speed_history as road_start, road_end, road_removed and road_checked, with the kind in its column state,
@@ -95,7 +96,12 @@ WORKS_TAPS = ('start', 'end', 'remove', 'checked')
 # The kinds of road there are before a person adds one: (kind, label), in the order the page and the brain take them.
 # Seeded at every opening (INSERT OR IGNORE): a kind added here reaches a store made before, after the kinds it has.
 FIRST_ROAD_KINDS = (('narrow', 'Narrow road'), ('country', 'Country road'), ('gravel', 'Gravel road'), ('potholes', 'Potholes'),
-                    ('speed_bump', 'Speed bump'))
+                    ('speed_bump', 'Speed bump'), ('person_crossing', 'Person crossing'),
+                    ('vehicle_crossing', 'Vehicle crossing'))
+# The kinds that are an event of a few seconds, not a stretch of road: a person or a vehicle crossing our path (#112).
+# Marked, kept and checked as every kind; the brain's road_head learns them with their rare frames lifted
+# (brain_train.road_pos_weight).
+EVENT_KINDS = ('person_crossing', 'vehicle_crossing')
 MAX_KIND_LABEL = 40
 # The names a kind of road may not take: the page's own roadworks ("works", its taps go to speed_works), a name every
 # object of the page has already ("constructor"), and the fields a guest's copy drops as places

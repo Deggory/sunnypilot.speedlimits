@@ -56,16 +56,22 @@ def test_the_limit_ahead_has_none_after_the_last_speed(tmp_path, monkeypatch):
 
 def saved_brain(path, kph=None, ahead=True, road_kinds=(), users=False):
     """A checkpoint as brain_train writes it, works_head (and road_head with road_kinds) and its table of the speeds among
-    the weights."""
+    the weights. users: as one of 12 to 17 Nov 2026, with the road users' head (person, two-wheeler, vehicle, 8 columns,
+    a presence and a size each) among the weights and its fields in the source."""
     import torch
 
     from nnslr_tools.brain_net import build_brain_net
     torch.manual_seed(0)
     model = build_brain_net(GROUPS, pool='grid', works=True, ahead=ahead, pretrained=False, kph=kph,
-                            road_kinds=len(road_kinds), users=users)
-    torch.save({'weights': model.state_dict(), 'epoch': 0, 'groups': GROUPS, 'pool': 'grid', 'works': True,
+                            road_kinds=len(road_kinds))
+    weights = model.state_dict()
+    old = {}
+    if users:
+        weights = {**weights, 'users_head.weight': torch.randn(2 * 3 * 8, 128), 'users_head.bias': torch.randn(2 * 3 * 8)}
+        old = {'users': True, 'user_kinds': ['person', 'two_wheeler', 'vehicle'], 'user_columns': 8}
+    torch.save({'weights': weights, 'epoch': 0, 'groups': GROUPS, 'pool': 'grid', 'works': True,
                 'road_kinds': list(road_kinds), 'features': 128, 'hidden': 128, 'ahead': ahead, 'rate_hz': 4.0,
-                'picture': 'brain', 'split': 'x', 'reader': None, 'inputs_sha256': inputs_sha256()}, path)
+                'picture': 'brain', 'split': 'x', 'reader': None, 'inputs_sha256': inputs_sha256(), **old}, path)
     return model
 
 
@@ -95,7 +101,9 @@ def test_a_brain_that_learnt_the_kinds_of_road_goes_to_the_car_as_one_that_did_n
 
 
 def test_a_brain_that_learnt_the_road_users_goes_to_the_car_as_one_that_did_not(tmp_path):
-    # users_head is only in training (brain_net.TRAINING_ONLY): the car's network, weights and contract are the same.
+    # A brain of 12 to 17 Nov 2026 has users_head among its weights and users, user_kinds, user_columns in its source; no
+    # network has that head any more (#112): it loads without it, and the car's network, weights, contract and file are
+    # those of the same brain without it.
     import torch
 
     from nnslr_tools.brain_net import car_weights
@@ -103,19 +111,21 @@ def test_a_brain_that_learnt_the_road_users_goes_to_the_car_as_one_that_did_not(
     with_users.parent.mkdir()
     without.parent.mkdir()
     trained = saved_brain(with_users, users=True)
-    assert 'users_head.weight' in torch.load(with_users, weights_only=False)['weights']
+    saved = torch.load(with_users, weights_only=False)
+    assert 'users_head.weight' in saved['weights'] and saved['users'] is True
     saved_brain(without)
-    model, _saved = brain_export.load_brain(with_users)
-    assert model.users_head is None
+    model, said = brain_export.load_brain(with_users)
+    assert getattr(model, 'users_head', None) is None and said['user_kinds'] == ['person', 'two_wheeler', 'vehicle']
     weights, kept = car_weights(model), car_weights(trained)
-    assert set(weights) == set(kept) and not [name for name in kept if name.startswith('users_head')]
+    assert set(weights) == set(kept) and not [name for name in weights if name.startswith('users_head')]
     assert all(torch.equal(weights[name], kept[name]) for name in weights)
-    contracts = []
+    contracts, files = [], []
     for path in (with_users, without):
         brain_export.export_brain_onnx(path, path.parent / 'brain.onnx')
         contract = json.loads((path.parent / 'brain.onnx.contract.json').read_text())
-        contracts.append((contract['inputs'], contract['outputs'], contract['output']))
-    assert contracts[0] == contracts[1]
+        contracts.append((contract['inputs'], contract['outputs'], contract['output'], contract['step']))
+        files.append((path.parent / 'brain.onnx').read_bytes())
+    assert contracts[0] == contracts[1] and files[0] == files[1]
 
 
 def test_a_brain_of_5_km_h_classes_loads_with_its_own_table_and_says_it_to_the_car(tmp_path):

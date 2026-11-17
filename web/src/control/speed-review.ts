@@ -27,8 +27,10 @@ export interface Works {
 
 export type WorksTap = 'start' | 'end' | 'remove' | 'checked';
 
-/** A kind of road a person can mark as the roadworks (narrow, country, gravel, potholes, speed bumps, and those added from the page):
- * the brain learns them aside, as the roadworks, to understand the road better; they change no speed. */
+/** A kind of road a person can mark as the roadworks (narrow, country, gravel, potholes, speed bumps, a person or a vehicle
+ * crossing our path, and those added from the page): the brain learns them aside, as the roadworks, to understand the road
+ * better; they change no speed. A crossing is marked the same way, from the frame where it starts to the frame where it
+ * ends, a few seconds (speed_review.EVENT_KINDS). */
 export interface RoadKind {
   kind: string;
   label: string;

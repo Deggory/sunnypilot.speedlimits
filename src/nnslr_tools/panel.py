@@ -94,7 +94,10 @@ DECIDER_SCRIPT = 'scripts/run_experiment_b.sh'
 # script -s0, -s1, -s2), or seed 0 alone. What it learns: {'works': 'on'|'off', 'road', 'types', 'pool': 'grid'|'mean',
 # 'number_path': 'bell'|'class', 'seeds': 'all'|'one'}, the variables
 # of the script, the first of each the usual one. The driver's inputs are gone since 10 Nov 2026 (brain_targets.LEFT_OUT):
-# 'driver' is still taken as 'off', the only value, so that a page loaded before can start a training.
+# 'driver' is still taken as 'off', the only value, so that a page loaded before can start a training. The same for
+# 'users' since 17 Nov 2026 (#112): the brain no longer learns the road users in a head of its own (it learns who
+# crosses our path from the marks of Speed review, as a kind of road), so 'off' is taken and changes nothing, and
+# anything else is refused, never dropped into a training that is not the one asked for.
 BRAIN_SCRIPT = 'scripts/run_brain.sh'
 # UserNet, the detector of the road users (nnslr_tools.usernet), on a run of its own (start() adds <time>-users). Its
 # option {'stage': 'bdd' | 'drives'}: BDD100K's pictures or the road users boxed in Sign review (USERNET_STAGES, the
@@ -104,9 +107,6 @@ USERNET_STAGES = ('bdd', 'drives')
 BRAIN_WORKS = {'on': '1', 'off': '0'}
 BRAIN_ROAD = {'on': '1', 'off': '0'}
 BRAIN_TYPES = {'on': '1', 'off': '0'}
-# Train › Brain's Road users (option B, #75, 12 Nov 2026): the brain also learns where the road users are and how big,
-# a head only the training has (brain_net.users_head; nnslr road-users reads them first); off: --no-users.
-BRAIN_USERS = {'on': '1', 'off': '0'}
 # Train › Brain's Map's limit (#85, 14 Nov 2026): the limit the comma's map had is one more input of the brain; off, the
 # usual one: the brain never reads the map (the script's NNSLR_BRAIN_MAP).
 BRAIN_MAP = {'off': '0', 'on': '1'}
@@ -367,15 +367,14 @@ def _settings_of(log: Path, action: str) -> list[str]:
     if flags.get('--patience'):
         chips.append('patience ' + flags['--patience'])
     # The brain's choices (scripts/run_brain.sh), when not the usual ones. The driver's inputs, of the runs of before
-    # 10 Nov 2026 only: --driver turned them on, and a run of before 8 Nov that left them out said --no-driver.
+    # 10 Nov 2026 only: --driver turned them on, and a run of before 8 Nov that left them out said --no-driver. The
+    # --no-users of 12-17 Nov 2026 has no chip: no brain learns the road users in a head of its own since #112.
     if '--no-works' in flags:
         chips.append('no roadworks')
     if '--no-road' in flags:
         chips.append('no kinds of road')
     if '--no-road-types' in flags:
         chips.append('no road types')
-    if '--no-users' in flags:
-        chips.append('no road users')
     if '--no-applicability' in flags:
         chips.append('no applicability head')
     if '--driver' in flags:
@@ -2490,31 +2489,36 @@ class Panel:
 
     def _brain_choices(self, options: dict, check_only: bool = False) -> dict:
         """The variables of scripts/run_brain.sh from the options of Train › Brain ({'works', 'road', 'types', 'pool',
-        'seeds', 'users', 'map', 'applicability', 'number_path'}), the usual ones when not given: the roadworks, the
-        kinds of road, the road types, the road users and the applicability on, the map's limit off, the picture as a
+        'seeds', 'map', 'applicability', 'number_path'}), the usual ones when not given: the roadworks, the
+        kinds of road, the road types and the applicability on, the map's limit off, the picture as a
         grid, the number in force as a bell, the three seeds.
         'driver' is only 'off' (a page loaded before 10 Nov 2026 sends it): the brain never takes his pedals nor the
-        car's speed."""
+        car's speed. 'users' is only 'off' too (a page loaded before 17 Nov 2026 sends it, and a pipeline saved before
+        may hold it): the brain no longer learns the road users, and a training asked with them is refused, not started
+        without them."""
         if options.get('driver', 'off') != 'off':
             raise PanelError(400, 'bad_option', 'The brain no longer takes the driver’s inputs: with the car’s speed in, '
                                                 'it followed your speed. Reload the page.')
+        if options.get('users', 'off') != 'off':
+            raise PanelError(400, 'bad_option', 'The brain no longer learns the road users (17 Nov 2026): reload the '
+                                                'page.')
         works, road, types = options.get('works', 'on'), options.get('road', 'on'), options.get('types', 'on')
-        pool, seeds, users = options.get('pool', BRAIN_POOLS[0]), options.get('seeds', 'all'), options.get('users', 'on')
+        pool, seeds = options.get('pool', BRAIN_POOLS[0]), options.get('seeds', 'all')
         map_limit, applicability = options.get('map', 'off'), options.get('applicability', 'on')
         number_path = options.get('number_path', BRAIN_NUMBER_PATHS[0])
-        if not all(isinstance(value, str) for value in (works, road, types, pool, seeds, users, map_limit, applicability,
+        if not all(isinstance(value, str) for value in (works, road, types, pool, seeds, map_limit, applicability,
                                                         number_path)) \
                 or works not in BRAIN_WORKS or road not in BRAIN_ROAD or types not in BRAIN_TYPES \
-                or pool not in BRAIN_POOLS or seeds not in BRAIN_SEEDS or users not in BRAIN_USERS \
+                or pool not in BRAIN_POOLS or seeds not in BRAIN_SEEDS \
                 or map_limit not in BRAIN_MAP or applicability not in BRAIN_APPLICABILITY \
                 or number_path not in BRAIN_NUMBER_PATHS:
-            raise PanelError(400, 'bad_option', 'Roadworks, the kinds of road, the road types, the road users, the '
+            raise PanelError(400, 'bad_option', 'Roadworks, the kinds of road, the road types, the '
                                                 'applicability and the map’s limit are on or off, the picture mean or '
                                                 'grid, the number bell or class, the seeds all or one.')
         found = {'NNSLR_BRAIN_WORKS': BRAIN_WORKS[works], 'NNSLR_BRAIN_ROAD': BRAIN_ROAD[road],
                  'NNSLR_BRAIN_TYPES': BRAIN_TYPES[types], 'NNSLR_BRAIN_POOL': pool,
                  'NNSLR_BRAIN_NUMBER_PATH': number_path,
-                 'NNSLR_BRAIN_SEEDS': BRAIN_SEEDS[seeds], 'NNSLR_BRAIN_USERS': BRAIN_USERS[users],
+                 'NNSLR_BRAIN_SEEDS': BRAIN_SEEDS[seeds],
                  'NNSLR_BRAIN_MAP': BRAIN_MAP[map_limit],
                  'NNSLR_BRAIN_APPLICABILITY': BRAIN_APPLICABILITY[applicability],
                  **self._brain_sign_networks(options, check_only)}

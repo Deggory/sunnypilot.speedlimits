@@ -3,7 +3,8 @@ set -euo pipefail
 
 # The brain (docs/NEURAL_NETWORK.md): the network that says the speed to hold, four times a second, from the picture and the
 # car's own signals, learnt from every dashcam drive with its logs read, each whole: the driver's own speed, corrected
-# by the blocks of Speed review, with the roadworks and the kinds of road marked there. On one
+# by the blocks of Speed review, with the roadworks and the kinds of road marked there (a person or a vehicle that
+# crosses our path is one of those kinds since 17 Nov 2026, #112). On one
 # GPU (the reading of step 3 also on the free ones), one step after the other:
 #
 #   1. checks the labels, the split and the whole training on the CPU (nnslr train-brain --dry-run; its log says the
@@ -25,19 +26,19 @@ set -euo pipefail
 #      holds at that moment, which the panel then counts as the brain's until the step ends (#36: the NVDEC of one
 #      V100 held it back). There is no second reading of the signs since 12 Nov 2026: it made the answers of the
 #      next limit, which no brain is taught any more;
-#   4. the road users (nnslr road-users, option B of #75, 12 Nov 2026) on the brain's card: an off-the-shelf detector
-#      reads the road video of every segment of its drives at 4 readings a second (a segment already read is not read
-#      again), then the crossing rule proposes the vehicles that cross our path, which only a person's verdict makes an
-#      answer; the training learns them in users_head, a head only it has. Skipped with NNSLR_BRAIN_USERS=0
-#      (--no-users: the comparison without it);
-#   5-7. trains seeds 0, 1 and 2, each into a run of its own, runs/NAME-s0, -s1, -s2 (nnslr train-brain, the last epoch
+#   4-6. trains seeds 0, 1 and 2, each into a run of its own, runs/NAME-s0, -s1, -s2 (nnslr train-brain, the last epoch
 #      kept): three versions in Models › Brain, which differ only by chance. Train › Brain draws them on one chart. With
-#      NNSLR_BRAIN_SEEDS=0 seed 0 alone (step 5), a third of the time.
+#      NNSLR_BRAIN_SEEDS=0 seed 0 alone (step 4), a third of the time.
+#
+# Six steps, as before 12 Nov 2026. From 12 to 17 Nov 2026 they were seven: the fourth read the road users with an
+# off-the-shelf detector (nnslr road-users) and the training learnt them in a head of its own, users_head. Both are gone
+# since 17 Nov 2026 (#112): the brain learns who crosses our path from the marks of Speed review, as a kind of road
+# (job_progress still reads the logs of seven steps).
 #
 # usage: scripts/run_brain.sh NAME
 #
 # Writes only into $DATA_ROOT/runs/NAME/ (brain.log, routes.json, dry-run/), $DATA_ROOT/runs/NAME-s{0,1,2}/ (brain-last.pt, result.json),
-# the sign readings (derived/road_type_signs), the road users (derived/road_users) and the frame cache. It never imports reviews, changes the labels, the model in use or the car, and
+# the sign readings (derived/road_type_signs) and the frame cache. It never imports reviews, changes the labels, the model in use or the car, and
 # exports nothing: Publish exports the brain chosen in Models and checks it along a real drive. Run it again with the same
 # NAME to finish: a finished seed is not repeated, the signs already read are not read again, the drives are the same.
 #
@@ -47,7 +48,7 @@ set -euo pipefail
 # default the brain's and every other card free then), NNSLR_BRAIN_WORKS (1: it also learns the
 # roadworks; 0: not), NNSLR_BRAIN_ROAD (1: it also learns the kinds of road of Speed review; 0: not),
 # NNSLR_BRAIN_TYPES (1: it also learns the road type of the map and of Speed review, and only from the seconds that have
-# one; 0: not, every second), NNSLR_BRAIN_USERS (1: step 4 reads the road users and it learns them; 0: not),
+# one; 0: not, every second),
 # NNSLR_BRAIN_MAP (1: the map's limit the comma had, liveMapDataSP, is one more input of the brain, #85; 0, the default:
 # not, the brain never reads the map), NNSLR_BRAIN_APPLICABILITY (1, the default: it also learns whose road a speed sign
 # is of from the reviewed boxes, a head only the training has, #89, #90; 0: not),
@@ -76,7 +77,6 @@ SIGN_GPUS="${NNSLR_SIGN_GPUS:-}"
 WORKS="${NNSLR_BRAIN_WORKS:-1}"
 ROAD="${NNSLR_BRAIN_ROAD:-1}"
 TYPES="${NNSLR_BRAIN_TYPES:-1}"
-USERS="${NNSLR_BRAIN_USERS:-1}"
 MAP="${NNSLR_BRAIN_MAP:-0}"
 APPLICABILITY="${NNSLR_BRAIN_APPLICABILITY:-1}"
 ROUTES_FROM="${NNSLR_BRAIN_ROUTES_FROM:-}"
@@ -124,11 +124,6 @@ fi
 
 if [[ "$TYPES" != "0" && "$TYPES" != "1" ]]; then
   echo "error: NNSLR_BRAIN_TYPES must be 0 or 1: $TYPES" >&2
-  exit 2
-fi
-
-if [[ "$USERS" != "0" && "$USERS" != "1" ]]; then
-  echo "error: NNSLR_BRAIN_USERS must be 0 or 1: $USERS" >&2
   exit 2
 fi
 
@@ -242,9 +237,6 @@ fi
 if [[ "$TYPES" == "0" ]]; then
   SETTINGS+=(--no-road-types)
 fi
-if [[ "$USERS" == "0" ]]; then
-  SETTINGS+=(--no-users)
-fi
 if [[ "$MAP" == "1" ]]; then
   SETTINGS+=(--map-limit)
 fi
@@ -260,7 +252,6 @@ fi
 echo "== Brain =="
 echo "run:          $RUN_ID"
 echo "seeds:        ${SEEDS[*]}"
-echo "road users:   $([[ "$USERS" == "1" ]] && echo on || echo off)"
 echo "map's limit:  $([[ "$MAP" == "1" ]] && echo "on (an input of the brain)" || echo off)"
 echo "applicability: $([[ "$APPLICABILITY" == "1" ]] && echo "on (a head of the brain, every sign's box)" || echo off)"
 echo "number path:  $([[ "$NUMBER_PATH" == "bell" ]] && echo "bell (a bell around the number in force)" || echo "class (the number's class alone, as before 16 Nov 2026)")"
@@ -275,7 +266,7 @@ echo "physical GPU: $GPU_INDEX"
 echo "settings:     ${SETTINGS[*]}"
 echo
 
-echo "== 1/7 Check the labels, the split and the training (CPU-only) =="
+echo "== 1/6 Check the labels, the split and the training (CPU-only) =="
 # The drives of the run: those its first dry run took (brain_train.ROUTES), kept for every step and every seed whatever
 # drive is read meanwhile; a NAME run again keeps them too.
 ROUTES_FILE="$RUN_ROOT/routes.json"
@@ -318,10 +309,10 @@ if [[ ! -f "$ROUTES_FILE" ]]; then
 fi
 echo "drives:       $(( ${#ROUTE_ARGS[@]} / 2 )) (routes.json)"
 
-echo "== 2/7 Explicit CUDA smoke test =="
+echo "== 2/6 Explicit CUDA smoke test =="
 "$NN" env --gpu-smoke --gpu-device 0
 
-echo "== 3/7 Read the signs of the drives as the car does today =="
+echo "== 3/6 Read the signs of the drives as the car does today =="
 # The networks they are read with, chosen in Train › Brain (those in use by default), exported on the brain's card into
 # the run (networks.json): a run started again keeps its own.
 NETWORKS_FILE="$RUN_ROOT/networks.json"
@@ -359,18 +350,9 @@ else
   "$NN" brain-targets --data-root "$DATA_ROOT" "${SIGN_ARGS[@]}" "${ROUTE_ARGS[@]}"
 fi
 
-echo "== 4/7 Read the road users =="
-# On the brain's card (CUDA_VISIBLE_DEVICES above): the detector, then the proposed crossings; a segment already read by
-# the same detector is not read again. Without the road users the training is told so (--no-users) and nothing is read.
-if [[ "$USERS" == "1" ]]; then
-  "$NN" road-users --data-root "$DATA_ROOT" --gpus "$GPU_INDEX" "${ROUTE_ARGS[@]}"
-else
-  echo "skip: road users off (NNSLR_BRAIN_USERS=0)"
-fi
-
-# Each seed its own step, 5 to 7 (job_progress: seed 0 alone is step 5 alone).
+# Each seed its own step, 4 to 6 (job_progress: seed 0 alone is step 4 alone).
 for seed in "${SEEDS[@]}"; do
-  echo "== $(( 5 + seed ))/7 Train seed $seed =="
+  echo "== $(( 4 + seed ))/6 Train seed $seed =="
   if [[ -f "$RUN_ROOT-s$seed/result.json" ]]; then
     echo "skip seed $seed: already trained"
     continue

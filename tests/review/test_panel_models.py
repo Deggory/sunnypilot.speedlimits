@@ -237,6 +237,28 @@ def test_a_brain_that_takes_the_drivers_inputs_cannot_be_chosen_and_the_one_in_u
     assert (roles['cutter']['old_kind_in_use'], roles['cutter']['notice']) == (False, None)
 
 
+def test_a_brain_that_learnt_the_road_users_is_still_listed_and_chosen(root, models):
+    """A brain of 12 to 17 Nov 2026 learnt the road users in a head of its own (users_head, gone on 17 Nov 2026, #112):
+    its result.json still has their fields. It is listed and can be put in use as any other; the fields are ignored."""
+    run = brain(root, 'b1', ['signs', 'plate', 'hour_tz', 'lead', 'country_iso', 'motion'])
+    result = json.loads((run / 'result.json').read_text())
+    write(run / 'result.json', {
+        **result, 'users': True, 'user_kinds': ['person', 'two_wheeler', 'vehicle'], 'user_columns': 8,
+        'users_pos_weight': {'person': [10.0] * 8}, 'users_answers': {'drives': 3, 'seconds': 120},
+        'road_kinds': ['narrow', 'country'],
+        'test': {**result['test'], 'users': {'person': {'precision': 0.5, 'recall': 0.4, 'cells': 12,
+                                                         'by_height': {'24-48': {'recall': 0.3}}}},
+                 'users_speed': {'with_users': {'frames': 4, 'mean_error_kph': 6.0, 'mean_signed_kph': -1.0},
+                                 'others': {'frames': 6, 'mean_error_kph': 2.0, 'mean_signed_kph': 0.5},
+                                 'crossing_frames': 0, 'note': 'no crossing confirmed yet'}}})
+    [version] = by_role(models.index())['brain']['versions']
+    assert version['id'] == 'brain:b1/brain' and version['finished'] and version['selectable']
+    assert 'users' not in version and not any(key.startswith(('users_', 'user_')) for key in version)
+    assert version['road_kinds'] == ['narrow', 'country']
+    assert version['test'] == {'frames': 10, 'right': 0.5, 'mean_error_kph': 3.0}
+    assert models.set_active('brain', 'brain:b1/brain', who='admin', via='sign-in')['id'] == 'brain:b1/brain'
+
+
 # -- the model in use -------------------------------------------------------------------------------------
 def test_choosing_the_model_in_use_writes_only_active_json(root, models):
     pipeline(root)

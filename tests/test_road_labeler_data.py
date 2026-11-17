@@ -96,12 +96,25 @@ def test_marks_answer_inside_and_outside_only_before_checked_and_the_labeler_s_o
     seconds = {int((t - T0) / NS): (found['kinds'][i, 0], found['kinds_weight'][i, 0]) for i, t in enumerate(ns)}
     assert seconds[15] == (1, 1)            # osm's mark is an answer
     # The labeler's own marks are the brain's answers, never its own: masked, kept by a person (before "checked to
-    # here") or not, with EDGE_SECONDS around them, so the check past them does not teach it "outside" there either.
+    # here") or not, with edge_seconds around them, so the check past them does not teach it "outside" there either.
     assert seconds[35][1] == 0 and seconds[30][1] == 0 and seconds[65][1] == 0
     assert seconds[45] == (0, 1)            # outside, before the check: known
     assert seconds[25] == (0, 1)
     assert seconds[80][1] == 0              # outside, past the check: unknown
     assert found['works_weight'].sum() == 0
+
+
+def test_the_labeler_s_own_crossing_is_masked_half_a_second_around_it_a_person_s_removal_answers_no_past_that():
+    ns = np.array([at(s) for s in np.arange(0, 30, 0.25)])
+    labels = {'road': [{'kind': 'person_crossing', 'start_ns': at(10), 'end_ns': at(13), 'reviewer': 'net/run'}],
+              'road_checked': {}, 'works': [], 'checked_ns': None}
+    removed = [{'kind': 'person_crossing', 'start_ns': at(0), 'end_ns': at(25)}]
+    found = data.drive_answers(ns, labels, ('person_crossing',), removed)
+    weight = {round((t - T0) / NS, 2): found['kinds_weight'][i, 0] for i, t in enumerate(ns)}
+    # Masked inside the labeler's own crossing and 0.5 s around it (edge_seconds of a crossing, not 2 s).
+    assert weight[9.5] == weight[9.75] == weight[12] == weight[13.25] == 0
+    # The person's removal says "no" from 0.5 s outside it on.
+    assert weight[9.25] > 0 and weight[13.5] > 0 and found["kinds"][ns == at(9.25), 0][0] == 0
 
 
 def test_a_kind_with_one_side_alone_leaves_the_loss_of_train():

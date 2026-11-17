@@ -58,8 +58,9 @@ const extras = computed<(Block & {source: string; map: boolean})[]>(() => [
     what: 'the road type it sees, compared with the map’s, corrected in Speed review where it is wrong'},
   {on: learns.value.works, id: 'works', title: 'Roadworks', sub: 'inside roadworks or not',
     source: 'your marks in Speed review', what: 'whether the car is inside roadworks, compared with the ones marked in Speed review'},
-  {on: learns.value.road, id: 'road', title: 'Road conditions', sub: 'narrow, country, gravel, potholes, speed bumps',
-    source: 'your marks in Speed review', what: 'the kinds of road it sees, compared with the ones marked in Speed review'},
+  {on: learns.value.road, id: 'road', title: 'Road conditions', sub: 'narrow, gravel, speed bumps, crossings…',
+    source: 'your marks in Speed review', what: 'the kinds of road it sees (narrow, country, gravel, potholes, speed bumps…) '
+      + 'and a person or a vehicle crossing our path, compared with the ones marked in Speed review'},
   {on: learns.value.applicability, id: 'applicability', title: 'Applicability', sub: 'our road or another',
     source: 'your reviews in Sign review',
     what: 'whose road the speed sign in each of the 8 columns of sign_boxes is of, ours or another, compared with the boxes '

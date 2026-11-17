@@ -37,7 +37,7 @@ The answers (drive_answers), each with a weight a step, 0 where nothing is known
 - a person's removal (removed_marks): a person who removes a mark says that stretch is not of that kind (or not
   roadworks), so its steps answer 0 at STRONG_WEIGHT where nothing else answers, also past "checked to here". Left out:
   the removals of the labeler and of nnslr tunnels (their own undo), a mark removed before it had an end (a start
-  tapped by mistake, logged to the drive's end), and the steps within EDGE_SECONDS of a mark of that kind there now (a
+  tapped by mistake, logged to the drive's end), and the steps within edge_seconds of a mark of that kind there now (a
   mark moved is removed and set again);
 - the tunnel's weak "no" (tunnel_free): where the GPS has a fix and our road of the map (map_context.our_road, the way
   nnslr road-types found that second) is no tunnel, the tunnel column answers 0 at TUNNEL_FREE_WEIGHT where nothing
@@ -45,7 +45,7 @@ The answers (drive_answers), each with a weight a step, 0 where nothing is known
   whose road of the map is a tunnel. The map makes this label offline; it never reaches anything of the car.
 
 What the labeler wrote itself (reviewer NET_PREFIX + its run) is never an answer of its own training, though it is the
-brain's: its marks are left out, and their steps (with EDGE_SECONDS around them) masked (own_steps), so that neither
+brain's: its marks are left out, and their steps (with edge_seconds around them) masked (own_steps), so that neither
 their inside nor a "checked to here" past them teaches it its own word; its road types are a layer the map's lines and a
 person's corrections never include here (map_road_types, load_corrections without its lines).
 
@@ -63,7 +63,7 @@ import numpy as np
 
 from nnslr_tools import drive_logs
 from nnslr_tools.annotations import load_jsonl
-from nnslr_tools.brain_targets import (EDGE_SECONDS, FramesChanged, NO_LABELS, _cell_partition, drive_frames,
+from nnslr_tools.brain_targets import (FramesChanged, NO_LABELS, _cell_partition, drive_frames, edge_seconds,
                                        frame_partitions, read_labels, read_split, road_answers, road_kinds,
                                        road_labels, works_answers)
 from nnslr_tools.map_context import ROADS_RELATIVE
@@ -303,25 +303,25 @@ def _near(ns: np.ndarray, start: int, end: int | None, margin_ns: int) -> np.nda
 
 
 def own_steps(ns: np.ndarray, marks: list[dict]) -> np.ndarray:
-    """The steps inside a mark of the labeler's own, or within EDGE_SECONDS of it (to the drive's end without an end):
+    """The steps inside a mark of the labeler's own, or within edge_seconds of it (to the drive's end without an end):
     out of its own loss, whatever else answers there."""
     ns = np.asarray(ns, dtype=np.int64)
     where = np.zeros(len(ns), dtype=bool)
     for mark in marks:
         if own(mark.get('reviewer')):
-            where |= _near(ns, mark['start_ns'], mark['end_ns'], EDGE_SECONDS * NS)
+            where |= _near(ns, mark['start_ns'], mark['end_ns'], int(round(edge_seconds(mark.get('kind')) * NS)))
     return where
 
 
 def removal_answers(ns: np.ndarray, removed: list[dict], marks: list[dict]) -> np.ndarray:
     """The steps a person's removals (removed_marks' of one kind, or of the roadworks) say "no" at: inside a removed
-    stretch, at least EDGE_SECONDS from the marks of that kind there now (see the module's text)."""
+    stretch, at least edge_seconds from the marks of that kind there now (see the module's text)."""
     ns = np.asarray(ns, dtype=np.int64)
     where = np.zeros(len(ns), dtype=bool)
     for row in removed:
         where |= (ns >= row['start_ns']) & (ns < row['end_ns'])
     for mark in marks:
-        where &= ~_near(ns, mark['start_ns'], mark['end_ns'], EDGE_SECONDS * NS)
+        where &= ~_near(ns, mark['start_ns'], mark['end_ns'], int(round(edge_seconds(mark.get('kind')) * NS)))
     return where & (ns >= 0)
 
 

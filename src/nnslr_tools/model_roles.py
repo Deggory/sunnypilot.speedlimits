@@ -448,31 +448,6 @@ def model_result_digest(result: Any) -> dict:
     }
 
 
-def _brain_users(result: dict) -> dict:
-    """The road users of a brain's result.json (brain_train, since 12 Nov 2026): whether users_head learned them, its
-    presence on test per kind (precision, recall, and the recall per height bin) and the speed on test with a road user in
-    front against the other frames (users_speed). Every part None for a brain of before."""
-    hits = _dig(result, ('test', 'users'))
-    near = _dig(result, ('test', 'users_speed'))
-
-    def signed(part: Any) -> dict | None:
-        if not isinstance(part, dict):
-            return None
-        return {'frames': _int(part.get('frames')), 'mean_error_kph': _num(part.get('mean_error_kph')),
-                'mean_signed_kph': _num(part.get('mean_signed_kph'))}
-
-    return {'learned': None if 'users' not in result else bool(result.get('users')),
-            'test': {kind: {'precision': _num(row.get('precision')), 'recall': _num(row.get('recall')),
-                            'cells': _int(row.get('cells')),
-                            'by_height': {name: _num(part.get('recall')) for name, part in (row.get('by_height') or {}).items()
-                                          if isinstance(part, dict)}}
-                     for kind, row in hits.items() if isinstance(row, dict)} if isinstance(hits, dict) else None,
-            'speed': {'with_users': signed(near.get('with_users')), 'others': signed(near.get('others')),
-                      'crossing_frames': _int(near.get('crossing_frames')),
-                      'note': near.get('note') if isinstance(near.get('note'), str) else None}
-            if isinstance(near, dict) else None}
-
-
 def _brain_applicability(result: dict) -> dict:
     """Whose road a sign is of, of a brain's result.json (brain_train, since 15 Nov 2026, #89): whether
     applicability_head learned it, whether the brain was given the boxes of every sign read (other_road_boxes: the car
@@ -518,7 +493,7 @@ def brain_digest(result: Any) -> dict:
             'number_path': 'bell' if result.get('number_path') == 'bell' else 'class',
             'road_kinds': list(result.get('road_kinds') or []), 'road_types': list(result.get('road_types') or []),
             'plates': bool(result.get('plates')), 'hours': bool(result.get('hours')), 'wet': bool(result.get('wet')), 'dry_run': bool(result.get('dry_run')), 'epochs': len(result.get('history') or []),
-            'users': _brain_users(result), 'applicability': _brain_applicability(result),
+            'applicability': _brain_applicability(result),
             'validation': speed('validation'), 'test': speed('test'),
             # Of a brain that learns the map's limit: the test frames with no map at all (brain_train, test_no_map).
             'test_no_map': speed('test_no_map'),
@@ -1085,7 +1060,7 @@ class ModelIndex:
                       'hours': bool(trained.get('hours')), 'wet': bool(trained.get('wet')),
                       # How the car steps it and what it says (Models › How it works, model-flow.ts).
                       **{key: trained.get(key) for key in ('rate_hz', 'ahead', 'hidden', 'kph', 'road_kinds', 'road_types',
-                                                           'pool', 'sign_networks', 'users', 'applicability',
+                                                           'pool', 'sign_networks', 'applicability',
                                                            'road_sign_kinds', 'number_path')},
                       'epochs': trained.get('epochs'), 'epochs_run': trained.get('epochs'),
                       'validation': trained.get('validation'), 'test': trained.get('test'),

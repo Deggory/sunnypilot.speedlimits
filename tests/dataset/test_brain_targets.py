@@ -153,6 +153,23 @@ def test_each_kind_of_road_is_the_roadworks_of_its_own_marks_and_its_own_check()
     assert targets.road_answers(ns, road, {}, ())[0].shape == (4, 0)
 
 
+def test_a_crossing_is_out_of_the_loss_only_half_a_second_around_its_taps_the_other_kinds_two_seconds():
+    import numpy as np
+    targets = _targets()
+    ns = np.array([int(t * NS) for t in np.arange(8, 16.01, 0.25)])
+    road = [kind_mark('person_crossing', 10, 13), kind_mark('narrow', 10, 13)]
+    target, weight = targets.road_answers(ns, road, {'person_crossing': 20 * NS, 'narrow': 20 * NS},
+                                          ('person_crossing', 'narrow'))
+    taught = {round(t / NS, 2) for t, w, y in zip(ns, weight[:, 0], target[:, 0]) if w and y}
+    # A crossing of 3 s keeps 2 s of yes: 10.5 to 12.5 (0.5 s from each tap is out).
+    assert min(taught) == 10.5 and max(taught) == 12.5 and len(taught) == 9
+    assert weight[ns == 9.5 * NS, 0][0] == 1 and weight[ns == 9.75 * NS, 0][0] == 0
+    # The same mark of another kind keeps nothing: every frame is within 2 s of a tap.
+    assert not (weight[:, 1] * target[:, 1]).any()
+    assert targets.edge_seconds('vehicle_crossing') == targets.EVENT_EDGE_SECONDS == 0.5
+    assert targets.edge_seconds(None) == targets.edge_seconds('narrow') == targets.EDGE_SECONDS == 2
+
+
 def test_the_kinds_of_road_are_read_in_their_order_and_a_file_without_them_has_the_first_ones(tmp_path):
     import sqlite3 as sql
     from nnslr_tools.speed_review import FIRST_ROAD_KINDS, SpeedReviewStore, db_path
@@ -650,40 +667,28 @@ def test_with_the_road_types_only_the_seconds_with_one_answer_and_a_person_s_typ
     assert (plain['road_type'] == drive['road_type']).all()
 
 
-def test_a_drive_nobody_read_for_road_users_answers_nothing_and_never_nobody_there(tmp_path, monkeypatch):
-    """No derived/road_users of the drive: every second, kind and column has weight 0 (unknown), never a presence of 0
-    with a weight (\"nobody there\"); answers that exist are dropped where the frame is unusable or, with the road types,
-    where the second has no type, like the other heads' answers."""
-    import numpy as np
-    from nnslr_tools.usernet import KINDS
-    from nnslr_tools import road_users
+def test_a_crossing_is_a_kind_of_road_and_a_drive_has_no_road_users_answers_any_more(tmp_path):
+    """A person or a vehicle crossing our path (#112) is answered from its marks as every kind of road, in the order of
+    the kinds, after those of before; the answers of the road users' detector and rule (12 to 17 Nov 2026) are gone."""
+    from nnslr_tools.speed_review import EVENT_KINDS
     targets = _targets()
     write_drive(tmp_path, ROUTE, [(0, i) for i in range(40)])
-    label_db(tmp_path, works=[(ROUTE, 5 * NS, 15 * NS)])
-    road_type_lines(tmp_path, ROUTE, ['town'] * 20 + [None] * 10 + ['motorway'] * 10)
-    merged = {'frames': encoded(40, missing=(60,)), 'series': {'v_ego': [[3 * NS, 77.0]]}, 'meta': {}, 'span': [0, 40 * NS]}
+    label_db(tmp_path, road=[(ROUTE, 'person_crossing', 10 * NS, 20 * NS)], road_checked=[(ROUTE, 'person_crossing', 30 * NS)])
+    kinds = targets.road_kinds(tmp_path)
+    assert kinds[-2:] == EVENT_KINDS == ('person_crossing', 'vehicle_crossing') and kinds[:2] == ('narrow', 'country')
+    merged = {'frames': encoded(40), 'series': {'v_ego': [[3 * NS, 77.0]]}, 'meta': {}, 'span': [0, 40 * NS]}
     split = {'cells': {}, 'partitions': {}, 'frame_keys': {}}
-    labels = targets.read_labels(tmp_path)[ROUTE]
-    drive = targets.drive_targets(tmp_path, ROUTE, labels, merged, split, inputs=False, types=True)
-    assert drive['users_weight'].shape == (40, len(KINDS), road_users.COLUMNS)
-    assert not drive['users_weight'].any() and not drive['users'].any()
-    assert drive['users_reviewed'] is False and drive['users_proposed'] is None
+    drive = targets.drive_targets(tmp_path, ROUTE, targets.read_labels(tmp_path)[ROUTE], merged, split, inputs=False,
+                                  kinds=kinds)
+    person, vehicle = kinds.index('person_crossing'), kinds.index('vehicle_crossing')
+    assert drive['road'][15, person] == 1 and drive['road_weight'][15, person] == 1
+    assert drive['road'][25, person] == 0 and drive['road_weight'][25, person] == 1
+    assert drive['road_weight'][35, person] == 0 and not drive['road_weight'][:, vehicle].any()
+    assert not [key for key in drive if key.startswith('users')]
     found = targets.summary([drive])
-    assert found['users']['drives'] == 0 and found['users']['seconds'] == {kind: 0 for kind in KINDS}
-
-    def everywhere(root, route, frames):
-        shape = (len(frames), len(KINDS), road_users.COLUMNS)
-        return {'presence': np.zeros(shape, np.float32), 'height': np.zeros(shape, np.float32),
-                'weight': np.ones(shape, np.float32), 'read': np.ones(len(frames), bool), 'reviewed': True,
-                'confirmed': 0, 'proposed': 0}
-    monkeypatch.setattr(targets, 'users_answers', everywhere)
-    typed = targets.drive_targets(tmp_path, ROUTE, labels, merged, split, inputs=False, types=True)
-    assert typed['users_weight'][5].all() and not typed['users_weight'][3].any() and not typed['users_weight'][21].any()
-    plain = targets.drive_targets(tmp_path, ROUTE, labels, merged, split, inputs=False)
-    assert plain['users_weight'][21].all() and not plain['users_weight'][3].any()
-    counted = targets.summary([plain])['users']
-    assert counted['drives'] == 1 and counted['reviewed_drives'] == 1 and counted['seconds']['vehicle'] == 39
-    assert 'Road users: answers on 1 drives' in targets.users_counts_text(counted)
+    assert 'users' not in found and 'user_kinds' not in found and 'person_crossing' in found['drives'][0]['road']
+    assert 'road users' not in targets.summary_text(found)
+    assert not hasattr(targets, 'users_answers') and not hasattr(targets, 'users_counts')
 
 
 def test_a_drive_the_map_was_never_asked_about_has_no_road_type(tmp_path):

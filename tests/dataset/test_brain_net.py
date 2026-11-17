@@ -531,78 +531,60 @@ def test_the_car_gets_the_trust():
     assert 'trust.weight' in car_weights(net())
 
 
-def users_answers(t=T, on=(), present=()):
-    """(presence, height, weight) (1, t, kinds, columns): on, the (frame, kind, column) with an answer; present, those of
-    them with one there, a third of the frame tall."""
-    from nnslr_tools.brain_net import USER_COLUMNS, USER_KINDS
-    shape = (1, t, len(USER_KINDS), USER_COLUMNS)
-    presence, height, weight = torch.zeros(shape), torch.zeros(shape), torch.zeros(shape)
-    for frame, kind, column in on:
-        weight[0, frame, kind, column] = 1
-    for frame, kind, column in present:
-        presence[0, frame, kind, column], height[0, frame, kind, column] = 1, 1 / 3
-    return presence, height, weight
+def test_a_crossing_weighs_with_its_pos_weight_and_every_other_kind_as_before_to_the_last_bit():
+    from nnslr_tools.brain_net import ROAD_EVENT_POS_WEIGHT_MAX, brain_loss
+    speed_logits, works_logit, _state, road_logits = net(road_kinds=3)(*batch(), road=True)
+    labels = answers(speed_on=[0])
+
+    def loss(road):
+        return brain_loss(speed_logits, works_logit, *labels, frames=T, road=road)
+
+    # The kinds of before answered, the crossing (column 2) not: no pos_weight, ones, or the crossing's alone.
+    old = road_answers(kinds=3, on=[(0, 0), (1, 0), (2, 1), (3, 1)], inside=[(1, 0), (2, 1)])
+    plain = loss((road_logits, *old))
+    assert torch.equal(plain, loss((road_logits, *old, None)))
+    assert torch.equal(plain, loss((road_logits, *old, torch.ones(3))))
+    assert torch.equal(plain, loss((road_logits, *old, torch.tensor([1.0, 1.0, 40.0]))))
+    # A frame of a crossing: lifted, it weighs more; a frame answered "no crossing" weighs as it did.
+    yes = road_answers(kinds=3, on=[(0, 0), (1, 0), (2, 1), (3, 1), (4, 2)], inside=[(1, 0), (2, 1), (4, 2)])
+    lift = torch.tensor([1.0, 1.0, 40.0])
+    assert float(loss((road_logits, *yes, lift))) > float(loss((road_logits, *yes)))
+    no = road_answers(kinds=3, on=[(0, 0), (1, 0), (2, 1), (3, 1), (4, 2)], inside=[(1, 0), (2, 1)])
+    assert float(loss((road_logits, *no, lift))) == pytest.approx(float(loss((road_logits, *no))))
+    # Of the yes, pos_weight times the error of the plain loss on that frame.
+    from nnslr_tools.brain_net import ROAD_LOSS
+    alone = road_answers(kinds=3, on=[(4, 2)], inside=[(4, 2)])
+    base = loss((road_logits, torch.zeros(1, T, 3), torch.zeros(1, T, 3)))
+    one = float(loss((road_logits, *alone)) - base)
+    assert float(loss((road_logits, *alone, lift)) - base) == pytest.approx(40 * one, rel=1e-4) and one > 0
+    assert ROAD_LOSS == 0.3 and ROAD_EVENT_POS_WEIGHT_MAX == 100.0
 
 
-def test_the_road_users_are_a_presence_and_a_size_a_kind_and_column_last_only_when_asked():
-    from nnslr_tools.brain_net import USER_COLUMNS, USER_KINDS, outputs
-    model = net(road_types=4, users=True)
-    said = model(*batch(), types=True, users=True)
-    assert len(said) == 5 and said[4].shape == (1, T, 2, len(USER_KINDS), USER_COLUMNS)
-    found = outputs(said, types=True, users=True)
-    assert found['users'] is said[4] and found['types'] is said[3]
-    assert len(model(*batch())) == 3 and net()(*batch(), users=True)[3] is None
-    assert (len(USER_KINDS), USER_COLUMNS) == (3, 8)
-
-
-def test_a_road_user_reaches_the_memory_and_not_the_speed_head_and_an_unknown_cell_adds_nothing():
-    from nnslr_tools.brain_net import USERS_LOSS, brain_loss
-    model = net(users=True)
-    model.zero_grad()
-    speed_logits, works_logit, _state, users = model(*batch(), users=True)
-    speed, speed_weight, works, works_weight = answers()
-    alone = brain_loss(speed_logits, works_logit, speed, speed_weight, works, works_weight)
-    # Weight 0 everywhere (a drive nobody read): the same loss as without the head, whatever presence says.
-    unknown = torch.ones(1, T, 3, 8), torch.full((1, T, 3, 8), 0.5), torch.zeros(1, T, 3, 8)
-    nothing = brain_loss(speed_logits, works_logit, speed, speed_weight, works, works_weight,
-                         users=(users, *unknown, None))
-    assert float(nothing) == pytest.approx(float(alone)) and 0 < USERS_LOSS < 1
-    loss = brain_loss(speed_logits, works_logit, speed, speed_weight, works, works_weight,
-                      users=(users, *users_answers(on=[(1, 0, 3), (1, 2, 4)], present=[(1, 0, 3)]), None))
-    assert float(loss) > float(alone)
-    loss.backward()
-    assert gradient_of(model, 'users_head') > 0 and gradient_of(model, 'gru') > 0 and gradient_of(model, 'project') > 0
-    assert gradient_of(model, 'speed_head') == 0 and gradient_of(model, 'works_head') == 0
-    # Only the answered cells learn: the rows of the presence of a person in column 5, of nobody's size, stay still.
-    grad = model.users_head.weight.grad.view(2, 3, 8, -1)
-    assert float(grad[0, 0, 3].abs().sum()) > 0 and float(grad[0, 2, 4].abs().sum()) > 0
-    assert float(grad[1, 0, 3].abs().sum()) > 0 and float(grad[1, 2, 4].abs().sum()) == 0
-    assert float(grad[0, 0, 5].abs().sum()) == 0
-
-
-def test_a_rare_presence_weighs_more_with_its_pos_weight():
+def test_a_lifted_crossing_reaches_the_memory_and_only_its_own_row_of_the_road_head():
     from nnslr_tools.brain_net import brain_loss
-    speed_logits, works_logit, _state, users = net(users=True)(*batch(), users=True)
-    speed, speed_weight, works, works_weight = answers()
-    labels = users_answers(on=[(1, 0, 3)], present=[(1, 0, 3)])
-    plain = brain_loss(speed_logits, works_logit, speed, speed_weight, works, works_weight, users=(users, *labels, None))
-    lifted = brain_loss(speed_logits, works_logit, speed, speed_weight, works, works_weight,
-                        users=(users, *labels, torch.full((3, 8), 5.0)))
-    assert float(lifted) > float(plain)
+    model = net(road_kinds=3)
+    model.zero_grad()
+    speed_logits, works_logit, _state, road_logits = model(*batch(), road=True)
+    crossing = road_answers(kinds=3, on=[(2, 2)], inside=[(2, 2)])
+    loss = brain_loss(speed_logits, works_logit, *answers(), road=(road_logits, *crossing, torch.tensor([1.0, 1.0, 9.0])))
+    loss.backward()
+    assert gradient_of(model, 'road_head') > 0 and gradient_of(model, 'gru') > 0
+    assert gradient_of(model, 'speed_head') == 0
+    assert float(model.road_head.weight.grad[:2].abs().sum()) == 0 and float(model.road_head.weight.grad[2].abs().sum()) > 0
 
 
-def test_the_speed_does_not_depend_on_the_users_head_and_the_car_does_not_get_it():
-    from nnslr_tools.brain_net import TRAINING_ONLY, build_brain_net, car_weights
-    model = net(users=True)
-    images, extra = batch()
-    with torch.no_grad():
-        speed = model(images, extra)[0]
-        model.users_head.weight.mul_(100).add_(1)
-        again = model(images, extra, users=True)[0]
-    assert torch.equal(speed, again) and 'users_head.' in TRAINING_ONLY
-    weights = car_weights(model)
-    without = build_brain_net(GROUPS, pretrained=False, works=False)
-    assert set(weights) == set(without.state_dict())
+def test_no_network_has_the_road_users_head_any_more_and_its_name_stays_out_of_the_car():
+    # users_head learnt the road users from 12 to 17 Nov 2026 (#112 took it away): its brains load without it
+    # (test_brain_export), and TRAINING_ONLY keeps its name for them.
+    from nnslr_tools import brain_net
+    from nnslr_tools.brain_net import TRAINING_ONLY, build_brain_net, outputs
+    with pytest.raises(TypeError):
+        build_brain_net(GROUPS, pretrained=False, users=True)
+    model = net(road_kinds=2, road_types=4)
+    assert not hasattr(model, 'users_head') or model.users_head is None
+    assert 'users_head.' in TRAINING_ONLY and not hasattr(brain_net, 'USERS_LOSS')
+    said = model(*batch(), road=True, types=True)
+    assert len(said) == 5 and set(outputs(said, road=True, types=True)) == {'speed', 'works', 'state', 'road', 'types'}
 
 
 MAP_GROUPS = (*GROUPS, 'map_limit')
@@ -868,15 +850,15 @@ def whose_answers(ours=(), another=()):
 def test_whose_road_a_sign_is_of_is_a_logit_a_column_of_the_sign_boxes_last_only_when_asked():
     from nnslr_tools.brain_net import APPLICABILITY_COLUMNS, build_brain_net, outputs
     from nnslr_tools.brain_targets import BRAIN_INPUTS
-    model = box_net(users=True, applicability=True)
-    said = model(*box_batch(), users=True, applicability=True)
+    model = box_net(road_types=4, applicability=True)
+    said = model(*box_batch(), types=True, applicability=True)
     # A brain of sign_boxes (until 17 Nov 2026) keeps a logit a column; one of sign_slots has one a slot (#110)
     assert len(said) == 5 and said[4].shape == (1, T, BRAIN_INPUTS.BOX_COLUMNS) and BRAIN_INPUTS.BOX_COLUMNS == 8
     assert APPLICABILITY_COLUMNS == BRAIN_INPUTS.SIGN_SLOTS == 16
     slotted = build_brain_net((*GROUPS, 'sign_slots'), pretrained=False, applicability=True)
     assert slotted.applicability_head.out_features == 16
-    found = outputs(said, users=True, applicability=True)
-    assert found['applicability'] is said[4] and found['users'] is said[3]
+    found = outputs(said, types=True, applicability=True)
+    assert found['applicability'] is said[4] and found['types'] is said[3]
     assert len(model(*box_batch())) == 3 and box_net()(*box_batch(), applicability=True)[3] is None
     # It answers of the columns of sign_boxes: a brain without them cannot learn it
     with pytest.raises(ValueError, match='sign_slots'):

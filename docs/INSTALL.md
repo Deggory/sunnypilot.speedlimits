@@ -107,16 +107,6 @@ Since 13 Nov 2026 the site runs on CT 1310 (serverone2, no card) and the V100s a
 
 Check from CT 1310 with `scripts/gpu_remote.sh --status`: it says whether CT 131 answers, and starts nothing.
 
-### The road users' detector (for the brain's training)
-
-`nnslr road-users` (step 4 of `scripts/run_brain.sh`) reads the road users with torchvision's Faster R-CNN ResNet-50 FPN v2 on its COCO weights (`fasterrcnn_resnet50_fpn_v2_coco-dd69338a.pth`, about 167 MB). The first run downloads them from download.pytorch.org into torch's hub cache (`~/.cache/torch/hub/checkpoints/`); to have them there before, with their checksum checked:
-
-```sh
-bash scripts/fetch_road_users_detector.sh
-```
-
-It needs `.venv-gpu` (torch and torchvision as above) and a V100: without a CUDA card it stops, it never runs on the CPU.
-
 ### A model that sees images: Qwen3-VL-8B (optional)
 
 ```sh

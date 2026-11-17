@@ -14,7 +14,7 @@ and output.road_types as well (below), so its file and contract are no longer th
 step says how the car steps it: rate_hz, clock ("schedule": on the grid of the rate, as the training's frames) and picture
 ("brain": vision.BrainInput; "road_type": the PIL picture).
 
-works_head, road_head, users_head and applicability_head stay out (brain_net.car_weights). A brain that learnt whose
+works_head, road_head and applicability_head (and the users_head of 12-17 Nov 2026) stay out. A brain that learnt whose
 road a sign is of was given the boxes of every speed sign read, those of another road too: the contract's
 step.other_road_boxes says so (the checkpoint's), and the car gives it the same (brain.BrainReader); the check along a
 drive makes its inputs so too. A brain that learnt the road type also gives road_type (1,
@@ -47,7 +47,7 @@ TIE = 1e-3
 
 
 def load_brain(checkpoint: Path):
-    """(the network on the CPU in eval mode, without works_head, road_head and users_head, with type_head when it learnt the road
+    """(the network on the CPU in eval mode, without works_head, road_head (nor a users_head of 12-17 Nov 2026), with type_head when it learnt the road
     type; what the checkpoint says of itself). The network has the table of its checkpoint (class_kph): a brain of 5 km/h
     classes stays one. A checkpoint with the limit ahead (its 'ahead': the brains of 7 to 11 Nov 2026) keeps those heads. Its number path is its 'number_path', and 'class' when it does not say (brain_net.number_path_of, #104)."""
     torch = _torch()

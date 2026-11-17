@@ -40,13 +40,6 @@ between roads seen and not seen:
 - road: the same for each kind of road (road_head), and in_road the speed inside each kind's marks;
 - types: the share of frames on which type_head names the road type right, on all and per type, None without the head;
   in_type the speed on each type, the head or not;
-- users: users_head's presence against the road users' answers (brain_targets.users_answers), per kind on the cells
-  (frame, column) with an answer: precision, recall, and the recall per height of the tallest one in the cell
-  (road_users.CHECK_BINS, pixels of the 1344 x 760 frame); None without the head;
-- users_speed: the speed on the frames with a road user in the middle columns (MIDDLE_COLUMNS: a crossing a person
-  confirmed, or a person or two-wheeler of the detector) against the other frames: mean error and mean signed error (said
-  minus his, above 0 too fast), with the head or not, so that the two trainings compare; crossing_frames counts the frames
-  with a confirmed crossing, and the note says when there is none yet;
 - applicability: whose road a speed sign is of, on the slots of sign_slots a reviewed box answers
   (brain_targets.applicability_answers), every frame with one (a reviewed frame is not one a second): precision and
   recall of "of another road" of applicability_head (head; None without it), with how many slots say our road and
@@ -86,11 +79,13 @@ and the car's speed are never inputs (brain_targets.LEFT_OUT, since 10 Nov 2026;
 his own speed, and with the car's among the inputs the network learns to say it back, on the car its own. Nor are the
 metres to the sign ahead (sign_distance, LEFT_OUT since 12 Nov 2026): the brain gets the boxes of the signs (sign_boxes).
 
-The road users (users, the usual since 12 Nov 2026; --no-users, the comparison): users_head on the memory learns who is
-on the road and where (brain_net). The answers exist whether the head learns or not (brain_targets.drive_targets), so
-users_speed measures both; the dry run logs how many drives and seconds have them (users_counts_text). A presence is rare:
-users_pos_weight lifts it, per kind and column, by the frames without one over those with one in train, at most
-brain_net.USERS_POS_WEIGHT_MAX.
+The crossings (speed_review.EVENT_KINDS, since 17 Nov 2026, #112): a person or a vehicle crossing our path is a kind of
+road of Speed review, marked as every kind (by a person, or by the road labeler once a head of that kind passed its
+gate), and road_head learns it as the others (road and in_road measure it). A mark is a few seconds in hours of driving:
+road_pos_weight lifts its frames, per kind, by the frames of train answered no over those answered yes, at most
+brain_net.ROAD_EVENT_POS_WEIGHT_MAX; every other kind keeps 1, and its loss is what it was. The log says the weights and
+result.json keeps them (road_pos_weight). The road users' head of 12 to 17 Nov 2026 (users_head, a COCO detector's
+answers and a rule of crossings) went with it: a brain of those days still loads, its head left out.
 
 Whose road a sign is of (applicability, the usual since 15 Nov 2026, #89; --no-applicability, the comparison):
 applicability_head on the memory learns it from the reviewed boxes (brain_net), and the brain is given the boxes of
@@ -124,19 +119,17 @@ from pathlib import Path
 import numpy as np
 
 from nnslr_tools import road_type_data as data
-from nnslr_tools.brain_net import (APPLICABILITY_POS_WEIGHT_MAX, NUMBER_PATHS, USER_COLUMNS, USER_KINDS,
-                                   USERS_POS_WEIGHT_MAX, brain_loss, build_brain_net, number_path_of, outputs)
+from nnslr_tools.brain_net import (APPLICABILITY_POS_WEIGHT_MAX, NUMBER_PATHS, ROAD_EVENT_POS_WEIGHT_MAX, brain_loss,
+                                   build_brain_net, number_path_of, outputs)
 from nnslr_tools.brain_targets import (INPUT_SIZES, LEFT_OUT, MAP_GROUP, METRES_SCALE, NO_TYPE, NS, OPTIONAL, RATE_HZ,
                                        ROAD_SIGN_KINDS, brain_sizes,
                                        applicability_counts, applicability_counts_text, applicability_weights,
                                        check_drives, class_kph, dataset, epoch_drives, hours_in_train, inputs_sha256,
                                        learning_pieces, loss_weights, night_frames, pack_inputs, plates_in_train, read_split,
                                        road_weights, sign_kph, swap_passages, swapped, training_counts,
-                                       training_counts_text, type_weights, users_counts, users_counts_text, users_weights,
-                                       wet_in_train, without_map)
-from nnslr_tools.media import FRAME_SIZE
-from nnslr_tools.road_users import CHECK_BINS
+                                       training_counts_text, type_weights, wet_in_train, without_map)
 from nnslr_tools.road_types import ROAD_TYPES
+from nnslr_tools.speed_review import EVENT_KINDS
 from nnslr_tools.road_type_net import FEATURES, FrameStore, HIDDEN, LEARNING_RATE, WEIGHT_DECAY, _augment, _print, _torch
 from nnslr_tools.road_type_signs import load_pictures
 
@@ -164,9 +157,6 @@ def learned_inputs(map_limit: bool = False) -> tuple[str, ...]:
     """The groups a brain learns from: LEARNED_INPUTS, and after them the optional ones asked for (map_limit: the map's
     limit, #85)."""
     return LEARNED_INPUTS + (('map_limit',) if map_limit else ())
-# The columns of road_users.COLUMNS in front of us (2 to 5 of 0 to 7: x from 336 to 1008 of 1344 pixels): a road user
-# there is in or next to our path, the frames users_speed measures apart.
-MIDDLE_COLUMNS = slice(2, 6)
 
 
 def _piece(drive: dict, first: int, last: int, store: FrameStore, device):
@@ -184,9 +174,10 @@ def _same_augment(torch, images, seed: int, device):
 
 
 def train_epoch(model, optimizer, drives: list[dict], store: FrameStore, *, chunk: int, rng: random.Random, device,
-                augment: bool = True, steps: int | None = None, pos_weight=None, sign_pos_weight=None) -> float:
-    """One pass over the train frames: the mean error of its steps. pos_weight: users_pos_weight's, a tensor on device
-    (kinds, columns), or None. sign_pos_weight: applicability_pos_weight's, a scalar tensor on device, or None."""
+                augment: bool = True, steps: int | None = None, road_pos_weight=None, sign_pos_weight=None) -> float:
+    """One pass over the train frames: the mean error of its steps. road_pos_weight: road_pos_weight's, a tensor on
+    device (kinds,) in the order of the kinds, or None (every kind 1). sign_pos_weight: applicability_pos_weight's, a
+    scalar tensor on device, or None."""
     torch = _torch()
     model.train()
     errors = []
@@ -196,7 +187,6 @@ def train_epoch(model, optimizer, drives: list[dict], store: FrameStore, *, chun
             works_weight = np.zeros_like(works_weight)
         road = road_weights(drive, 'train') if getattr(model, 'road_head', None) is not None else None
         typed = type_weights(drive, 'train') if getattr(model, 'type_head', None) is not None else None
-        people = users_weights(drive, 'train') if getattr(model, 'users_head', None) is not None else None
         whose = applicability_weights(drive, 'train') if getattr(model, 'applicability_head', None) is not None else None
         look, state = rng.getrandbits(32), None
         for first, last, learn, fresh in learning_pieces(drive['partitions'], chunk, rng.randrange(chunk), drive['cuts']):
@@ -208,8 +198,6 @@ def train_epoch(model, optimizer, drives: list[dict], store: FrameStore, *, chun
                 answers += road[first:last].sum()
             if typed is not None:
                 answers += typed[first:last].sum()
-            if people is not None:
-                answers += people[first:last].sum()
             if whose is not None:
                 answers += whose[first:last].sum()
             if not learn or not answers or (steps is not None and len(errors) >= steps):
@@ -220,20 +208,16 @@ def train_epoch(model, optimizer, drives: list[dict], store: FrameStore, *, chun
             def piece(values):
                 return torch.from_numpy(values[first:last])[None].to(device)
 
-            asked = {'road': road is not None, 'types': typed is not None, 'users': people is not None,
-                     'applicability': whose is not None}
+            asked = {'road': road is not None, 'types': typed is not None, 'applicability': whose is not None}
             said = outputs(model(images, extra, state, **asked), **asked)
             speed_logits, works_logit, state = said['speed'], said['works'], said['state']
-            kinds = None if road is None else (said['road'], piece(drive['road']), piece(road))
+            kinds = None if road is None else (said['road'], piece(drive['road']), piece(road), road_pos_weight)
             types = None if typed is None else (said['types'], piece(drive['road_type']), piece(typed))
-            users = None if people is None else (said['users'], piece(drive['users']), piece(drive['users_height']),
-                                                 piece(people), pos_weight)
             signs = None if whose is None else (said['applicability'], piece(drive['applicability']), piece(whose),
                                                 sign_pos_weight)
             loss = brain_loss(speed_logits, works_logit,
                               *(piece(values) for values in (drive['speed'], speed_weight, drive['works'], works_weight)),
-                              frames=chunk, kph=model.class_kph, road=kinds, types=types, users=users,
-                              applicability=signs)
+                              frames=chunk, kph=model.class_kph, road=kinds, types=types, applicability=signs)
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), CLIP)
@@ -250,9 +234,7 @@ def _stretches_out_of_train(partitions: list[str]) -> set[int]:
 def predict(model, drive: dict, store: FrameStore, *, chunk: int, device, cold: bool = False) -> dict:
     """What the network says along a whole drive, as on the car: {'kph': per frame, the km/h of its class in the network's
     own table (class_kph), 'works': chance per frame, or None, 'road': chance per frame and kind of road, or None, 'types':
-    chance per frame and road type (road_types.ROAD_TYPES), or None, 'users': chance of a road user per frame, kind and
-    column (frames, kinds, columns), or None, 'users_height': the height it says over the frame's, the same shape, or
-    None, 'applicability': the chance that the speed sign of each slot of sign_slots is of another road (frames,
+    chance per frame and road type (road_types.ROAD_TYPES), or None, 'applicability': the chance that the speed sign of each slot of sign_slots is of another road (frames,
     columns), or None}; a network with the limit ahead (a brain of 7 to 11
     Nov 2026, loaded from its checkpoint: brain_export.load_brain) also 'next' (a class of that table per frame, 'none'
     for none: the last one, len(class_kph)) and 'metres'. cold: the memory also starts again where a stretch out of
@@ -261,11 +243,10 @@ def predict(model, drive: dict, store: FrameStore, *, chunk: int, device, cold: 
     model.eval()
     asked = {'ahead': getattr(model, 'ahead', False), 'road': getattr(model, 'road_head', None) is not None,
              'types': getattr(model, 'type_head', None) is not None,
-             'users': getattr(model, 'users_head', None) is not None,
              'applicability': getattr(model, 'applicability_head', None) is not None}
     cuts = drive['cuts'] | (_stretches_out_of_train(drive['partitions']) if cold else set())
     state, speed, works, road, types, following, metres = None, [], [], [], [], [], []
-    users, users_height, whose = [], [], []
+    whose = []
     with torch.no_grad():
         for first, last, _learn, fresh in learning_pieces(['train'] * len(drive['frames']), chunk, cuts=cuts):
             state = None if fresh else state
@@ -279,9 +260,6 @@ def predict(model, drive: dict, store: FrameStore, *, chunk: int, device, cold: 
                 road.append(torch.sigmoid(said['road'][0]).cpu().numpy())
             if asked['types']:
                 types.append(torch.softmax(said['types'][0], dim=-1).cpu().numpy())
-            if asked['users']:
-                users.append(torch.sigmoid(said['users'][0, :, 0]).cpu().numpy())
-                users_height.append(said['users'][0, :, 1].exp().cpu().numpy())
             if asked['applicability']:
                 whose.append(torch.sigmoid(said['applicability'][0]).cpu().numpy())
             speed.append(said['speed'][0].argmax(dim=-1).cpu().numpy())
@@ -290,8 +268,6 @@ def predict(model, drive: dict, store: FrameStore, *, chunk: int, device, cold: 
     table = np.rint(model.class_kph.detach().cpu().numpy()).astype(np.int64)
     found = {'kph': table[np.concatenate(speed)], 'works': np.concatenate(works) if works else None,
              'road': np.concatenate(road) if road else None, 'types': np.concatenate(types) if types else None,
-             'users': np.concatenate(users) if users else None,
-             'users_height': np.concatenate(users_height) if users_height else None,
              'applicability': np.concatenate(whose) if whose else None}
     ahead = asked['ahead']
     if ahead:
@@ -423,7 +399,6 @@ def measure(drives: list[dict], answers: list[dict], partition: str) -> dict:
             'types': _types_measure(type_said, type_truth),
             'in_type': {kind: _speed_measure(said_all[type_all == column], truth_all[type_all == column])
                         for column, kind in enumerate(ROAD_TYPES) if (type_all == column).any()},
-            'users': _users_measure(drives, answers, partition), 'users_speed': _users_speed(drives, answers, partition),
             'applicability': _applicability_measure(drives, answers, partition)}
 
 
@@ -473,81 +448,6 @@ def _applicability_needs_both(drives: list[dict], log) -> None:
     for drive in drives:
         if 'applicability_weight' in drive:
             drive['applicability_weight'] = drive['applicability_weight'] * (np.array(drive['partitions']) != 'train')[:, None]
-
-
-def _users_measure(drives: list[dict], answers: list[dict], partition: str) -> dict | None:
-    """users_head against the road users' answers of a partition, on the cells (frame, column) with an answer, one frame a
-    second: per kind the hits of _count with precision and recall, and the recall per height bin of the tallest one
-    there (road_users.CHECK_BINS); None for a network without the head."""
-    if not any(said.get('users') is not None for said in answers):
-        return None
-    found = {kind: ({'true_positive': 0, 'false_positive': 0, 'false_negative': 0}, {'yes': 0, 'no': 0},
-                    {name: {'present': 0, 'found': 0} for name, _low, _high in CHECK_BINS}) for kind in USER_KINDS}
-    for drive, said in zip(drives, answers):
-        weight = users_weights(drive, partition)
-        if weight is None or said.get('users') is None:
-            continue
-        known = (weight > 0) & _measured(drive)[:, None, None]
-        tall = drive['users_height'] * FRAME_SIZE[1]
-        for column, kind in enumerate(USER_KINDS):
-            hits, told, bins = found[kind]
-            here = known[:, column]
-            _count(said['users'][:, column], drive['users'][:, column], here, hits, told)
-            present, yes = here & (drive['users'][:, column] > 0), said['users'][:, column] >= .5
-            for name, low, high in CHECK_BINS:
-                inside = present & (tall[:, column] >= low) & (tall[:, column] < high)
-                bins[name]['present'] += int(inside.sum())
-                bins[name]['found'] += int((inside & yes).sum())
-    return {kind: {**_told(hits, told), 'cells': told['yes'] + told['no'],
-                   'by_height': {name: {**row, 'recall': row['found'] / row['present'] if row['present'] else None}
-                                 for name, row in bins.items()}}
-            for kind, (hits, told, bins) in found.items()}
-
-
-def _signed(said: np.ndarray, truth: np.ndarray) -> dict:
-    """_speed_measure with the mean signed error too: said minus his, above 0 the network is faster than he drove."""
-    return {**_speed_measure(said, truth), 'mean_signed_kph': float((said - truth).mean()) if len(truth) else None}
-
-
-def _users_speed(drives: list[dict], answers: list[dict], partition: str) -> dict:
-    """The speed on the frames of a partition with a road user in MIDDLE_COLUMNS (a crossing a person confirmed, a person
-    or a two-wheeler of the detector: an answer of 1 with its weight) against the other frames with a speed answer, one
-    frame a second; the same with the head or without it."""
-    there_said, there_truth, rest_said, rest_truth = [], [], [], []
-    crossings = 0
-    vehicle = USER_KINDS.index('vehicle')
-    for drive, said in zip(drives, answers):
-        asked = (loss_weights(drive, partition)[0] > 0) & _measured(drive)
-        if 'users_weight' in drive:
-            seen = (drive['users_weight'][:, :, MIDDLE_COLUMNS] > 0) & (drive['users'][:, :, MIDDLE_COLUMNS] > 0)
-            there = seen.any(axis=(1, 2))
-            crossings += int((asked & seen[:, vehicle].any(axis=1)).sum())
-        else:
-            there = np.zeros(len(asked), dtype=bool)
-        truth = class_kph(drive['speed'])
-        there_said.append(said['kph'][asked & there])
-        there_truth.append(truth[asked & there])
-        rest_said.append(said['kph'][asked & ~there])
-        rest_truth.append(truth[asked & ~there])
-    there_said, there_truth, rest_said, rest_truth = (np.concatenate(part or [[]]) for part in
-                                                      (there_said, there_truth, rest_said, rest_truth))
-    return {'with_users': _signed(there_said, there_truth), 'others': _signed(rest_said, rest_truth),
-            'crossing_frames': crossings,
-            'note': None if crossings else ('no confirmed crossing here: with_users are persons and two-wheelers only, the '
-                                            'vehicles count once a person reviews the proposed crossings')}
-
-
-def users_pos_weight(drives: list[dict]) -> np.ndarray | None:
-    """(kinds, columns) float32: the cells of train without a road user over those with one, between 1 and
-    USERS_POS_WEIGHT_MAX; 1 where train has none with one. None without the road users' answers."""
-    weights = [(users_weights(drive, 'train'), drive) for drive in drives if 'users_weight' in drive]
-    if not weights:
-        return None
-    present = sum(((weight * drive['users']).sum(axis=0) for weight, drive in weights), np.zeros((len(USER_KINDS), USER_COLUMNS)))
-    absent = sum(((weight * (1 - drive['users'])).sum(axis=0) for weight, drive in weights),
-                 np.zeros((len(USER_KINDS), USER_COLUMNS)))
-    lift = np.where(present > 0, absent / np.maximum(present, 1), 1.0)
-    return np.clip(lift, 1.0, USERS_POS_WEIGHT_MAX).astype(np.float32)
 
 
 def _types_measure(said: list[np.ndarray], truth: list[np.ndarray]) -> dict | None:
@@ -607,7 +507,7 @@ def _short(drive: dict, length: int) -> dict:
     cut = {name: drive[name][part] for name in ('frames', 'ns', 'partitions', 'cells', 'speed', 'speed_out', 'speed_weight',
                                                 'works', 'works_weight', 'road', 'road_weight', 'road_type',
                                                 'type_weight', 'typed_by_person', 'own_kph', 'measured',
-                                                'blocked', 'users', 'users_height', 'users_weight', 'applicability',
+                                                'blocked', 'applicability',
                                                 'applicability_weight') if name in drive}
     return {**drive, **cut, 'inputs': {name: value[part] for name, value in drive['inputs'].items()},
             'cuts': {at - first for at in drive['cuts'] if first < at < first + length}}
@@ -688,6 +588,20 @@ def _road_needs_both(drives: list[dict], log) -> None:
                 'left out. A mark needs "checked to here" in Speed review.')
         for _weight, drive in road:
             drive['road_weight'][:, column] *= np.array(drive['partitions']) != 'train'
+
+
+def road_pos_weight(drives: list[dict], kinds: list[str]) -> dict[str, float]:
+    """{kind: pos_weight} of road_head's loss, in the order of the kinds: for a crossing (speed_review.EVENT_KINDS), the
+    frames of train with an answer (weight above 0) of no over those of yes, between 1 and ROAD_EVENT_POS_WEIGHT_MAX;
+    1 for every other kind, and for a crossing with no frame of yes in train (one _road_needs_both left out)."""
+    road = [(road_weights(drive, 'train'), drive) for drive in drives if 'road_weight' in drive]
+    lifts = {}
+    for column, kind in enumerate(kinds):
+        yes = sum(int(((weight[:, column] > 0) & (drive['road'][:, column] > 0)).sum()) for weight, drive in road)
+        no = sum(int(((weight[:, column] > 0) & (drive['road'][:, column] <= 0)).sum()) for weight, drive in road)
+        lifts[kind] = (float(np.clip(no / yes, 1.0, ROAD_EVENT_POS_WEIGHT_MAX)) if kind in EVENT_KINDS and yes
+                       else 1.0)
+    return lifts
 
 
 def _types_in_train(drives: list[dict], log) -> None:
@@ -872,7 +786,7 @@ def _trust_text(path: str, before: dict, after: dict, swapped_test: dict) -> str
 
 
 def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid', works: bool = True,
-                road: bool = True, types: bool = True, users: bool = True, epochs: int = EPOCHS, chunk: int = CHUNK, device: str | None = None,
+                road: bool = True, types: bool = True, epochs: int = EPOCHS, chunk: int = CHUNK, device: str | None = None,
                 dry_run: bool = False, seed: int = 0, routes: list[str] | None = None, init_from: Path | None = None,
                 sign_networks: dict | None = None, map_limit: bool = False, applicability: bool = True,
                 number_path: str = NUMBER_PATH, log=_print) -> dict:
@@ -880,10 +794,10 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
     and result.json into run_dir; the checkpoint
     says what it came from, its table of the speeds too (the class_kph of its weights), and its kinds of road. Refuses what
     would train wrong: brain_targets.check_drives. It learns from LEARNED_INPUTS, never his pedals nor the car's
-    speed, nor the metres to a sign. road: with the kinds of road of Speed review as a task of their own (road_head); False, the comparison.
+    speed, nor the metres to a sign. road: with the kinds of road of Speed review as a task of their own (road_head), the
+    crossings lifted (road_pos_weight); False, the comparison.
     types: with the road type as a task of its own (type_head), and only the seconds that have one (brain_targets'
-    types); False, the comparison. users: with the road users as a task of their own (users_head, brain_net); False,
-    the comparison, measured all the same (users_speed). routes: only these drives (those of the run's start, run_brain.sh), and of them only
+    types); False, the comparison. routes: only these drives (those of the run's start, run_brain.sh), and of them only
     the ones still in training_routes; None, every drive of training_routes. init_from: an earlier brain-last.pt whose
     weights it goes on from (brain_start; the dry run checks it), else ImageNet and random weights. sign_networks: the
     networks its signs were read with (sign_networks.load: the cutter, classifier and applicability network chosen in
@@ -932,9 +846,6 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
     if not any(loss_weights(drive, 'train')[0].any() for drive in drives):
         raise ValueError('no speed labels in train: the dashcam drives fall in val and test of the split; drive more')
     (run_dir / ROUTES).write_text(json.dumps([drive['route'] for drive in drives]), encoding='utf-8')
-    # On every drive, before the dry run's cut: what the road users have to teach (their answers exist with the head or not).
-    log(users_counts_text(users_counts(drives))
-        + ('' if users else '. users_head off (--no-users): the road users are measured, not learned'))
     # The same of whose road a sign is of: what the reviews answer, on every drive, with the head or not.
     log(applicability_counts_text(applicability_counts(drives))
         + ('. The brain is given every speed sign read, those of another road too, and learns whose road each is of'
@@ -961,16 +872,20 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
     sign_lift = applicability_pos_weight(drives) if applicability else None
     if sign_lift is not None:
         log(f'A sign of another road weighs {sign_lift:.1f} times one of ours (pos_weight)')
-    lift = users_pos_weight(drives) if users else None
-    if lift is not None:
-        log('Road users pos_weight (the most of the columns): '
-            + ', '.join(f'{kind} {lift[at].max():.1f}' for at, kind in enumerate(USER_KINDS)))
+    road_lift = road_pos_weight(drives, kinds)
+    if any(kind in EVENT_KINDS for kind in kinds):
+        log(f'The crossings weigh in road_head (pos_weight, frames of no over yes in train, at most '
+            f'{ROAD_EVENT_POS_WEIGHT_MAX:.0f}): '
+            + ', '.join(f'{kind} {road_lift[kind]:.1f}' for kind in kinds if kind in EVENT_KINDS))
     store = FrameStore(_pictures(root, drives, dry_run=dry_run, log=log), device)
     # A brain that learns the map's limit has its path straight to the answer (brain_net: trust_map).
     model = build_brain_net(groups, pool=pool, works=works, pretrained=not dry_run, road_kinds=len(kinds),
-                            road_types=len(ROAD_TYPES) if types else 0, users=users, map_path=map_limit,
+                            road_types=len(ROAD_TYPES) if types else 0, map_path=map_limit,
                             applicability=applicability, number_path=number_path).to(device)
-    pos_weight = None if lift is None else torch.from_numpy(lift).to(device)
+    # None when every kind weighs 1: road_head's loss is then the one of before, to the last bit.
+    lifted = [road_lift[kind] for kind in kinds]
+    kinds_pos_weight = (torch.tensor(lifted, dtype=torch.float32, device=device) if any(value != 1.0 for value in lifted)
+                        else None)
     sign_pos_weight = None if sign_lift is None else torch.tensor(sign_lift, device=device)
     optimizer = torch.optim.AdamW([value for value in model.parameters() if value.requires_grad], lr=LEARNING_RATE,
                                   weight_decay=WEIGHT_DECAY)
@@ -980,8 +895,7 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
     # rate_hz and picture: how the car steps it (brain_export); a checkpoint without them is a 1 Hz brain of PIL pictures.
     # No 'ahead': only the checkpoints of 7 to 11 Nov 2026 have it, with their heads of the limit ahead.
     source = {'groups': groups, 'pool': pool, 'works': works, 'road_kinds': kinds,
-              'road_types': list(ROAD_TYPES) if types else [], 'users': users,
-              'user_kinds': list(USER_KINDS) if users else [], 'user_columns': USER_COLUMNS if users else 0,
+              'road_types': list(ROAD_TYPES) if types else [],
               # Whose road a sign is of as a head, and what sign_boxes held: every sign read, those of another road too
               # (brain_export puts it in the contract: the car gives such a brain the same).
               'applicability': applicability, 'other_road_boxes': applicability,
@@ -1006,7 +920,7 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
     for epoch in range(epochs):
         started = time.monotonic()
         error = train_epoch(model, optimizer, epoch_drives(drives, groups, rng), store, chunk=chunk, rng=rng, device=device,
-                            steps=DRY_STEPS if dry_run else None, pos_weight=pos_weight,
+                            steps=DRY_STEPS if dry_run else None, road_pos_weight=kinds_pos_weight,
                             sign_pos_weight=sign_pos_weight)
         answers = [predict(model, drive, store, chunk=chunk, device=device) for drive in drives]
         validation = measure(drives, answers, 'validation')
@@ -1038,9 +952,9 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
     # rate_hz, hidden and kph: how the car steps it and what it says, for Models (model_roles.brain_digest).
     result = {'groups': list(groups), 'road_sign_kinds': source['road_sign_kinds'], 'map_limit': map_limit, 'map_path': map_limit, 'pool': pool, 'works': works, 'road_kinds': kinds,
               'number_path': number_path, 'trust': trust,
-              'road_types': list(ROAD_TYPES) if types else [], 'users': users, 'user_kinds': source['user_kinds'],
-              'users_pos_weight': None if lift is None else lift.round(3).tolist(),
-              'users_answers': users_counts(drives), 'applicability': applicability, 'other_road_boxes': applicability,
+              'road_types': list(ROAD_TYPES) if types else [],
+              'road_pos_weight': {kind: round(value, 3) for kind, value in road_lift.items()},
+              'applicability': applicability, 'other_road_boxes': applicability,
               'applicability_pos_weight': sign_lift, 'applicability_answers': applicability_counts(drives),
               'rate_hz': source['rate_hz'],
               'hidden': HIDDEN, 'kph': {'from': table[0], 'to': table[-1], 'step': table[1] - table[0] if len(table) > 1 else 0},

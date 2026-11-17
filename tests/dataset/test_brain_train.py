@@ -316,78 +316,44 @@ def test_the_log_says_the_seconds_with_a_road_type_and_the_drives_with_none():
     assert lines == []
 
 
-def peopled(drive, cells, *, read=True):
-    """The drive with the road users' answers drive_targets gives: cells, {frame: [(kind, column, height px)]} present;
-    every cell answered (read), or none (a drive nobody read: weight 0 everywhere)."""
+CROSSED = ['narrow', 'person_crossing', 'vehicle_crossing']
+
+
+def crossed(drive, road, weight=None):
+    """The drive with a kind of road and the two crossings (speed_review.EVENT_KINDS), CROSSED: road their answers per
+    frame, weight 1 everywhere unless said."""
     import numpy
-    count = len(drive['partitions'])
-    drive['users'] = numpy.zeros((count, 3, 8), dtype=numpy.float32)
-    drive['users_height'] = numpy.zeros((count, 3, 8), dtype=numpy.float32)
-    drive['users_weight'] = numpy.full((count, 3, 8), 1.0 if read else 0.0, dtype=numpy.float32)
-    for frame, found in cells.items():
-        for kind, column, tall in found:
-            drive['users'][frame, kind, column], drive['users_height'][frame, kind, column] = 1, tall / 760
+    drive['road_kinds'] = list(CROSSED)
+    drive['road'] = numpy.array(road, dtype=numpy.float32)
+    drive['road_weight'] = numpy.ones_like(drive['road']) if weight is None else numpy.array(weight, dtype=numpy.float32)
     return drive
 
 
-def test_the_users_head_is_measured_per_kind_and_per_height_and_none_without_it():
-    import numpy
-    from nnslr_tools.brain_train import measure
-    # Frame 0: a person 30 px tall in column 3, found; frame 1: a crossing car 120 px in column 4, missed; frame 2: a
-    # two-wheeler said in column 0 where there is none; frame 3 of train.
-    drive = peopled(fake_drive(['test'] * 3 + ['train']), {0: [(0, 3, 30)], 1: [(2, 4, 120)], 3: [(0, 3, 60)]})
-    answer = said([100] * 4)
-    answer['users'] = numpy.zeros((4, 3, 8), dtype=numpy.float32)
-    answer['users'][0, 0, 3] = .9
-    answer['users'][2, 1, 0] = .8
-    found = measure([drive], [answer], 'test')['users']
-    person, two_wheeler, vehicle = found['person'], found['two_wheeler'], found['vehicle']
-    assert person['true_positive'] == 1 and person['recall'] == 1.0 and person['cells'] == 24
-    assert person['by_height']['24-48'] == {'present': 1, 'found': 1, 'recall': 1.0}
-    assert person['by_height']['48-96'] == {'present': 0, 'found': 0, 'recall': None}
-    assert vehicle['false_negative'] == 1 and vehicle['recall'] == 0.0 and vehicle['by_height']['96+']['present'] == 1
-    assert two_wheeler['false_positive'] == 1 and two_wheeler['precision'] == 0.0 and two_wheeler['recall'] is None
-    assert measure([drive], [said([100] * 4)], 'test')['users'] is None
-
-
-def test_the_speed_with_a_road_user_in_front_is_measured_apart_with_or_without_the_head():
-    from nnslr_tools.brain_train import measure
-    # A person in column 3 (in front) on frames 0 and 1, one in column 7 (the side) on frame 2, nobody known on frame 3.
-    drive = peopled(fake_drive(['test'] * 4), {0: [(0, 3, 30)], 1: [(0, 3, 30)], 2: [(0, 7, 30)]})
-    drive['users_weight'][3] = 0
-    found = measure([drive], [said([90, 96, 100, 104])], 'test')['users_speed']
-    assert found['with_users'] == {'frames': 2, 'right': 0.0, 'mean_error_kph': 7.0, 'mean_signed_kph': -7.0}
-    assert found['others']['frames'] == 2 and found['others']['mean_signed_kph'] == 2.0
-    assert found['crossing_frames'] == 0 and 'no confirmed crossing' in found['note']
-    # A confirmed crossing in front: counted, and no note.
-    drive = peopled(fake_drive(['test'] * 2), {1: [(2, 5, 80)]})
-    found = measure([drive], [said([100, 80])], 'test')['users_speed']
-    assert found['crossing_frames'] == 1 and found['note'] is None and found['with_users']['mean_signed_kph'] == -20.0
-    # A drive without the answers at all: every frame is among the others.
-    found = measure([fake_drive(['test'] * 2)], [said([100, 100])], 'test')['users_speed']
-    assert found['with_users']['frames'] == 0 and found['others']['frames'] == 2
-
-
-def test_a_rare_presence_is_lifted_by_how_rare_it_is_at_most_ten_times():
-    import numpy
-    from nnslr_tools.brain_train import users_pos_weight
-    # 8 frames of train: a person in column 3 on 2 of them (6 without: 3 times), a car in column 0 on none, a test frame
-    # with a two-wheeler in column 1 that counts for nothing.
-    drive = peopled(fake_drive(['train'] * 8 + ['test']), {0: [(0, 3, 30)], 1: [(0, 3, 30)], 8: [(1, 1, 30)]})
-    lift = users_pos_weight([drive, fake_drive(['train'])])
-    assert lift.shape == (3, 8) and lift.dtype == numpy.float32
-    assert lift[0, 3] == 3.0 and lift[2, 0] == 1.0 and lift[1, 1] == 1.0
-    lonely = peopled(fake_drive(['train'] * 40), {0: [(2, 4, 50)]})
-    assert users_pos_weight([lonely])[2, 4] == 10.0
-    assert users_pos_weight([fake_drive(['train'])]) is None
-
-
-def test_a_drive_nobody_read_for_road_users_lifts_and_measures_nothing():
-    from nnslr_tools.brain_train import measure, users_pos_weight
-    drive = peopled(fake_drive(['train'] * 4 + ['test'] * 2), {0: [(0, 3, 30)], 4: [(0, 3, 30)]}, read=False)
-    assert (users_pos_weight([drive]) == 1).all()
-    found = measure([drive], [said([100] * 6)], 'test')['users_speed']
-    assert found['with_users']['frames'] == 0 and found['others']['frames'] == 2
+def test_a_crossing_is_lifted_by_how_rare_it_is_in_train_and_every_other_kind_weighs_one():
+    from nnslr_tools.brain_net import ROAD_EVENT_POS_WEIGHT_MAX
+    from nnslr_tools.brain_train import road_pos_weight
+    from nnslr_tools.speed_review import EVENT_KINDS
+    assert set(EVENT_KINDS) == set(CROSSED[1:])
+    # 20 frames of train: a person crossing on 2 of them, the narrow road on 2 too, a vehicle on none; 2 frames of test
+    # with a person on both, and 2 of train with no answer for the person (weight 0): neither counts.
+    road = [[0, 0, 0]] * 22
+    road[0], road[1], road[20], road[21] = [1, 1, 0], [1, 1, 0], [0, 1, 0], [0, 1, 0]
+    weight = [[1, 1, 1]] * 22
+    weight[2], weight[3] = [1, 0, 1], [1, 0, 1]
+    drive = crossed(fake_drive(['train'] * 20 + ['test'] * 2), road, weight)
+    lift = road_pos_weight([drive, fake_drive(['train'])], CROSSED)
+    assert list(lift) == CROSSED
+    # The person: 16 frames of no over 2 of yes. The narrow road as rare, but a stretch of road: 1, as before #112.
+    assert lift == {'narrow': 1.0, 'person_crossing': 8.0, 'vehicle_crossing': 1.0}
+    assert all(type(value) is float for value in lift.values())
+    # A crossing on 1 frame of 400: lifted no more than ROAD_EVENT_POS_WEIGHT_MAX.
+    lonely = crossed(fake_drive(['train'] * 401), [[0, 1, 0]] + [[0, 0, 0]] * 400)
+    assert road_pos_weight([lonely], CROSSED)['person_crossing'] == ROAD_EVENT_POS_WEIGHT_MAX == 100.0
+    # A crossing on every frame it answers is not lowered under 1, and nothing of a road at all lifts nothing.
+    always = crossed(fake_drive(['train'] * 4), [[0, 1, 0]] * 4)
+    assert road_pos_weight([always], CROSSED)['person_crossing'] == 1.0
+    assert road_pos_weight([fake_drive(['train'])], CROSSED) == dict.fromkeys(CROSSED, 1.0)
+    assert road_pos_weight([drive], []) == {}
 
 
 def roaded(drive, cells):
@@ -633,28 +599,29 @@ def test_a_road_type_alone_is_a_step_of_its_head_and_the_prediction_says_the_cha
                    device=torch.device('cpu'))['types'] is None
 
 
-def test_a_road_user_alone_is_a_step_of_its_head_and_the_prediction_says_each_kind_and_column():
+def test_a_crossing_lifted_weighs_more_in_its_steps_and_a_lift_of_one_on_every_kind_is_no_lift_to_the_last_bit():
+    """train_epoch hands road_pos_weight to brain_loss (test_brain_net: every other kind's error stays as it was, to the
+    last bit). The steps clip the whole gradient (CLIP), so a lifted crossing moves the other rows too: only a lift of 1
+    everywhere leaves every weight as without one."""
     torch = torch_or_skip()
-    from nnslr_tools.brain_train import predict
+    from nnslr_tools.brain_train import train_epoch
     from nnslr_tools.road_type_net import FrameStore
-    drive = peopled(fake_drive(['train'] * T), {1: [(0, 3, 30)], 2: [(2, 5, 90)]})
-    drive['speed_weight'][:], drive['works_weight'][:] = 0, 0
-    model = tiny(torch, users=True)
-    before = {name: value.clone() for name, value in model.named_parameters()}
+    drive = crossed(fake_drive(['train'] * T), [[1, 1, 0], [1, 1, 0], [1, 0, 0], [1, 0, 0]] + [[0, 0, 1]] * 4)
     array = pictures(drive)
-    assert one_epoch(torch, model, drive, array) > 0
-    assert not torch.equal(before['users_head.weight'], model.users_head.weight)
-    said = predict(model, drive, FrameStore({drive['route']: array}, torch.device('cpu')), chunk=3, device=torch.device('cpu'))
-    assert said['users'].shape == (T, 3, 8) and ((said['users'] >= 0) & (said['users'] <= 1)).all()
-    assert said['users_height'].shape == (T, 3, 8) and (said['users_height'] > 0).all()
-    assert predict(tiny(torch), drive, FrameStore({drive['route']: array}, torch.device('cpu')), chunk=3,
-                   device=torch.device('cpu'))['users'] is None
-    # Nobody read the drive: no answer, no step, nothing moves.
-    drive['users_weight'][:] = 0
-    model = tiny(torch, users=True)
-    before = [value.clone() for value in model.parameters()]
-    assert one_epoch(torch, model, drive, array) == 0
-    assert all(torch.equal(a, b) for a, b in zip(before, model.parameters()))
+
+    def stepped(lift):
+        model = tiny(torch, road_kinds=len(CROSSED))
+        optimizer = torch.optim.AdamW(model.parameters(), lr=0.01)
+        loss = train_epoch(model, optimizer, [drive], FrameStore({drive['route']: array}, torch.device('cpu')), chunk=4,
+                           rng=random.Random(0), device=torch.device('cpu'), augment=False,
+                           road_pos_weight=None if lift is None else torch.tensor(lift, dtype=torch.float32))
+        return loss, model.state_dict()
+
+    plain, ones, lifted = stepped(None), stepped([1.0, 1.0, 1.0]), stepped([1.0, 40.0, 1.0])
+    assert plain[0] > 0 and plain[0] == ones[0]
+    assert all(torch.equal(value, ones[1][name]) for name, value in plain[1].items())
+    assert lifted[0] > plain[0]
+    assert not torch.equal(lifted[1]['road_head.weight'][1], plain[1]['road_head.weight'][1])
 
 
 BOXED = (*GROUPS, 'sign_boxes')
@@ -952,7 +919,9 @@ def test_the_epoch_line_keeps_what_the_site_reads_and_says_the_speeds_in_short(t
     assert re.search(r' says (nothing|\d+ speeds?, \d+-\d+ km/h) \d+s$', epoch), epoch
 
 
-def test_the_log_says_the_road_users_on_every_drive_before_the_dry_run_cut_and_the_result_keeps_them(tmp_path, monkeypatch):
+def test_the_log_says_how_much_the_crossings_weigh_and_the_result_keeps_every_kind_s_pos_weight(tmp_path, monkeypatch):
+    """#112: the crossings are kinds of road, lifted by how rare they are in train; nothing of the road users is asked of
+    the network, kept in the checkpoint or measured."""
     torch = torch_or_skip()
     from nnslr_tools import brain_train
     lines = []
@@ -962,13 +931,49 @@ def test_the_log_says_the_road_users_on_every_drive_before_the_dry_run_cut_and_t
         return real(*args, **{**options, 'log': lines.append})
 
     monkeypatch.setattr(brain_train, 'train_brain', logged)
-    result, saved, _model = run_training(torch, tmp_path, monkeypatch, [1.0],
-                                         change=lambda drive: peopled(drive, {0: [(0, 3, 30)]}))
-    assert any(line.startswith('Road users: answers on 1 drives (persons 8 s') for line in lines), lines
-    assert any(line.startswith('Road users pos_weight') for line in lines)
-    assert BUILT[0]['users'] is True and saved['users'] is True and saved['user_kinds'] == ['person', 'two_wheeler', 'vehicle']
-    assert result['users'] is True and len(result['users_pos_weight']) == 3 and result['users_answers']['drives'] == 1
-    assert 'users_speed' in result['test'] and result['test']['users'] is None  # the tiny model has no head here
+    # 4 frames of train: the narrow road on 2, a person crossing on 1, a vehicle on none (left out: one side alone).
+    road = [[1, 1, 0], [1, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 1, 0], [1, 0, 0], [0, 0, 1]]
+    result, saved, _model = run_training(torch, tmp_path, monkeypatch, [1.0], change=lambda drive: crossed(drive, road))
+    assert ('The crossings weigh in road_head (pos_weight, frames of no over yes in train, at most 100): '
+            'person_crossing 3.0, vehicle_crossing 1.0') in lines, lines
+    assert result['road_kinds'] == CROSSED and saved['road_kinds'] == CROSSED and BUILT[0]['road_kinds'] == 3
+    assert result['road_pos_weight'] == {'narrow': 1.0, 'person_crossing': 3.0, 'vehicle_crossing': 1.0}
+    assert 'users' not in BUILT[0]
+    assert not [key for key in (*saved, *result) if key.startswith(('users', 'user_'))]
+    assert all(key not in result[part] for part in ('train', 'validation', 'test') for key in ('users', 'users_speed'))
+    assert not [name for name in saved['weights'] if name.startswith('users_head.')]
+    # A brain without the crossings says nothing of them, and nothing is lifted.
+    lines.clear()
+    result, _saved, _model = run_training(torch, tmp_path / 'plain', monkeypatch, [1.0])
+    assert not [line for line in lines if 'crossings' in line] and result['road_pos_weight'] == {}
+
+
+def test_a_dry_run_on_the_cpu_teaches_the_crossings_to_the_whole_network_and_keeps_their_rows(tmp_path, monkeypatch):
+    """The dry run of train-brain on a drive of its own: the network as a training builds it (no pretrained encoder), its
+    road_head with a row for each crossing, their pos_weight through train_epoch to brain_loss, and a checkpoint the car's
+    export loads."""
+    torch = torch_or_skip()
+    from nnslr_tools import brain_train
+    from nnslr_tools.brain_export import load_brain
+    drive = fake_drive(['train'] * 12 + ['validation'] * 2 + ['test'] * 2)
+    road = [[0, 0, 0]] * 16
+    road[2], road[3], road[5], road[6], road[8], road[13] = [0, 1, 0], [0, 1, 0], [1, 0, 0], [1, 0, 0], [0, 0, 1], [0, 1, 0]
+    crossed(drive, road)
+    drive['reader'], drive['reader_current'], drive['signs_read'] = {'vision': 'abc'}, True, True
+    monkeypatch.setattr(brain_train, 'dataset', lambda *_args, **_options: [drive])
+    monkeypatch.setattr(brain_train, 'read_split', lambda _root: {'sha256': 'split'})
+    monkeypatch.setattr(brain_train, '_pictures', lambda _root, drives, **_options: {one['route']: pictures(one) for one in drives})
+    lines = []
+    result = brain_train.train_brain(tmp_path, tmp_path / 'run', None, dry_run=True, device='cpu', log=lines.append)
+    # The 12 frames of train the dry run keeps: the person on 2 (10 without), the vehicle on 1 (11 without).
+    assert ('The crossings weigh in road_head (pos_weight, frames of no over yes in train, at most 100): '
+            'person_crossing 5.0, vehicle_crossing 11.0') in lines, lines
+    assert result['road_pos_weight'] == {'narrow': 1.0, 'person_crossing': 5.0, 'vehicle_crossing': 11.0}
+    saved = torch.load(tmp_path / 'run' / 'brain-last.pt', weights_only=False)
+    assert saved['road_kinds'] == CROSSED and saved['weights']['road_head.weight'].shape[0] == len(CROSSED)
+    assert not [name for name in saved['weights'] if name.startswith('users_head.')]
+    model, said = load_brain(tmp_path / 'run' / 'brain-last.pt')
+    assert getattr(model, 'road_head', None) is None and said['road_kinds'] == CROSSED
 
 
 def test_a_brain_learns_whose_road_a_sign_is_of_with_every_sign_s_box_unless_asked_not_to(tmp_path, monkeypatch):
@@ -1463,26 +1468,48 @@ def test_a_brain_goes_on_from_one_trained_with_fewer_kinds_of_other_sign_and_say
         brain_start(torch, tiny(torch, groups=groups, road_kinds=1), wrong, source_of(groups, road_sign_kinds=ROAD_SIGN_KINDS))
 
 
-def test_a_brain_goes_on_with_the_road_users_from_one_without_and_without_them_from_one_with(tmp_path):
-    from nnslr_tools.brain_train import brain_start
+def test_a_brain_goes_on_from_one_of_12_to_17_nov_that_learnt_the_road_users_without_them(tmp_path):
+    """#112: the brains of 12 to 17 Nov 2026 have a users_head (48 = 3 kinds x 8 columns x presence and height) and say
+    so in the checkpoint: a brain of today goes on from one of them with every other layer, nothing left fresh."""
+    from nnslr_tools.brain_train import _start_text, brain_start
     torch = torch_or_skip()
-    plain = tiny(torch, road_kinds=1)
-    path = start_file(torch, tmp_path, plain)
-    new = tiny(torch, road_kinds=1, users=True)
+    old = tiny(torch, road_kinds=1)
+    for value in old.parameters():
+        value.data.add_(torch.randn_like(value) * 0.05)
+    weights = {**old.state_dict(), 'users_head.weight': torch.randn(48, 128), 'users_head.bias': torch.randn(48)}
+    path = start_file(torch, tmp_path, old, weights=weights, users=True,
+                      user_kinds=['person', 'two_wheeler', 'vehicle'], user_columns=8)
+    new = tiny(torch, road_kinds=1)
     start = brain_start(torch, new, path, source_of(GROUPS))
-    assert sorted(start['fresh']) == ['users_head.bias', 'users_head.weight']
-    assert torch.equal(new.gru.weight_ih_l0, plain.gru.weight_ih_l0)
-    with_users = tiny(torch, road_kinds=1, users=True)
-    for value in with_users.parameters():
-        value.data.add_(0.01)
-    path = start_file(torch, tmp_path / 'other', with_users, users=True)
-    back = tiny(torch, road_kinds=1)
-    start = brain_start(torch, back, path, source_of(GROUPS))
-    assert start['fresh'] == [] and back.users_head is None
-    assert torch.equal(back.speed_head.weight, with_users.speed_head.weight)
-    again = tiny(torch, road_kinds=1, users=True)
-    assert brain_start(torch, again, path, source_of(GROUPS))['fresh'] == []
-    assert torch.equal(again.users_head.weight, with_users.users_head.weight)
+    assert start['fresh'] == [] and getattr(new, 'users_head', None) is None
+    assert 'users_head' not in _start_text(start)
+    assert all(torch.equal(value, old.state_dict()[name]) for name, value in new.state_dict().items())
+    drive = fake_drive(['train'] * T)
+    array = pictures(drive)
+    for got, wanted in zip(said_by(torch, new, GROUPS, drive, array), said_by(torch, old, GROUPS, drive, array)):
+        assert torch.equal(got, wanted)
+
+
+def test_a_brain_with_the_crossings_goes_on_from_one_without_them_with_its_kinds_by_name_and_theirs_fresh(tmp_path):
+    from nnslr_tools.brain_train import _start_text, brain_start
+    torch = torch_or_skip()
+    before = ['narrow', 'country', 'gravel', 'potholes', 'speed_bump', 'tunnel']
+    old = tiny(torch, road_kinds=len(before))
+    for value in old.parameters():
+        value.data.add_(torch.randn_like(value) * 0.05)
+    path = start_file(torch, tmp_path, old, road_kinds=before)
+    kinds = [*before, 'person_crossing', 'vehicle_crossing']
+    new = tiny(torch, road_kinds=len(kinds))
+    fresh = {name: value.clone() for name, value in new.road_head.state_dict().items()}
+    start = brain_start(torch, new, path, source_of(GROUPS, road_kinds=kinds))
+    assert start['fresh'] == ['road_head.weight (person_crossing, vehicle_crossing)',
+                              'road_head.bias (person_crossing, vehicle_crossing)']
+    assert 'road_head.weight (person_crossing, vehicle_crossing)' in _start_text(start)
+    # The kinds it had, row by row; the crossings' rows as this brain was built; every other layer the start's.
+    assert torch.equal(new.road_head.weight[:6], old.road_head.weight) and torch.equal(new.road_head.bias[:6], old.road_head.bias)
+    assert torch.equal(new.road_head.weight[6:], fresh['weight'][6:]) and torch.equal(new.road_head.bias[6:], fresh['bias'][6:])
+    assert all(torch.equal(value, old.state_dict()[name]) for name, value in new.state_dict().items()
+               if not name.startswith('road_head.'))
 
 
 def number_drive(kph=60):

@@ -90,7 +90,8 @@ too where the map is wrong or missing.
   weight 1 where nothing else answers, also past "checked to here" (`removed_marks`). Three cases are left out:
   - the removals of the labeler and of `nnslr tunnels`, which are their own undo;
   - a mark removed before it had an end, which was a start tapped by mistake;
-  - the steps within 2 s (`EDGE_SECONDS`) of a mark of that kind that is there now, because moving a mark means
+  - the steps within 2 s (`EDGE_SECONDS`; half a second, `EVENT_EDGE_SECONDS`, for a person or a vehicle crossing,
+    `edge_seconds`) of a mark of that kind that is there now, because moving a mark means
     removing it and setting it again.
 - **The tunnel's weak "no".** Where the GPS has a fix and our road of the map is not a tunnel, the tunnel column
   answers 0 at weight 0.3 (`TUNNEL_FREE_WEIGHT`). "Our road" is the way `nnslr road-types` found with
@@ -99,7 +100,8 @@ too where the map is wrong or missing.
   never reaches the car.
 - **The labeler's own writes.** Everything with reviewer `net/<run>` is an answer of the brain, with no confirmation,
   but never an answer of this network nor of the road-type network: a network never learns to say again what it said.
-  Here its marks are left out and their steps, with 2 s (`EDGE_SECONDS`) around them, masked (`own_steps`), so that
+  Here its marks are left out and their steps, with 2 s (`EDGE_SECONDS`; half a second for a crossing) around them,
+  masked (`own_steps`), so that
   neither their inside nor a "checked to here" past them teaches it its own word. Its layer of road types is read with
   `road_types.load_road_types(..., labeler=False)` here and in `road_type_data`, so both use the map's line under it,
   with a person's corrections over it.

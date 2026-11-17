@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from nnslr_tools.pages import asset
-from review_helpers import ROUTE, RunningServer, make_report
+from nnslr_tools.pages import CONTROL_TABS, SITE_TABS, asset
+from review_helpers import ROUTE, TOKEN, RunningServer, make_report, sign_in
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -76,6 +76,33 @@ def test_error_pages_speak_plainly_and_lead_back(served):
     assert status == 404 and '<h1>Drive not found</h1>' in page
     assert 'This drive is not on the server, or it is not prepared yet.' in page and 'pre-annotation' not in page
     assert '<a class="btn back" href="/speed-review">← Speed and sign review</a>' in page
+
+
+def test_the_crossings_tab_is_gone_and_its_addresses_are_unknown(tmp_path):
+    """Data › Crossings and its API went away on 17 Nov 2026 (#112): a bookmark to /crossings, and the road users' API
+    (GET and POST), get what any unknown address gets, signed in and not."""
+    assert '/crossings' not in CONTROL_TABS and all('crossings' not in page for page in SITE_TABS)
+    make_report(tmp_path)
+    server = RunningServer(tmp_path, token=TOKEN, require_token=True)
+
+    def answer(method: str, path: str, headers: dict) -> tuple[int, str]:
+        # The status and the body, its nonces left out (a page has a new one at every answer).
+        status, _response, data = server.request(method, path, headers={**headers, 'Origin': f'http://127.0.0.1:{server.port}'},
+                                                 body={} if method == 'POST' else None)
+        text = data.decode()
+        return status, re.sub(r"nonce-[^']+|nonce=\"[^\"]+\"", 'nonce', text)
+
+    try:
+        for headers in ({}, sign_in(server)):
+            for gone, unknown in ((('GET', '/crossings'), ('GET', '/nonexistent')),
+                                  (('GET', f'/crossings?drive={ROUTE}'), ('GET', '/nonexistent')),
+                                  (('GET', '/api/road-users/drives'), ('GET', '/api/nothing')),
+                                  (('GET', f'/api/road-users/drives/{ROUTE}'), ('GET', '/api/nothing')),
+                                  (('POST', f'/api/road-users/drives/{ROUTE}/verdicts'), ('POST', '/api/nothing'))):
+                assert answer(*gone, headers) == answer(*unknown, headers), gone
+            assert answer('GET', '/crossings', headers)[0] == (404 if headers else 401)
+    finally:
+        server.close()
 
 
 def test_the_empty_route_list_says_what_to_do_in_words(tmp_path):

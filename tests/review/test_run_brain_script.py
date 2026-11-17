@@ -49,18 +49,15 @@ def run_script(tmp_path: Path, name: str = 'n1', env: dict[str, str] | None = No
                                            'NNSLR_GPU_VENV': str(venv.parent), **(env or {})})
 
 
-def test_the_steps_read_the_signs_and_the_road_users_before_the_three_seeds(tmp_path):
+def test_the_steps_read_the_signs_before_the_three_seeds(tmp_path):
     process = run_script(tmp_path)
     assert process.returncode == 0, process.stderr + process.stdout
     log = (tmp_path / 'data' / 'runs' / 'n1' / 'brain.log').read_text()
-    steps = [line for line in log.splitlines() if line.startswith('== ') and '/7 ' in line]
-    assert [line.split()[1] for line in steps] == ['1/7', '2/7', '3/7', '4/7', '5/7', '6/7', '7/7']
+    steps = [line for line in log.splitlines() if line.startswith('== ') and '/' in line.split()[1]]
+    assert [line.split()[1] for line in steps] == ['1/6', '2/6', '3/6', '4/6', '5/6', '6/6']
     assert log.index('--dry-run') < log.index('road-type-signs --labelled') < log.index('brain-targets') \
-        < log.index('args: road-users') < log.index('--seed 0') < log.index('--seed 1') < log.index('--seed 2')
-    # The road users on the brain's card (NNSLR_GPU_INDEX, 0 by default), on, the header says.
-    assert 'args: road-users --data-root ' in log and '--gpus 0 --route 00000001--aaaaaaaaaa' in log
-    assert 'road users:   on' in log and 'drives:       every dashcam drive' in log
-    assert '--no-users' not in log
+        < log.index('--seed 0') < log.index('--seed 1') < log.index('--seed 2')
+    assert 'drives:       every dashcam drive' in log
     # No second reading of the signs: it made the answers of the next limit, which no brain is taught (12 Nov 2026).
     assert 'brain-signs' not in log
     for seed in range(3):
@@ -175,7 +172,7 @@ def test_the_same_name_again_trains_only_the_seeds_left(tmp_path):
 
 def test_bad_settings_and_another_kind_of_run_are_refused(tmp_path):
     for env in ({'NNSLR_BRAIN_WORKS': 'x'}, {'NNSLR_BRAIN_ROAD': 'x'}, {'NNSLR_BRAIN_DRIVER': 'x'}, {'NNSLR_BRAIN_POOL': 'x'},
-                {'NNSLR_BRAIN_EPOCHS': 'x'}, {'NNSLR_BRAIN_TYPES': 'x'}, {'NNSLR_BRAIN_USERS': 'x'},
+                {'NNSLR_BRAIN_EPOCHS': 'x'}, {'NNSLR_BRAIN_TYPES': 'x'},
                 {'NNSLR_BRAIN_ROUTES_FROM': '../n0'}, {'NNSLR_BRAIN_ROUTES_FROM': '-x'},
                 {'NNSLR_SIGN_GPUS': 'x'}, {'NNSLR_SIGN_GPUS': '0,,1'}, {'NNSLR_SIGN_GPUS': 'cuda:0'}):
         assert run_script(tmp_path, env=env).returncode == 2, env
@@ -200,8 +197,8 @@ def test_every_step_and_every_seed_takes_the_drives_of_the_start(tmp_path):
     assert calls[0].startswith('args: train-brain --dry-run') and '--route' not in calls[0]
     assert all(pinned in line for line in calls[1:]
                if not line.startswith(('args: env', 'args: borrow-cards', 'args: brain-networks'))), calls
-    # road-type-signs, brain-targets, road-users and the three seeds.
-    assert len([line for line in calls if pinned in line]) == 6
+    # road-type-signs, brain-targets and the three seeds.
+    assert len([line for line in calls if pinned in line]) == 5
     assert 'drives:       2 (routes.json)' in lines
     # The same NAME again, a third drive marked meanwhile: the dry run too takes the drives of the start.
     for seed in range(3):
@@ -211,19 +208,25 @@ def test_every_step_and_every_seed_takes_the_drives_of_the_start(tmp_path):
     assert process.returncode == 0, process.stderr + process.stdout
     calls = [line for line in (tmp_path / 'data' / 'runs' / 'n1' / 'brain.log').read_text().splitlines()
              if line.startswith('args: ') and not line.startswith(('args: env', 'args: borrow-cards', 'args: brain-networks'))]
-    assert len(calls) == 7 and all(pinned in line for line in calls)
+    assert len(calls) == 6 and all(pinned in line for line in calls)
     assert not any('00000003--cccccccccc' in line for line in calls)
 
 
-def test_without_the_road_users_the_step_is_skipped_and_every_training_says_so(tmp_path):
-    process = run_script(tmp_path, env={'NNSLR_BRAIN_USERS': '0', 'NNSLR_BRAIN_SEEDS': '0'})
-    assert process.returncode == 0, process.stderr + process.stdout
-    lines = (tmp_path / 'data' / 'runs' / 'n1' / 'brain.log').read_text().splitlines()
-    assert 'road users:   off' in lines and 'skip: road users off (NNSLR_BRAIN_USERS=0)' in lines
-    assert not any(line.startswith('args: road-users') for line in lines)
-    trainings = [line for line in lines if line.startswith('args: train-brain')]
-    assert len(trainings) == 2 and all('--no-users' in line for line in trainings)
-    assert [line.split()[1] for line in lines if line.startswith('== ') and '/7 ' in line] == ['1/7', '2/7', '3/7', '4/7', '5/7']
+def test_the_road_users_are_read_no_more_and_no_training_is_told_of_them(tmp_path):
+    """#112, 17 Nov 2026: no step reads the road users (nnslr road-users is gone), no header line says them and no
+    training is told --no-users; seed 0 alone is step 4 of 6. A NNSLR_BRAIN_USERS of a caller of before changes
+    nothing."""
+    for name, env in (('n1', {'NNSLR_BRAIN_SEEDS': '0'}), ('n2', {'NNSLR_BRAIN_SEEDS': '0', 'NNSLR_BRAIN_USERS': '0'}),
+                      ('n3', {'NNSLR_BRAIN_SEEDS': '0', 'NNSLR_BRAIN_USERS': '1'})):
+        process = run_script(tmp_path, name=name, env=env)
+        assert process.returncode == 0, process.stderr + process.stdout
+        log = (tmp_path / 'data' / 'runs' / name / 'brain.log').read_text()
+        lines = log.splitlines()
+        assert 'road-users' not in log and 'road users' not in log and '--no-users' not in log, name
+        assert [line.split()[1] for line in lines if line.startswith('== ') and '/' in line.split()[1]] == \
+            ['1/6', '2/6', '3/6', '4/6'], name
+        assert '== 4/6 Train seed 0 ==' in lines
+        assert len([line for line in lines if line.startswith('args: train-brain')]) == 2
 
 
 def test_the_applicability_head_is_on_unless_the_run_is_told_not(tmp_path):
@@ -259,7 +262,7 @@ def test_the_drives_of_an_earlier_run_are_this_runs(tmp_path):
     # What the dry run kept (the fake keeps one) is the run's, for every step after it.
     assert (tmp_path / 'data' / 'runs' / 'n1' / 'routes.json').read_text().strip() == '["00000005--eeeeeeeeee"]'
     assert all(line.endswith('--route 00000005--eeeeeeeeee') for line in calls[1:]
-               if line.startswith(('args: road-type-signs', 'args: brain-targets', 'args: road-users', 'args: train-brain')))
+               if line.startswith(('args: road-type-signs', 'args: brain-targets', 'args: train-brain')))
     process = run_script(tmp_path, name='n2', env={'NNSLR_BRAIN_ROUTES_FROM': 'nothing'})
     assert process.returncode == 3 and 'the run nothing kept no drives' in process.stderr + process.stdout
     assert not (tmp_path / 'data' / 'runs' / 'n2' / 'dry-run').exists()

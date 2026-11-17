@@ -178,3 +178,33 @@ def test_train_is_implemented_and_requires_dataset_inputs(capsys, tmp_path) -> N
     assert code == 2
     assert "objects.jsonl" in err
 # [training-baseline] - END
+
+
+def test_the_brain_takes_the_road_users_no_more(capsys, monkeypatch, tmp_path) -> None:
+    """#112, 17 Nov 2026: nnslr road-users (the COCO detector and the crossing rule of the brain's road users) is gone,
+    and nnslr train-brain neither takes --no-users nor tells the training about the road users."""
+    import sys
+    import types as module_types
+
+    import nnslr_tools
+
+    code, _, err = run(["road-users", "--check"], capsys)
+    assert code == 2 and "invalid choice: 'road-users'" in err
+    code, _, err = run(["train-brain", "--run-dir", str(tmp_path / "run"), "--no-users"], capsys)
+    assert code == 2 and "unrecognized arguments: --no-users" in err
+    # The training stands in (the CLI alone, no torch): what it is asked.
+    asked = []
+
+    def train_brain(_root, _run_dir, _merged_of, **options):
+        asked.append(options)
+        part = {"speed": {}, "speeds_said": [], "one_speed": {}, "follow_the_sign": {}}
+        return {"train": part, "validation": part, "test": part, "validation_swapped": {}, "test_swapped": {}}
+
+    fake = module_types.ModuleType("nnslr_tools.brain_train")
+    fake.EPOCHS, fake.train_brain = 40, train_brain
+    monkeypatch.setitem(sys.modules, "nnslr_tools.brain_train", fake)
+    monkeypatch.setattr(nnslr_tools, "brain_train", fake, raising=False)
+    code, _, err = run(["train-brain", "--run-dir", str(tmp_path / "run"), "--data-root", str(tmp_path), "--dry-run"],
+                       capsys)
+    assert code == 0, err
+    assert len(asked) == 1 and "users" not in asked[0] and asked[0]["road"] is True
