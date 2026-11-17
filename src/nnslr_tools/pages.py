@@ -62,7 +62,7 @@ COMMA_PILL = '<div class="tabs-machine" id="comma-pill"></div>'
 # Account is the icon at the right. A page is (key of the current page, address, label).
 SECTIONS = (
     ('overview', '/', 'Overview', ()),
-    ('data', '/prepare', 'Data', (('prepare', '/prepare', 'Drives'), ('speedreview', '/speed-review', 'Speed review'),
+    ('data', '/prepare', 'Data', (('prepare', '/prepare', 'Drives'), ('speedreview', '/speed-review', 'Speed and sign review'),
                                   ('signdistance', '/sign-distance', 'Sign distance'), ('crossings', '/crossings', 'Crossings'),
                                   ('dataset', '/dataset', 'Training dataset'), ('reviewers', '/reviewers', 'Reviewers'))),
     ('train', '/train', 'Training', ()),
@@ -630,7 +630,7 @@ def render_problem(status: int, message: str, nonce: str = '', *, drive: bool = 
         main.append('<a class="btn back" href="/">← Smartspeed</a> <a class="btn back" href="' + SIGN_OUT_ADDRESS + '">Sign out</a>')
     if status != 403:
         main.append('<a class="btn back" href="' + GUEST_HOME + '">← My reviews</a>' if guest
-                    else '<a class="btn back" href="/speed-review">← Speed review</a>' if drive
+                    else '<a class="btn back" href="/speed-review">← Speed and sign review</a>' if drive
                     else '<a class="btn back" href="/">← Overview</a>')
     main.append('</div></main>')
     return simple_page(title, 'speedreview' if drive else '', nonce, '\n'.join(main), guest=guest)

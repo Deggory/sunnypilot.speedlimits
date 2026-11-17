@@ -22,7 +22,7 @@ export const TAB_PATH: Record<ControlTab, string> = {
 /** The name of each page, in the window title and under its section's title. */
 const TAB_TITLE: Record<ControlTab, string> = {
   overview: 'Overview', prepare: 'Drives', dataset: 'Training dataset',
-  speedreview: 'Speed review', signdistance: 'Sign distance', crossings: 'Crossings', reviewers: 'Reviewers', train: 'Training', evaluate: 'Results', models: 'Versions',
+  speedreview: 'Speed and sign review', signdistance: 'Sign distance', crossings: 'Crossings', reviewers: 'Reviewers', train: 'Training', evaluate: 'Results', models: 'Versions',
   drive: 'Drive', publish: 'Publish',
 };
 /** A page of a section: its address and name. */
@@ -35,7 +35,7 @@ export interface SectionPage {
 export const SECTIONS: Record<Section, {title: string; pages: SectionPage[]}> = {
   overview: {title: 'Overview', pages: []},
   data: {title: 'Data', pages: [{key: 'prepare', href: '/prepare', label: 'Drives'},
-    {key: 'speedreview', href: '/speed-review', label: 'Speed review'},
+    {key: 'speedreview', href: '/speed-review', label: 'Speed and sign review'},
     {key: 'signdistance', href: '/sign-distance', label: 'Sign distance'}, {key: 'crossings', href: '/crossings', label: 'Crossings'},
     {key: 'dataset', href: '/dataset', label: 'Training dataset'}, {key: 'reviewers', href: '/reviewers', label: 'Reviewers'}]},
   train: {title: 'Training', pages: []},

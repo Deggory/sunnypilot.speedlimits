@@ -55,7 +55,7 @@ def test_every_page_has_the_shared_look_the_account_menu_and_its_script(served, 
         assert '<nav class="tabbar"' not in page
 
 
-@pytest.mark.parametrize('path, title', [('/', 'Overview'), ('/prepare', 'Drives'), ('/speed-review', 'Speed review'),
+@pytest.mark.parametrize('path, title', [('/', 'Overview'), ('/prepare', 'Drives'), ('/speed-review', 'Speed and sign review'),
                                          ('/drive', 'Drive'),
                                          ('/account', 'Settings'), (f'/route/{ROUTE}/', 'Sign review'),
                                          ('/nonexistent', 'Page not found')])
@@ -75,7 +75,7 @@ def test_error_pages_speak_plainly_and_lead_back(served):
     page = data.decode()
     assert status == 404 and '<h1>Drive not found</h1>' in page
     assert 'This drive is not on the server, or it is not prepared yet.' in page and 'pre-annotation' not in page
-    assert '<a class="btn back" href="/speed-review">← Speed review</a>' in page
+    assert '<a class="btn back" href="/speed-review">← Speed and sign review</a>' in page
 
 
 def test_the_empty_route_list_says_what_to_do_in_words(tmp_path):

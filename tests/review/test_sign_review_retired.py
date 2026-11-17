@@ -97,7 +97,7 @@ def test_the_route_list_and_the_menu_lead_to_speed_review(served):
 def test_an_unknown_drive_leads_back_to_speed_review(served):
     server, _rows = served
     status, _response, data = server.request('GET', '/route/ffffffff--ffffffffff/')
-    assert status == 404 and b'href="/speed-review">\xe2\x86\x90 Speed review</a>' in data
+    assert status == 404 and b'href="/speed-review">\xe2\x86\x90 Speed and sign review</a>' in data
 
 
 def test_the_style_of_review_with_ai_reaches_the_signs_side():
