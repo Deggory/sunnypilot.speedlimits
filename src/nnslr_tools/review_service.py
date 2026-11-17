@@ -25,7 +25,7 @@ from pathlib import Path
 from nnslr_tools.annotations import ENUMS, LABEL_KEYS
 from nnslr_tools.carry_over import carry_over, unchecked_boxes
 from nnslr_tools.drives import drive_of
-from nnslr_tools.sign_types import PLATE_DISTANCE_MAX_M, SIGN_TYPES
+from nnslr_tools.sign_types import BOXED_SIGN_TYPES, PLATE_DISTANCE_MAX_M
 from nnslr_tools.gps import load_positions, positions_path
 from nnslr_tools.manifest import parse_route_id
 from nnslr_tools.preannotate import PreannotationError, _inside
@@ -1062,6 +1062,7 @@ class ReviewService:
             'dropped': result['dropped'],
             'kept': result['kept'],
             'duplicates': result['duplicates'],
+            'road_users': result['road_users'],
             'to_check': to_check,
             'message': _carry_message(source_key, result),
             'save': {'run_id': snapshot.run_id, 'base_revision': review['revision'] if review else 0},
@@ -1169,6 +1170,9 @@ def _carry_message(source_key: str, result: dict) -> str:
     if result.get('duplicates'):
         parts.append(f"{result['duplicates']} model {'box' if result['duplicates'] == 1 else 'boxes'} on a sign "
                      f"that already has one removed")
+    if result.get('road_users'):
+        parts.append(f"{result['road_users']} road {'user' if result['road_users'] == 1 else 'users'} left there: "
+                     f"road users are no longer boxed (#113)")
     if not parts:
         return f'From {source_key}: no sign to carry over.'
     return f'From {source_key}: ' + '; '.join(parts) + '.'
@@ -1211,11 +1215,6 @@ def review_schema() -> dict:
                           f'relevant sign. A proposal left out of the list is recorded as rejected',
             'country': 'ISO 3166-1 alpha-2 code of the country of the frame ("CH", "IT", "PL"...), or null; '
                        'omitted: country_proposed of the frame, from its GPS position',
-            'users_complete': 'boolean, default false ("road users complete"). true only when every road user '
-                              'from the size rule has its box on this frame: each person on foot and each '
-                              'two-wheeler (bicycle, motorcycle) at least 24 px tall and each vehicle (car, van, '
-                              'truck, bus, tram) at least 40 px tall, in pixels of the original image (the height '
-                              'of bbox_xyxy). apply_previous does not carry it: send it for each frame',
             'site_group': 'string or null (optional)',
             'encounter_id': 'string or null (optional)',
             'override_human_review': 'boolean, default false. An AI review never changes or withdraws a frame a '
@@ -1245,7 +1244,7 @@ def review_schema() -> dict:
             'temporary': 'true, false or null',
             'variable_display': 'true, false or null',
             'notes': 'string, possibly empty; never null',
-            'sign_type': 'with family other_sign: what the sign is, one of ' + ', '.join(SIGN_TYPES)
+            'sign_type': 'with family other_sign: what the sign is, one of ' + ', '.join(BOXED_SIGN_TYPES)
                          + '; with family not_a_sign: on_vehicle for a sign-like disc or panel on a vehicle (the '
                          'top-speed sticker on the back of a truck); null or omitted when not said',
             'painted': 'with family other_sign: true when the sign is painted on the road (the children\'s triangle '
@@ -1282,18 +1281,15 @@ def review_schema() -> dict:
             'box stays on the disc. plate_hours says the hours when the plate can be read in this frame.',
             'A sign with a plate that says how far ahead it holds (a give way with "15 m", a limit with "200 m"): '
             'supplementary_panel "distance" and one box around the sign and the plate, on any sign (never on '
-            'not_a_sign, a road marking or a road user). plate_distance_m says the metres when the plate can be read '
+            'not_a_sign or a road marking). plate_distance_m says the metres when the plate can be read '
             'in this frame.',
             'Other traffic signs (give way, stop, direction signs, town entry and exit, main road, motorway, '
             'no entry, no overtaking, weight, height or width limits, minimum speed, danger signs...) get a box '
             'too: family "other_sign" with their sign_type (get_review_schema lists them), so the model learns '
-            'not to take them for limits. Logos, advertising and shop signs stay out of detections. Duplicates '
+            'not to take them for limits. Logos, advertising, shop signs and road users (people, vehicles: no '
+            'longer boxed since #113) stay out of detections. Duplicates '
             'on the same sign: keep one box with the right value.',
             'A frame without traffic signs is confirmed with detections [] (negative examples matter).',
-            'Road users (family other_sign, sign_type road_user_*) get a box when they matter for the speed: a '
-            'person crossing or about to cross, a two-wheeler on our road, a vehicle crossing or entering our '
-            'path; not parked cars, the opposite lane or the vehicle ahead. On a frame saved with users_complete '
-            'true every road user from the size rule has its box, whether it matters or not.',
             'Look at the image before saving; model proposals and the second reading are only hints. Save only '
             'when the owner authorized saving for this route.',
             'A saved confirmation is final, by a person or by an AI (no second approval): the next dataset import '

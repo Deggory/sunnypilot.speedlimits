@@ -133,6 +133,9 @@ def test_v2_labels_add_kinds_and_not_a_sign_and_keep_the_rest():
     assert _classifier_label(_row("not_a_sign")) == "not_a_sign" and _reader_label(_row("not_a_sign")) is None
     assert _classifier_label(_row("maximum_speed", 60, state="rejected")) is None
     assert _classifier_label({**_row("not_a_sign"), "bbox_xyxy": None}) is None
+    # A road user boxed before 17 Nov 2026 (#113): no class learns it, not even as a plain other sign.
+    assert _classifier_label(_row("other_sign", sign_type="road_user_car")) is None
+    assert _classifier_label(_row("other_sign", sign_type="road_user_person")) is None
     assert family_label("other_sign:give_way") == "other_sign" and family_label("maximum_speed:60") == "maximum_speed:60"
 
 
@@ -1286,3 +1289,35 @@ def test_the_classifier_leaves_out_a_plate_of_distance_and_the_cutter_learns_it_
     plates = [box for frame in cutter["frames"] for box in frame.get("plate_boxes", [])]
     assert sorted(plates) == sorted(row["bbox_xyxy"] for row in rows)
     assert all(box in frame["boxes"] for frame in cutter["frames"] for box in frame.get("plate_boxes", []))
+
+
+def test_the_classifier_leaves_out_a_road_user_boxed_before_113_and_the_cutter_keeps_it_as_an_ignore_box(
+        tmp_path, capsys, monkeypatch):
+    """Road users are no longer boxed (#113): a box of one saved before is no crop of any class (it once came in as
+    a plain other sign), and the cutter still ignores it."""
+    from nnslr_tools.training import prepare_detector_training
+
+    plain = tmp_path / "plain"
+    before = prepare_reader_training(_classifier_fixture(plain, capsys), plain / "splits" / "latest.json", plain,
+                                     class_scheme="v2")
+    changed, user = [], None
+    for split, who, kept, removed in FRAMES:
+        boxes = []
+        for box in kept:
+            if user is None and split == "train" and box.get("sign_type") == "give_way":
+                box = {**box, "sign_type": "road_user_car"}
+                user = box["bbox_xyxy"]
+            boxes.append(box)
+        changed.append((split, who, boxes, removed))
+    assert user is not None
+    monkeypatch.setitem(globals(), "FRAMES", changed)
+    users = tmp_path / "users"
+    dataset = _classifier_fixture(users, capsys)
+    latest = users / "splits" / "latest.json"
+    plan = prepare_reader_training(dataset, latest, users, class_scheme="v2")
+    assert plan["skipped"]["road_user_no_class"] == 1
+    assert len(plan["records"]) == len(before["records"]) - 1
+    assert not any("road_user" in label for label in plan["classes"])
+    cutter = prepare_detector_training(dataset, latest, users)
+    ignored = [frame for frame in cutter["frames"] if user in frame.get("ignore_boxes", [])]
+    assert len(ignored) == 1 and user not in ignored[0]["boxes"]

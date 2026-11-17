@@ -101,7 +101,7 @@ def by_role(index: dict) -> dict:
 # -- the index --------------------------------------------------------------------------------------------
 def test_without_runs_every_role_is_empty_and_nothing_is_in_use(models):
     index = models.index()
-    assert [role['role'] for role in index['roles']] == ['cutter', 'classifier', 'decider', 'brain', 'users']
+    assert [role['role'] for role in index['roles']] == ['cutter', 'classifier', 'decider', 'brain']
     assert all(role['versions'] == [] and role['active'] is None for role in index['roles'])
     assert (index['runs_dir_exists'], index['active_problem'], index['cutter_score_threshold']) == (False, None, 0.1)
 
@@ -269,8 +269,7 @@ def test_choosing_the_model_in_use_writes_only_active_json(root, models):
     assert (entry['id'], entry['who'], entry['via']) == ('cutter:s1/signnet', 'admin', 'sign-in') and entry['at']
     path = root / 'models' / 'active.json'
     saved = json.loads(path.read_text())
-    assert saved == {'schema_version': 1, 'cutter': entry, 'classifier': None, 'decider': None, 'brain': None,
-                     'users': None}
+    assert saved == {'schema_version': 1, 'cutter': entry, 'classifier': None, 'decider': None, 'brain': None}
     # Atomic: the temporary file is renamed, nothing is left next to it.
     assert sorted(item.name for item in path.parent.iterdir()) == ['active.json']
 
@@ -284,6 +283,27 @@ def test_choosing_the_model_in_use_writes_only_active_json(root, models):
     models.set_active('cutter', 'cutter:s2/signnet', who='admin', via='sign-in')
     saved = json.loads(path.read_text())
     assert saved['cutter']['id'] == 'cutter:s2/signnet' and saved['decider']['id'] == 'decider:expB/experiment-b/crop_geom'
+
+
+def test_an_active_json_with_the_role_of_usernet_still_works(root, models):
+    """UserNet's role went on 17 Nov 2026 (#113): an active.json written before still has "users", empty or with a
+    UserNet's id. It is not read, the four roles work as before, a choice written since leaves it out, and the role
+    itself is refused."""
+    make_signnet(root, 's1')
+    path = root / 'models' / 'active.json'
+    for users in (None, {'id': 'users:2026-11-12_1200-users/usernet', 'who': 'admin', 'via': 'sign-in',
+                         'at': '2026-11-12T12:00:00+01:00'}):
+        write(path, {'schema_version': 1, 'cutter': None, 'classifier': None, 'decider': None, 'brain': None,
+                     'users': users})
+        index = models.index()
+        assert [role['role'] for role in index['roles']] == ['cutter', 'classifier', 'decider', 'brain']
+        assert index['active_problem'] is None and all(role['active'] is None for role in index['roles'])
+        entry = models.set_active('cutter', 'cutter:s1/signnet', who='admin', via='sign-in')
+        assert json.loads(path.read_text()) == {'schema_version': 1, 'cutter': entry, 'classifier': None,
+                                                'decider': None, 'brain': None}
+    with pytest.raises(ModelChoiceError) as refused:
+        models.set_active('users', 'users:2026-11-12_1200-users/usernet', who='admin', via='sign-in')
+    assert (refused.value.status, refused.value.reason) == (400, 'bad_role')
 
 
 @pytest.mark.parametrize('role, model_id, status, reason', [

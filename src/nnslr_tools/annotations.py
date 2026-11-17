@@ -52,8 +52,9 @@ FIELDS = set(ENUMS) | {
 # the kind of an "Other sign" (nnslr_tools.sign_types) and whether it is painted on the road. The split by place
 # uses gps. The hours read on a plate (nnslr_tools.sign_types.PLATE_HOURS) are there only when read, and so are the
 # metres of a plate of distance (plate_distance_m, #98).
-# users_complete (true) is on every row of a frame the reviewer ticked "road users complete": every person and
-# two-wheeler from 24 px tall and every vehicle from 40 px tall is boxed there; the rows of other frames have none.
+# users_complete (true) is on every row of a frame the reviewer ticked "road users complete", a tick of the review from
+# 12 to 17 Nov 2026 that went with UserNet (#113): nothing reads it, and it stays so that those frames export and import
+# as before.
 OPTIONAL_FIELDS = {"country", "gps", "sign_type", "painted", "sign_value", "sign_unit", "plate_hours",
                    "plate_distance_m", "users_complete"}
 COUNTRY_CODE = re.compile(r"[A-Z]{2}")

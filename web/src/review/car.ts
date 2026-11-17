@@ -7,7 +7,7 @@
 // always, and a frame only passed over stays to review. Hidden offline.
 import {reactive, watch} from 'vue';
 import {isGuest} from '../common/guest';
-import {familyHasValue, signKindOf} from './catalog';
+import {familyHasValue, isRoadUser, signKindOf} from './catalog';
 import {readLocal, writeLocal} from './dom';
 import {pushBox} from './edits';
 import {currentRow, frameStatus, workOf} from './frames';
@@ -187,6 +187,9 @@ function placeCarSigns(row: FrameRow, reading: CarReading): void {
     const box: Box = [Math.max(0, x1), Math.max(0, y1), Math.min(row.width, x2), Math.min(row.height, y2)];
     if (box[2] - box[0] < 2 || box[3] - box[1] < 2 || !carSignLeft(work, sign)) continue;
     const d = carDetection(sign);
+    // A road user (a kind the classifier learnt from the boxes saved before #113) is no longer boxed: drawn and listed
+    // as the car read it, never one of the frame's boxes.
+    if (isRoadUser(d)) continue;
     pushBox(work, box, d.family, d.value_kph ?? null, d.sign_type ?? null, d.supplementary_panel, d.plate_hours,
       d.applicability, 'car', 'car');
   }

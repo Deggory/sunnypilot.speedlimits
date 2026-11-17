@@ -76,7 +76,6 @@ Un agente che ha a disposizione il **server MCP** della revisione (strumenti `li
   - sotto, l'origine: "modello · 92%", "modello 40 → 60" (cioè hai cambiato il valore proposto) oppure "aggiunto a mano";
   - **"stesso cartello di N"** in arancione: è un doppione di un altro riquadro;
   - **✕**: elimina quel riquadro.
-- **Road users complete** (key **J**), the small toggle right under the boxes: ticked (✓), it says that every road user of this frame has its box by the size rule of section 5. Confirm saves it with the boxes; Apply previous never carries it to the next frame.
 - **Riquadro N**, quando un riquadro è selezionato:
   - lo zoom sul cartello, con gli angoli gialli per ridimensionare;
   - i cartelli rapidi **10 20 30 40 50 60 70 80 100 120** e **?** (numero non leggibile);
@@ -84,7 +83,7 @@ Un agente che ha a disposizione il **server MCP** della revisione (strumenti `li
   - **Altro valore**, per i numeri che non ci sono tra quelli rapidi. Compare solo quando il tipo ammette un numero;
   - **Tipo**: Limite massimo, Fine limitazione, Illeggibile, Segnale variabile, Zona; più in piccolo Numero a terra, Altro cartello, Non è un cartello;
   - **Strada**: La nostra, Un'altra, Da chiarire;
-  - **Panel below**, always open: None, Hours (a limit valid only at some hours, such as the German 22-6), Wet (a limit valid only on a wet road, such as the German "bei Nässe"), Distance (a sign with a plate that says how far ahead it holds: a give way with "15 m", a limit with "200 m"), Other. With None and Other the box stays on the disc; with Hours and Wet it takes the disc and the plate, with Distance the sign and the plate, one box for both, and the page says so under the row. Under it **From** and **to** take the hours written on the plate, whole hours (22 and 6 for "22-6"): leave them empty when they cannot be read, or the plate has days, minutes or two ranges. With Distance, **Metres** takes the distance written on the plate in whole metres ("1,2 km" is 1200): leave it empty when it cannot be read. Distance is offered on every sign box, not on Not a sign, a road marking or a road user. Fit box (C, ⇧C) leaves such a box as it is;
+  - **Panel below**, always open: None, Hours (a limit valid only at some hours, such as the German 22-6), Wet (a limit valid only on a wet road, such as the German "bei Nässe"), Distance (a sign with a plate that says how far ahead it holds: a give way with "15 m", a limit with "200 m"), Other. With None and Other the box stays on the disc; with Hours and Wet it takes the disc and the plate, with Distance the sign and the plate, one box for both, and the page says so under the row. Under it **From** and **to** take the hours written on the plate, whole hours (22 and 6 for "22-6"): leave them empty when they cannot be read, or the plate has days, minutes or two ranges. With Distance, **Metres** takes the distance written on the plate in whole metres ("1,2 km" is 1200): leave it empty when it cannot be read. Distance is offered on every sign box, not on Not a sign or a road marking. Fit box (C, ⇧C) leaves such a box as it is;
   - **Dettagli del cartello**, chiuso: visibilità, occlusione, pannello sotto, temporaneo, display variabile, note.
 - **Seconda lettura**: c'è solo sui fotogrammi che ne hanno una. Ogni voce indica tipo, valore, sicurezza, letture (A, B) e lato, con il pulsante **Usa**, che diventa **Già usato** quando quel cartello c'è già.
 - **Altro**, chiuso: sito fisico, incontro, esportazione JSONL, scorciatoie.
@@ -119,12 +118,7 @@ La foto e il pulsante Conferma non si spostano mai da soli: avvisi ed errori com
 - Controllare anche i riquadri piccoli contenuti in uno più grande.
 - Un fotogramma senza cartelli pertinenti si conferma comunque, con **Conferma · nessun cartello**: anche gli esempi negativi servono.
 
-**Road users** (a person on foot, a bicycle or motorcycle, a car, truck, bus or tram, another road user). Their boxes teach the road-user detector (UserNet); SignNet ignores them and they never count as signs.
-- Box a road user only when it matters for the speed: a person crossing the road or about to step onto it, a bicycle or motorcycle on our road, a vehicle crossing our path or entering it (from a side road, a driveway, a roundabout). Do not box parked cars, traffic on the opposite lane, or the vehicle ahead of us in our lane.
-- One box for the whole road user: a bicycle or a motorcycle together with its rider.
-- Keys: **W** person, **Y** bicycle, **K** car. They set the kind of the selected box; pressed after **+ Riquadro** (or **B**/**N**) and before the drag, they give it to the box about to be drawn, and the photo says so ("Drag on the image to draw the box: Person"). Every road user, these three included, is also a chip in the **Road user** row of the box's kinds; motorcycle, truck, bus, tram and other user have no key.
-- **Road users complete** (key **J**) is the exception to "only those that matter": tick it only on a frame where every person on foot and every two-wheeler at least **24 px** tall, and every vehicle at least **40 px** tall, has its box, whether it matters for the speed or not, parked cars and the opposite lane included. The height is the height of the box in pixels of the original image (`bbox_xyxy`), not of the screen. Smaller ones may be boxed or left out. A frame with no road user that big is ticked with no road-user box. Leave it unticked when only those that matter are boxed: an unticked frame says nothing about the road users it does not box.
-- **Apply previous** (A) carries the boxes but never the tick: on the next frame look at every road user again before ticking it.
+**Road users** (a person on foot, a bicycle or motorcycle, a car, truck, bus or tram) get no box since 17 Nov 2026 ([#113](https://github.com/cristianku/sunnypilot.smartspeed/issues/113)): nothing used those boxes. A save with one is refused, also on a frame where one was saved before then: delete it with **✕** and confirm again. **Apply previous** leaves them on the earlier frame and says how many. A person or a vehicle crossing our path is marked in Speed review (**Person crossing**, **Vehicle crossing**), not with a box.
 
 Esempi visti nelle route reali:
 - una fine limite generale 50 proposta come 40;
@@ -169,7 +163,6 @@ Esempi visti nelle route reali:
 - **Canc** e **Backspace** eliminano il riquadro selezionato;
 - le frecce **← →** cambiano fotogramma;
 - **N** avvia il disegno, **H** nasconde la seconda lettura, **Esc** toglie la selezione;
-- **W**, **Y** and **K** make the selected box (or the box about to be drawn) a person, a bicycle or a car, and **J** ticks or unticks **Road users complete** (section 5).
 
 Dentro **Altro valore** e **Note**, invece, **Invio** registra il valore e non conferma.
 
@@ -179,6 +172,8 @@ Dentro **Altro valore** e **Note**, invece, **Invio** registra il valore e non c
 - **"NON salvato: …"**: il motivo è scritto nella riga.
   - "Valore non ammesso in uno dei campi a scelta.": correggere il riquadro e riconfermare. Un numero fuori 5–250 non arriva fin qui: lo blocca già **Altro valore** (sezione 6).
   - "salvato da un'altra pagina nel frattempo": qualcun altro ha cambiato quel fotogramma. Ricaricare la pagina: la modifica locale viene scartata e si vede la versione del server. Non sovrascriverla senza autorizzazione.
+  - "Box N: road users are no longer boxed (#113): delete this box.": the frame holds the box of a road user, saved there before 17 Nov 2026 or proposed by a network that learnt them (section 5). Delete it with **✕** and confirm again.
+  - "Road users complete is gone (#113): reload the page.": a page opened before 17 Nov 2026 sent the frame with **Road users complete** ticked. Reload it and confirm again.
   - "server non raggiungibile": aspettare e premere **Riprova a salvare** nel riquadro rosso. Se continua, fermarsi e avvisare Cristian.
 - **Riquadro rosso "N fotogrammi confermati NON salvati sul server"** (con uno solo: "1 fotogramma confermato NON salvato sul server (chiave)."): ci sono conferme rimaste nel browser. Aprire quel fotogramma e leggere il motivo nella riga di stato.
   - **Riprova a salvare** serve solo quando il motivo è "server non raggiungibile" o un errore del server. La pagina riprova anche da sola ogni 30 secondi, quindi il riquadro può sparire senza clic. Quando riesce si resta sullo stesso fotogramma e la riga dice "Salvato ✓ · revisione N · <revisore>".
@@ -282,7 +277,7 @@ Più indicazioni:
   | `applicability` | `own_road`, `other_road`, `unresolved` |
   | `visibility` | `unknown`, `clear`, `partial`, `poor` |
   | `occlusion` | `unknown`, `none`, `partial`, `heavy` |
-  | `supplementary_panel` | `unknown`, `none`, `time` (hours, e.g. 22-6: one box around disc and plate), `wet` (only on a wet road, e.g. "bei Nässe": one box around disc and plate), `distance` (a plate that says how far ahead the sign holds, e.g. "15 m" under a give way: one box around sign and plate; any sign, never `not_a_sign`, `road_marking_candidate` or a road user, else 400 `invalid_supplementary_panel`), `present` (another panel: the box stays on the disc), `unresolved` |
+  | `supplementary_panel` | `unknown`, `none`, `time` (hours, e.g. 22-6: one box around disc and plate), `wet` (only on a wet road, e.g. "bei Nässe": one box around disc and plate), `distance` (a plate that says how far ahead the sign holds, e.g. "15 m" under a give way: one box around sign and plate; any sign, never `not_a_sign` or `road_marking_candidate`, else 400 `invalid_supplementary_panel`), `present` (another panel: the box stays on the disc), `unresolved` |
   | `plate_hours` | with family `maximum_speed` and panel `time`: the hours on the plate, `22-6` (from-to, whole hours 0-23, no leading zero); null when they cannot be read, or the plate has days, minutes or two ranges |
   | `plate_distance_m` | with panel `distance` only: the distance on the plate in whole metres, 1 to 5000 (a plate in km in metres: "1,2 km" is 1200); null when it cannot be read. Otherwise 400 `invalid_plate_distance` |
   | `temporary`, `variable_display` | `true`, `false` oppure `null` |
@@ -317,7 +312,7 @@ Il server MCP (`/mcp` del sito, oppure `helpers/mcp.sh` via ssh) e la REST API `
    - cartello mancante: un riquadro nuovo senza `detection_id`, con `bbox_xyxy` in pixel dell'immagine originale, `family` e `value_kph`;
    - numero non leggibile: `value_kph: null`; tipo non riconoscibile: `family: "unreadable"` con `notes`;
    - nessun cartello pertinente: `detections: []`.
-   - road users: a box with `family: "other_sign"`, its `sign_type` (`road_user_person`, `road_user_bicycle`, `road_user_car`, ...) and `value_kph: null`, only for those that matter for the speed (section 5). Send `users_complete: true` only when every road user from the size rule of section 5 has its box in this save; left out, it is `false`. A save says the whole frame, so a later save without it unticks the frame, and `apply_previous_frame` never carries it.
+   - road users: no box (section 5). A box whose `sign_type` is `road_user_*` is refused: kept from a proposal it gives 400 `invalid_sign_type` (REST and MCP); a new one is refused over REST with the same 400 and over MCP by the values `sign_type` allows. Leave it out. `users_complete` is gone: leave it out (over REST `true` gives 400 `invalid_schema`; MCP has no such argument).
 5. **Salvare**, solo se autorizzati e dopo aver guardato l'immagine: la conferma è definitiva e diventa un dato di training al prossimo import, senza un'altra approvazione. Usare `save_frame_review` con `run_id` e `base_revision` esattamente come letti (`frame.save`) e `reviewer` con il nome dell'agente (per esempio `Claude Code`): il server lo salva come `ai/Claude Code`, tipo `ai`. Con la REST API indicare anche `reviewer_kind: "ai"`. Mai il nome di una persona.
 6. Leggere l'esito:
    - riuscito: `review.revision`, `confirmed_count`, `next_unreviewed_frame_key`;

@@ -1,5 +1,5 @@
-"""What an "Other sign" box is (``sign_type``): the kinds the review offers, the same ids as the page's
-"Kind" select (web/src/review/catalog.ts SIGN_KIND_GROUPS).
+"""What an "Other sign" box is (``sign_type``): every kind a review box has had (SIGN_TYPES), and the kinds the review
+offers (BOXED_SIGN_TYPES), the same ids as the page's "Kind" select (web/src/review/catalog.ts SIGN_KIND_GROUPS).
 
 Some give a limit without a number (town entry, motorway, expressway), some carry numbers that are no
 speed (weight, height, width, minimum speed): the model has to know them apart from the speed signs.
@@ -16,14 +16,12 @@ A traffic light is a kind too, one for what is lit in the picture: ``traffic_lig
 our lane. A flashing amber is amber on one frame and off on the next: each frame says what it shows, and the brain
 learns the flashing from the sequence.
 
-The review is no longer of signs alone (12 Nov 2026): a road user gets a box too, with a kind of its own (ROAD_USERS):
-``road_user_person`` (on foot, also with a pushchair or a wheelchair), ``road_user_bicycle`` and
-``road_user_motorcycle`` (one box around the vehicle with its rider), ``road_user_car`` (a van too),
-``road_user_truck``, ``road_user_bus``, ``road_user_tram``, ``road_user_other`` (an animal, a tractor, a scooter). One
-box around the whole of it, as much as is seen. The classifier learns them as it learns the other kinds
-(``other_sign:road_user_car``) and the brain gets them with every other kind it reads. The cutter does not learn them
-yet: until it does, their boxes are ignore boxes of its training (training.prepare_detector_training), neither a sign
-to find nor background, so the frames reviewed before, where no road user has a box, do not teach it the opposite.
+From 12 to 17 Nov 2026 a road user got a box too, with a kind of its own (ROAD_USERS): ``road_user_person``,
+``road_user_bicycle``, ``road_user_motorcycle``, ``road_user_car``, ``road_user_truck``, ``road_user_bus``,
+``road_user_tram``, ``road_user_other``. Since 17 Nov 2026 (#113) road users are no longer boxed: a new box has a kind
+of BOXED_SIGN_TYPES, and a save with a road user is refused. The boxes saved before still read, export and import as
+they are, but the classifier's training leaves them out (training._classifier_label gives none, counted as
+road_user_no_class) and the cutter's training keeps them as ignore boxes (training.prepare_detector_training).
 Only a box of family ``other_sign`` has a kind; ``None`` means not said (older reviews, or not chosen).
 
 A box of family ``not_a_sign`` may say what it is instead (NOT_A_SIGN_TYPES): ``on_vehicle``, a sign-like
@@ -66,6 +64,9 @@ SIGN_TYPES = (
 ROAD_USER_PREFIX = 'road_user_'
 # The kinds that are no sign: who is on the road.
 ROAD_USERS = tuple(kind for kind in SIGN_TYPES if kind.startswith(ROAD_USER_PREFIX))
+# The kinds a new box may have (17 Nov 2026, #113): every kind but the road users, which are no longer boxed. SIGN_TYPES
+# keeps them, so the boxes saved before still read and import.
+BOXED_SIGN_TYPES = tuple(kind for kind in SIGN_TYPES if kind not in ROAD_USERS)
 # What a "not a sign" box is, when said.
 NOT_A_SIGN_TYPES = ('on_vehicle',)
 # The kind of a classifier's class for a speed limit with a plate of hours under it (maximum_speed_hours:30): one box
@@ -194,14 +195,16 @@ def plate_hours_problem(detection: dict) -> str | None:
 
 
 def sign_type_problem(detection: dict) -> str | None:
-    """Why the sign_type of a box is not allowed, or None when it is."""
+    """Why the sign_type of a box being saved is not allowed, or None when it is."""
     value = detection.get('sign_type')
     if value is None:
         return None
     if value in NOT_A_SIGN_TYPES:
         return None if detection.get('family') == 'not_a_sign' else f'sign_type {value} is only for family not_a_sign'
-    if value not in SIGN_TYPES:
-        return 'sign_type must be one of: ' + ', '.join(SIGN_TYPES + NOT_A_SIGN_TYPES) + ', or null'
+    if value in ROAD_USERS:
+        return 'road users are no longer boxed (#113): delete this box'
+    if value not in BOXED_SIGN_TYPES:
+        return 'sign_type must be one of: ' + ', '.join(BOXED_SIGN_TYPES + NOT_A_SIGN_TYPES) + ', or null'
     if detection.get('family') != 'other_sign':
         return 'sign_type is only for boxes of family other_sign (or on_vehicle for not_a_sign)'
     return None

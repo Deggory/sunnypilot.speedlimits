@@ -10,10 +10,8 @@
 // validation it finds, which choose that stage's best epoch); for applicability (experiment B), its variants in the same two charts, one
 // line each: the mean of its reading accuracy and the F1 of the signs of another road (which chooses its best epoch; before
 // #72 the ownership macro F1 in its place), and its validation loss; for the brain, its three seeds in the same way: how far its speed is from the labels on validation, the frames it says
-// right, and its train loss; for UserNet (the road users' detector), the validation road users it finds at score 0.5 (which
-// chooses its best epoch), its false boxes per frame there, and its train loss. Data: progress.curves of the job, one
-// point per finished epoch. A SignNet or an applicability variant that goes on from an earlier run may choose its best
-// epoch on the validation rows no network before it trained on (#104, val_chosen in its points): its Best tile and the
+// right, and its train loss. Data: progress.curves of the job, one point per finished epoch. A SignNet or an
+// applicability variant that goes on from an earlier run may choose its best epoch on the validation rows no network before it trained on (#104, val_chosen in its points): its Best tile and the
 // mark on its curve are then that epoch and that measure, while the curves and the other numbers of the tile stay the
 // whole validation's, and each says which it is.
 import {computed} from 'vue';
@@ -30,22 +28,20 @@ type Net = CurveNet;
 const DECIDER_NETS: DeciderNet[] = ['experiment_b_crop', 'experiment_b_crop_geom', 'experiment_b_full'];
 /** The brain's seeds (scripts/run_brain.sh). */
 const BRAIN_NETS: BrainNet[] = ['brain_s0', 'brain_s1', 'brain_s2'];
-const ALL_NETS: Net[] = ['signnet_pretrain', 'signnet', 'detector', 'reader', 'pretrain', 'classifier', ...DECIDER_NETS, ...BRAIN_NETS,
-  'usernet'];
+const ALL_NETS: Net[] = ['signnet_pretrain', 'signnet', 'detector', 'reader', 'pretrain', 'classifier', ...DECIDER_NETS, ...BRAIN_NETS];
 const NET_NAME: Record<Net, string> = {signnet_pretrain: 'SignNet on Mapillary', signnet: 'SignNet', detector: 'Detector', reader: 'Reader', pretrain: 'Pretraining on Mapillary',
   classifier: 'Classifier', experiment_b_crop: 'The crop alone',
   experiment_b_crop_geom: 'Crop, position and speed', experiment_b_full: 'Crop, position and the scene',
-  brain_s0: 'Seed 0', brain_s1: 'Seed 1', brain_s2: 'Seed 2', usernet: 'UserNet'};
+  brain_s0: 'Seed 0', brain_s1: 'Seed 1', brain_s2: 'Seed 2'};
 /** A network in a sentence ("the classifier ends in ..."). */
 const NET_WORD: Record<Net, string> = {signnet_pretrain: 'Mapillary stage', signnet: 'SignNet', detector: 'detector', reader: 'reader', pretrain: 'pretraining',
   classifier: 'classifier', experiment_b_crop: 'variant with the crop alone', experiment_b_crop_geom: 'variant with crop, position and speed',
-  experiment_b_full: 'variant with crop, position and the scene', brain_s0: 'seed 0', brain_s1: 'seed 1', brain_s2: 'seed 2',
-  usernet: 'UserNet'};
+  experiment_b_full: 'variant with crop, position and the scene', brain_s0: 'seed 0', brain_s1: 'seed 1', brain_s2: 'seed 2'};
 const isSignnet = (net: Net): boolean => net === 'signnet' || net === 'signnet_pretrain';
 const isDecider = (net: Net): net is DeciderNet => (DECIDER_NETS as Net[]).includes(net);
 const isBrain = (net: Net): net is BrainNet => (BRAIN_NETS as Net[]).includes(net);
 /** The networks whose epochs have no validation loss nor accuracy (the table leaves those columns out). */
-const noValLoss = (net: Net): boolean => isSignnet(net) || isBrain(net) || net === 'usernet';
+const noValLoss = (net: Net): boolean => isSignnet(net) || isBrain(net);
 const TRAIN = 'var(--c-train)';
 const VAL = 'var(--c-val)';
 const REJECT = 'var(--split-3)';
@@ -62,7 +58,6 @@ const classifier = computed(() => curves.value.classifier ?? null);
 const pretrain = computed(() => curves.value.pretrain ?? null);
 const signnet = computed(() => curves.value.signnet ?? null);
 const signnetPretrain = computed(() => curves.value.signnet_pretrain ?? null);
-const usernet = computed(() => curves.value.usernet ?? null);
 const hasPoints = (curve: TrainingCurve | null | undefined): curve is TrainingCurve => curve !== null && curve !== undefined
   && curve.points.length > 0;
 /** The networks shown, in the order they train. */
@@ -133,9 +128,6 @@ const signnetPretrainBest = computed(() => shows('signnet_pretrain') && hasPoint
   ? best(signnetPretrain.value, (point) => point.val_chosen ?? (pretrainSpeed.value ? point.val_speed_recall : point.val_recall), true) : null);
 const signnetPretrainLowest = computed(() => hasPoints(signnetPretrain.value)
   ? best(signnetPretrain.value, (point) => point.train_loss, false) : null);
-/** UserNet's best epoch: the most validation road users found at score 0.5 (nnslr_tools.usernet keeps those weights). */
-const usernetBest = computed(() => shows('usernet') && hasPoints(usernet.value) ? best(usernet.value, (point) => point.val_recall, true) : null);
-const usernetLowest = computed(() => hasPoints(usernet.value) ? best(usernet.value, (point) => point.train_loss, false) : null);
 const signnetFalse = computed(() => hasPoints(signnet.value) && signnet.value.points.some((point) => point.val_false_per_frame !== undefined));
 const readerBestLoss = computed(() => hasPoints(reader.value) ? best(reader.value, (point) => point.val_loss, false) : null);
 const readerBestAccuracy = computed(() => shows('reader') && hasPoints(reader.value)
@@ -220,7 +212,7 @@ const beforeText = computed(() => shows('reader')
   ? 'First the training imports the reviews, checks the dataset and prepares the GPU: a few minutes.'
   : deciderCards.value.length ? 'First it checks the dataset and the GPU: a minute or two.'
   : brainCards.value.length ? 'First it checks the labels and the GPU, then reads the signs of the drives it learns from as the car does: a few minutes.'
-  : shows('detector') || shows('signnet') || shows('usernet')
+  : shows('detector') || shows('signnet')
     ? 'First it checks the frames of the training and of the evaluation, and the GPU: a few minutes.'
     : 'First it checks the dataset, the split and the cutter in use, then runs the cutter on every frame to mine its false boxes.');
 const isRunning = (net: Net): boolean => running.value && current.value === net;
@@ -294,12 +286,6 @@ const tables = computed(() => nets.value.flatMap((net) => {
           <span class="tile-value">{{ percent(signnetPretrainBest.value * 100) }}</span>
           <span class="tile-note">Mapillary stage on {{ signnetPretrainBest.val_chosen === undefined ? 'validation' : 'the validation frames no earlier network trained on'
             }}, epoch {{ signnetPretrainBest.epoch }}: the start of the second stage</span>
-        </div>
-        <div v-if="usernetBest" class="tile" id="usernet-best">
-          <span class="tile-label">Road users found at 0.5</span>
-          <span class="tile-value">{{ percent(usernetBest.value * 100) }}</span>
-          <span class="tile-note">UserNet on validation, epoch {{ usernetBest.epoch }}<template v-if="usernetBest.val_false_per_frame !== undefined">,
-            {{ usernetBest.val_false_per_frame.toFixed(2) }} false boxes per frame</template></span>
         </div>
         <div v-if="detectorBestRecall" class="tile" id="detector-best-recall">
           <span class="tile-label">Best validation recall</span>
@@ -395,24 +381,6 @@ const tables = computed(() => nets.value.flatMap((net) => {
           5 boxes of score 0.3 or more): those numbers are on the run's SignNet card. With a start, it chooses on the
           validation frames no earlier network trained on when they hold enough signs: the tile above then says so, and the
           mark is that epoch, which may not be the top of the line drawn on the whole validation.</p>
-      </div>
-
-      <div v-if="shows('usernet')" class="net" id="usernet-curves">
-        <h3>{{ NET_NAME.usernet }}<span>finds the people, two-wheelers and vehicles · on validation, found at score 0.5,
-          higher is better, its false boxes per frame, and loss</span></h3>
-        <div v-if="hasPoints(usernet)" class="net-charts">
-          <LineChart title="UserNet on validation" :top="100" :format="percentAxis" :epochs="span(usernet)"
-                     :series="[{key: 'val', label: 'found at 0.5', color: VAL, values: column(usernet, (point) => point.val_recall, 100)}]"
-                     :best="usernetBest ? {series: 'val', epoch: usernetBest.epoch, label: 'best'} : null"
-                     :running="isRunning('usernet')"/>
-          <LineChart title="UserNet loss" :epochs="span(usernet)" :format="lossAxis"
-                     :series="[{key: 'train', label: 'train', color: TRAIN, values: column(usernet, (point) => point.train_loss)}]"
-                     :best="usernetLowest ? {series: 'train', epoch: usernetLowest.epoch, label: 'lowest'} : null"
-                     :running="isRunning('usernet')"/>
-        </div>
-        <p v-else class="net-wait">UserNet’s curves appear at the end of its first epoch.</p>
-        <p v-if="hasPoints(usernet)" class="note">It keeps the weights of the epoch that finds the most validation road users at
-          score 0.5, at most 24 a frame; then it is measured on validation and test: those numbers are on its card in Models.</p>
       </div>
 
       <div v-if="shows('detector')" class="net">
@@ -530,8 +498,6 @@ const tables = computed(() => nets.value.flatMap((net) => {
             <caption>{{ NET_NAME[table.net] }}</caption>
             <thead><tr><th class="num">Epoch</th><th class="num">Train loss</th><th v-if="!noValLoss(table.net)" class="num">Val loss</th>
               <template v-if="table.net !== 'detector' && !noValLoss(table.net)"><th class="num">Train acc.</th><th class="num">Val acc.</th></template>
-              <template v-if="table.net === 'usernet'"><th class="num" title="Road users of validation found at score 0.5">Found at 0.5</th><th
-                class="num">False per frame</th></template>
               <template v-if="isBrain(table.net)"><th class="num">Km/h off</th><th class="num">Right</th>
                 <template v-if="brainTypes"><th class="num" title="The road type named right, on all types">Road type</th>
                   <th v-for="kind in brainTypeKinds" :key="kind" class="num" :title="'Road type right on ' + (ROAD_TYPE_LABELS[kind]?.label ?? kind)">{{
@@ -559,10 +525,6 @@ const tables = computed(() => nets.value.flatMap((net) => {
                 <template v-if="table.net !== 'detector' && !noValLoss(table.net)">
                   <td class="num">{{ cell(point.train_accuracy, (value) => percent(value * 100)) }}</td>
                   <td class="num">{{ cell(point.val_accuracy, (value) => percent(value * 100)) }}</td>
-                </template>
-                <template v-if="table.net === 'usernet'">
-                  <td class="num">{{ cell(point.val_recall, (value) => percent(value * 100)) }}</td>
-                  <td class="num">{{ cell(point.val_false_per_frame, (value) => value.toFixed(2)) }}</td>
                 </template>
                 <td v-if="table.net === 'detector' && detectorRecall" class="num">{{ cell(point.val_recall, (value) => percent(value * 100)) }}</td>
                 <template v-if="isSignnet(table.net)">

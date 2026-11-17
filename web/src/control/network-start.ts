@@ -5,21 +5,19 @@
 // applicability and the brain; the choice while none is in use). An applicability run is one choice: each of its
 // networks goes on from its own of that run. A brain is one seed: its three seeds go on from it; it learnt on the
 // brain's frozen split, and the server refuses one stepped otherwise (nnslr_tools.brain_train.brain_start). One that
-// took your pedals and the car's speed is a start too: the new one leaves those inputs out. A UserNet goes on from a
-// finished UserNet (random weights otherwise): usually the drives stage from a BDD100K one, whose licence then goes on
-// with the new weights (uses_bdd).
+// took your pedals and the car's speed is a start too: the new one leaves those inputs out.
 import {computed, reactive, ref, type Ref} from 'vue';
 import {isoWhen, plural} from '../common/format';
 import type {ActionOptions, ModelRole, ModelVersion, PanelStatus} from '../common/panel-types';
 import type {PickerOption} from '../components/PickerSheet.vue';
 
-export type StartRole = 'cutter' | 'decider' | 'brain' | 'users';
+export type StartRole = 'cutter' | 'decider' | 'brain';
 type Split = 'same' | 'another' | 'unknown';
 const SPLIT_WORDS: Record<Split, string> = {same: 'learnt on today’s split', another: 'learnt on another split',
   unknown: 'its split not recorded'};
 /** The usual start of each, first in the list: its test stays fair. */
-const FRESH: Record<StartRole, string> = {cutter: 'Random weights', decider: 'ImageNet', brain: 'ImageNet', users: 'Random weights'};
-const NAME: Record<StartRole, string> = {cutter: 'SignNet', decider: 'Applicability', brain: 'Brain', users: 'UserNet'};
+const FRESH: Record<StartRole, string> = {cutter: 'Random weights', decider: 'ImageNet', brain: 'ImageNet'};
+const NAME: Record<StartRole, string> = {cutter: 'SignNet', decider: 'Applicability', brain: 'Brain'};
 const POOL_WORDS = {grid: 'a grid', mean: 'a mean'} as const;
 const POOL_TITLE = {grid: 'Grid', mean: 'Mean'} as const;
 export const FRESH_START = 'fresh';
@@ -50,12 +48,10 @@ export function useNetworkStart(role: StartRole, status: Ref<PanelStatus | null>
   /** A brain that took your pedals and the car's speed too (model_roles.DRIVER_GROUPS). */
   const takesTheDriver = (version: ModelVersion): boolean => version.role === 'brain'
     && (version.groups ?? []).some((group) => group === 'pedals' || group === 'speed');
-  /** Whether it learnt on the split the new one is measured on. A UserNet of the BDD100K stage learnt none of your drives:
-   * no split of ours to compare. */
+  /** Whether it learnt on the split the new one is measured on. */
   const currentSplit = computed(() => status.value?.classifier_options?.split_sha256 ?? null);
   const splitOf = (version: ModelVersion): Split | null => {
-    if (version.role === 'users' && version.stage !== 'drives') return null;
-    if (version.role !== 'cutter' && version.role !== 'decider' && version.role !== 'users') return null;
+    if (version.role !== 'cutter' && version.role !== 'decider') return null;
     return !version.split_sha256 || !currentSplit.value ? 'unknown' : version.split_sha256 === currentSplit.value ? 'same' : 'another';
   };
   const options = computed((): PickerOption[] => [
@@ -64,8 +60,7 @@ export function useNetworkStart(role: StartRole, status: Ref<PanelStatus | null>
       const split = splitOf(version);
       const off = version.role === 'brain' ? version.test?.mean_error_kph ?? null : null;
       return {key: version.id, title: titleOf(version), short: titleOf(version), badge: inUse ? 'In use' : undefined,
-        sub: [version.role === 'users' && version.stage === 'bdd' ? 'learnt on BDD100K' : '',
-          split ? SPLIT_WORDS[split] : '', role === 'decider' ? plural(count, 'network') : '',
+        sub: [split ? SPLIT_WORDS[split] : '', role === 'decider' ? plural(count, 'network') : '',
           takesTheDriver(version) ? 'with your pedals and speed' : '',
           off === null ? '' : off.toFixed(1) + ' km/h off on the test'].filter(Boolean).join(' · ')};
     }),
@@ -90,12 +85,7 @@ export function useNetworkStart(role: StartRole, status: Ref<PanelStatus | null>
           ? '; your pedals and the car’s speed, which it took, are left out.' : '.'), warn: false};
     }
     const split = splitOf(version.value);
-    const licence = version.value.role === 'users' && version.value.uses_bdd
-      ? ' BDD100K’s licence goes on with the new weights.' : '';
-    if (version.value.role === 'users' && version.value.stage !== 'drives') return {text: 'It goes on from that UserNet’s '
-      + 'weights, which learnt none of your drives: the test on your ticked frames stays fair.' + licence, warn: false};
-    const what = role === 'users' ? 'It goes on from that UserNet’s weights'
-      : role === 'cutter' ? 'It goes on from that SignNet’s weights'
+    const what = role === 'cutter' ? 'It goes on from that SignNet’s weights'
       : role === 'decider' ? 'Each version goes on from its own of that run (one it lacks from ImageNet)'
         : 'Each network goes on from its own of that run (one it lacks from ImageNet)';
     // A SignNet or an applicability run that learnt on another split, or went on from one that did (#104): today's
@@ -117,9 +107,8 @@ export function useNetworkStart(role: StartRole, status: Ref<PanelStatus | null>
       + 'of the new one is not fair.', warn: true};
     if (split === 'unknown') return {text: 'Its split is not recorded: it may have seen some of today’s test frames, so the test '
       + 'of the new one may not be fair.', warn: true};
-    if (split === 'same') return {text: what + ', learnt on today’s split: the test stays fair.' + licence, warn: false};
-    return {text: what + '. If that run was tested on other drives, Models says the new one’s test is not fair.' + licence,
-      warn: false};
+    if (split === 'same') return {text: what + ', learnt on today’s split: the test stays fair.', warn: false};
+    return {text: what + '. If that run was tested on other drives, Models says the new one’s test is not fair.', warn: false};
   });
   /** A brain's picture chosen in Picture: a start that sees it otherwise cannot go on (its memory takes other features),
    * so the start becomes a brain that sees it so (the one in use, else the newest), else ImageNet. */

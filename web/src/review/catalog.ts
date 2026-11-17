@@ -61,9 +61,10 @@ export interface SignKind {
   short: string;
 }
 
-// What an "Other sign" is (sign_type; the same ids as nnslr_tools.sign_types.SIGN_TYPES), in groups of buttons
+// What an "Other sign" is (sign_type; the same ids as nnslr_tools.sign_types.BOXED_SIGN_TYPES), in groups of buttons
 // under "Type". Some give a limit without a number (town entry, motorway), some carry numbers that are no speed
-// (weight, height): the model has to know them apart. The traffic lights first, the ones used most.
+// (weight, height): the model has to know them apart. The traffic lights first, the ones used most: by what is lit in
+// this picture; a flashing amber is amber on one frame and off on the next.
 export const SIGN_KIND_GROUPS: readonly {label: string; kinds: readonly SignKind[]}[] = [
   {label: 'Traffic light', kinds: [
     {id: 'traffic_light_red', label: 'Traffic light: red (also red with amber)', chip: 'Red', short: 'light red'},
@@ -71,7 +72,6 @@ export const SIGN_KIND_GROUPS: readonly {label: string; kinds: readonly SignKind
     {id: 'traffic_light_green', label: 'Traffic light: green', chip: 'Green', short: 'light green'},
     {id: 'traffic_light_off', label: 'Traffic light: off (no lamp lit)', chip: 'Off', short: 'light off'},
   ]},
-  // Who is on the road: one box around the whole of it; a bicycle or a motorcycle with its rider.
   {label: 'Danger', kinds: [
     {id: 'pedestrian_crossing', label: 'Pedestrian crossing', chip: 'Pedestrian crossing', short: 'crossing'},
     {id: 'children', label: 'Danger: children', chip: 'Children', short: 'children'},
@@ -121,28 +121,32 @@ export const SIGN_KIND_GROUPS: readonly {label: string; kinds: readonly SignKind
     {id: 'motorway_direction', label: 'Motorway direction (green, or a green inset)', chip: 'Motorway direction', short: 'motorway dir.'},
     {id: 'motorway_exit', label: 'Motorway exit (gore arrow)', chip: 'Motorway exit', short: 'exit'},
   ]},
-  // By what is lit in this picture; a flashing amber is amber on one frame and off on the next.
-  {label: 'Road user', kinds: [
-    {id: 'road_user_person', label: 'Person on foot', chip: 'Person', short: 'person'},
-    {id: 'road_user_bicycle', label: 'Bicycle, with its rider', chip: 'Bicycle', short: 'bicycle'},
-    {id: 'road_user_motorcycle', label: 'Motorcycle, with its rider', chip: 'Motorcycle', short: 'motorcycle'},
-    {id: 'road_user_car', label: 'Car or van', chip: 'Car', short: 'car'},
-    {id: 'road_user_truck', label: 'Truck', chip: 'Truck', short: 'truck'},
-    {id: 'road_user_bus', label: 'Bus', chip: 'Bus', short: 'bus'},
-    {id: 'road_user_tram', label: 'Tram', chip: 'Tram', short: 'tram'},
-    {id: 'road_user_other', label: 'Another road user (animal, tractor, scooter)', chip: 'Other user', short: 'user'},
-  ]},
   {label: 'Other', kinds: [{id: 'other', label: 'Something else', chip: 'Something else', short: 'other'}]},
 ];
 
+/** The kind of an "Other sign" by its id, a road user's too (only to name the boxes saved before #113). */
 export function signKindOf(id: string | null | undefined): SignKind | null {
   if (!id) return null;
   for (const group of SIGN_KIND_GROUPS) {
     const found = group.kinds.find((kind) => kind.id === id);
     if (found) return found;
   }
-  return null;
+  return ROAD_USER_NAMES.find((kind) => kind.id === id) ?? null;
 }
+
+// The road users (nnslr_tools.sign_types.ROAD_USERS), boxed from 12 to 17 Nov 2026 and no longer offered (#113): their
+// names only, for the boxes saved then. A save with one is refused: the reviewer deletes it.
+const ROAD_USER_NAMES: readonly SignKind[] = [
+  {id: 'road_user_person', label: 'Road user: person on foot', chip: 'Person', short: 'person'},
+  {id: 'road_user_bicycle', label: 'Road user: bicycle', chip: 'Bicycle', short: 'bicycle'},
+  {id: 'road_user_motorcycle', label: 'Road user: motorcycle', chip: 'Motorcycle', short: 'motorcycle'},
+  {id: 'road_user_car', label: 'Road user: car or van', chip: 'Car', short: 'car'},
+  {id: 'road_user_truck', label: 'Road user: truck', chip: 'Truck', short: 'truck'},
+  {id: 'road_user_bus', label: 'Road user: bus', chip: 'Bus', short: 'bus'},
+  {id: 'road_user_tram', label: 'Road user: tram', chip: 'Tram', short: 'tram'},
+  {id: 'road_user_other', label: 'Road user: another (animal, tractor, scooter)', chip: 'Other user', short: 'user'},
+];
+
 export const ROADS: readonly {id: string; label: string}[] = [
   {id: 'own_road', label: 'Ours'},
   {id: 'other_road', label: 'Another'},
@@ -170,10 +174,14 @@ const NO_PLATE_FAMILIES: readonly string[] = ['not_a_sign', 'road_marking', 'roa
 /** The kinds of an "Other sign" that are who is on the road (nnslr_tools.sign_types.ROAD_USER_PREFIX). */
 const ROAD_USER_PREFIX = 'road_user_';
 
+/** A box of a road user, saved before 17 Nov 2026: road users are no longer boxed (#113). */
+export function isRoadUser(d: Pick<Detection, 'family' | 'sign_type'>): boolean {
+  return d.family === 'other_sign' && typeof d.sign_type === 'string' && d.sign_type.startsWith(ROAD_USER_PREFIX);
+}
+
 /** Whether a box may have a plate of distance: any sign, but not a box that is no sign, a road marking or a road user. */
 export function takesDistance(d: Detection): boolean {
-  return !NO_PLATE_FAMILIES.includes(d.family)
-    && !(d.family === 'other_sign' && typeof d.sign_type === 'string' && d.sign_type.startsWith(ROAD_USER_PREFIX));
+  return !NO_PLATE_FAMILIES.includes(d.family) && !isRoadUser(d);
 }
 
 /** The longest distance a plate may say, in metres (nnslr_tools.sign_types.PLATE_DISTANCE_MAX_M). */

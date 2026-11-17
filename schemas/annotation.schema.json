@@ -489,7 +489,7 @@
     },
     "users_complete": {
       "type": "boolean",
-      "description": "true on every row of a frame ticked \"road users complete\" in review: every person and two-wheeler from 24 px tall and every vehicle from 40 px tall (box height in pixels of the original image) is boxed there; absent on the rows of other frames; optional"
+      "description": "true on every row of a frame ticked \"road users complete\" in review, a tick of the review from 12 to 17 Nov 2026 that went with UserNet (#113): no review sets it any more and nothing reads it; kept so that those frames still import; absent on the rows of other frames; optional"
     },
     "sign_value": {
       "description": "Original written number. value_kph is a legacy alias, never a conversion.",

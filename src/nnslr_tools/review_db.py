@@ -41,7 +41,7 @@ from nnslr_tools.annotations import (
     validate_dataset,
 )
 from nnslr_tools.carry_over import unchecked_boxes
-from nnslr_tools.sign_types import (distance_panel_problem, holds_distance, holds_hours, painted_problem,
+from nnslr_tools.sign_types import (ROAD_USERS, distance_panel_problem, holds_distance, holds_hours, painted_problem,
                                      plate_distance_problem, plate_hours_problem, sign_type_problem)
 from nnslr_tools.manifest import parse_route_id
 from speed_vision_core.types import MAX_VALUE_KPH, MIN_VALUE_KPH
@@ -684,8 +684,6 @@ def public_review(review: dict) -> dict:
         'encounter_id': payload.get('encounter_id'),
         # Missing in reviews saved before the country existed: the page then shows the GPS proposal.
         **({'country': payload['country']} if 'country' in payload else {}),
-        # Every road user from the size rule boxed on this frame (the reviewer's tick); false in reviews saved before it.
-        'users_complete': payload.get('users_complete') is True,
     }
 
 
@@ -768,16 +766,7 @@ def build_reviewed_frame(report_row: dict, body: dict, timestamp: str, *, review
     if country is not None and (not isinstance(country, str) or not COUNTRY_CODE.fullmatch(country)):
         raise ReviewRejected(400, 'invalid_country',
                              'country must be a two-letter ISO 3166-1 code in capitals ("CH", "IT", "PL"), or null.')
-    # "Road users complete": every person and two-wheeler from 24 px tall and every vehicle from 40 px tall is boxed on
-    # this frame (UserNet learns from these frames). Only a ticked frame has the field, so the reviews saved before it
-    # and the frames left unticked keep exactly their line.
-    users_complete = body.get('users_complete', False)
-    if type(users_complete) is not bool:
-        raise ReviewRejected(400, 'invalid_schema', 'users_complete must be true or false.')
     frame = copy.deepcopy(report_row)
-    frame.pop('users_complete', None)
-    if users_complete:
-        frame['users_complete'] = True
     frame['country'] = country
     frame['reviewer'] = reviewer
     frame['review_timestamp'] = timestamp
@@ -917,6 +906,11 @@ def save_frame_review(store: ReviewStore, root: Path, *, route_id: str, run_id: 
     confirmed = body.get('confirmed')
     if type(confirmed) is not bool:
         raise ReviewRejected(400, 'invalid_schema', italian_message('invalid_schema', 'confirmed must be true or false'))
+    # The "Road users complete" tick went with UserNet (17 Nov 2026, #113): a page loaded before still sends false,
+    # which says nothing; a tick is refused rather than dropped without a word.
+    users_complete = body.get('users_complete')
+    if users_complete is not None and users_complete is not False:
+        raise ReviewRejected(400, 'invalid_schema', 'Road users complete is gone (#113): reload the page.')
     base_revision = body.get('base_revision')
     if base_revision is not None:
         if type(base_revision) is not int or base_revision < 0:
@@ -973,6 +967,13 @@ def save_frame_review(store: ReviewStore, root: Path, *, route_id: str, run_id: 
     named = dict(body)
     named['reviewer'] = reviewer
     frame = build_reviewed_frame(report_row, named, utc_now(), reviewer_kind=kind, channel=channel)
+    # A box that only names its proposal takes the proposal's kind, which the checks above did not see: a proposal
+    # made by a classifier trained on the road users saved before #113 may be one.
+    for number, detection in enumerate(frame['detections'], start=1):
+        if (isinstance(detection, dict) and detection.get('family') == 'other_sign'
+                and detection.get('sign_type') in ROAD_USERS):
+            raise ReviewRejected(400, 'invalid_sign_type',
+                                 f'Box {number}: road users are no longer boxed (#113): delete this box.')
     validate_reviewed_frame(frame, root)
     return store.save_review(route_id=route_id, run_id=run_id, frame_key=frame_key,
                              segment_index=frame['segment_index'], output_index=frame['output_index'],

@@ -161,8 +161,11 @@ def _classifier_label(row: dict[str, Any]) -> str | None:
     and a known number (with no number it stays ``maximum_speed:unknown``), and ``not_a_sign`` for a kept box a
     reviewer marked so (none for one on a vehicle). A sign with a plate of distance (Panel below: Distance, #98) has
     none yet: its box takes the sign and the plate, which no class says, so the classifier leaves it out until one
-    does (the cutter learns it, as a box with its plate)."""
+    does (the cutter learns it, as a box with its plate). A road user boxed before 17 Nov 2026 has none either: road
+    users are no longer boxed (#113), so no class learns them (the cutter keeps their boxes as ignore boxes)."""
     if row.get("review_state") not in ELIGIBLE_REVIEW_STATES:
+        return None
+    if is_road_user(row):
         return None
     if holds_distance(row) and row.get("sign_family") != NOT_A_SIGN:
         return None
@@ -272,10 +275,7 @@ def reviewed_frames(rows: list[dict[str, Any]], assignments: dict[str, Any]) -> 
             "image_path": row.get("image_path"), "image_sha256": key, "width": row.get("width"),
             "height": row.get("height"), "route_id": row.get("route_id"), "segment_index": row.get("segment_index"),
             "output_index": row.get("output_index"), "split": None, "kept": [], "rejected": [],
-            "label_bases": set(), "reviewed_at": None, "users_complete": False})
-        # Ticked "road users complete" in review: every row of the frame says so (annotations._canonical).
-        if row.get("users_complete") is True:
-            frame["users_complete"] = True
+            "label_bases": set(), "reviewed_at": None})
         if row.get("review_state") in ELIGIBLE_REVIEW_STATES:
             split = assignments.get(row.get("annotation_id"))
             if isinstance(split, str):
@@ -665,6 +665,9 @@ def _prepare_classifier(loaded: dict[str, Any], dataset_path: Path, split_path: 
         if label is None and holds_distance(row) and row.get("review_state") in ELIGIBLE_REVIEW_STATES:
             skipped["plate_of_distance_no_class_yet"] += 1
             continue
+        if label is None and is_road_user(row) and row.get("review_state") in ELIGIBLE_REVIEW_STATES:
+            skipped["road_user_no_class"] += 1
+            continue
         if label is None:
             skipped["not_classifier_eligible"] += 1
             continue
@@ -880,9 +883,9 @@ def prepare_detector_training(
     is drawn over. A frame is a detector negative only when it has an explicit whole-frame not_a_sign
     review. other_sign rows alone are not silently promoted to
     whole-frame negatives. A switched-off variable display (off_display) is an ignore box of its frame
-    (ignore_boxes), and so is the box of a road user (sign_types.ROAD_USERS: a person, a car...), which the cutter does
-    not learn yet: SignNet neither learns it as a sign nor as background and is not measured on it; the cutter
-    reads boxes only, so for it the panel is background.
+    (ignore_boxes), and so is the box of a road user (sign_types.ROAD_USERS: a person, a car..., boxed from 12 to 17 Nov
+    2026, #113), which the cutter does not learn: SignNet neither learns it as a sign nor as background and is not
+    measured on it; the cutter reads boxes only, so for it the panel is background.
 
     mapillary: the windows file of nnslr mapillary-windows (nnslr_tools.mtsd_windows), whose train windows of the
     region and share asked (percent) are added to train (source 'mapillary'), their speed boxes at most
@@ -953,8 +956,6 @@ def prepare_detector_training(
             "annotation_ids": [],
             "explicit_negative": False,
             "label_basis": _label_basis(row),
-            # Every road user from the size rule is boxed on this frame (the reviewer's tick): UserNet's frames.
-            "users_complete": False,
         })
         if (
             frame["image_path"] != row["image_path"]
@@ -966,8 +967,6 @@ def prepare_detector_training(
         if frame["label_basis"] != _label_basis(row):
             # The same image confirmed by different kinds of reviewer: it counts as neither.
             frame["label_basis"] = "mixed"
-        if row.get("users_complete") is True:
-            frame["users_complete"] = True
 
         family = row["sign_family"]
         if row["bbox_xyxy"] is None and family == "not_a_sign":

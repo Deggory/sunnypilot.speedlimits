@@ -2,7 +2,7 @@
 import type {AiState} from './ai-types';
 
 export type ActionName = 'fetch' | 'prepare' | 'prepare_again' | 'measure_proposer' | 'setup_vlm' | 'dataset' | 'train' | 'train_continue' | 'train_resume' | 'train_classifier'
-  | 'train_cutter' | 'train_decider' | 'train_brain' | 'train_users' | 'regression' | 'update' | 'ai_review' | 'measure_ai_reviewer' | 'networks_prepare' | 'networks_publish'
+  | 'train_cutter' | 'train_decider' | 'train_brain' | 'regression' | 'update' | 'ai_review' | 'measure_ai_reviewer' | 'networks_prepare' | 'networks_publish'
   | 'road_types' | 'send_to_car' | 'try_on_comma' | 'comma_restore' | 'mapillary_locations' | 'mapillary_windows'
   | 'road_labeler_train' | 'road_labeler_predict' | 'box_fit_train' | 'simulate' | 'networks_github_save'
   | 'networks_github_restore';
@@ -115,11 +115,7 @@ export interface ActionOptions {
    * certified "1" every certified drive instead (the regression test). */
   set?: string;
   certified?: string;
-  /** What UserNet learns from (train_users): BDD100K's pictures, or the road users boxed on your drives. */
-  stage?: UserNetStage;
 }
-/** The two stages of UserNet (scripts/run_usernet.sh, NNSLR_USERNET_STAGE). */
-export type UserNetStage = 'bdd' | 'drives';
 /** GET /api/panel/box-fit (nnslr_tools.panel.Panel.box_fit, #94): every version of Fit box on this server, newest
  * first, the code's files last, and the one the review page fits with. A mean IoU is with the person's box on the
  * drives left out, from 0 to 1. */
@@ -322,8 +318,7 @@ export interface TrainingCurve {
 export type DeciderNet = 'experiment_b_crop' | 'experiment_b_crop_geom' | 'experiment_b_full';
 /** The brain's three seeds (scripts/run_brain.sh). */
 export type BrainNet = 'brain_s0' | 'brain_s1' | 'brain_s2';
-export type CurveNet = 'detector' | 'reader' | 'classifier' | 'pretrain' | 'signnet' | 'signnet_pretrain' | DeciderNet | BrainNet
-  | 'usernet';
+export type CurveNet = 'detector' | 'reader' | 'classifier' | 'pretrain' | 'signnet' | 'signnet_pretrain' | DeciderNet | BrainNet;
 
 export interface StepProgress {
   done: number;
@@ -754,7 +749,7 @@ export type RunState = 'running' | 'finished' | 'incomplete';
  * scripts/run_experiment_b.sh alone, 'done' when its three variants have a result; mine, classifier, chain for a run of
  * scripts/run_classifier.sh, 'done' when its chain is measured. */
 export type RunStage = 'checks' | 'detector' | 'reader' | 'evaluate' | 'export' | 'bundle' | 'experiment' | 'mine' | 'classifier'
-  | 'chain' | 'signnet' | 'usernet' | 'done';
+  | 'chain' | 'signnet' | 'done';
 
 export interface RunStart {
   /** Where the weights came from; null when not recorded (a fresh run before its detector finished). */
@@ -848,8 +843,8 @@ export interface RunSummary {
   name: string;
   /** training: the pipeline of helpers/3_train.sh; experiment: a folder with experiment B only; classifier: a run of
    * scripts/run_classifier.sh (the classifier with “not a sign”); cutter: a SignNet run (scripts/run_signnet.sh), or an
-   * old Detector run of scripts/run_detector_sizes.sh; usernet: a run of scripts/run_usernet.sh (the road users). */
-  kind: 'training' | 'experiment' | 'classifier' | 'cutter' | 'usernet';
+   * old Detector run of scripts/run_detector_sizes.sh. */
+  kind: 'training' | 'experiment' | 'classifier' | 'cutter';
   state: RunState;
   stage: RunStage;
   /** "training the detector", ... */
@@ -889,47 +884,12 @@ export interface RunSummary {
   chain_old_reader: ChainNumbers | null;
   /** The detectors of scripts/run_detector_sizes.sh in this run, smallest first; a SignNet run: its one line. */
   cutters: CutterLine[] | null;
-  /** A UserNet run with its result.json: its stage and, on test (else validation), the road users found at its score;
-   * null for other runs (and older servers). */
-  usernet?: UserNetLine | null;
   /** Experiment B variants with a result.json. */
   experiment_b: string[];
   /** Files that exist but cannot be read. */
   problems: string[];
   /** Changes when anything of the run changes: the page asks the detail again. */
   version: string;
-}
-
-/** A UserNet run in a line (nnslr_tools.runs.RunsIndex._usernet_headline): at its score (0.5) on `partition`. */
-export interface UserNetLine {
-  stage: UserNetStage | null;
-  uses_bdd: boolean;
-  validation_source: 'drives' | 'bdd' | null;
-  best_epoch: number | null;
-  /** test, else validation; null when neither has frames. */
-  partition: 'test' | 'validation' | null;
-  frames: number | null;
-  score_threshold: number;
-  recall: number | null;
-  precision: number | null;
-  false_per_frame: number | null;
-}
-
-/** The result.json of a UserNet run (nnslr_tools.usernet.digest), without its epochs (in curves). */
-export interface UserNetRun {
-  stage: UserNetStage | null;
-  best_epoch: number | null;
-  epochs: number | null;
-  epochs_run: number | null;
-  parameters: number | null;
-  split_sha256: string | null;
-  dataset_sha256: string | null;
-  uses_bdd: boolean;
-  validation_source: 'drives' | 'bdd' | null;
-  start: {run: string | null; epoch: number | null; stage: UserNetStage | null; split_sha256: string | null;
-    uses_bdd: boolean} | null;
-  validation: UserNetNumbers | null;
-  test: UserNetNumbers | null;
 }
 
 export interface RunsPayload {
@@ -1234,8 +1194,6 @@ export interface RunDetail extends RunSummary {
   cutter_run: {sizes: CutterSize[]; comparison: string | null} | null;
   /** A SignNet run (scripts/run_signnet.sh, or by hand): its result.json; null for other runs and older servers. */
   signnet_run?: SignNetRun | null;
-  /** A UserNet run (scripts/run_usernet.sh): its result.json as the Models tab reads it; null for other runs. */
-  usernet_run?: UserNetRun | null;
   /** The reports of this run the Watch panel can play (only which files exist). */
   watch: WatchModel[];
 }
@@ -1419,8 +1377,8 @@ export interface CutterSize {
 
 // GET /api/panel/models and POST /api/panel/models/active (nnslr_tools.model_roles.ModelIndex): the Models tab.
 
-/** The three networks of the sign pipeline (docs/NEURAL_NETWORK.md), the brain, and UserNet (the road users' detector). */
-export type ModelRole = 'cutter' | 'classifier' | 'decider' | 'brain' | 'users';
+/** The three networks of the sign pipeline (docs/NEURAL_NETWORK.md) and the brain. */
+export type ModelRole = 'cutter' | 'classifier' | 'decider' | 'brain';
 
 /** Signs of one width found by the cutter. */
 export interface WidthRecall {
@@ -1701,35 +1659,7 @@ export interface BrainModel extends ModelBase {
     validation: BrainApplicabilityNumbers | null; test: BrainApplicabilityNumbers | null} | null;
 }
 
-/** UserNet on one partition at its score (0.5, what the brain will read; nnslr_tools.usernet.digest): the frames, the road
- * users found (recall, also by kind), its boxes that are users (precision) and its false boxes a frame. */
-export interface UserNetNumbers {
-  frames: number | null;
-  recall: number | null;
-  precision: number | null;
-  false_per_frame: number | null;
-  recall_by_kind: {person: number | null; two_wheeler: number | null; vehicle: number | null};
-}
-
-/** UserNet of a run of scripts/run_usernet.sh: the road users' detector (person, two-wheeler, vehicle). Not on the car. */
-export interface UserNetModel extends ModelBase {
-  role: 'users';
-  kind: 'usernet';
-  /** What it learnt from: BDD100K's pictures or your drives (null: not finished). */
-  stage: UserNetStage | null;
-  /** It learnt BDD100K's pictures (its stage, or its start's): their licence goes with the weights. */
-  uses_bdd: boolean;
-  /** Where its best epoch was chosen: your ticked frames, or BDD's own validation pictures while there were none. */
-  validation_source: 'drives' | 'bdd' | null;
-  split_sha256: string | null;
-  /** The UserNet it went on from (null: random weights). */
-  start: (NetworkStart & {stage: UserNetStage | null; uses_bdd: boolean}) | null;
-  parameters: number | null;
-  validation: UserNetNumbers | null;
-  test: UserNetNumbers | null;
-}
-
-export type ModelVersion = CutterModel | ClassifierModel | DeciderModel | BrainModel | UserNetModel;
+export type ModelVersion = CutterModel | ClassifierModel | DeciderModel | BrainModel;
 
 /** The model in use for a role (models/active.json of the data root). */
 export interface ActiveModel {
@@ -1882,7 +1812,7 @@ export interface TrainSetting {
 }
 /** What a training keeps as it is: what the car needs (the cutter's band, grid, channels, fuse). */
 export interface TrainFixed {label: string; value: string; help: string}
-export type TrainSettingsAction = 'train_cutter' | 'train_classifier' | 'train_decider' | 'train_brain' | 'train_users';
+export type TrainSettingsAction = 'train_cutter' | 'train_classifier' | 'train_decider' | 'train_brain';
 /** Why a second of a drive is out of the brain's speed loss (brain_targets.OUT_REASONS): no speed in the logs, below 1 km/h,
  * inside a block left out, at the edge of a block, no picture, a machine held the speed, no road type. */
 export type BrainOut = 'no_speed' | 'stopped' | 'left_out' | 'boundary' | 'no_frame' | 'cruise' | 'no_road_type';

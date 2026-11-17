@@ -2100,10 +2100,6 @@ def make_handler(app: ReviewApp):
                     # something else it must be refused, never dropped into a replay with the map.
                     options.update((key, body[key]) for key in ('set', 'certified', 'map')
                                    if isinstance(body, dict) and body.get(key) is not None)
-                    # UserNet's stage ({"stage": "bdd" | "drives"}), the same way: a stage sent as something else must be
-                    # refused, never dropped into a training on BDD100K.
-                    options.update((key, body[key]) for key in ('stage',)
-                                   if isinstance(body, dict) and body.get(key) is not None)
                     # The brain's number path ({"number_path": "bell" | "class"}, #104), the same way: sent as something
                     # else it must be refused, never dropped into a training of the other path.
                     options.update((key, body[key]) for key in ('number_path',)

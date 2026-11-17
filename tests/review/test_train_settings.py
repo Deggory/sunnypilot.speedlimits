@@ -20,7 +20,7 @@ REPO = Path(__file__).resolve().parents[2]
 
 def test_the_defaults_until_one_is_saved(tmp_path):
     view = train_settings.view(tmp_path)['trainings']
-    assert list(view) == ['train_cutter', 'train_classifier', 'train_decider', 'train_brain', 'train_users']
+    assert list(view) == ['train_cutter', 'train_classifier', 'train_decider', 'train_brain']
     classifier = {item['key']: item for item in view['train_classifier']['settings']}
     assert {key: item['value'] for key, item in classifier.items()} == {
         'epochs': 30, 'pretrain_epochs': 30, 'patience': 5, 'batch': 64, 'workers': train_settings.DEFAULT_WORKERS,
@@ -78,7 +78,7 @@ def test_the_first_stage_set_apart_from_the_epochs(tmp_path):
     {'training': 'train_cutter', 'values': {'workers': 33}}, {'training': 'train_cutter', 'values': {'seed': 1}},
     {'training': 'train_cutter', 'values': {'band': 960}}, {'training': 'train', 'values': {}},
     {'training': 'train_decider', 'values': {'patience': 5}}, {'training': 'train_road_type', 'values': {}},
-    {'values': {'epochs': 40}}, [],
+    {'training': 'train_users', 'values': {}}, {'values': {'epochs': 40}}, [],
 ])
 def test_a_wrong_value_is_refused_and_nothing_is_written(tmp_path, body):
     with pytest.raises(train_settings.SettingsError):
@@ -93,6 +93,24 @@ def test_a_value_spoiled_in_the_file_is_the_default(tmp_path):
     assert train_settings.environment(tmp_path, 'train_classifier') == {'NNSLR_CLASSIFIER_BATCH_SIZE': '8'}
     path.write_text('not json')
     assert train_settings.environment(tmp_path, 'train_classifier') == {}
+
+
+def test_the_settings_of_usernet_saved_before_are_left_aside(tmp_path):
+    """UserNet went on 17 Nov 2026 (#113): its settings in a train-settings.json of before are neither shown nor set,
+    a save of them is refused, and the next save of another training leaves them out."""
+    path = tmp_path / train_settings.SETTINGS_FILE
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({'trainings': {
+        'train_users': {'values': {'epochs': 12, 'batch': 8}, 'by': 'c', 'at': '2026-11-12T12:00:00+01:00'},
+        'train_classifier': {'values': {'batch': 8}, 'by': 'c', 'at': '2026-11-12T12:00:00+01:00'}}}))
+    assert list(train_settings.view(tmp_path)['trainings']) == list(train_settings.TRAININGS)
+    assert train_settings.environment(tmp_path, 'train_users') == {}
+    assert train_settings.environment(tmp_path, 'train_classifier') == {'NNSLR_CLASSIFIER_BATCH_SIZE': '8'}
+    with pytest.raises(train_settings.SettingsError):
+        train_settings.save(tmp_path, {'training': 'train_users', 'values': {'epochs': 20}}, 'c')
+    train_settings.save(tmp_path, {'training': 'train_decider', 'values': {'epochs': 30}}, 'c')
+    stored = json.loads(path.read_text())['trainings']
+    assert set(stored) == {'train_classifier', 'train_decider'} and stored['train_classifier']['values'] == {'batch': 8}
 
 
 def _script_default(script: str, env: str) -> str:
@@ -176,6 +194,24 @@ def test_over_http(tmp_path):
         assert status == 403 and json_of(data)['error'] == 'actions_disabled'
         assert train_settings.values(tmp_path, 'train_decider')['epochs'] == 80
         assert not json_of(server.request('GET', '/api/panel/train-settings')[2])['can_edit']
+    finally:
+        server.close()
+
+
+def test_a_page_of_before_cannot_train_usernet_over_http(tmp_path):
+    """A page loaded before 17 Nov 2026 (#113) still shows Train › UserNet: its training is an unknown action and its
+    settings an unknown training, both refused with a clear answer, and nothing starts or is written."""
+    from review_helpers import RunningServer, json_of
+
+    server = RunningServer(tmp_path)
+    try:
+        status, _, data = server.request('POST', '/api/panel/run/train_users', body={'stage': 'bdd', 'start': 'fresh'})
+        assert status == 404 and json_of(data)['error'] == 'unknown_action'
+        assert server.app.panel.jobs([]) == []
+        status, _, data = server.request('POST', '/api/panel/train-settings',
+                                         body={'training': 'train_users', 'values': {'epochs': 30}})
+        assert status == 400 and json_of(data)['error'] == 'invalid_settings'
+        assert not (tmp_path / train_settings.SETTINGS_FILE).exists()
     finally:
         server.close()
 

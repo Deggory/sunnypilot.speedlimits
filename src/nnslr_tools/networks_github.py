@@ -4,7 +4,7 @@ Face. Models › Publish › GitHub: **Save on GitHub** (scripts/save_networks_g
 (scripts/restore_networks_github.sh).
 
 What a save copies, each version once (it stays in the repository afterwards; git keeps every change of a file):
-- the networks in use (models/active.json: cutter, classifier, applicability, brain, UserNet), those on the car
+- the networks in use (models/active.json: cutter, classifier, applicability, brain), those on the car
   (models/on-car.json) and the sign networks each saved brain read its signs with (its result.json's sign_networks),
   each with the files the Models tab reads to show it and a training's Start from reads: its PyTorch weights and its
   result.json, the classifier's test reports, every variant of an applicability run, a brain's routes.json and its
@@ -169,7 +169,7 @@ def _version_files(root: Path, model_id: str) -> dict | None:
     """The files of a version (relative to the data root): {'role', 'run', 'required', 'optional', 'needs' (the ids it
     depends on: a brain's sign networks), 'siblings' (the other variants of an applicability run), 'sets' (the folders
     of a brain's sign networks)}; None for an id that is not one."""
-    from nnslr_tools.model_roles import EXPERIMENT_DIR, MODEL_ID, SIGNNET_PART, USERNET_WEIGHTS
+    from nnslr_tools.model_roles import EXPERIMENT_DIR, MODEL_ID, SIGNNET_PART
     from nnslr_tools.runs import VARIANTS
 
     match = MODEL_ID.fullmatch(model_id) if isinstance(model_id, str) else None
@@ -221,8 +221,6 @@ def _version_files(root: Path, model_id: str) -> dict | None:
             found['needs'] = list(ids.values())
             if all(ids.get(part_name) for part_name in sign_networks.PARTS):
                 found['sets'] = [sign_networks.set_key(ids)]
-    elif role == 'users':
-        found['required'] = [base + USERNET_WEIGHTS, base + 'result.json']
     else:
         return None
     return found

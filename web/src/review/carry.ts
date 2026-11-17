@@ -264,16 +264,20 @@ async function applyFrom(way: CarryWay, repeat = false): Promise<void> {
     // with a plate, so it stays to check, and A again stops on it (confirmFrame, blockUnchecked).
     for (const d of work.detections) if (d.supplementary_panel !== 'distance') delete d.check_position;
     const plateLeft = uncheckedIndices(work);
+    // Road users of the frame carried from stay there, never carried (#113): said even when nothing is left to check.
+    const users = answer.road_users ?? 0;
+    const usersLeft = users > 0 ? users + (users === 1 ? ' road user' : ' road users')
+      + ' left on the frame carried from: road users are no longer boxed.' : '';
     if (plateLeft.length > 0) {
       state.selected = plateLeft[0]!;
       state.selectedByUser = true;
-      state.notice = {key, text: (plateLeft.length === 1 ? 'Box ' : 'Boxes ') + plateLeft.map((i) => i + 1).join(', ')
-        + ', a sign with a distance plate, to check: draw ' + (plateLeft.length === 1 ? 'it' : 'each')
-        + ' over the sign and the plate, then press “Here”.', error: false, warn: true};
+      state.notice = {key, text: (usersLeft ? usersLeft + ' ' : '') + (plateLeft.length === 1 ? 'Box ' : 'Boxes ')
+        + plateLeft.map((i) => i + 1).join(', ') + ', a sign with a distance plate, to check: draw '
+        + (plateLeft.length === 1 ? 'it' : 'each') + ' over the sign and the plate, then press “Here”.', error: false, warn: true};
       void nextTick(revealEditor);
     } else {
       if (state.selected < 0 || state.selected >= work.detections.length) state.selected = work.detections.length > 0 ? 0 : -1;
-      state.notice = null;
+      state.notice = usersLeft ? {key, text: usersLeft, error: false, warn: true} : null;
     }
     carried.value = key;
     carriedWay.value = way;

@@ -11,7 +11,7 @@ import pytest
 
 from nnslr_tools.gps import (DETAILED_BORDERS, GpsError, country_names, country_of, frame_country, frame_position,
                              positions_path, recountry_positions)
-from nnslr_tools.sign_types import SIGN_TYPES
+from nnslr_tools.sign_types import BOXED_SIGN_TYPES, ROAD_USERS
 from review_helpers import ROUTE, RUN_ID, TOKEN, RunningServer, json_of, make_report, page_body
 
 CATALOG = Path(__file__).resolve().parents[2] / 'web/src/review/catalog.ts'
@@ -103,7 +103,11 @@ def test_the_position_of_a_frame_is_the_nearest_fix():
 def test_the_page_offers_the_kinds_of_the_server():
     text = CATALOG.read_text()
     block = text[text.index('export const SIGN_KIND_GROUPS'):text.index('export function signKindOf')]
-    assert sorted(re.findall(r"\{id: '([a-z_]+)', label:", block)) == sorted(SIGN_TYPES)
+    assert sorted(re.findall(r"\{id: '([a-z_]+)', label:", block)) == sorted(BOXED_SIGN_TYPES)
+    # The road users are no longer offered (#113): their names only, for the boxes saved before.
+    names = text[text.index('const ROAD_USER_NAMES'):]
+    names = names[:names.index('];')]
+    assert sorted(re.findall(r"\{id: '([a-z_]+)', label:", names)) == sorted(ROAD_USERS)
 
 
 @pytest.fixture
@@ -307,13 +311,15 @@ def test_a_plate_of_distance_and_its_metres_reach_the_dataset(server, tmp_path):
                                      plate_distance_m=metres)
         status, response, data = running.post_frame(ROUTE, '0/2', body)
         assert status == 400 and json_of(data)['error'] == 'invalid_plate_distance', (panel, metres)
-    for refused in ({'family': 'not_a_sign', 'value_kph': None},
-                    {'family': 'other_sign', 'value_kph': None, 'sign_type': 'road_user_person'}):
-        body = page_body(rows['0/2'])
-        body['detections'][0].update(refused, supplementary_panel='distance')
-        status, response, data = running.post_frame(ROUTE, '0/2', body)
-        assert status == 400 and json_of(data)['error'] == 'invalid_supplementary_panel', refused
-        assert 'only for signs' in json_of(data)['message']
+    body = page_body(rows['0/2'])
+    body['detections'][0].update(family='not_a_sign', value_kph=None, supplementary_panel='distance')
+    status, response, data = running.post_frame(ROUTE, '0/2', body)
+    assert status == 400 and json_of(data)['error'] == 'invalid_supplementary_panel'
+    assert 'only for signs' in json_of(data)['message']
+    # A road user is refused before its plate: road users are no longer boxed (#113).
+    body['detections'][0].update(family='other_sign', sign_type='road_user_person')
+    status, response, data = running.post_frame(ROUTE, '0/2', body)
+    assert status == 400 and json_of(data)['error'] == 'invalid_sign_type'
 
 
 def test_a_proposal_of_hours_moved_to_another_plate_saves_without_its_hours(tmp_path, monkeypatch):

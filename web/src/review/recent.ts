@@ -6,7 +6,7 @@
 //     model made it.
 //   - Nearest first: the other boxes of the frame on screen, the frames before it, then the ones after.
 import {originalOf} from './boxes';
-import {ROADS, PANELS, describe, familyHasValue, shortName, signKindOf} from './catalog';
+import {ROADS, PANELS, describe, familyHasValue, isRoadUser, shortName, signKindOf} from './catalog';
 import {isConfirmed} from './frames';
 import {anchorIndex, indexOf, isVirtual, report, state} from './store';
 import type {Detection, FrameRow} from './types';
@@ -74,13 +74,14 @@ function recentOf(label: Label): Recent {
   return {key: labelKey(label), disc, text: parts.join(' · '), title, label};
 }
 
-/** The boxes of a frame labelled by a reviewer, but the one left out (the selected box of the frame on screen). */
+/** The boxes of a frame labelled by a reviewer, but the one left out (the selected box of the frame on screen) and a
+ * road user's, saved before #113: that kind is no longer given. */
 function labelled(row: FrameRow, skip: number): Detection[] {
   const work = state.edits[row.frame_key];
   if (!work) return [];
   const confirmed = isConfirmed(row.frame_key);
   return work.detections.filter((d, i) => {
-    if (i === skip || !d.family) return false;
+    if (i === skip || !d.family || isRoadUser(d)) return false;
     if (confirmed) return true;
     const original = originalOf(row, d);
     return original === null || labelKey(labelOf(original)) !== labelKey(labelOf(d));

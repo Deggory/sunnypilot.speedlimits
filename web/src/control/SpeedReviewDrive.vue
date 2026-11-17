@@ -58,7 +58,7 @@ import {clockOf, type ScanState, secondOf as frameSecondOf, type SyncSegment} fr
 import DriveReviewDrive from './DriveReviewDrive.vue';
 import {networksText, PROPOSER_LABELS} from './proposer-words';
 import Segmented from './Segmented.vue';
-import {aiRuns, isAiFrame, isOtherRoad, isSpeedSign, lastRead, lightOf, type MarkRun, markRuns, nearestFrame, type OffRead, offReads, placeFrames, roadUserOf, type SignFrames, signReads, signRuns,
+import {aiRuns, isAiFrame, isOtherRoad, isSpeedSign, lastRead, lightOf, type MarkRun, markRuns, nearestFrame, type OffRead, offReads, placeFrames, type SignFrames, signReads, signRuns,
   stepFrame} from './sign-frames';
 import {boxesAt, type Drawn, exactFrames, type VideoFrame, type VideoIndex} from './frame-boxes';
 import {type Block, blockAt, canEndWorks, clampKph, draggedEdge, heldAt, MIN_BLOCK_NS, ROAD_TYPE_LABELS, ROADWORKS, type RoadKind,
@@ -565,15 +565,13 @@ function goAi(step: -1 | 1): void {
   const frame = index >= 0 ? aiFrames.value[index] : undefined;
   if (frame) goSign(frame.at);
 }
-/** The traffic lights and the road users of the confirmed frames, each on a lane of its own under the signs: a run per
- * stretch with the same light (the red first) or the same kind of road user (a pedestrian first), a tap goes to it. */
+/** The traffic lights of the confirmed frames, on a lane of their own under the signs: a run per stretch with the same
+ * light (the red first), a tap goes to it. */
 const lightRuns = computed(() => markRuns(placed.value, lightOf));
-const userRuns = computed(() => markRuns(placed.value, roadUserOf));
 const MARK_HEIGHT = 14;
 const MARK_WORDS: Record<string, string> = {
   traffic_light_red: 'Red light', traffic_light_amber: 'Amber light', traffic_light_green: 'Green light',
-  traffic_light_off: 'Light off', road_user_person: 'Pedestrian', road_user_bicycle: 'Bicycle',
-  road_user_motorcycle: 'Motorcycle', road_user_other: 'Other road user',
+  traffic_light_off: 'Light off',
 };
 const marksIn = (runs: readonly MarkRun[], from: number, to: number): MarkRun[] => runs.filter((run) => run.to >= from && run.from <= to);
 const markTitle = (run: MarkRun): string => (MARK_WORDS[run.kind] ?? run.kind) + ' · '
@@ -1132,14 +1130,6 @@ function worksIn(from: number, to: number) {
         <span class="dr-lane-name">Lights<small>review</small></span>
         <svg :width="width" :height="MARK_HEIGHT" :viewBox="`0 0 ${width} ${MARK_HEIGHT}`" aria-hidden="true">
           <rect v-for="run in marksIn(lightRuns, from, to)" :key="run.kind + run.from" :x="x(run.from) - 1" y="2"
-                :width="Math.max(3, w(run.from, run.to) + 2)" :height="MARK_HEIGHT - 4" rx="2" :class="['sr-mark', run.kind]"
-                @pointerdown.stop="goSign(run.from)"><title>{{ markTitle(run) }}</title></rect>
-        </svg>
-      </div>
-      <div v-if="userRuns.length" class="dr-lane sr-mark-lane" title="Pedestrians, bicycles, motorcycles on the confirmed frames (cars, trucks and buses left out); a tap goes to the frame">
-        <span class="dr-lane-name">Road users<small>review</small></span>
-        <svg :width="width" :height="MARK_HEIGHT" :viewBox="`0 0 ${width} ${MARK_HEIGHT}`" aria-hidden="true">
-          <rect v-for="run in marksIn(userRuns, from, to)" :key="run.kind + run.from" :x="x(run.from) - 1" y="2"
                 :width="Math.max(3, w(run.from, run.to) + 2)" :height="MARK_HEIGHT - 4" rx="2" :class="['sr-mark', run.kind]"
                 @pointerdown.stop="goSign(run.from)"><title>{{ markTitle(run) }}</title></rect>
         </svg>

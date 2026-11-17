@@ -171,7 +171,7 @@ def test_off_displays_are_ignore_boxes_of_the_detector_plan(tmp_path, capsys):
     assert all(frame["ignore_boxes"] == [] for route, frame in by_route.items() if route != "00000001")
 
 
-def test_a_road_user_is_an_ignore_box_of_the_detector_plan_and_a_class_of_the_classifier(tmp_path, capsys):
+def test_a_road_user_boxed_before_113_is_an_ignore_box_of_the_detector_plan_and_no_class_of_the_classifier(tmp_path, capsys):
     from nnslr_tools.sign_types import ROAD_USERS, is_road_user
     from nnslr_tools.training import ELIGIBLE_REVIEW_STATES, _classifier_label
     assert 'road_user_person' in ROAD_USERS and 'road_user_car' in ROAD_USERS and 'give_way' not in ROAD_USERS
@@ -191,18 +191,18 @@ def test_a_road_user_is_an_ignore_box_of_the_detector_plan_and_a_class_of_the_cl
     assert code == 0, out.err + out.out
     plan = prepare_detector_training(tmp_path / "annotations" / "objects.jsonl", tmp_path / "splits" / "latest.json", tmp_path)
     by_route = {frame["route_id"][:8]: frame for frame in plan["frames"]}
-    # The cutter does not learn road users yet: neither a sign to find nor background.
+    # The cutter does not learn road users: neither a sign to find nor background.
     assert by_route["00000001"]["boxes"] == [] and by_route["00000001"]["ignore_boxes"] == [[1, 2, 15, 20]]
     assert sum(plan["ignore_boxes_by_split"].values()) == 1 and sum(plan["boxes_by_split"].values()) == 5
-    # The classifier names it as any other kind.
+    # The classifier leaves it out: road users are no longer boxed (#113), so no class learns them.
     car = {"sign_family": "other_sign", "sign_type": "road_user_car", "bbox_xyxy": [1, 2, 15, 20],
            "review_state": sorted(ELIGIBLE_REVIEW_STATES)[0]}
-    assert _classifier_label(car) == "other_sign:road_user_car"
+    assert _classifier_label(car) is None
 
 
-def test_a_frame_ticked_road_users_complete_says_so_in_the_training_frames(tmp_path, capsys):
-    """"Road users complete" (the tick of Sign review): every frame export says it, false on every other frame; the
-    cutter's plan is otherwise the same (the road user an ignore box)."""
+def test_a_frame_ticked_road_users_complete_before_113_still_imports_and_nothing_reads_the_tick(tmp_path, capsys):
+    """"Road users complete", the tick of Sign review from 12 to 17 Nov 2026, went with UserNet (#113): a frame saved
+    with it still imports with it on its rows, and the cutter's plan and the training frames no longer carry it."""
     from nnslr_tools.training import reviewed_frames
     rows = []
     for index in range(6):
@@ -220,16 +220,13 @@ def test_a_frame_ticked_road_users_complete_says_so_in_the_training_frames(tmp_p
     assert code == 0, out.err + out.out
     dataset = load_jsonl(tmp_path / "annotations" / "objects.jsonl")
     assert {row["route_id"][:8] for row in dataset if row.get("users_complete") is True} == {"00000001", "00000002"}
-    assert all("users_complete" not in row for row in dataset if row["route_id"][:8] not in ("00000001", "00000002"))
     plan = prepare_detector_training(tmp_path / "annotations" / "objects.jsonl", tmp_path / "splits" / "latest.json", tmp_path)
     by_route = {frame["route_id"][:8]: frame for frame in plan["frames"]}
-    assert by_route["00000001"]["users_complete"] is True and by_route["00000001"]["ignore_boxes"] == [[1, 2, 15, 20]]
-    assert by_route["00000001"]["boxes"] == []
-    assert by_route["00000002"]["users_complete"] is True and by_route["00000002"]["explicit_negative"] is True
-    assert all(frame["users_complete"] is False for route, frame in by_route.items() if route not in ("00000001", "00000002"))
+    assert by_route["00000001"]["ignore_boxes"] == [[1, 2, 15, 20]] and by_route["00000001"]["boxes"] == []
+    assert by_route["00000002"]["explicit_negative"] is True
+    assert all("users_complete" not in frame for frame in plan["frames"])
     frames = reviewed_frames(dataset, {row["annotation_id"]: "train" for row in dataset})
-    assert {frame["route_id"][:8] for frame in frames if frame["users_complete"]} == {"00000001", "00000002"}
-    assert sum(1 for frame in frames if frame["users_complete"] is False) == 4
+    assert len(frames) == 6 and all("users_complete" not in frame for frame in frames)
 
 
 def test_prepare_detector_training_groups_full_frames_without_torch(tmp_path, capsys):

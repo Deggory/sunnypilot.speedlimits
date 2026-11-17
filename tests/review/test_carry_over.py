@@ -537,17 +537,26 @@ def test_a_plate_of_distance_is_never_replaced_by_the_hours_or_wet_read_here():
     assert (carried['supplementary_panel'], carried['plate_hours']) == ('time', '22-6')
 
 
-def test_metres_leave_with_the_plate_of_distance_and_a_road_user_has_none():
+def test_metres_leave_with_the_plate_of_distance():
     old = confirmed(tall_at(900, 315, 30), family='maximum_speed', value=30, supplementary_panel='time',
                     plate_distance_m=15)
     tall = proposal(tall_at(958, 308, 36), 'p', 'maximum_speed', 30)
     (carried,) = carry_over([old], [tall], width=W, height=H, source_key='1/2', proposals=[tall])['detections']
     assert carried['supplementary_panel'] == 'time' and 'plate_distance_m' not in carried
-    old = confirmed(tall_at(900, 315, 30), family='other_sign', value=None, sign_type='road_user_person',
-                    supplementary_panel='distance', plate_distance_m=15)
+
+
+def test_a_road_user_saved_before_113_is_never_carried():
+    """Road users are no longer boxed (17 Nov 2026, #113): a road user's box of the previous frame stays there, counted,
+    and the proposal under it is left as it is."""
+    old = confirmed(tall_at(900, 315, 30), family='other_sign', value=None, sign_type='road_user_person')
     tall = proposal(tall_at(958, 308, 36), 'p')
-    (carried,) = carry_over([old], [tall], width=W, height=H, source_key='1/2', proposals=[tall])['detections']
-    assert carried['supplementary_panel'] == 'unknown' and 'plate_distance_m' not in carried
+    result = carry_over([old], [tall], width=W, height=H, source_key='1/2', proposals=[tall])
+    assert result['detections'] == [tall] and result['road_users'] == 1 and result['matched'] == 0
+    # Beside a sign, only the sign goes.
+    sign = confirmed(box_at(400, 315, 30), family='maximum_speed', value=50)
+    result = carry_over([old, sign], [], width=W, height=H, source_key='1/2', proposals=[])
+    assert [d['family'] for d in result['detections']] == ['maximum_speed'] and result['road_users'] == 1
+    assert carry_over([sign], [], width=W, height=H, source_key='1/2', proposals=[])['road_users'] == 0
 
 
 def test_hours_read_here_stay_on_a_sign_confirmed_without_them():

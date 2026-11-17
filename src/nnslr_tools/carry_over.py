@@ -29,7 +29,7 @@ from __future__ import annotations
 import copy
 import math
 
-from nnslr_tools.sign_types import distance_panel_problem, holds_distance, holds_hours, holds_plate
+from nnslr_tools.sign_types import ROAD_USERS, distance_panel_problem, holds_distance, holds_hours, holds_plate
 
 # Where the road runs to, as a fraction of width and height: signs move away from it as they come
 # closer (median of the confirmed pairs: x 0.52, y 0.53).
@@ -252,8 +252,10 @@ def carry_over(previous: list, current: list, *, width: float, height: float, so
     proposals of this frame, to tell boxes the reviewer changed (kept as they are) from the others. ``follow``:
     ``follow(old box, expected box)`` gives where a sign found on no box of this frame is in its picture, or None
     (:func:`nnslr_tools.carry_track.follow` on the two pictures); a box placed there needs no check.
-    Returns {'detections', 'matched', 'estimated', 'followed', 'dropped', 'kept'}; a carried box has
-    ``carried_from`` (the previous frame key) and, when its position is a guess, ``check_position``.
+    Returns {'detections', 'matched', 'estimated', 'followed', 'dropped', 'kept', 'duplicates', 'road_users'}; a
+    carried box has ``carried_from`` (the previous frame key) and, when its position is a guess, ``check_position``.
+    ``road_users``: the boxes of a road user on the previous frame, saved before 17 Nov 2026, left behind: road users
+    are no longer boxed (#113) and a save with one is refused.
     ``backward``: ``previous`` holds the boxes of a frame confirmed after this one (Shift+A, Apply next, #105).
     """
     unit = width / 1344 if width else 1.0
@@ -264,6 +266,8 @@ def carry_over(previous: list, current: list, *, width: float, height: float, so
             by_id[item['detection_id']] = item
     result = [copy.deepcopy(item) for item in current if isinstance(item, dict)]
     olds = [item for item in previous if isinstance(item, dict) and _box(item) is not None]
+    road_users = sum(1 for item in olds if _road_user(item))
+    olds = [item for item in olds if not _road_user(item)]
     taken_old = match_boxes(olds, result, width=width, height=height, backward=backward)
 
     matched = 0
@@ -351,7 +355,12 @@ def carry_over(previous: list, current: list, *, width: float, height: float, so
     for j in reversed(duplicates):
         del result[j]
     return {'detections': result, 'matched': matched, 'estimated': estimated, 'followed': followed, 'dropped': dropped,
-            'kept': kept, 'duplicates': len(duplicates)}
+            'kept': kept, 'duplicates': len(duplicates), 'road_users': road_users}
+
+
+def _road_user(box: dict) -> bool:
+    """Whether a review box is a road user (saved before 17 Nov 2026, #113)."""
+    return box.get('family') == 'other_sign' and box.get('sign_type') in ROAD_USERS
 
 
 def _carry(target: dict, old: dict, source_key: str, height: float) -> bool:

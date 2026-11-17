@@ -30,7 +30,7 @@ from pathlib import Path
 
 from nnslr_tools.review_db import BOX_SOURCES, ReviewRejected
 from nnslr_tools.review_service import DETECTION_FAMILIES, review_schema
-from nnslr_tools.sign_types import NOT_A_SIGN_TYPES, SIGN_TYPES
+from nnslr_tools.sign_types import BOXED_SIGN_TYPES, NOT_A_SIGN_TYPES
 
 SERVER_NAME = 'nnslr-review'
 # Neighbour images that get_frame_context attaches at most, to keep answers small.
@@ -127,13 +127,12 @@ class ReviewTools:
 
     def save_frame_review(self, route_id, frame_key, *, run_id, base_revision, reviewer, detections,
                           confirmed=True, site_group=None, encounter_id=None, override_human_review=False,
-                          country=None, users_complete=False) -> dict:
+                          country=None) -> dict:
         if self.read_only:
             raise ReviewRejected(403, 'read_only', 'Read-only MCP server: saving is disabled.')
         body = {'run_id': run_id, 'base_revision': base_revision, 'reviewer': reviewer, 'reviewer_kind': 'ai',
                 'confirmed': confirmed, 'detections': detections, 'site_group': site_group,
-                'encounter_id': encounter_id, 'override_human_review': override_human_review,
-                'users_complete': users_complete}
+                'encounter_id': encounter_id, 'override_human_review': override_human_review}
         # Omitted: the country the GPS position of the frame gives.
         if country is not None:
             body['country'] = country
@@ -267,7 +266,7 @@ def build_server(service, *, client: str, read_only: bool = False):
         plate_distance_m: StrictInt | None
         temporary: bool | None
         variable_display: bool | None
-        sign_type: Literal[SIGN_TYPES + NOT_A_SIGN_TYPES] | None
+        sign_type: Literal[BOXED_SIGN_TYPES + NOT_A_SIGN_TYPES] | None
         painted: bool | None
         notes: str
         # From apply_previous_frame: a save refuses check_position true (look, fix the box, drop the flag).
@@ -380,6 +379,7 @@ def build_server(service, *, client: str, read_only: bool = False):
         dropped: int
         kept: int
         duplicates: int
+        road_users: int
         to_check: list[int]
         message: str
         save: dict[str, Any]
@@ -396,9 +396,10 @@ def build_server(service, *, client: str, read_only: bool = False):
         frame that is the same sign (moved and grown) takes the previous labels; a sign not found here gets a
         box where it should be, with check_position true: look at the image, fix its bbox_xyxy or drop it if
         the sign is gone, and remove check_position before save_frame_review (which refuses it otherwise).
-        Check every carried value in this image too. 409 previous_not_confirmed: no frame before it is confirmed,
-        confirm one first. direction "next" is the same from the first frame confirmed after this one (this minute or
-        the one after; 409 next_not_confirmed when none is)."""
+        Check every carried value in this image too. A road user's box of the previous frame stays there
+        (road_users counts them): road users are no longer boxed. 409 previous_not_confirmed: no frame before it is
+        confirmed, confirm one first. direction "next" is the same from the first frame confirmed after this one
+        (this minute or the one after; 409 next_not_confirmed when none is)."""
         return call(tools.apply_previous_frame, route_id, frame_key, detections, direction)
 
     @server.tool(annotations=reading)
@@ -428,10 +429,6 @@ def build_server(service, *, client: str, read_only: bool = False):
                 country: Annotated[str | None, Field(pattern='^[A-Z]{2}$', description=(
                     'ISO code of the country of the frame ("CH", "IT", "PL"); omit to keep country_proposed, '
                     'from the GPS position of the frame.'))] = None,
-                users_complete: Annotated[bool, Field(description=(
-                    '"Road users complete": true only when every road user from the size rule has its box on '
-                    'this frame (each person and two-wheeler at least 24 px tall, each vehicle at least 40 px '
-                    'tall, in pixels of the original image). Not carried by apply_previous_frame.'))] = False,
                 override_human_review: Annotated[bool, Field(description='Change a frame confirmed by a human: '
                                                                          'only when the owner asked for it.')] = False,
         ) -> SaveResult:
@@ -441,8 +438,7 @@ def build_server(service, *, client: str, read_only: bool = False):
             report was rebuilt: read it again."""
             return call(tools.save_frame_review, route_id, frame_key, run_id=run_id, base_revision=base_revision,
                         reviewer=reviewer, detections=detections, confirmed=confirmed, site_group=site_group,
-                        encounter_id=encounter_id, override_human_review=override_human_review, country=country,
-                        users_complete=users_complete)
+                        encounter_id=encounter_id, override_human_review=override_human_review, country=country)
 
     return server
 

@@ -149,6 +149,45 @@ def test_a_box_with_its_plate_of_distance_keeps_its_place_and_its_metres():
     assert changed['supplementary_panel'] == 'unknown' and 'plate_distance_m' not in changed
 
 
+def test_the_prompt_offers_no_road_user():
+    """Road users are no longer boxed (17 Nov 2026, #113): the model is never asked for one."""
+    from nnslr_tools.sign_types import BOXED_SIGN_TYPES, ROAD_USERS
+    assert re.search(r'road[ _]users?', ai_review.SYSTEM_PROMPT, re.IGNORECASE) is None
+    assert ', '.join(BOXED_SIGN_TYPES) in ai_review.SYSTEM_PROMPT
+    assert not any(kind in ai_review.SYSTEM_PROMPT for kind in ROAD_USERS)
+
+
+def test_a_road_user_of_the_model_is_left_out_with_a_warning():
+    result = suggest({'boxes': [{'n': 1, 'verdict': 'keep'},
+                                {'n': 2, 'verdict': 'correct', 'family': 'other_sign', 'sign_type': 'road_user_car'}],
+                      'added': [{'box': [500, 500, 600, 700], 'family': 'other_sign', 'sign_type': 'road_user_person'},
+                                {'box': [700, 500, 800, 700], 'family': 'other_sign', 'sign_type': 'stop'}]})
+    assert [(d['detection_id'], d['family'], d.get('sign_type')) for d in result['detections']] == [
+        ('a', 'maximum_speed', None), ('ai-1', 'other_sign', 'stop')]
+    assert result['warnings'] == [
+        'box 2: a road user (road_user_car), left out: road users are no longer boxed (#113)',
+        'added box 1: a road user (road_user_person), left out: road users are no longer boxed (#113)']
+    assert result['complete'] is True
+
+
+def test_a_road_user_box_on_the_frame_is_never_sent(site, tmp_path):
+    """A box of a road user saved before #113, on the page or in the proposals: left out of what the model sees and
+    of the suggestion, with a warning, so that the suggestion saves."""
+    service, rows = site
+    edits = [{'bbox_xyxy': [0, 0, 16, 24], 'family': 'other_sign', 'sign_type': 'road_user_bicycle'},
+             {'bbox_xyxy': [16, 0, 32, 24], 'family': 'other_sign', 'sign_type': 'give_way'}]
+    answer = answer_json(boxes=[{'n': 1, 'verdict': 'keep'}])
+    with FakeLlm(answer) as fake:
+        provider = fake_provider(tmp_path, fake)
+        result = ai_review.suggest_frame(service, ROUTE, '0/1', provider, detections=edits)
+    text = frame_text(fake.requests[0])
+    assert '1. [500,0,1000,1000] other_sign give_way, unresolved' in text and 'road_user' not in text
+    assert '2. ' not in text.split('Boxes already on this frame, numbered:')[1].split('\n\n')[0]
+    assert [d.get('sign_type') for d in result['detections']] == ['give_way'] and result['complete'] is True
+    assert result['warnings'][0] == ('a box of a road user (road_user_bicycle) on the frame, left out: road users are '
+                                     'no longer boxed (#113)')
+
+
 def test_scale_of_the_coordinates_is_detected():
     unit = suggest({'added': [{'box': [0.1, 0.2, 0.3, 0.4], 'family': 'other_sign'}]}, [], 1164, 874)
     assert unit['detections'][0]['bbox_xyxy'] == [116.4, 174.8, 349.2, 349.6]

@@ -46,12 +46,11 @@ const plateNote = computed(() => props.detection === null || !holdsPlate(props.d
 const asksDistance = computed(() => panel.value === 'distance');
 const metresError = ref(false);
 watch(() => [props.row.frame_key, state.selected], () => { metresError.value = false; });
-// O X U, G P R E M and the road users W Y K on a keyboard (use-keyboard.ts).
+// O X U and G P R E M on a keyboard (use-keyboard.ts).
 const ROAD_KEYS: Record<string, string> = {own_road: 'O', other_road: 'X', unresolved: 'U'};
 /** The traffic lights, the kind given most, are LightChips.vue; the other kinds under Type. */
 const KIND_GROUPS = SIGN_KIND_GROUPS.filter((group) => group.label !== 'Traffic light');
-const KIND_KEYS: Record<string, string> = {give_way: 'G', stop: 'P', roundabout: 'R', other: 'E', main_road: 'M',
-  road_user_person: 'W', road_user_bicycle: 'Y', road_user_car: 'K'};
+const KIND_KEYS: Record<string, string> = {give_way: 'G', stop: 'P', roundabout: 'R', other: 'E', main_road: 'M'};
 const canFit = computed(() => props.detection !== null && aiBlocker() === '');
 const fittingThis = computed(() => fitting.key === props.row.frame_key && fitting.index === state.selected);
 const canFitHere = computed(() => props.detection !== null && canFitLocally());

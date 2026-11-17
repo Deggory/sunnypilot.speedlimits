@@ -59,13 +59,6 @@ SIGNNET_TWO_STAGE_STEPS = (
     ('signnet', 'Train on our drives', 45),
     SIGNNET_STEPS[2],
 )
-# scripts/run_usernet.sh: UserNet, the road users' detector (one stage a run: BDD100K or our drives), then its best epoch
-# measured on validation and test ("usernet measure the best epoch ..."), until "UserNet complete: <run>".
-USERNET_STEPS = (
-    ('checks', 'Checks and GPU smoke test', 5),
-    ('usernet', 'Train UserNet', 85),
-    ('evaluate', 'Measure on validation and test', 10),
-)
 # The old cutter, scripts/run_detector_sizes.sh with one size: a detector trained as the cutter, then measured on test
 # and validation (the jobs of the history before SignNet; chosen by the log, see is_signnet).
 CUTTER_STEPS = (
@@ -178,7 +171,7 @@ AI_MEASURE_STEPS = (('measure', 'Measure the AI reviewer', 100),)
 STEPS = {'fetch': FETCH_STEPS, 'prepare': PREPARE_STEPS, 'dataset': DATASET_STEPS, 'train': TRAIN_STEPS,
          'train_continue': TRAIN_STEPS, 'train_resume': TRAIN_STEPS, 'train_classifier': CLASSIFIER_STEPS,
          'train_cutter': CUTTER_STEPS, 'train_decider': DECIDER_STEPS,
-         'train_brain': BRAIN_STEPS, 'train_users': USERNET_STEPS, 'regression': REGRESSION_STEPS,
+         'train_brain': BRAIN_STEPS, 'regression': REGRESSION_STEPS,
          'simulate': SIMULATE_STEPS, 'update': UPDATE_STEPS,
          'ai_review': AI_REVIEW_STEPS,
          'measure_ai_reviewer': AI_MEASURE_STEPS, 'networks_prepare': NETWORKS_PREPARE_STEPS,
@@ -189,7 +182,7 @@ STEPS = {'fetch': FETCH_STEPS, 'prepare': PREPARE_STEPS, 'dataset': DATASET_STEP
          'networks_github_restore': GITHUB_RESTORE_STEPS}
 # The actions whose percent is the weighted sum of their steps (the AI's: its frames done, from its reports).
 WEIGHTED = ('train', 'train_continue', 'train_resume', 'train_classifier', 'train_cutter', 'train_decider',
-            'train_brain', 'train_users', 'regression', 'simulate', 'dataset', 'ai_review',
+            'train_brain', 'regression', 'simulate', 'dataset', 'ai_review',
             'measure_ai_reviewer', 'networks_prepare', 'networks_publish', 'road_types', 'send_to_car',
             'try_on_comma', 'comma_restore', 'road_labeler_train', 'road_labeler_predict',
             'box_fit_train', 'networks_github_save', 'networks_github_restore')
@@ -211,7 +204,6 @@ DECIDER_PIPELINE = {1: 'checks', 2: 'checks', 3: 'experiment_b_crop', 4: 'experi
 SUBSTEPS = {'train_classifier': (7, CLASSIFIER_PIPELINE), 'train_cutter': (None, CUTTER_PIPELINE),
             'train_decider': (5, DECIDER_PIPELINE),
             'train_brain': (6, BRAIN_PIPELINE_SIX),
-            'train_users': (3, {1: 'checks', 2: 'checks', 3: 'usernet'}),
             'regression': (3, {1: 'openpilot', 2: 'signs', 3: 'brains'}),
             'simulate': (2, {1: 'networks', 2: 'replay'}),
             'networks_prepare': (4, {1: 'cutter', 2: 'classifier', 3: 'decider', 4: 'package'}),
@@ -229,9 +221,6 @@ SIGNNET_PIPELINE = {1: 'checks', 2: 'checks', 3: 'signnet'}
 SIGNNET_LOG = re.compile(r'^(?:== scripts/run_signnet\.sh |== \d+/\d+ Train SignNet\b|signnet epoch \d)', re.M)
 SIGNNET_MEASURE = re.compile(r'^signnet measure the best epoch\b')
 SIGNNET_COMPLETE = re.compile(r'^SignNet complete: ')
-# The same two lines of scripts/run_usernet.sh (nnslr_tools.usernet.train_usernet).
-USERNET_MEASURE = re.compile(r'^usernet measure the best epoch\b')
-USERNET_COMPLETE = re.compile(r'^UserNet complete: ')
 MARKERS = (
     (re.compile(r'^== a\+b\. '), 'gpu_env', ('import', 'split')),
     (re.compile(r'^== a\. (?:importing|importo)'), 'import', ()),
@@ -271,7 +260,7 @@ SUBSTEP = re.compile(r'^== (\d+)/(\d+) ')
 REGRESSION_ITEM = re.compile(r'^regression item (\w+) (\d+)/(\d+)(?: (\S+))?')
 REGRESSION_SEGMENT = re.compile(r'^SEGMENT (\d+)/(\d+) ')
 EPOCH = re.compile(r'^(signnet_pretrain|signnet|detector|reader|classifier|pretrain|experiment_b_crop_geom|experiment_b_crop|experiment_b_full|'
-                   r'brain_s[0-2]|road_labeler|usernet) epoch (\d+)/(\d+)\b')
+                   r'brain_s[0-2]|road_labeler) epoch (\d+)/(\d+)\b')
 # "classifier stops early after epoch 12: ...": the training ends before its planned epochs.
 EARLY = re.compile(r'^(detector|reader|classifier|pretrain) stops early after epoch (\d+)\b')
 # The values of an epoch line: "train_loss 0.5000 val_loss 0.6000 ... 40s" (the detector also writes
@@ -476,10 +465,6 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
             current = 'evaluate'
         if signnet and SIGNNET_COMPLETE.match(line):
             complete = True
-        if action == 'train_users' and USERNET_MEASURE.match(line):
-            current = 'evaluate'
-        if action == 'train_users' and USERNET_COMPLETE.match(line):
-            complete = True
         match = SUBSTEP.match(line)
         if match:
             number, title = int(match.group(1)), line[match.end():].strip(' =')
@@ -576,7 +561,7 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
     if current in keys:
         done.update(keys[:keys.index(current)])
     if complete:
-        # SignNet (or UserNet) wrote its result: every step is over, also in a log read from a terminal.
+        # SignNet wrote its result: every step is over, also in a log read from a terminal.
         done.update(keys)
 
     inside = _inside_step(current, epoch, substep, pipeline, stopped) if current in keys and not complete else None
@@ -706,7 +691,7 @@ PRETRAINING = re.compile(r'^pretraining:\s', re.MULTILINE)
 SECOND_STAGE = re.compile(r'^-- the second stage', re.MULTILINE)
 # A network by its name in the line under the progress bar ("Mapillary · epoch 3 of 30").
 NET_NAMES = {'pretrain': 'Mapillary', 'signnet': 'SignNet', 'signnet_pretrain': 'Mapillary', 'road_labeler': 'Road labeler',
-             'refiner': 'Box refiner', 'usernet': 'UserNet'}
+             'refiner': 'Box refiner'}
 
 
 def box_fit_steps(text: str) -> tuple:

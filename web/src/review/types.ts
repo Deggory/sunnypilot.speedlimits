@@ -186,8 +186,6 @@ export interface ServerReview {
   site_group: string | null;
   encounter_id: string | null;
   country?: string | null;
-  /** "Road users complete": every person and two-wheeler from 24 px tall and every vehicle from 40 px tall is boxed. */
-  users_complete?: boolean;
 }
 
 /** GET /api/route/<id>/reviews */
@@ -225,6 +223,8 @@ export interface CarryAnswer {
   message: string;
   /** "previous" (A) or "next" (Shift+A, #105); missing from a server older than Shift+A. */
   direction?: string;
+  /** Road-user boxes of the frame carried from that were left there: no longer boxed (#113); missing before #113. */
+  road_users?: number;
 }
 
 /** An error answer of the API (400, 403, 409 revision_conflict or stale_report...). */
@@ -262,8 +262,6 @@ export interface FrameEdit {
   encounter_id?: string | null | undefined;
   /** The country picked for the frame; undefined: the one its GPS gives (FrameRow.country_proposed). */
   country?: string | null | undefined;
-  /** "Road users complete" ticked on this frame (J): every road user from the size rule has its box. */
-  users_complete?: boolean | undefined;
   server_confirmed?: boolean | undefined;
   base?: ConfirmedCopy | null | undefined;
 }

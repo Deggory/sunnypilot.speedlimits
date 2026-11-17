@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Models: first the networks in use (the cutter, the classifier, the brain and UserNet; docs/NEURAL_NETWORK.md), one
+// Models: first the networks in use (the cutter, the classifier and the brain; docs/NEURAL_NETWORK.md), one
 // card each with its numbers; then the versions of one of them (the switch, or a tap on its card) as a table to
 // compare (VersionsCard.vue: the numbers that judge that role in columns, the one in use marked; only the recent versions
 // of recentOf, the older ones behind “Show older versions”, nothing is deleted; a row opens its whole card, ModelItem:
@@ -51,7 +51,7 @@ const busy = ref<string | null>(null);
 
 /** The networks of the grid at the top. Applicability, which helps only Sign review, is in Review helpers at the bottom
  * (#91). */
-const ROLES: readonly ModelRole[] = ['cutter', 'classifier', 'brain', 'users'];
+const ROLES: readonly ModelRole[] = ['cutter', 'classifier', 'brain'];
 const topRoles = computed(() => roles.value.filter((role) => ROLES.includes(role.role)));
 const deciderRole = computed(() => roles.value.find((role) => role.role === 'decider') ?? null);
 /** The role whose versions are listed: the address's (/models#role-classifier, or /models#role-brain:<version id>,
@@ -117,11 +117,11 @@ const recent = computed(() => Object.fromEntries(roles.value.map((role) => [role
 const carOf = (role: RoleModels): ModelVersion | null => role.versions.find((version) => version.on_car) ?? null;
 /** Whether the comma runs the version in use of a role, in words. Two versions often have the same name: the time
  * of the one on the car tells them apart. The comma runs the cutter, the classifier and the brain (Publish puts the ones
- * in use there); a trial replaces the first two until its next software update. UserNet is not on the car: no line. The
- * applicability network never goes since #90: one an older publication left is taken away by the next. */
+ * in use there); a trial replaces the first two until its next software update. The applicability network never goes
+ * since #90: one an older publication left is taken away by the next. */
 interface CarLine {tone: 'same' | 'other' | 'none'; text: string; more?: string}
 function carLine(role: RoleModels): CarLine | null {
-  if (payload.value?.on_car_problem || role.role === 'users') return null;
+  if (payload.value?.on_car_problem) return null;
   const used = inUseOf(role);
   const car = carOf(role);
   const tried = role.role === 'cutter' ? trial.value?.signnet.run : role.role === 'classifier' ? trial.value?.classifier.run : null;
