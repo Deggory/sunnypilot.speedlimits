@@ -50,6 +50,7 @@ import {row as editRow} from '../review/current';
 import {frameKeyAt, loadSignEditor, pictureBaseOf, stopSignEditor, videoFrameOf} from '../review/embed';
 import {frameStatus} from '../review/frames';
 import {linkedFrame, openFrame} from '../review/navigation';
+import LightChips from '../review/LightChips.vue';
 import SignEditorPanel from '../review/SignEditorPanel.vue';
 import SignEditorStage from '../review/SignEditorStage.vue';
 import {report as editReport, rowOf, state as editState} from '../review/store';
@@ -1017,6 +1018,8 @@ function worksIn(from: number, to: number) {
         class="sr-ai-square" aria-hidden="true"></i>AI {{ aiHere.saving ? 'REVIEWING' : 'TRYING' }}<template v-if="aiHere.total"> · {{ thousands(aiHere.done) }}/{{ thousands(aiHere.total) }}</template></b>
       <b v-else-if="aiSaved" class="ai-badge" id="sr-drive-ai-badge" :title="thousands(aiSaved) + ' frames of this drive reviewed by the AI'"><i
         class="sr-ai-square" aria-hidden="true"></i>AI REVIEW · {{ thousands(aiSaved) }}</b></template>
+    <!-- The traffic light of the selected box, on the title row while a frame's signs are edited. -->
+    <template #title-side><div v-if="editing && (onFrame || alone)" class="sign-editor sr-title-lights"><LightChips/></div></template>
     <template #hud>
       <span v-if="!speedOff" class="dr-box sr-box-label" :class="{empty: label === null}" title="ANSWER: your dashboard speed, or your block where there is one; a dash where openpilot or the cruise held the speed"><small>ANSWER</small>
         <b>{{ label ?? '–' }}</b></span>

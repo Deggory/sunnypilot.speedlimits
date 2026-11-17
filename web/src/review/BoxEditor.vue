@@ -11,6 +11,7 @@ import {releaseFocus} from './dom';
 import {setFamily, setField, setKind, setOnVehicle, setOtherOurs, setValue, squareSelected, togglePainted, toggleVariable} from './edits';
 import {countryOf, workOf} from './frames';
 import {vFill} from './fill';
+import LightChips from './LightChips.vue';
 import {report, state} from './store';
 import type {Detection, FrameRow} from './types';
 
@@ -47,8 +48,7 @@ const metresError = ref(false);
 watch(() => [props.row.frame_key, state.selected], () => { metresError.value = false; });
 // O X U, G P R E M and the road users W Y K on a keyboard (use-keyboard.ts).
 const ROAD_KEYS: Record<string, string> = {own_road: 'O', other_road: 'X', unresolved: 'U'};
-/** The traffic lights, the kind given most: at the top of the editor, the other kinds under Type. */
-const LIGHT_GROUPS = SIGN_KIND_GROUPS.filter((group) => group.label === 'Traffic light');
+/** The traffic lights, the kind given most, are LightChips.vue; the other kinds under Type. */
 const KIND_GROUPS = SIGN_KIND_GROUPS.filter((group) => group.label !== 'Traffic light');
 const KIND_KEYS: Record<string, string> = {give_way: 'G', stop: 'P', roundabout: 'R', other: 'E', main_road: 'M',
   road_user_person: 'W', road_user_bicycle: 'Y', road_user_car: 'K'};
@@ -135,16 +135,8 @@ function booleanChanged(key: BooleanField, event: Event): void {
 <template>
   <section id="editor" :hidden="detection === null">
     <div class="section-head"><h2 id="editorTitle">Box {{ state.selected + 1 }}</h2></div>
-    <!-- The traffic lights first, right under the heading: a button makes the box an "Other sign" of that light. -->
-    <div class="kinds lights" id="lightKinds">
-      <div v-for="group in LIGHT_GROUPS" :key="group.label" class="kind-group" role="group" :aria-label="group.label">
-        <span class="field-label">{{ group.label }}</span>
-        <button v-for="kind in group.kinds" :key="kind.id" type="button" class="chip kind"
-                :aria-pressed="detection?.family === 'other_sign' && detection?.sign_type === kind.id"
-                :data-kind="kind.id" :title="kind.label + (KIND_KEYS[kind.id] ? ' (' + KIND_KEYS[kind.id] + ')' : '')"
-                @click="setKind(kind.id); releaseFocus($event)">{{ kind.chip }}<kbd v-if="KIND_KEYS[kind.id]" class="key-hint">{{ KIND_KEYS[kind.id] }}</kbd></button>
-      </div>
-    </div>
+    <!-- The traffic lights first, right under the heading; on Speed and sign review on the drive's title row instead. -->
+    <LightChips v-if="!report.embedded"/>
     <div class="zoom-foot">
       <p class="evidence" id="evidence">{{ evidence }}</p>
       <div class="fit-chips">

@@ -833,7 +833,8 @@ watch(() => props.route, () => {
       <button type="button" class="link-button rt-back" @click="back"><span aria-hidden="true">‹</span> {{ backLabel }}</button>
       <div class="dr-view-top">
         <div class="rt-view-name">
-          <h2 id="dr-view-title">{{ view?.title ?? (guest ? 'Drive' : 'Places unknown') }} <slot name="badge"></slot></h2>
+          <div class="dr-title-row"><h2 id="dr-view-title">{{ view?.title ?? (guest ? 'Drive' : 'Places unknown') }} <slot name="badge"></slot></h2>
+            <slot name="title-side"></slot></div>
           <span>{{ facts }}</span>
           <span v-if="whenNote" class="dr-uncertain">{{ whenNote }}</span>
         </div>
