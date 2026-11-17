@@ -16,7 +16,10 @@
 // the GPU (the panel action "simulate", helpers/simulate_drive.sh) where it has no replay or one of other networks
 // than today's; Certify this drive; and on a certified drive the answer of the regression test with the way to each
 // difference. The squares follow the time shown alone, the pulse too: a paused video is a still screen. Nothing here
-// changes the car, the labels or the networks in use.
+// changes the car, the labels or the networks in use. The page opens on the set chosen, or on Comma that day when the
+// drive has no replay with it and the comma logged its vision limit (#114); a source picked by hand stays. Where the
+// comma was in Smartspeed, the screen has the word SMART as the comma drew it (simulation.smartAt): on a replay, pea
+// green while engaged with the replay holding a limit.
 // With the map or without it (#87): a set whose brain reads the map's limit has the switch Map; "without" shows the
 // drive replayed with no map given to the brain (?map=off, Compute with {map: 'off'}), kept beside the usual replay,
 // and the lane Differs and the side then say where it differs from that one. Never certified: the reference is the
@@ -35,7 +38,7 @@ import {jobOf, terminalActivities} from './jobs';
 import Segmented from './Segmented.vue';
 import {ROAD_TYPE_LABELS, roadTypeLabel} from './speed-review';
 import {boxesAt, changeLines, chosenSet, type Differences, FRAME, identical, inputTexts, isSet, PERIOD, pyRound, readingWords, readTimes,
-  mapText, regressionText, screenAt, screenPlace, SET_LABEL, type SetKey, type SetStates, showBoxes, type SignBox, type SimulationDrive,
+  mapText, regressionText, screenAt, screenPlace, SET_LABEL, type SetKey, type SetStates, showBoxes, type SignBox, type SimulationDrive, smartAt,
   type Source, type Summary, type VideoFrame} from './simulation';
 
 const props = defineProps<{route: string; status: PanelStatus | null}>();
@@ -99,6 +102,19 @@ const certified = computed(() => summary.value?.certified ?? null);
 const sources = computed((): {key: Source; label: string}[] => (['comma', 'car', 'in-use', 'certified'] as const)
   .filter((key) => key === 'comma' ? logged.value : key === 'certified' ? certified.value !== null : true)
   .map((key) => ({key, label: SOURCE_LABEL[key]})));
+/** The source picked at the top of the side: once picked by hand, the page never changes it by itself. */
+let handPicked = false;
+const sourceChoice = computed({get: (): Source => source.value, set: (key: Source) => {
+  handPicked = true;
+  source.value = key;
+}});
+// A drive with no replay with the set chosen opens on what the comma logged, when it logged its vision limit: the squares
+// as on the comma that day, not none.
+watch([summary, logged], () => {
+  if (!handPicked && source.value === chosenSet.value && summary.value && logged.value && !summary.value.sets[chosenSet.value]) {
+    source.value = 'comma';
+  }
+});
 /** The drive again after something changed it (a replay ended, it was certified or removed, its logs were read): the
  * answer shown stays until the new one comes, the others are asked again when they are shown. */
 function reload(): void {
@@ -167,6 +183,9 @@ const outOfDate = computed((): string[] | null => {
 
 // -- on the picture ---------------------------------------------------------------------------------------------------------
 const screen = computed(() => shownSeries.value ? screenAt(shownSeries.value, seconds.value) : null);
+/** The word SMART: always by the comma's own log (its mode, engaged, the assist), on a replay with the replay's limit. */
+const smart = computed(() => screen.value && timeline.value
+  ? smartAt(timeline.value.series, seconds.value, source.value === 'comma' ? null : screen.value.limitKph) : null);
 const frame = computed(() => view.value?.frame ?? FRAME);
 /** The stage's size, followed as it changes: the comma's screen goes on the picture inside it, not on its bars. */
 const overlay = useTemplateRef<HTMLDivElement>('overlay');
@@ -373,7 +392,7 @@ function lanesIn(from: number, to: number, width: number, x: (seconds: number) =
             <text :x="box[0]" :y="Math.max(frame[1] / 30, box[1] - frame[1] / 120)" :font-size="frame[1] / 28">{{ tagOf(box) }}</text>
           </g>
         </svg>
-        <CommaScreen v-if="screen && stage.width" v-bind="screen" :scale="place.scale"
+        <CommaScreen v-if="screen && stage.width" v-bind="screen" :smart="smart" :scale="place.scale"
                      :style="{right: place.right + 'px', top: place.top + 'px'}"/>
       </div>
     </template>
@@ -426,7 +445,7 @@ function lanesIn(from: number, to: number, width: number, x: (seconds: number) =
     </template>
     <template #side>
       <section class="sr-card dv-card" aria-labelledby="dv-card-title">
-        <Segmented v-if="sources.length > 1" v-model="source" :options="sources" label="Whose squares are on the picture" class="dv-source"/>
+        <Segmented v-if="sources.length > 1" v-model="sourceChoice" :options="sources" label="Whose squares are on the picture" class="dv-source"/>
         <Segmented v-if="readsMap" v-model="mapChoice" :options="MAP_CHOICES" class="dv-source dv-map"
                    label="The drive replayed with the map’s limit given to the brain, as on the car, or with no map at all"/>
         <h3 id="dv-card-title">{{ SOURCE_LABEL[source] + (noMap ? ', no map' : '') }} at {{ clockOf(seconds) }}</h3>

@@ -21,7 +21,9 @@ clock, which runs on across the segments of a drive); the civil time of the GPS 
   IsMetric param initData logs; None when the log has none), the car (carParams), the counts of messages per service
   and the span of the log. sign_dist_exact (SIGN_DIST_VERSION): the distance to the sign and its size are written at
   every change (no tolerance), the distance as the log has it, unrounded (the car's screen rounds that very value): an
-  extract without it, or with an older value, rounded them (drive_logs.stale_extract).
+  extract without it, or with an older value, rounded them (drive_logs.stale_extract). smart (SMART_VERSION): the
+  extract has what the comma's word SMART is drawn by (sl_mode, the SpeedLimitMode param of initData, and
+  sla_enabled, sla_v_target, mads_enabled); an extract without it that holds longitudinalPlanSP is read again.
 
 The schema is the one of the runtime branch (drive_logs.schema_dir): speedVisionSP, longitudinalPlanSP.speedLimit
 and liveMapDataSP are sunnypilot's (cereal/custom.capnp). A field the schema or an older log lacks reads as None.
@@ -54,6 +56,8 @@ SERIES = (
     ('alert', 'selfdriveState', 'alertType', 'str', 0, 1),
     ('mads_state', 'selfdriveStateSP', 'mads.state', 'str', 0, 1),
     ('mads_active', 'selfdriveStateSP', 'mads.active', 'bool', 0, 1),
+    # The comma's ui_state.engaged is selfdriveState.enabled or this.
+    ('mads_enabled', 'selfdriveStateSP', 'mads.enabled', 'bool', 0, 1),
     ('icbm_state', 'selfdriveStateSP', 'intelligentCruiseButtonManagement.state', 'str', 0, 1),
     ('icbm_send', 'selfdriveStateSP', 'intelligentCruiseButtonManagement.sendButton', 'str', 0, 1),
     ('lat_active', 'carControl', 'latActive', 'bool', 0, 1),
@@ -63,6 +67,10 @@ SERIES = (
     ('res_final', 'longitudinalPlanSP', 'speedLimit.resolver.speedLimitFinal', 'num', 0.5, 3.6),
     ('sla_state', 'longitudinalPlanSP', 'speedLimit.assist.state', 'str', 0, 1),
     ('sla_active', 'longitudinalPlanSP', 'speedLimit.assist.active', 'bool', 0, 1),
+    # The word SMART on the comma's screen is pea green while these say Speed Limit Assist drives to a limit (enabled, and
+    # a target under V_CRUISE_UNSET, 255 m/s: 918 km/h here), grey otherwise (auto_speed.py).
+    ('sla_enabled', 'longitudinalPlanSP', 'speedLimit.assist.enabled', 'bool', 0, 1),
+    ('sla_v_target', 'longitudinalPlanSP', 'speedLimit.assist.vTarget', 'num', 0.5, 3.6),
     ('plan_source', 'longitudinalPlanSP', 'longitudinalPlanSource', 'str', 0, 1),
     ('v_target', 'longitudinalPlanSP', 'vTarget', 'num', 0.5, 3.6),
     ('a_target', 'longitudinalPlan', 'aTarget', 'num', 0.25, 1),
@@ -131,6 +139,11 @@ UNROUNDED = frozenset(('vis_sign_dist',))
 # read again (drive_logs.stale_extract).
 MOTION_KEY = 'motion'
 MOTION_VERSION = 1
+# The key of meta that says the extract has what the word SMART is drawn by: sl_mode (the SpeedLimitMode param initData
+# logs at the start of each segment, 4 = Smartspeed; None when the log has none) and sla_enabled, sla_v_target,
+# mads_enabled. An extract without it that holds longitudinalPlanSP is read again (drive_logs.stale_extract).
+SMART_KEY = 'smart'
+SMART_VERSION = 1
 
 
 def _get(obj, path: str):
@@ -175,17 +188,28 @@ def _messages(path: Path, cereal: Path, car: Path):
     yield from schema.Event.read_multiple_bytes(data)
 
 
-def _is_metric(init) -> bool | None:
-    """The IsMetric param initData logs (the unit the car's screen shows): None when the log does not have it."""
+def _param(init, key: str) -> str | None:
+    """A param initData logs, as its text (stripped, lower case): None when the log does not have it."""
     for entry in _get(init, 'params.entries') or ():
-        if str(_get(entry, 'key')) != 'IsMetric':
+        if str(_get(entry, 'key')) != key:
             continue
         try:
-            text = bytes(_get(entry, 'value') or b'').decode('utf-8', 'replace').strip().lower()
+            return bytes(_get(entry, 'value') or b'').decode('utf-8', 'replace').strip().lower()
         except (TypeError, ValueError):
             return None
-        return text in ('1', 'true') if text in ('0', '1', 'true', 'false') else None
     return None
+
+
+def _is_metric(init) -> bool | None:
+    """The IsMetric param initData logs (the unit the car's screen shows): None when the log does not have it."""
+    text = _param(init, 'IsMetric')
+    return text in ('1', 'true') if text in ('0', '1', 'true', 'false') else None
+
+
+def _speed_limit_mode(init) -> int | None:
+    """The SpeedLimitMode param initData logs (sunnypilot's speed_limit.common.Mode: 4 Smartspeed): None without it."""
+    text = _param(init, 'SpeedLimitMode')
+    return int(text) if text is not None and text.isdigit() else None
 
 
 def _events_of(which: str, payload) -> list[list]:
@@ -202,6 +226,10 @@ def extract(path: Path, cereal: Path, car: Path) -> dict:
     for spec in SERIES:
         by_service.setdefault(spec[1], []).append(spec)
     series: dict[str, list] = {spec[0]: [] for spec in SERIES}
+    series['sl_mode'] = []
+    # The SpeedLimitMode param of initData: its logMonoTime is loggerd's start, minutes before this one, so it goes at
+    # the first message of the minute.
+    mode: list = []
     last_value: dict[str, object] = {}
     last_seen: dict[str, int] = {}
     events: list[list] = []
@@ -210,7 +238,7 @@ def extract(path: Path, cereal: Path, car: Path) -> dict:
     gps: list[list] = []
     gps_service = None
     counts: dict[str, int] = {}
-    meta: dict = {SIGN_DIST_EXACT: SIGN_DIST_VERSION, MOTION_KEY: MOTION_VERSION}
+    meta: dict = {SIGN_DIST_EXACT: SIGN_DIST_VERSION, MOTION_KEY: MOTION_VERSION, SMART_KEY: SMART_VERSION}
     first = last = None
     total = 0
 
@@ -234,6 +262,7 @@ def extract(path: Path, cereal: Path, car: Path) -> dict:
                              'commit': _get(init, 'gitCommit'), 'commit_date': _get(init, 'gitCommitDate') or None,
                              'device': str(_get(init, 'deviceType'))}
             meta['is_metric'] = _is_metric(init)
+            mode[:] = [_speed_limit_mode(init)]
             continue
         total += 1
         first = t if first is None else min(first, t)
@@ -301,6 +330,8 @@ def extract(path: Path, cereal: Path, car: Path) -> dict:
                         int(_get(fix, 'unixTimestampMillis') or 0) or None])
     if total == 0:
         raise ValueError('no messages in the log')
+    if mode:
+        series['sl_mode'] = [[first, mode[0]]]
     # The services that stopped before the end of the log: None from their last message on.
     for service, specs in by_service.items():
         seen = last_seen.get(service)

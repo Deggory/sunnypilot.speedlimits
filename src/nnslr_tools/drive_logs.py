@@ -44,7 +44,8 @@ import tempfile
 import urllib.request
 from pathlib import Path
 
-from nnslr_tools.drive_extract import EXTRACT_VERSION, MOTION_KEY, MOTION_VERSION, SIGN_DIST_EXACT, SIGN_DIST_VERSION
+from nnslr_tools.drive_extract import (EXTRACT_VERSION, MOTION_KEY, MOTION_VERSION, SIGN_DIST_EXACT, SIGN_DIST_VERSION,
+                                      SMART_KEY, SMART_VERSION)
 
 ROUTE = re.compile(r'[0-9a-f]{8}--[0-9a-f]{10}')
 # A log file as the comma names it.
@@ -283,12 +284,17 @@ def stale_extract(value: dict | None) -> bool:
     """A cached extract written before the distance to the sign was kept exactly (drive_extract.SIGN_DIST_EXACT below
     SIGN_DIST_VERSION: no marker, or True, which still rounded it) that holds such a distance: it is read again from its
     log. One without a distance (an older build, no sign) stays. So is one written before the motion series were read
-    (drive_extract.MOTION_KEY) that holds carState."""
+    (drive_extract.MOTION_KEY) that holds carState, and one written before the series of the word SMART were read
+    (drive_extract.SMART_KEY) that holds longitudinalPlanSP."""
     if not value:
         return False
     series = value.get('series') or {}
-    motion = (value.get('meta') or {}).get(MOTION_KEY)
+    meta = value.get('meta') or {}
+    motion = meta.get(MOTION_KEY)
     if not (type(motion) is int and motion >= MOTION_VERSION) and series.get('v_ego'):
+        return True
+    smart = meta.get(SMART_KEY)
+    if not (type(smart) is int and smart >= SMART_VERSION) and series.get('sla_state'):
         return True
     marker = (value.get('meta') or {}).get(SIGN_DIST_EXACT)
     if type(marker) is int and marker >= SIGN_DIST_VERSION:

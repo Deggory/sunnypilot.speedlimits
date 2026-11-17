@@ -89,6 +89,7 @@ struct SelfdriveStateSP {
   struct Mads {
     state @0 :Text;
     active @1 :Bool;
+    enabled @2 :Bool;
   }
   struct Icbm {
     state @0 :Text;
@@ -116,6 +117,8 @@ struct LongitudinalPlanSP {
     struct Assist {
       state @0 :AssistState;
       active @1 :Bool;
+      enabled @2 :Bool;
+      vTarget @3 :Float32;
     }
     enum Source {
       none @0;

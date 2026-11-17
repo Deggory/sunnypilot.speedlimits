@@ -313,6 +313,24 @@ export function screenAt(series: Record<string, Series>, s: number): Screen {
   };
 }
 
+/** The word SMART left of the vision square (auto_speed.py): 'driving', pea green, while Speed Limit Assist drives to a
+ * limit; 'idle', grey, otherwise; null where the comma was not in Smartspeed. */
+export type Smart = 'driving' | 'idle' | null;
+/** The assist's target when it has none, V_CRUISE_UNSET (255 m/s), in the km/h of the extract (drive_extract). */
+const UNSET_KPH = 255 * 3.6;
+/** The word SMART at s, as the comma draws it (auto_speed.py), from the comma's own series (the player's timeline): only
+ * where the log says Smartspeed (sl_mode, the SpeedLimitMode param at the start of each minute, 4); driving while engaged
+ * (selfdriveState or MADS enabled), the assist enabled and with a target under V_CRUISE_UNSET. On a replay (replayKph not
+ * null) the target is the replay's own speed to hold: a limit, or none (0); the rest stays what the comma logged. */
+export function smartAt(series: Record<string, Series>, s: number, replayKph: number | null = null): Smart {
+  const at = (name: string): Value | undefined => valueAt(series[name], s);
+  if (at('sl_mode') !== 4) return null;
+  const engaged = at('sd_enabled') === true || at('mads_enabled') === true;
+  const target = at('sla_v_target');
+  const limit = replayKph === null ? typeof target === 'number' && target < UNSET_KPH - 0.5 : replayKph > 0;
+  return engaged && at('sla_enabled') === true && limit ? 'driving' : 'idle';
+}
+
 /** The road signs a reading can be, by their short name on the comma, crossed out at their end (sign_reading.ROAD_SIGNS). */
 const ROAD_SIGNS: Record<string, [text: string, crossed: boolean]> = {
   'other_sign:motorway_start': ['MWY', false], 'other_sign:motorway_end': ['MWY', true],

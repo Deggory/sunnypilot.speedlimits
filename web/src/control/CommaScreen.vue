@@ -6,15 +6,18 @@
 // confidence and the last limit read as written (END), no metres; its border is red while the sign is in view, and it
 // blinks, a white pulse growing under it, from the moment the network sees a sign until the car passes it. A road sign read (its short name, crossed out at its end)
 // goes in a small box under the square, red while in view, until the next sign, and leaves the limit in it. Left of
-// it the kind of road the network sees. The page gives what the car's message had at the time shown and the pulse of
-// that time (0 to 1): nothing here moves by itself, so a paused video is a still screen. The page places it (right,
-// top); its colours and the comma's own font, CommaInter, are control.html's (.cms-…).
+// it the kind of road the network sees. Left of the vision square, level with its top, the word SMART where the comma
+// was in Smartspeed (auto_speed.py, smart): pea green while Speed Limit Assist drives to a limit, grey otherwise. The
+// page gives what the car's message had at the time shown and the pulse of that time (0 to 1): nothing here moves by
+// itself, so a paused video is a still screen. The page places it (right, top); its colours and the comma's own font,
+// CommaInter, are control.html's (.cms-…).
 import {computed, ref} from 'vue';
 import {EYE_ICON} from './drive-review';
-import {isRoadSign, pyRound, readingText, SCREEN} from './simulation';
+import {isRoadSign, pyRound, readingText, SCREEN, type Smart} from './simulation';
 
 const props = defineProps<{limitKph: number; rawClass: string; rawValue: number; confidence: number; limitClass: string;
-  limitValue: number; limitConfidence: number; seen: boolean; distance: number; road: string; pulse: number; scale: number}>();
+  limitValue: number; limitConfidence: number; seen: boolean; distance: number; road: string; pulse: number; scale: number;
+  smart?: Smart}>();
 
 // The comma's numbers (vision_speed_limit.py): two squares in the top right corner, the reading under the vision.
 const SIZE = 72;
@@ -145,6 +148,16 @@ const roadSign = computed(() => {
   return line(text, ROAD_SIGN, ROAD_TOP + ROAD_HEIGHT / 2, crossed);
 });
 
+/** The word SMART (auto_speed.py): Inter Bold 26, its right end GAP left of the vision square, its line's top CAP_TOP of
+ * the line above the square's top, so that its capitals start level with it. */
+const SMART_SIZE = 26 * FONT_SCALE;
+const CAP_TOP = 0.2;
+const smartWord = computed(() => {
+  void fontLoaded.value;
+  if (!props.smart) return null;
+  return {x: LEFT - GAP - textWidth('SMART', SMART_SIZE), y: VISION_TOP - CAP_TOP * SMART_SIZE + ASCENT * SMART_SIZE};
+});
+
 /** The pulse: the reading square's outline grown and white, drawn under it; its alphas whole steps of 255, as the
  * comma's colours (sign_reading._render: int(70 × pulse), int(255 × pulse)). */
 const halo = computed(() => {
@@ -191,6 +204,8 @@ const halo = computed(() => {
             fill-rule="evenodd"/>
       <text :x="MIDDLE" :y="vision.y" :font-size="vision.size">{{ vision.text }}</text>
     </g>
+    <text v-if="smartWord" class="cms-smart" :class="{driving: smart === 'driving'}" :x="smartWord.x" :y="smartWord.y"
+          :font-size="SMART_SIZE * EM">SMART</text>
     <!-- The kind of road, left of the reading square and level with its middle. -->
     <text v-if="road" class="cms-road" :x="LEFT - GAP" :y="ROAD_BASELINE" :font-size="ROAD * EM">{{ road }}</text>
   </svg>

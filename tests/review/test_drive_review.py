@@ -83,6 +83,9 @@ def segment_log(segment: int, gps_unix_ms: int | None = None, skip_frames: tuple
     def init(event):
         data = event.init('initData')
         data.version, data.gitBranch, data.gitCommit, data.deviceType = '0.0-synthetic', 'synthetic', '0' * 40, 'mici'
+        # Smartspeed (sunnypilot's speed_limit.common.Mode 4), as the comma logs its params: text bytes.
+        entry = data.init('params').init('entries', 1)[0]
+        entry.key, entry.value = 'SpeedLimitMode', b'4'
     put(start, init)
 
     for i, value in enumerate(passive):
@@ -110,11 +113,15 @@ def segment_log(segment: int, gps_unix_ms: int | None = None, skip_frames: tuple
             state = event.init('selfdriveState')
             state.state, state.enabled, state.active = 'enabled', True, True
 
+        def selfdrive_sp(event):
+            event.init('selfdriveStateSP').init('mads').enabled = True
+
         def control(event):
             control = event.init('carControl')
             control.latActive, control.longActive = True, True
         put(t + 1_000_000, car_state)
         put(t + 2_000_000, selfdrive)
+        put(t + 2_500_000, selfdrive_sp)
         put(t + 3_000_000, control)
         if k % 5 == 0:
             def plan(event, s=s):
@@ -124,6 +131,10 @@ def segment_log(segment: int, gps_unix_ms: int | None = None, skip_frames: tuple
                 vision = _vision(s)
                 resolver.source = 'vision' if vision else 'map'
                 resolver.speedLimit = (vision or _map(s)) / 3.6
+                # Speed Limit Assist drives to the limit from 20 s on; before, it has no target (V_CRUISE_UNSET).
+                assist = plan.speedLimit.init('assist')
+                assist.enabled = True
+                assist.vTarget = (vision or _map(s)) / 3.6 if s >= 20 else 255.0
             put(t + 4_000_000, plan)
 
             def radar(event, s=s):
@@ -403,6 +414,28 @@ def test_the_timeline_says_why_the_vision_limit_is_what_it_is(tmp_path):
     assert at('vis_sign_size', 3.5) == 40 and at('vis_sign_size', 10) == 0
     # Where speedVisionSP stops (150 s on), its series end: a missing value is never carried on.
     assert at('vis_reason', 170) is None and at('vis_raw_class', 170) is None
+
+
+def test_the_timeline_has_what_the_word_smart_is_drawn_by(tmp_path):
+    comma_drive(tmp_path, segments=(0,))
+    store = drive_review.store_for(tmp_path)
+    store.scan(ROUTE)
+    view = drive_review.timeline(store, ROUTE, None)
+    series = view['series']
+
+    def at(name, s):
+        points = [value for t, value in series[name] if t <= s]
+        return points[-1] if points else None
+    # The SpeedLimitMode param of initData (4: Smartspeed), from the start of the minute.
+    assert at('sl_mode', 0) == 4 and at('sl_mode', 50) == 4
+    assert at('sla_enabled', 10) is True and at('mads_enabled', 10) is True
+    # Without a target the assist logs V_CRUISE_UNSET (255 m/s), a limit in km/h once it drives to one.
+    assert at('sla_v_target', 10) == 918 and at('sla_v_target', 25) < 200
+    # An extract from before these series, that holds longitudinalPlanSP, is read again; one without it is not.
+    value = {'meta': {drive_logs.MOTION_KEY: drive_logs.MOTION_VERSION}, 'series': {'sla_state': [[1, 'disabled']]}}
+    assert drive_logs.stale_extract(value)
+    assert not drive_logs.stale_extract({**value, 'meta': {**value['meta'], drive_logs.SMART_KEY: drive_logs.SMART_VERSION}})
+    assert not drive_logs.stale_extract({'meta': {drive_logs.MOTION_KEY: 1}, 'series': {'sla_state': []}})
 
 
 def test_the_timeline_never_sends_another_forks_directions_as_the_road_type(tmp_path, monkeypatch):
