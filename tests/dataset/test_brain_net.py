@@ -870,12 +870,16 @@ def test_whose_road_a_sign_is_of_is_a_logit_a_column_of_the_sign_boxes_last_only
     from nnslr_tools.brain_targets import BRAIN_INPUTS
     model = box_net(users=True, applicability=True)
     said = model(*box_batch(), users=True, applicability=True)
-    assert len(said) == 5 and said[4].shape == (1, T, APPLICABILITY_COLUMNS) and APPLICABILITY_COLUMNS == BRAIN_INPUTS.BOX_COLUMNS == 8
+    # A brain of sign_boxes (until 17 Nov 2026) keeps a logit a column; one of sign_slots has one a slot (#110)
+    assert len(said) == 5 and said[4].shape == (1, T, BRAIN_INPUTS.BOX_COLUMNS) and BRAIN_INPUTS.BOX_COLUMNS == 8
+    assert APPLICABILITY_COLUMNS == BRAIN_INPUTS.SIGN_SLOTS == 16
+    slotted = build_brain_net((*GROUPS, 'sign_slots'), pretrained=False, applicability=True)
+    assert slotted.applicability_head.out_features == 16
     found = outputs(said, users=True, applicability=True)
     assert found['applicability'] is said[4] and found['users'] is said[3]
     assert len(model(*box_batch())) == 3 and box_net()(*box_batch(), applicability=True)[3] is None
     # It answers of the columns of sign_boxes: a brain without them cannot learn it
-    with pytest.raises(ValueError, match='sign_boxes'):
+    with pytest.raises(ValueError, match='sign_slots'):
         build_brain_net(GROUPS, pretrained=False, applicability=True)
 
 

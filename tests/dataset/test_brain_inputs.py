@@ -203,7 +203,7 @@ def test_a_group_has_the_size_it_says():
             'motion': brain.MotionInputs().row(10.0), 'road_signs': signs.road_signs_row(10.0),
             'sign_boxes': sign_boxes().row(10.0), 'light_boxes': light_boxes().row(10.0),
             'country_iso': brain.country_iso_row('PL'), 'hour_tz': brain.hour_row(12.0, 'hour_tz'),
-            'map_limit': brain.map_limit_row(80.0)}
+            'map_limit': brain.map_limit_row(80.0), 'sign_slots': brain.SlotInputs(_car()[1]).row(10.0)}
     assert {name: len(row) for name, row in rows.items()} == sizes
     assert brain.pack_inputs(rows, tuple(sizes)).shape == (sum(sizes.values()),)
 

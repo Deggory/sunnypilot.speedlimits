@@ -1245,12 +1245,13 @@ def test_a_brain_of_before_says_its_speeds_in_its_own_table():
 def test_no_brain_learns_engaged_the_pedals_the_speed_or_the_sign_distance():
     import inspect
     from nnslr_tools import brain_train
-    # country and hour since 13 Nov 2026 (#81: country_iso and hour_tz instead); map_limit only when asked (#85).
+    # country and hour since 13 Nov 2026 (#81: country_iso and hour_tz instead); map_limit only when asked (#85);
+    # sign_boxes since 17 Nov 2026 (#110: sign_slots instead).
     assert set(brain_train.INPUT_SIZES) - set(brain_train.LEARNED_INPUTS) == {'engaged', 'pedals', 'speed', 'sign_distance',
-                                                                             'country', 'hour', 'map_limit'}
+                                                                             'country', 'hour', 'map_limit', 'sign_boxes'}
     assert brain_train.learned_inputs(map_limit=True)[-1] == 'map_limit' and brain_train.learned_inputs() == brain_train.LEARNED_INPUTS
     assert inspect.signature(brain_train.train_brain).parameters['map_limit'].default is False
-    assert 'sign_boxes' in brain_train.LEARNED_INPUTS  # the boxes of the signs instead of the metres to one
+    assert 'sign_slots' in brain_train.LEARNED_INPUTS  # the signs one by one with their numbers (#110)
     assert 'driver' not in inspect.signature(brain_train.train_brain).parameters
 
 
@@ -1571,13 +1572,13 @@ def test_a_brain_of_today_going_on_from_the_one_of_11_nov_drops_its_sign_distanc
     for value in old.parameters():
         value.data.add_(torch.randn_like(value) * 0.05)
     path = start_file(torch, tmp_path, old, groups=theirs, ahead=True)
-    assert 'sign_boxes' in LEARNED_INPUTS and 'sign_distance' not in LEARNED_INPUTS
+    assert 'sign_slots' in LEARNED_INPUTS and 'sign_distance' not in LEARNED_INPUTS and 'sign_boxes' not in LEARNED_INPUTS
     new = tiny(torch, groups=LEARNED_INPUTS, road_kinds=1)
     start = brain_start(torch, new, path, source_of(LEARNED_INPUTS))
     assert start['fresh'] == [] and start['inputs_left_out'] == ['hour', 'country', 'sign_distance']
-    assert start['inputs_added'] == ['road_signs', 'sign_boxes', 'light_boxes', 'country_iso', 'hour_tz']
+    assert start['inputs_added'] == ['road_signs', 'light_boxes', 'country_iso', 'hour_tz', 'sign_slots']
     drive = fake_drive(['train'] * T)
-    for name in ('signs', 'lead', 'motion', 'road_signs', 'sign_boxes'):
+    for name in ('signs', 'lead', 'motion', 'road_signs', 'sign_slots'):
         drive['inputs'][name][:] = numpy_random(drive['inputs'][name].shape)
     array = pictures(drive)
     for got, wanted in zip(said_by(torch, new, LEARNED_INPUTS, drive, array), said_by(torch, old, theirs, drive, array)):

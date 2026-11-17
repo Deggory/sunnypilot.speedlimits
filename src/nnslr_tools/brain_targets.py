@@ -78,14 +78,15 @@ answer nothing (weight 0, never "nobody there"); so does every frame out of the 
 types every frame without a road type, as for the other heads.
 
 Whose road a speed sign is of (applicability_answers, #89, Cristian's rule of 15 Nov 2026: applicability is a head of
-the brain, trained on our reviews). For each of the BOX_COLUMNS columns of sign_boxes, 1 when the speed sign the brain
-is given in that column is of another road, 0 when it is of ours, and a weight of 1 only where a reviewed box says so:
+the brain, trained on our reviews). For each of the SIGN_SLOTS slots of sign_slots (#110; the columns of sign_boxes
+until 17 Nov 2026), 1 when the speed sign the brain is given in that slot is of another road, 0 when it is of ours, and a weight of 1 only where a reviewed box says so:
 the boxes of the dataset (annotations/objects.jsonl, what Import sign reviews writes) of the families the applicability
 network learns, given to our road or to another by a person or an AI review (context_experiment.ownership_target;
 unresolved has no label). A reviewed frame is one of the 20 a second of the video, a reading one in VIDEO_STEP: its
 boxes go to the reading nearest to it (at most 2 frames, 0.1 s, away), and each column takes the label of the reviewed
-box that covers its sign (APPLICABILITY_IOU of overlap with the box SignNet gave). A sign SignNet did not find, or one
-not the tallest of its column, teaches nothing: the head answers of what the brain is given. It is an answer of a head
+box that covers its sign (APPLICABILITY_IOU of overlap with the box SignNet gave). A slot is the car's own rule
+(brain_inputs.SlotInputs.chosen), never a copy of it. A sign SignNet did not find, or one left out of the slots,
+teaches nothing: the head answers of what the brain is given. It is an answer of a head
 only the training has (brain_net's applicability_head), measured only against the reviews (brain_train). No
 applicability network reads the brain's signs since 15 Nov 2026 (#90): every sign read goes to the brain, as on the car,
 and the brain learns whose road it is of from the car's motion and the picture. A drive read with one before (the
@@ -111,7 +112,7 @@ The inputs (drive_inputs), one group each so that a comparison can leave one out
 before the frame:
 
 - signs, plate, plate_hours, plate_wet, hour, lead, country, pedals, speed, engaged, sign_distance, motion, road_signs,
-  sign_boxes, light_boxes, country_iso, hour_tz: what the car has,
+  sign_boxes, light_boxes, country_iso, hour_tz, sign_slots: what the car has,
   described in sunnypilot/speed_limits/brain_inputs.py. A drive not read yet has its signs unknown throughout. The hour and the country come from the last fix at or before the frame
   (merged['gps']), the country through the borders (gps.py): a frame never takes the country of a later fix. The lead comes
   from the series of the logs, which leave out a change under 2 m or 2 km/h (drive_extract): a little coarser than the car's.
@@ -130,7 +131,8 @@ before the frame:
   frame the reader read: one with no reading in the record had no sign, so its columns are empty, as on the car. Zeros on a
   drive read before the boxes were kept: check_drives refuses it. light_boxes is the traffic lights of the same readings
   and boxes through another BoxInputs, a channel for each light (red, amber, green, off): zeros until the drives are read
-  by a cutter and a classifier that know the lights (those of 11 Nov 2026 do not).
+  by a cutter and a classifier that know the lights (those of 11 Nov 2026 do not). sign_slots is the same signs as
+  sign_boxes, one by one with their numbers, through the car's brain_inputs.SlotInputs (box_inputs, #110).
 
 They are made by the car's own file, sunnypilot/speed_limits/brain_inputs.py, loaded here by its path (BRAIN_INPUTS): what
 the network learns on is what it gets on the car, and the checkpoint keeps the file's hash.
@@ -145,6 +147,10 @@ speed far from the answer. The measure's own speed is the dashboard's (drive_log
 sign_distance is made and no longer learned either (LEFT_OUT since 12 Nov 2026, his rule): no metres worked out by a
 formula go into the brain, which gets the boxes of the signs as they are (sign_boxes). The brain of 11 Nov 2026 took it:
 its checkpoint says so, and its replay and its export still pack it.
+
+sign_boxes is made and no longer learned either (LEFT_OUT since 17 Nov 2026, #110): it kept only the tallest box of
+each of 8 columns and no number, so two speed signs side by side were one and the brain could not tell which limit was
+where. A brain of today takes sign_slots, each sign with its km/h; the brains trained before keep sign_boxes.
 
 country and hour are made and no longer learned either (LEFT_OUT since 13 Nov 2026, #81): they knew only the countries of
 his drives (6, and 5 for the hour). country_iso and hour_tz take the whole world: every ISO code, and the local hour from
@@ -288,7 +294,8 @@ INPUT_SIZES = BRAIN_INPUTS.INPUT_SIZES
 # sign_distance (vision.SignDistance's metres, 12 Nov 2026): no metres worked out by a formula go into the brain, his call;
 # it gets the boxes of the signs instead (sign_boxes). The brain of 11 Nov took it and can still be chosen in Models.
 # country and hour (13 Nov 2026, #81): only the countries of his drives; country_iso and hour_tz take the whole world.
-LEFT_OUT = ('engaged', 'pedals', 'speed', 'sign_distance', 'country', 'hour')
+# sign_boxes (17 Nov 2026, #110): sign_slots gives the same signs one by one with their numbers.
+LEFT_OUT = ('engaged', 'pedals', 'speed', 'sign_distance', 'country', 'hour', 'sign_boxes')
 # Groups made for every drive and learned only by a brain asked for them (Train › Brain's switches, off unless turned on):
 # map_limit, the map's limit the comma had (liveMapDataSP), Cristian's choice of 14 Nov 2026 (#85). The vision never read
 # the map before: such a brain does, any other still does not.
@@ -752,14 +759,17 @@ def sign_distance_inputs(ns: np.ndarray, merged: dict, readings: list | None, bo
 
 
 def _box_memory(group: str):
-    """The car's own BoxInputs of a group of boxes: sign_boxes (sign_box_channel) or light_boxes (light_box_channel)."""
+    """The car's own BoxInputs of a group of boxes: sign_boxes (sign_box_channel) or light_boxes (light_box_channel); or
+    its SlotInputs for sign_slots."""
+    if group == 'sign_slots':
+        return BRAIN_INPUTS.SlotInputs(VISION)
     if group == 'light_boxes':
         return BRAIN_INPUTS.BoxInputs(VISION, len(BRAIN_INPUTS.LIGHTS), BRAIN_INPUTS.light_box_channel)
     return BRAIN_INPUTS.BoxInputs(VISION, BRAIN_INPUTS.SIGN_BOX_CHANNELS, BRAIN_INPUTS.sign_box_channel(VISION))
 
 
 def box_inputs(seconds: np.ndarray, readings: list | None, boxes: list | None, group: str = 'sign_boxes') -> np.ndarray:
-    """The sign_boxes or light_boxes group (frames, size) by the car's own BoxInputs: see the module's text. Readings [[seconds, [[class,
+    """The sign_boxes, sign_slots or light_boxes group (frames, size) by the car's own BoxInputs or SlotInputs: see the module's text. Readings [[seconds, [[class,
     confidence], ...]], ...] and their boxes in the same order (x1, y1, x2, y2 in the pixels of FRAME_SIZE), each given at
     its time as brain.BrainReader.add_signs gives a frame's; a frame the record has no reading at is given as a reading
     with no sign. None (the drive was not read, or before the boxes were kept): zeros."""
@@ -809,25 +819,14 @@ def all_readings(record: dict | None) -> tuple[list | None, list | None]:
             [[list(box) for _name, _confidence, box, _other in signs[seconds]] for seconds in sorted(signs)])
 
 
-def _speed_columns(signs: list[tuple]) -> dict[int, tuple]:
-    """{column: (box, given to another road)} of the speed signs of one reading [(class, confidence, box, given to
-    another road), ...]: the tallest of each column of sign_boxes, by the rule of the car's BoxInputs.add (the first
-    channel of sign_box_channel, read sure enough, the box's part inside the frame, the column of its centre)."""
+def _speed_slots(signs: list[tuple]) -> dict[int, tuple]:
+    """{slot: (box, given to another road)} of the speed signs of one reading [(class, confidence, box, given to another
+    road), ...]: the slots of sign_slots by the car's own rule (brain_inputs.SlotInputs.chosen), those with a speed sign or
+    the end of a limit in them (the first channel of sign_box_channel)."""
     channel, (width, height) = BRAIN_INPUTS.sign_box_channel(VISION), FRAME_SIZE
-    columns = BRAIN_INPUTS.BOX_COLUMNS
-    found, tallest = {}, {}
-    for name, confidence, box, other in signs:
-        if channel(name) != 0 or confidence < VISION.MIN_CONFIDENCE:
-            continue
-        left, right = (min(max(float(x), 0.0), width) for x in (box[0], box[2]))
-        top, bottom = (min(max(float(y), 0.0), height) for y in (box[1], box[3]))
-        if right <= left or bottom <= top:
-            continue
-        column = min(int((left + right) / 2 / width * columns), columns - 1)
-        if bottom - top > tallest.get(column, 0.0):
-            tallest[column] = bottom - top
-            found[column] = ((left, top, right, bottom), other)
-    return found
+    chosen = BRAIN_INPUTS.SlotInputs(VISION).chosen([(name, confidence, box) for name, confidence, box, _other in signs],
+                                                   width, height)
+    return {slot: (place, signs[at][3]) for slot, (at, place) in enumerate(chosen) if channel(signs[at][0]) == 0}
 
 
 def _overlap(a: tuple, b: tuple) -> float:
@@ -873,11 +872,11 @@ def reviewed_roads(root: Path) -> dict[str, list[tuple]]:
 
 
 def applicability_answers(root: Path, route: str, frames: list[dict], record: dict | None) -> dict:
-    """Whose road the speed sign of each column of sign_boxes is of, at a drive's frames: {'target' (frames, BOX_COLUMNS)
+    """Whose road the speed sign of each slot of sign_slots is of, at a drive's frames: {'target' (frames, SIGN_SLOTS)
     float32, 1 of another road and 0 of ours; 'weight', 1 where a reviewed box says it, 0 elsewhere; 'reviewed', the
-    reviewed boxes of the drive with a label; 'matched', the columns they answered}: see the module's text. Nothing is answered on
+    reviewed boxes of the drive with a label; 'matched', the slots they answered}: see the module's text. Nothing is answered on
     a drive not read, or read before the boxes of the signs of another road were kept."""
-    shape = (len(frames), BRAIN_INPUTS.BOX_COLUMNS)
+    shape = (len(frames), BRAIN_INPUTS.SIGN_SLOTS)
     target, weight = (np.zeros(shape, dtype=np.float32) for _ in range(2))
     reviewed = reviewed_roads(root).get(route, [])
     found = {'target': target, 'weight': weight, 'reviewed': len(reviewed), 'matched': 0}
@@ -903,10 +902,10 @@ def applicability_answers(root: Path, route: str, frames: list[dict], record: di
         if row is None:
             continue
         seen = signs.get(round(segment * SEGMENT_SECONDS + reading / VIDEO_FPS, 3), [])
-        for column, (place, _given_away) in _speed_columns(seen).items():
+        for slot, (place, _given_away) in _speed_slots(seen).items():
             overlap, another = max((_overlap(place, box), another) for box, another in boxes)
             if overlap >= APPLICABILITY_IOU:
-                target[row, column], weight[row, column] = another, 1.0
+                target[row, slot], weight[row, slot] = another, 1.0
     found['matched'] = int(weight.sum())
     return found
 
@@ -983,7 +982,7 @@ def unix_at(gps: list, ns: np.ndarray) -> list[float | None]:
 def drive_inputs(frames: list[dict], ns: np.ndarray, merged: dict, readings: list | None,
                  root: Path | None, boxes: list | None = None, every: tuple | None = None) -> dict[str, np.ndarray]:
     """{group: (frames, size) float32}: see the module's text. Nothing after a frame reaches it. every: (readings, their
-    boxes) with the signs of another road among them (all_readings), what sign_boxes is made from for a brain given the
+    boxes) with the signs of another road among them (all_readings), what sign_boxes and sign_slots are made from for a brain given the
     boxes of every sign read; None: from the signs taken (readings, boxes), as every other group always is."""
     series, gps = merged.get('series') or {}, merged.get('gps') or []
     seconds = np.array([frame.get('seconds', frame['segment'] * SEGMENT_SECONDS + frame['index']) for frame in frames],
@@ -1015,6 +1014,7 @@ def drive_inputs(frames: list[dict], ns: np.ndarray, merged: dict, readings: lis
             'motion': motion_inputs(series, ns), 'road_signs': road_sign_inputs(seconds, readings),
             'sign_boxes': box_inputs(seconds, *(every if every is not None else (readings, boxes))),
             'light_boxes': box_inputs(seconds, readings, boxes, 'light_boxes'),
+            'sign_slots': box_inputs(seconds, *(every if every is not None else (readings, boxes)), 'sign_slots'),
             'country_iso': country_iso.reshape(len(ns), INPUT_SIZES['country_iso']),
             'hour_tz': hour_tz.reshape(len(ns), INPUT_SIZES['hour_tz']),
             'map_limit': map_limit.reshape(len(ns), INPUT_SIZES['map_limit'])}
@@ -1042,7 +1042,7 @@ def drive_targets(root: Path, route: str, labels: dict, merged: dict, split: dic
     second, so that it reads the same at both rates), inputs, own_kph (the car's speed as the dashboard shows it, in the
     labels' units: drive_logs.dashboard_speed; NaN unknown; for the measure, no input), signs_read, boxes_read (the
     record has the boxes of its signs: sign_boxes), applicability, applicability_weight (whose road the speed sign of
-    each column of sign_boxes is of, 1 of another road, where a reviewed box says it: applicability_answers),
+    each slot of sign_slots is of, 1 of another road, where a reviewed box says it: applicability_answers),
     applicability_reviewed (the reviewed boxes of the drive
     with a label), other_road_boxes (as asked: sign_boxes holds every sign read, those of another road too, for a brain
     that learns whose road a sign is of; False, the signs taken), other_boxes_read (the record has the boxes of the
@@ -1270,8 +1270,8 @@ def applicability_counts_text(counts: dict) -> str:
     parts = ', '.join(f"{name} {part['ours']} of our road and {part['another']} of another"
                       for name, part in counts['partitions'].items() if name != 'buffer')
     unread = counts.get('unread')
-    return (f"Whose road a sign is of: {counts['reviewed']} reviewed speed signs on these drives; the columns of "
-            f"sign_boxes they answer: {parts}"
+    return (f"Whose road a sign is of: {counts['reviewed']} reviewed speed signs on these drives; the slots of "
+            f"sign_slots they answer: {parts}"
             + (f" ({unread} drive{'' if unread == 1 else 's'} not read yet with the boxes of the signs of another road: "
                f"{'it answers' if unread == 1 else 'they answer'} nothing until read)" if unread else ''))
 

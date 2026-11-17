@@ -24,7 +24,7 @@ const facts = (names: string[]): BrainFact[] => names.map((name) => {
   const group = BRAIN_GROUPS.find((item) => item.name === name)!;
   return {name: group.name + ' · ' + group.size, what: group.what};
 });
-const SIGN_GROUPS = ['signs', 'plate', 'plate_hours', 'plate_wet', 'sign_boxes', 'road_signs', 'light_boxes'];
+const SIGN_GROUPS = ['signs', 'plate', 'plate_hours', 'plate_wet', 'sign_boxes', 'sign_slots', 'road_signs', 'light_boxes'];
 const carGroups = BRAIN_GROUPS.filter((group) => group.use === 'car').map((group) => group.name);
 /** The car's groups that are not the signs': hour, car ahead, country, and any group added after them. */
 const placeGroups = carGroups.filter((name) => !SIGN_GROUPS.includes(name));

@@ -474,10 +474,12 @@ def test_engaged_the_pedals_the_speed_and_the_sign_distance_are_made_and_never_l
     keeps packing every group it took."""
     numpy = _np()
     targets = _targets()
-    assert targets.LEFT_OUT == ('engaged', 'pedals', 'speed', 'sign_distance', 'country', 'hour')  # the last two: #81
-    assert set(targets.LEFT_OUT) <= set(targets.INPUT_SIZES) and 'sign_boxes' not in targets.LEFT_OUT
+    # country and hour: #81; sign_boxes: #110, sign_slots in its place
+    assert targets.LEFT_OUT == ('engaged', 'pedals', 'speed', 'sign_distance', 'country', 'hour', 'sign_boxes')
+    assert set(targets.LEFT_OUT) <= set(targets.INPUT_SIZES) and 'sign_slots' not in targets.LEFT_OUT
     made = inputs_of(seconds(10, 20), {})
     assert set(made) == set(targets.INPUT_SIZES) and made['sign_distance'].shape == (2, 2) and made['sign_boxes'].shape == (2, 50)
+    assert made['sign_slots'].shape == (2, 16 * 9 + 2)
     inputs = {name: numpy.zeros((2, size), dtype=numpy.float32) for name, size in targets.INPUT_SIZES.items()}
     learned = tuple(name for name in targets.INPUT_SIZES if name not in targets.LEFT_OUT)
     assert targets.pack_inputs(inputs, learned).shape == (2, sum(targets.INPUT_SIZES[name] for name in learned))
@@ -1390,7 +1392,7 @@ def test_the_brain_takes_the_labeler_s_road_types_over_the_map_and_a_person_s_ov
 
 
 # -- whose road a sign is of (#89): the reviewed boxes as an answer, and every sign's box as an input ---------------------
-OURS, THEIRS = [1008.0, 190.0, 1050.0, 232.0], [100.0, 300.0, 160.0, 360.0]  # columns 6 and 0 of sign_boxes
+OURS, THEIRS = [1008.0, 190.0, 1050.0, 232.0], [100.0, 300.0, 160.0, 360.0]  # right and left: THEIRS takes the first slot
 
 
 def reviewed(decoded, box, road, **changes):
@@ -1417,7 +1419,7 @@ def reading_frames():
 
 
 def test_whose_road_a_sign_is_of_comes_from_the_reviewed_boxes(tmp_path):
-    """#89: a reviewed box of a speed family says whose road the sign of its column is of, at the reading nearest to its
+    """#89: a reviewed box of a speed family says whose road the sign of its slot is of (#110), at the reading nearest to its
     frame. Only the reviews: no applicability network's verdict beside it (#90)."""
     numpy = _np()
     targets = _targets()
@@ -1435,10 +1437,11 @@ def test_whose_road_a_sign_is_of_comes_from_the_reviewed_boxes(tmp_path):
     found = targets.applicability_answers(tmp_path, ROUTE, reading_frames(), read_record())
     answered = {(int(row), int(column)): float(found['target'][row, column])
                 for row, column in zip(*numpy.nonzero(found['weight']))}
-    # At 0.5 s the 80 is ours and the 40 another's; at 0.75 s the 80 is on a vehicle: another's
-    assert answered == {(2, 6): 0.0, (2, 0): 1.0, (3, 6): 1.0}
+    # At 0.5 s the 40 (left, slot 0) is another's and the 80 (slot 1) ours; at 0.75 s the stop takes slot 0 and the 80,
+    # on a vehicle, is another's in slot 1
+    assert answered == {(2, 1): 0.0, (2, 0): 1.0, (3, 1): 1.0}
     assert 'network' not in found
-    assert found['reviewed'] == 5 and found['matched'] == 3 and found['target'].shape == (5, 8)
+    assert found['reviewed'] == 5 and found['matched'] == 3 and found['target'].shape == (5, 16)
     # A drive read before the boxes of the signs of another road were kept, or not read, answers nothing
     old = {key: value for key, value in read_record().items() if key != 'other_boxes'}
     assert not targets.applicability_answers(tmp_path, ROUTE, reading_frames(), old)['weight'].any()
@@ -1456,13 +1459,13 @@ def test_the_last_frames_of_a_minute_go_to_the_first_reading_of_the_next(tmp_pat
         write_reviews(tmp_path, [reviewed(decoded, OURS, 'other_road')])
         targets._REVIEWED.clear()
         found = targets.applicability_answers(tmp_path, ROUTE, frames, record)
-        assert [(int(row), int(column)) for row, column in zip(*numpy.nonzero(found['weight']))] == [(1, 6)], decoded
-        assert found['target'][1, 6] == 1
+        assert [(int(row), int(slot)) for row, slot in zip(*numpy.nonzero(found['weight']))] == [(1, 0)], decoded
+        assert found['target'][1, 0] == 1
     # The nearer frame wins across the two minutes too: frame 1 of the next one over frame 1198 of this one
     write_reviews(tmp_path, [reviewed(1198, OURS, 'other_road'), reviewed(1, OURS, 'own_road', segment_index=1)])
     targets._REVIEWED.clear()
     found = targets.applicability_answers(tmp_path, ROUTE, frames, record)
-    assert found['weight'][1, 6] == 1 and found['target'][1, 6] == 0
+    assert found['weight'][1, 0] == 1 and found['target'][1, 0] == 0
     # A drive that ends there has no such reading: nothing is answered
     write_reviews(tmp_path, [reviewed(1199, OURS, 'other_road')])
     targets._REVIEWED.clear()
@@ -1482,21 +1485,25 @@ def test_the_reviewed_boxes_are_read_again_when_the_dataset_changes(tmp_path):
     assert [row[3] for row in targets.reviewed_roads(tmp_path)[ROUTE]] == [True, False]
 
 
-def test_a_column_holds_the_sign_the_cars_own_boxes_keep():
-    """The label goes to the sign the brain is given in a column: the tallest speed sign of it, by BoxInputs' own rule."""
+def test_a_slot_holds_the_sign_the_cars_own_slots_keep():
+    """The label goes to the sign the brain is given in a slot, by SlotInputs' own rule (#110): two speed signs side by
+    side are two slots, each with its own label."""
     targets = _targets()
     signs = [('maximum_speed:80', .9, tuple(OURS), False), ('maximum_speed:60', .9, (1020.0, 300.0, 1090.0, 370.0), True),
              ('other_sign:stop', .9, (84.0, 304.0, 168.0, 380.0), False), ('maximum_speed:30', .4, tuple(THEIRS), True),
              ('cancellation', .9, (-30.0, 100.0, 50.0, 180.0), False), ('zone:30', .9, (700.0, 10.0, 700.0, 50.0), False)]
-    columns = targets._speed_columns(signs)
-    memory = targets._box_memory('sign_boxes')
+    slots = targets._speed_slots(signs)
+    memory = targets._box_memory('sign_slots')
     memory.add(0.0, [(name, confidence, box) for name, confidence, box, _other in signs], *targets.FRAME_SIZE)
-    cells = memory.row(0.0)[:-2].reshape(2, 8, 3)[0]
-    assert sorted(columns) == [column for column in range(8) if cells[column].any()] == [0, 6]
-    for column, (box, _other) in columns.items():
-        assert cells[column] == pytest.approx([(box[2] - box[0]) / 1344, (box[3] - box[1]) / 760, (box[1] + box[3]) / 2 / 760])
-    # The taller 60 of the same column wins, and it was given to another road; the end of a limit is clipped to the frame
-    assert columns[6] == ((1020.0, 300.0, 1090.0, 370.0), True) and columns[0] == ((0.0, 100.0, 50.0, 180.0), False)
+    cells = memory.row(0.0)[:-2].reshape(16, 9)
+    # Left to right: the end (clipped to the frame), the stop, the 80, the 60; the unsure 30 and the empty zone nowhere
+    assert [int(cell[0]) for cell in cells] == [1, 1, 1, 1] + [0] * 12
+    assert sorted(slots) == [slot for slot in range(16) if cells[slot, 0] and not cells[slot, 5]] == [0, 2, 3]
+    for slot, (box, _other) in slots.items():
+        assert cells[slot, 1:5] == pytest.approx([(box[0] + box[2]) / 2 / 1344, (box[1] + box[3]) / 2 / 760,
+                                                  (box[2] - box[0]) / 1344, (box[3] - box[1]) / 760])
+    assert slots == {0: ((0.0, 100.0, 50.0, 180.0), False), 2: (tuple(OURS), False),
+                     3: ((1020.0, 300.0, 1090.0, 370.0), True)}
 
 
 def test_a_brain_that_learns_whose_road_a_sign_is_of_gets_the_box_of_every_sign_read():
@@ -1516,10 +1523,15 @@ def test_a_brain_that_learns_whose_road_a_sign_is_of_gets_the_box_of_every_sign_
     def speed_columns(inputs, row):
         return [column for column in range(8) if inputs['sign_boxes'][row, :-2].reshape(2, 8, 3)[0, column].any()]
 
+    def speed_slots(inputs, row):
+        return [round(float(cell[6]) * 130) for cell in inputs['sign_slots'][row, :-2].reshape(16, 9) if cell[0] and not cell[5]]
+
     assert [speed_columns(taken, row) for row in range(3)] == [[], [6], [6]]
     assert [speed_columns(seen, row) for row in range(3)] == [[], [0, 6], [6]]
+    assert [speed_slots(taken, row) for row in range(3)] == [[], [80], [80]]
+    assert [speed_slots(seen, row) for row in range(3)] == [[], [40, 80], [80]]
     for group in taken:
-        if group != 'sign_boxes':
+        if group not in ('sign_boxes', 'sign_slots'):
             assert numpy.array_equal(taken[group], seen[group]), group
     assert seen['signs'][2, 0] == pytest.approx(80 / 130)  # the 40 of the other road is never the number in force
     # A drive read before those boxes were kept gives the signs taken (and check_drives refuses it for such a brain)

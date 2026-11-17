@@ -32,10 +32,11 @@ export const BRAIN_GROUPS: BrainGroup[] = [
   {name: 'hour_tz', size: 3, use: 'car', what: 'the local hour, on a circle, from the real time zones of the whole world (the zone of the country nearest to the last fix)'},
   {name: 'lead', size: 3, use: 'car', what: 'metres and speed of the car ahead (radarState.leadOne)'},
   {name: 'country_iso', size: 251, use: 'car', what: 'the last country of the GPS, any of the world: its ISO code among 250, or none'},
-  {name: 'sign_boxes', size: 50, use: 'car', what: 'where the signs of the last frame read are in the picture and how big, as SignNet’s '
-    + 'boxes say, with no metres worked out: the picture in 8 columns and, for the speed signs and for the other signs, the tallest '
-    + 'box of each column (its width, its height and the height of its centre, over the frame’s); then whether a sign was ever seen '
-    + 'and the age of the last one (brain_inputs.BoxInputs). Every sign read, of another road too'},
+  {name: 'sign_slots', size: 146, use: 'car', what: 'the signs of the last frame read one by one, each with its number (#110): 16 slots, '
+    + 'the speed signs and the ends of a limit first, then the other signs, the tallest first, in order of x from left to right; '
+    + 'of each, where its centre is, its width and height over the frame’s, whether it is another sign, its km/h, whether the number '
+    + 'was read, whether it is the end of a limit; then whether a sign was ever seen and the age of the last one '
+    + '(brain_inputs.SlotInputs). Every sign read, of another road too'},
   {name: 'road_signs', size: 100, use: 'car', what: 'every other kind the classifier reads: the other signs (give way, stop, pedestrian '
     + 'crossing, roundabout…), the traffic light by what is lit (red, amber, green, off) and the road users (person, bicycle, car…): '
     + 'for each, confirmed, and the age of its last reading'},
@@ -53,6 +54,8 @@ export const BRAIN_GROUPS: BrainGroup[] = [
   {name: 'country', size: 7, use: 'never', what: 'the last country of the GPS among CH, DE, FR, IT, AT, US: the brains until 13 Nov 2026 (country_iso since)'},
   {name: 'sign_distance', size: 2, use: 'never', what: 'the metres to the round sign ahead (vision.SignDistance), worked out from its '
     + 'box and vEgo: only a brain trained until 11 Nov 2026 gets them, a brain of today gets the boxes (sign_boxes)'},
+  {name: 'sign_boxes', size: 50, use: 'never', what: 'where the signs are, in 8 columns: the tallest box of each column and no number, '
+    + 'so two speed signs side by side were one (brain_inputs.BoxInputs). Only the brains trained until 17 Nov 2026; sign_slots since'},
 ];
 
 /** What it says on the car (the head the car's network keeps): the speed to hold and nothing else, since 12 Nov 2026. */
@@ -69,7 +72,7 @@ export const BRAIN_ANSWERS: BrainFact[] = [
   {name: 'road_head', what: 'the kinds of road (narrow, country, gravel, potholes, speed bumps…), where they are marked in Speed review (Road conditions on)'},
   {name: 'type_head', what: 'the road type of the map (Read the map in Data › Prepare), corrected in Speed review where it is wrong (Road type (map) on)'},
   {name: 'users_head', what: 'where the persons and two-wheelers are (a detector, nnslr road-users) and the vehicles you confirmed crossing our path, in 8 columns, with their height (Road users on)'},
-  {name: 'applicability_head', what: 'whose road the speed sign in each of the 8 columns of sign_boxes is of, ours or another, where a box you reviewed in Sign review says it (Applicability on)'},
+  {name: 'applicability_head', what: 'whose road the speed sign in each of the 16 slots of sign_slots is of, ours or another, where a box you reviewed in Sign review says it (Applicability on)'},
 ];
 
 /** The seconds that answer nothing (brain_targets.OUT_REASONS): they still go through the memory, as on the car. */

@@ -11,8 +11,8 @@ The network, per frame: encoder (MobileNetV3-small, as the road-type network) ->
     type   = type_head(h)                        the road type, a logit a type of road_types.ROAD_TYPES: only in training
     users  = users_head(h)                       who is on the road and where, a presence and a size a kind and column:
                                                  only in training
-    whose  = applicability_head(h)               whose road the speed sign of each column of sign_boxes is of, a logit a
-                                                 column (above 0: of another road): only in training, for now
+    whose  = applicability_head(h)               whose road the speed sign of each slot of sign_slots is of, a logit a
+                                                 slot (above 0: of another road): only in training, for now
 
 The table is the network's own (build_brain_net's kph, the class_kph buffer, kept in every checkpoint): a class a km/h from
 1 to 200 since 8 Nov 2026 (brain_targets.SPEED_CLASSES), a class every 5 km/h before. A brain of before keeps its own: its
@@ -48,8 +48,9 @@ Whose road a sign is of (applicability=True, since 15 Nov 2026, #89: Cristian's 
 trained on our reviews"). Until now a small network of its own (the applicability network, one box at a time, no memory)
 gave each speed sign to our road or to another, and the brain never saw a sign given to another road. The brain has what
 that network has not: its memory, the turn signals, the steering wheel, the whole scene. So applicability_head is one
-layer on h with a logit for each of the BOX_COLUMNS columns of sign_boxes: the speed sign the brain is given in that
-column is of another road (above 0) or of ours. loss += APPLICABILITY_LOSS * binary cross entropy on the columns a
+layer on h with a logit for each of the SIGN_SLOTS slots of sign_slots (since 17 Nov 2026, #110; a brain of before has
+one for each of the BOX_COLUMNS columns of sign_boxes, applicability_columns): the speed sign the brain is given in that
+slot is of another road (above 0) or of ours. loss += APPLICABILITY_LOSS * binary cross entropy on the columns a
 reviewed box answers (brain_targets.applicability_answers: the reviews of the gold dataset, our road or another), a
 sum over those columns divided by the frames of the piece: a reviewed sign weighs as a frame of his speed, since few
 frames have one and each is a person's word. pos_weight (brain_train.applicability_pos_weight) lifts the rare side,
@@ -57,8 +58,8 @@ another road, by the columns of our road over those of another in train, at most
 brain that learns it is given the boxes of every speed sign read, those of another road too (the checkpoint's
 other_road_boxes; the car gives the same, brain.BrainReader), since it can only judge what it sees. The head is
 TRAINING_ONLY for now (stage 1): on the car the applicability network still decides which signs are taken, and the head
-is measured beside it on the same signs. Its design limits: a column, not a sign (two speed signs in one column get one
-answer); the picture is 256 x 144, where a sign is a few pixels, so it judges by where the box is and how big, the
+is measured beside it on the same signs. Its design limits: SIGN_SLOTS signs a frame at most (the speed signs first);
+the picture is 256 x 144, where a sign is a few pixels, so it judges by where the box is and how big, the
 scene, the motion and what it remembers, not by the face of the sign; it answers only of a sign SignNet found.
 
 The road type (town, rural, motorway... of the map, with a person's corrections in Speed review: brain_targets.type_answers)
@@ -153,7 +154,20 @@ USERS_POS_WEIGHT_MAX = 10.0  # the most a presence of a rare kind and column is 
 USERS_MIN_HEIGHT = 1e-3  # the size's floor before its log: a present one has at least this height over the frame's
 APPLICABILITY_LOSS = 1.0  # whose road a sign is of: a reviewed sign weighs as a frame of his speed
 APPLICABILITY_POS_WEIGHT_MAX = 10.0  # the most a sign of another road is lifted (brain_train.applicability_pos_weight)
-APPLICABILITY_COLUMNS = BRAIN_INPUTS.BOX_COLUMNS  # applicability_head's outputs: the columns of sign_boxes
+# applicability_head's outputs: one a slot of sign_slots (#110, the brains of today), one a column of sign_boxes for the
+# brains trained with it until 17 Nov 2026 (applicability_columns)
+APPLICABILITY_COLUMNS = BRAIN_INPUTS.SIGN_SLOTS
+APPLICABILITY_GROUPS = {'sign_slots': BRAIN_INPUTS.SIGN_SLOTS, 'sign_boxes': BRAIN_INPUTS.BOX_COLUMNS}
+
+
+def applicability_columns(groups) -> int:
+    """How many logits applicability_head has for a brain of these groups: a slot of sign_slots each, else (a brain of
+    before 17 Nov 2026) a column of sign_boxes each. ValueError for groups with neither."""
+    for name, columns in APPLICABILITY_GROUPS.items():
+        if name in groups:
+            return columns
+    raise ValueError('whose road a sign is of is asked of the slots of sign_slots (or the columns of sign_boxes): '
+                     'one must be among the groups')
 SPEED_SIGMA_KPH = 2.0  # the width of the bell around his speed (speed_targets)
 # How the number in force reaches the answer (the module's text): added to its class alone, or as a bell around it.
 # The first is the path of a checkpoint that does not say: every brain trained before 16 Nov 2026 (#104).
@@ -213,13 +227,13 @@ def build_brain_net(groups: tuple[str, ...], *, pool: str = 'grid', works: bool 
     types=True, the logits of the road type (B, T, road_types), or None for a network built without them; with users=True,
     last, users_head's (B, T, 2, kinds, columns): presence logits ([:, :, 0]) and log sizes ([:, :, 1]) of the road
     users, or None for a network built without it; with applicability=True, last, applicability_head's logits (B, T,
-    BOX_COLUMNS), above 0 where the speed sign of that column of sign_boxes is of another road, or None for a network
+    applicability_columns), above 0 where the speed sign of that slot of sign_slots is of another road, or None for a network
     built without it (outputs reads them by name).
     kph: the km/h of each class, in order (a list, or the class_kph buffer of a checkpoint): the heads have as many classes,
     and a number in force falls on the class within half the table's step of it. None: the table of today's training.
     map_path: the map's limit goes straight to the answer too (trust_map; the module's text): only with map_limit among
     the groups. A checkpoint has it when it has trust_map's weights. applicability: with applicability_head, whose
-    road the speed sign of each column of sign_boxes is of (the module's text): only with sign_boxes among the groups.
+    road the speed sign of each slot of sign_slots is of (the module's text): only with sign_slots (or sign_boxes) among the groups.
     number_path: how the number in force, and the map's limit of a network with map_path, reach the answer (the module's
     text): 'class', the path of every checkpoint that does not say (number_path_of), or 'bell', a training of today's
     (brain_train); never 'bell' with ahead."""
@@ -250,8 +264,7 @@ def build_brain_net(groups: tuple[str, ...], *, pool: str = 'grid', works: bool 
     if map_path and MAP_GROUP not in groups:
         raise ValueError(f'the map’s limit has a path to the answer only when {MAP_GROUP} is among the groups')
     map_at = sum(sizes[name] for name in groups[:groups.index(MAP_GROUP)]) if map_path else None
-    if applicability and 'sign_boxes' not in groups:
-        raise ValueError('whose road a sign is of is asked of the columns of sign_boxes: it must be among the groups')
+    whose_columns = applicability_columns(groups) if applicability else 0
 
     class BrainNet(nn.Module):
         def __init__(self):
@@ -283,7 +296,7 @@ def build_brain_net(groups: tuple[str, ...], *, pool: str = 'grid', works: bool 
             self.road_head = nn.Linear(hidden, road_kinds) if road_kinds else None
             self.type_head = nn.Linear(hidden, road_types) if road_types else None
             self.users_head = nn.Linear(hidden, USER_OUTPUTS) if users else None
-            self.applicability_head = nn.Linear(hidden, APPLICABILITY_COLUMNS) if applicability else None
+            self.applicability_head = nn.Linear(hidden, whose_columns) if applicability else None
             self.ahead = ahead
             if ahead:
                 self.next_head = nn.Linear(hidden, classes + 1)

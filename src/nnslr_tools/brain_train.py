@@ -47,9 +47,9 @@ between roads seen and not seen:
   confirmed, or a person or two-wheeler of the detector) against the other frames: mean error and mean signed error (said
   minus his, above 0 too fast), with the head or not, so that the two trainings compare; crossing_frames counts the frames
   with a confirmed crossing, and the note says when there is none yet;
-- applicability: whose road a speed sign is of, on the columns of sign_boxes a reviewed box answers
+- applicability: whose road a speed sign is of, on the slots of sign_slots a reviewed box answers
   (brain_targets.applicability_answers), every frame with one (a reviewed frame is not one a second): precision and
-  recall of "of another road" of applicability_head (head; None without it), with how many columns say our road and
+  recall of "of another road" of applicability_head (head; None without it), with how many slots say our road and
   how many another. Only against the reviews: no applicability network reads the brain's signs since 15 Nov 2026 (#90);
 - sites: per mark of the partition, how long after his end tap the speed reaches (within RIGHT_KPH) the speed he drove
   after it, and how much of the mark was above his label: said too early, the end of works that is not there. The speed
@@ -252,7 +252,7 @@ def predict(model, drive: dict, store: FrameStore, *, chunk: int, device, cold: 
     own table (class_kph), 'works': chance per frame, or None, 'road': chance per frame and kind of road, or None, 'types':
     chance per frame and road type (road_types.ROAD_TYPES), or None, 'users': chance of a road user per frame, kind and
     column (frames, kinds, columns), or None, 'users_height': the height it says over the frame's, the same shape, or
-    None, 'applicability': the chance that the speed sign of each column of sign_boxes is of another road (frames,
+    None, 'applicability': the chance that the speed sign of each slot of sign_slots is of another road (frames,
     columns), or None}; a network with the limit ahead (a brain of 7 to 11
     Nov 2026, loaded from its checkpoint: brain_export.load_brain) also 'next' (a class of that table per frame, 'none'
     for none: the last one, len(class_kph)) and 'metres'. cold: the memory also starts again where a stretch out of
@@ -428,7 +428,7 @@ def measure(drives: list[dict], answers: list[dict], partition: str) -> dict:
 
 
 def _applicability_measure(drives: list[dict], answers: list[dict], partition: str) -> dict | None:
-    """Whose road a speed sign is of, on the columns of sign_boxes a reviewed box answers in a partition, every frame
+    """Whose road a speed sign is of, on the slots of sign_slots a reviewed box answers in a partition, every frame
     with one: {'ours', 'another': the columns of each; 'head': precision and recall of "of another road" as
     applicability_head says it (_told), None for a network without the head}. Only against the reviews (#90). None for
     drives without those answers."""
@@ -451,7 +451,7 @@ def _applicability_measure(drives: list[dict], answers: list[dict], partition: s
 
 
 def applicability_pos_weight(drives: list[dict]) -> float | None:
-    """How much a sign of another road is lifted in the loss: the answered columns of train of our road over those of
+    """How much a sign of another road is lifted in the loss: the answered slots of train of our road over those of
     another, between 1 and APPLICABILITY_POS_WEIGHT_MAX. None with no sign of another road in train, or none of ours:
     one side alone teaches nothing (_applicability_needs_both)."""
     counts = applicability_counts(drives)['partitions']['train']

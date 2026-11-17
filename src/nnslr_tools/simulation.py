@@ -126,7 +126,7 @@ REGRESSION_SUFFIX = '.regression.json'  # beside a result: how it stands next to
 # What a result's meta keeps of it (the rows aside); COMPARE_VERSION: of compare()'s counts kept beside a result, made
 # again when compare() looks at more.
 META_FIELDS = ('version', 'route', 'set', 'name', 'made_at', 'device', 'networks', 'code', 'settings', 'brain_type_head')
-COMPARE_VERSION = 4  # 4: sign_boxes is no shared input of a brain given every sign's box and one given the signs taken
+COMPARE_VERSION = 5  # 5: nor sign_slots (#110); 4: sign_boxes is no shared input of a brain given every sign's box and one given the signs taken
 # The messages of the log a replay gives the car's loop, and those that say when each frame of the video came.
 GPS_SERVICES = ('gpsLocationExternal', 'gpsLocation')
 LOG_WORKERS = 8
@@ -662,13 +662,13 @@ def _restarts(brain: dict, times: list[int], gap: float | None) -> set[int]:
 
 def _shared_cuts(was: dict, now: dict) -> tuple[list | None, list | None]:
     """Where each brain's input row has the groups both brains take, in one order: [(from, to)] of each, or None for the
-    whole row when they take the same groups (brain_groups [[name, size]]). sign_boxes is not one they share when one
+    whole row when they take the same groups (brain_groups [[name, size]]). sign_boxes (and sign_slots) is not one they share when one
     brain is given the boxes of every sign read and the other those of the signs taken (brain_every_box, the contract's
     other_road_boxes, #89): there the rows differ by the brains' own contracts, not by what is read before them. A group
     one brain has longer (road_signs: a kind of other sign added at its end, #103) is shared for its first numbers, those
     both have."""
     mine, theirs = was.get('brain_groups'), now.get('brain_groups')
-    apart = {'sign_boxes'} if bool(was.get('brain_every_box')) != bool(now.get('brain_every_box')) else set()
+    apart = {'sign_boxes', 'sign_slots'} if bool(was.get('brain_every_box')) != bool(now.get('brain_every_box')) else set()
     if not mine or not theirs or (mine == theirs and not apart):
         return None, None
 
