@@ -37,9 +37,12 @@ def test_the_drives_and_a_drive_s_proposals_are_read_behind_the_login(tmp_path):
         assert status == 200
         [drive] = json_of(data)['drives']
         assert drive['route'] == ROUTE and drive['proposed'] == 1 and drive['reviewed'] == 0
+        # Its name and when, as Speed and sign review lists it (no GPS here: no place to name).
+        assert {'title', 'when', 'when_certain', 'minutes'} <= set(drive) and drive['title'] is None
         status, _response, data = server.request('GET', f'/api/road-users/drives/{ROUTE}', headers=sign_in(server))
         view = json_of(data)
         assert status == 200 and view['revision'] == 0 and view['frame_size'] == [1344, 760]
+        assert {'title', 'when', 'when_certain', 'minutes'} <= set(view) and view['route'] == ROUTE
         assert view['fps'] == 20 and view['readings_per_second'] == 4
         [event] = view['events']
         assert event['id'] == EVENT['id'] and event['kind'] == 'vehicle' and event['score'] == 4.2

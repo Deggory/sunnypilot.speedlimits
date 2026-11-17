@@ -10,7 +10,7 @@ import {api, ApiError, messageOf, post} from '../common/api';
 import {plural} from '../common/format';
 import {toast} from '../composables/toast';
 import {acrossText, API, CLASS_WORDS, type CrossingDrive, type CrossingEvent, type CrossingView, placeText, toReview,
-  type Verdict, type VerdictName, videoTime} from './crossings';
+  titleOf, type Verdict, type VerdictName, videoTime, whenOf} from './crossings';
 import type {VideoState} from './drive-review';
 import {goTo, showEvent, tabEvent} from './tabs';
 
@@ -269,7 +269,8 @@ const videoNote = computed(() => {
     <div class="rt-view-head">
       <button type="button" class="link-button rt-back" @click="back"><span aria-hidden="true">‹</span> Crossings</button>
       <div class="rt-view-name">
-        <h2>{{ route }}</h2>
+        <h2>{{ drive ? titleOf(drive) : route }}</h2>
+        <span v-if="drive && whenOf(drive)">{{ whenOf(drive) }}</span>
         <span v-if="drive">{{ plural(events.length, 'vehicle') }} proposed · {{ remaining ? remaining + ' to review' : 'all reviewed' }}<template
           v-if="crossingCount"> · {{ crossingCount }} crossing</template></span>
       </div>

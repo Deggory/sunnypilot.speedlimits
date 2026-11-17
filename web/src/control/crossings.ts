@@ -10,6 +10,11 @@ export const API = '/api/road-users';
 
 export interface CrossingDrive {
   route: string;
+  /** Its name and when, as Speed and sign review shows them: "Basel → Herznach", "Thu 13 Nov 2026 · 08:11". */
+  title?: string | null;
+  when?: string | null;
+  when_certain?: boolean | null;
+  minutes?: number | null;
   proposed: number;
   reviewed: number;
   crossing: number;
@@ -47,6 +52,10 @@ export interface CrossingEvent {
 
 export interface CrossingView {
   route: string;
+  title?: string | null;
+  when?: string | null;
+  when_certain?: boolean | null;
+  minutes?: number | null;
   revision: number;
   current: boolean;
   frame_size: [number, number];
@@ -82,3 +91,12 @@ export function acrossText(mps: number): string {
 }
 
 export const toReview = (event: CrossingEvent): boolean => event.verdict === null;
+
+/** A drive's name, "Places unknown" without one (Speed and sign review's words); its id while the server is one of
+ *  before the names (no title sent at all). */
+export const titleOf = (drive: {route: string; title?: string | null}): string =>
+  drive.title || (drive.title === undefined ? drive.route : 'Places unknown');
+/** When it was driven and how long: "Thu 13 Nov 2026 · 08:11 · 33 min", ≈ when the time is not certain. */
+export const whenOf = (drive: {when?: string | null; when_certain?: boolean | null; minutes?: number | null}): string =>
+  (drive.when ? (drive.when_certain === false ? '≈ ' : '') + drive.when : '')
+  + (typeof drive.minutes === 'number' ? (drive.when ? ' · ' : '') + drive.minutes + ' min' : '');

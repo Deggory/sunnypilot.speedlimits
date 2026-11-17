@@ -8,7 +8,7 @@ import {computed, onMounted, ref, shallowRef, watch} from 'vue';
 import {api, messageOf} from '../common/api';
 import {plural} from '../common/format';
 import CrossingsDrive from './CrossingsDrive.vue';
-import {API, type CrossingDrive, driveHref} from './crossings';
+import {API, type CrossingDrive, driveHref, titleOf, whenOf} from './crossings';
 import SectionHead from './SectionHead.vue';
 import {tabDrive} from './tabs';
 
@@ -60,13 +60,15 @@ watch(tabDrive, (now) => {
         <li v-for="drive in sorted" :key="drive.route" class="rt-drive sd-drive">
           <a class="rt-open" :href="driveHref(drive.route)">
             <div class="rt-name">
-              <strong class="dr-route">{{ drive.route }}</strong>
+              <strong>{{ titleOf(drive) }}</strong>
+              <span v-if="whenOf(drive)">{{ whenOf(drive) }}</span>
             </div>
             <p class="dr-drive-state" :class="open(drive) ? 'dr-todo' : 'dr-ok'">{{ plural(drive.proposed, 'vehicle') }} proposed ·
               {{ open(drive) ? open(drive) + ' to review' : drive.proposed ? 'all reviewed' : 'nothing to review' }}</p>
             <p class="rt-shares">
               <span v-if="drive.crossing">{{ drive.crossing }} crossing</span>
               <span v-if="drive.yaw === null">no yaw in the logs</span>
+              <span class="rt-frames dr-route">{{ drive.route }}</span>
             </p>
             <span class="data-chev rt-go" aria-hidden="true">›</span>
           </a>

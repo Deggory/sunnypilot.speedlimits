@@ -1881,16 +1881,26 @@ def make_handler(app: ReviewApp):
             /api/road-users/drives (each drive with proposals: proposed, reviewed, confirmed crossings) and
             /api/road-users/drives/<route> (its events with their verdicts and the drive's revision; each event's start,
             end and boxes with their segment, frame and seconds in the drive's video, the boxes in 1344 x 760 pixels)."""
-            from nnslr_tools import road_users
+            from nnslr_tools import drive_review, road_users
+
+            def named(row: dict, names: dict) -> dict:
+                # The drive's name and when, as Speed and sign review shows them ("Basel → Herznach").
+                drive = names.get(row['route']) or {}
+                return {**row, **{key: drive.get(key) for key in ('title', 'when', 'when_certain', 'minutes')}}
+
+            def names_of() -> dict:
+                return {drive['route']: drive for drive in drive_review.drives_view(drive_review.store_for(app.root))}
+
             if path == '/api/road-users/drives':
-                self._json(200, {'ok': True, 'drives': road_users.drives_list(app.root)})
+                names = names_of()
+                self._json(200, {'ok': True, 'drives': [named(row, names) for row in road_users.drives_list(app.root)]})
                 return
             match = re.fullmatch(r'/api/road-users/drives/([0-9a-f]{8}--[0-9a-f]{10})', path)
             if match is None:
                 self._problem(404, 'not_found', 'Not found.', True)
                 return
             try:
-                self._json(200, road_users.drive_view(app.root, match.group(1)))
+                self._json(200, named(road_users.drive_view(app.root, match.group(1)), names_of()))
             except road_users.RoadUsersError as exc:
                 self._problem(exc.status, exc.reason, exc.message, True)
 
