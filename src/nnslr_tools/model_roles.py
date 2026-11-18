@@ -463,14 +463,14 @@ def _brain_applicability(result: dict) -> dict:
             'validation': partition('validation'), 'test': partition('test')}
 
 
-def _brain_situation(result: dict) -> dict | None:
-    """The brain's error against the sign-only baseline on test and validation, without the per-state tables."""
-    situation = result.get('situation')
-    if not isinstance(situation, dict):
-        return None
+def _situation_part(part: Any) -> dict:
+    """One partition of brain_replay.situation_metrics, without the per-state tables: the error with no sign and with one
+    against the driver's median by number (and by number and road type), the first 10 s after an end, and how far the
+    brain is from the driver around the entries of ramps and merges."""
+    part = part if isinstance(part, dict) else {}
 
     def combined(states: dict, names: tuple[str, ...]) -> dict | None:
-        rows = [states[name] for name in names if name in states and states[name].get('ticks')]
+        rows = [states[name] for name in names if isinstance(states.get(name), dict) and states[name].get('ticks')]
         ticks = sum(row['ticks'] for row in rows)
         if not ticks:
             return None
@@ -478,15 +478,50 @@ def _brain_situation(result: dict) -> dict | None:
         return {'ticks': ticks, **{key: sum(row[key] * row['ticks'] for row in rows) / ticks
                                    for key in keys if all(key in row for row in rows)}}
 
-    found = {}
-    for name in ('validation', 'test'):
-        part = situation.get(name) or {}
-        states = _dig(part, ('by', 'state')) or {}
-        found[name] = {'no_sign': combined(states, ('none yet', 'after an end')),
-                       'with_sign': combined(states, ('number, fresh', 'number, old')),
-                       'mean_error_by_place_kph': _num(_dig(part, ('all', 'mean_error_by_place_kph'))),
-                       'within_number_slope': _num(_dig(part, ('within_number', 'slope')))}
-    return found
+    def errors(row: Any) -> dict | None:
+        if not isinstance(row, dict) or not row.get('ticks'):
+            return None
+        return {'ticks': _int(row.get('ticks')), **{key: _num(row.get(key)) for key in (
+            'mean_error_kph', 'baseline_mean_error_kph', 'type_baseline_mean_error_kph') if key in row}}
+
+    states = _dig(part, ('by', 'state')) or {}
+    entries = {}
+    for kind, found in (part.get('entries') or {}).items():
+        if isinstance(found, dict) and found.get('entries'):
+            entries[kind] = {'entries': _int(found.get('entries')),
+                             **{phase: _num((row or {}).get('brain_minus_driver_kph'))
+                                for phase, row in (found.get('phases') or {}).items()}}
+    return {'all': errors(part.get('all')),
+            'no_sign': combined(states, ('none yet', 'after an end')),
+            'with_sign': combined(states, ('number, fresh', 'number, old')),
+            'after_end_first_10s': errors(_dig(part, ('after_end', '0-10s'))),
+            'entries': entries or None,
+            'mean_error_by_place_kph': _num(_dig(part, ('all', 'mean_error_by_place_kph'))),
+            'within_number_slope': _num(_dig(part, ('within_number', 'slope')))}
+
+
+def _brain_situation(result: dict) -> dict | None:
+    """The brain's error against the sign-only baseline on test and validation, without the per-state tables."""
+    situation = result.get('situation')
+    if not isinstance(situation, dict):
+        return None
+    return {name: _situation_part(situation.get(name)) for name in ('validation', 'test')}
+
+
+def brain_replay_digest(found: Any) -> dict:
+    """runs/<run>/replay-<partition>.json of Models › brain › Replay (brain_replay.main, #116): the situation measure of
+    a brain trained before it was measured at the end of training, the decoders and how much the number moves it."""
+    if not isinstance(found, dict) or not isinstance(found.get('situation'), dict):
+        raise ValueError('not a brain replay')
+    number = found.get('number_use') if isinstance(found.get('number_use'), dict) else {}
+    decoders = _dig(found, ('decoders', found.get('partition'))) or {}
+    decision = found.get('decision') if isinstance(found.get('decision'), dict) else {}
+    return {'partition': found.get('partition'), 'passages': _int(found.get('passages')),
+            'trust_median': _num(number.get('trust_median')),
+            'argmax_changed_share': _num(number.get('argmax_changed_share')),
+            'decoders': {name: _num((row or {}).get('mean_error_kph')) for name, row in decoders.items()},
+            'decision': decision.get('training') if isinstance(decision.get('training'), str) else None,
+            'situation': _situation_part(found['situation'])}
 
 
 def brain_digest(result: Any) -> dict:
@@ -1046,6 +1081,9 @@ class ModelIndex:
         trained = result or {}
         if trained.get('dry_run'):
             return None
+        # Its replay (Models › brain › Replay), when it was run: validation and test.
+        replay = {part: self._read(run, f'replay-{part}.json', brain_replay_digest, problems)
+                  for part in ('validation', 'test')}
         entry = self._base('brain', name, BRAIN_PART, checkpoint, result, problems)
         seed = trained.get('seed')
         detail = ('says the speed to hold' + (' · without the picture (offline only)' if trained.get('picture') is False else '')
@@ -1065,7 +1103,8 @@ class ModelIndex:
                                                             'kept')},
                       'epochs': trained.get('epochs'), 'epochs_run': trained.get('epochs'),
                       'validation': trained.get('validation'), 'test': trained.get('test'),
-                       'test_no_map': trained.get('test_no_map'), 'situation': trained.get('situation')})
+                       'test_no_map': trained.get('test_no_map'), 'situation': trained.get('situation'),
+                       'replay': replay if any(replay.values()) else None})
         return entry
 
     def artifacts(self, roles: tuple[str, ...] = ROLES) -> dict[str, list[dict]]:

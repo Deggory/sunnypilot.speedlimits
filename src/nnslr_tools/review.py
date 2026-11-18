@@ -2122,6 +2122,9 @@ def make_handler(app: ReviewApp):
                     # into a training without them.
                     options.update((key, body[key]) for key in ('users',)
                                    if isinstance(body, dict) and body.get(key) is not None)
+                    # The brain of a replay ({"replay": run}, Models › brain): even null is passed, to be refused,
+                    # never dropped into a replay of no brain.
+                    options.update((key, body[key]) for key in ('replay',) if isinstance(body, dict) and key in body)
                     options = options or None
                     # [ai-reviewer] - END
                     job = app.panel.start(run.group(1), options)

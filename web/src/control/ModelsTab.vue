@@ -174,7 +174,22 @@ const car = computed((): CarState => ({
   tryState: props.status?.actions.try_on_comma ?? null,
   trying: runningOf('try_on_comma') ?? runningOf('comma_restore'),
   onTrial: trial.value?.signnet.run ?? null,
+  replayState: props.status?.actions.brain_replay ?? null,
+  replaying: (() => {
+    const job = jobOf(props.status, ['brain_replay']);
+    return job?.state === 'running' ? job.run ?? '' : null;
+  })(),
 }));
+/** Models › brain › Replay: asks, then replays the brain on its validation and test drives (scripts/run_brain_replay.sh). */
+async function replayBrain(version: ModelVersion): Promise<void> {
+  const state = car.value.replayState ?? null;
+  if (state === null || !state.allowed) return;
+  if (!await askConfirm({title: 'Replay ' + version.run + '?', action: 'Replay',
+    text: 'Runs this brain again on its validation and test drives, without training: its error by situation against your '
+      + 'median, ramps and merges, the time after an end, and how much the sign moves it. A card of its own for about half '
+      + 'an hour; the results show in its Details.'})) return;
+  emit('run', 'brain_replay', state, undefined, {replay: version.run});
+}
 /** The trial in a few words: "copied 28 Oct 14:20 · ready: used from the next drive". */
 const trialText = computed((): string => {
   const value = trial.value;
@@ -274,7 +289,7 @@ async function choose(version: ModelVersion): Promise<void> {
     <!-- The versions of one network, to compare and to choose. -->
     <VersionsCard v-if="pickedRole" :key="pickedRole.role" :role="pickedRole" :recent="recent[pickedRole.role] ?? pickedRole.versions"
                   :payload="payload" :read-only="readOnly" :busy="busy" :car="car" :trial="trial" :github="github"
-                  :open-id="linkedVersion" @use="choose" @try="tryOnComma">
+                  :open-id="linkedVersion" @use="choose" @try="tryOnComma" @replay="replayBrain">
       <Segmented v-model="picked" :options="roleOptions" label="Network" class="versions-seg"/>
       <template #foot>
         <p v-if="pickedRole.role === 'cutter' && carJob && !bigCarJob" class="last-line" id="car-last">{{ CAR_JOB_TEXT[carJob.action] }}:

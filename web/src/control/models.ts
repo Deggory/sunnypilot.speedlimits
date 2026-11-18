@@ -104,6 +104,9 @@ export interface CarState {
   tryState?: ActionState | null;
   trying?: string | null;
   onTrial?: string | null;
+  /** Models › brain › Replay: its state, and the run being replayed (null: none). */
+  replayState?: ActionState | null;
+  replaying?: string | null;
 }
 
 /** The question before Publish (Publish tab, scripts/send_to_car.sh): which SignNet, which classifier and which brain

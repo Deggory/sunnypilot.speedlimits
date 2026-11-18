@@ -5,7 +5,7 @@ export type ActionName = 'fetch' | 'fetch_connect' | 'prepare' | 'prepare_again'
   | 'train_cutter' | 'train_decider' | 'train_brain' | 'regression' | 'update' | 'ai_review' | 'measure_ai_reviewer' | 'networks_prepare' | 'networks_publish'
   | 'road_types' | 'send_to_car' | 'try_on_comma' | 'comma_restore' | 'mapillary_locations' | 'mapillary_windows'
   | 'road_labeler_train' | 'road_labeler_predict' | 'box_fit_train' | 'simulate' | 'networks_github_save'
-  | 'networks_github_restore';
+  | 'networks_github_restore' | 'brain_replay';
 /** What a cutter learns to find: every sign (the speed signs and the other signs) or the speed signs only. */
 export type CutterFamilies = 'all' | 'speed';
 /** The options of “Train the cutter” (POST /api/panel/run/train_cutter {"families"}): a SignNet at the car's band. */
@@ -64,6 +64,8 @@ export interface ActionOptions {
   license?: string;
   /** The run of the SignNet sent to the car (send_to_car) or tried on the comma (try_on_comma). */
   signnet?: string;
+  /** The run of the brain replayed on its validation and test drives (brain_replay, Models › brain › Replay). */
+  replay?: string;
   /** Build psa-torque-sunny-testing also when nothing changed (send_to_car, "Build again"). */
   rebuild?: 'on';
   /** Whether the classifier's training adds the signs of the Mapillary dataset to train, or first learns on them alone
@@ -1622,10 +1624,26 @@ export interface BrainSituationErrors {
   type_baseline_mean_error_kph?: number;
 }
 export interface BrainSituation {
+  all?: BrainSituationErrors | null;
   no_sign: BrainSituationErrors | null;
   with_sign: BrainSituationErrors | null;
+  /** The first 10 s after a limit ends. */
+  after_end_first_10s?: BrainSituationErrors | null;
+  /** Around the entries of ramps and merges: how many, and the brain's speed minus the driver's in km/h in the 10 s
+   * before, the first 10 s and the 20 s after. */
+  entries?: Record<string, {entries: number; before?: number | null; 'first 10 s'?: number | null; after?: number | null}> | null;
   mean_error_by_place_kph: number | null;
   within_number_slope: number | null;
+}
+/** runs/<run>/replay-<partition>.json of Models › brain › Replay (model_roles.brain_replay_digest). */
+export interface BrainReplay {
+  partition: string;
+  passages: number | null;
+  trust_median: number | null;
+  argmax_changed_share: number | null;
+  decoders: Record<string, number | null>;
+  decision: string | null;
+  situation: BrainSituation;
 }
 export interface BrainModel extends ModelBase {
   role: 'brain';
@@ -1664,6 +1682,8 @@ export interface BrainModel extends ModelBase {
   balance?: boolean | null;
   kept?: {epoch: number; validation_error_by_place_kph: number | null} | null;
   situation?: {validation: BrainSituation; test: BrainSituation} | null;
+  /** Its replay (Models › brain › Replay), when it was run. */
+  replay?: {validation: BrainReplay | null; test: BrainReplay | null} | null;
   /** The brain's frozen split it learnt on (null: not recorded in its result), and the brain it went on from (null:
    * ImageNet). */
   split_sha256?: string | null;

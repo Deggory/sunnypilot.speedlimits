@@ -20,7 +20,7 @@ import MetricTiles from './MetricTiles.vue';
 
 const props = defineProps<{version: ModelVersion; roleLabel: string; score: number; readOnly: boolean; busy: string | null;
   car?: CarState | null}>();
-const emit = defineEmits<{use: [version: ModelVersion]; try: [version: ModelVersion]}>();
+const emit = defineEmits<{use: [version: ModelVersion]; try: [version: ModelVersion]; replay: [version: ModelVersion]}>();
 
 const cutter = computed(() => props.version.role === 'cutter' ? props.version : null);
 const signnet = computed(() => cutter.value?.kind === 'signnet');
@@ -29,7 +29,27 @@ const forCar = computed(() => signnet.value && cutter.value?.fits_the_car !== fa
 const classifier = computed(() => props.version.role === 'classifier' ? props.version : null);
 const decider = computed(() => props.version.role === 'decider' ? props.version : null);
 const brain = computed(() => props.version.role === 'brain' ? props.version : null);
-function situationError(found: BrainSituationErrors | null): string {
+/** The situation measure on test: of its training (since 18 Nov 2026), else of its replay (Models › brain › Replay). */
+const situation = computed(() => brain.value?.situation?.test ?? brain.value?.replay?.test?.situation ?? null);
+const replayTest = computed(() => brain.value?.replay?.test ?? null);
+/** Around the entries of ramps and merges on test: the brain's speed minus yours, in km/h. */
+function entryText(kind: string): string {
+  const found = situation.value?.entries?.[kind];
+  if (!found) return '';
+  const sign = (value: number | null | undefined): string => value == null ? '–' : (value > 0 ? '+' : '') + value.toFixed(1);
+  return `${found.entries} entries: ${sign(found.before)} before, ${sign(found['first 10 s'])} first 10 s, ${sign(found.after)} after`;
+}
+const replaying = computed(() => props.car?.replaying != null && props.car.replaying === props.version.run);
+/** Models › brain › Replay: only a finished brain, on a server that lets it run. */
+const replayable = computed(() => brain.value !== null && props.version.finished && !props.readOnly
+  && props.car?.replayState != null);
+const replayBlocked = computed((): string => {
+  if (props.car?.replaying != null) return 'A brain is being replayed now.';
+  const state = props.car?.replayState;
+  if (state && !state.allowed) return state.reason.charAt(0).toUpperCase() + state.reason.slice(1) + '.';
+  return '';
+});
+function situationError(found: BrainSituationErrors | null | undefined): string {
   if (!found) return '–';
   const typed = found.type_baseline_mean_error_kph == null ? '' : `, ${found.type_baseline_mean_error_kph.toFixed(1)} by road type`;
   return `${found.mean_error_kph.toFixed(1)} vs ${found.baseline_mean_error_kph.toFixed(1)}${typed} km/h`;
@@ -290,10 +310,17 @@ const noOtherOnTest = computed(() => decider.value?.test?.other_road_support ===
           <div><dt>Off on average</dt><dd>{{ brain.test.mean_error_kph?.toFixed(1) ?? '–' }} km/h</dd></div>
           <div><dt>On validation</dt><dd>{{ pct(brain.validation?.right) }}</dd></div>
           <div v-if="brain.test_no_map"><dt title="The same test frames with no map at all, as past a border with no map downloaded: what is left of it without the map">Off without the map</dt><dd>{{ brain.test_no_map.mean_error_kph?.toFixed(1) ?? '–' }} km/h</dd></div>
-          <template v-if="brain.situation">
-            <div><dt title="Mean absolute error on test with no number in force, including after a limit ends, compared with your train median on the same ticks, and with your median for the number and road type">No sign in force</dt><dd>{{ situationError(brain.situation.test.no_sign) }}</dd></div>
-            <div><dt title="Mean absolute error on test with a number in force, compared with your train median for each number on the same ticks, and for the number and road type">With a sign</dt><dd>{{ situationError(brain.situation.test.with_sign) }}</dd></div>
-            <div><dt title="Within the same signed limit on test, how much the brain changes speed across road types compared with you. 1 means it makes the full change.">Slows as you did</dt><dd>{{ brain.situation.test.within_number_slope?.toFixed(2) ?? '–' }}</dd></div>
+          <template v-if="situation">
+            <div><dt title="Mean absolute error on test with no number in force, including after a limit ends, compared with your train median on the same ticks, and with your median for the number and road type">No sign in force</dt><dd>{{ situationError(situation.no_sign) }}</dd></div>
+            <div><dt title="Mean absolute error on test with a number in force, compared with your train median for each number on the same ticks, and for the number and road type">With a sign</dt><dd>{{ situationError(situation.with_sign) }}</dd></div>
+            <div v-if="situation.after_end_first_10s"><dt title="The first 10 s after a limit ends on test, against the same two medians of yours">After an end</dt><dd>{{ situationError(situation.after_end_first_10s) }}</dd></div>
+            <div v-if="entryText('ramp')"><dt title="Around the entries of ramps on test: the brain’s speed minus yours, 10 s before, the first 10 s and the 20 s after">Ramps</dt><dd>{{ entryText('ramp') }} km/h</dd></div>
+            <div v-if="entryText('merge')"><dt title="Around the entries of merges on test: the brain’s speed minus yours, 10 s before, the first 10 s and the 20 s after">Merges</dt><dd>{{ entryText('merge') }} km/h</dd></div>
+            <div><dt title="Within the same signed limit on test, how much the brain changes speed across road types compared with you. 1 means it makes the full change.">Slows as you did</dt><dd>{{ situation.within_number_slope?.toFixed(2) ?? '–' }}</dd></div>
+          </template>
+          <template v-if="replayTest">
+            <div><dt title="Mean absolute error on test with three ways to read the speed from its answer: the most likely class, the mean, the median">Decoders</dt><dd>{{ Object.entries(replayTest.decoders).map(([name, error]) => name + ' ' + (error?.toFixed(1) ?? '–')).join(' · ') }} km/h</dd></div>
+            <div v-if="replayTest.argmax_changed_share != null"><dt title="On the test ticks with a number in force: how often the speed it says changes when the sign is taken away">The sign moves it</dt><dd>{{ pct(replayTest.argmax_changed_share) }} of the ticks with a number</dd></div>
           </template>
           <div v-if="anotherRoad?.head"><dt :title="'Of the speed signs a reviewed box gives to another road (reviewed speed signs it is given: ' + anotherRoad.signs + '): how many its applicability head finds, and how many signs of our road it calls another’s'">Another road, its head</dt><dd>{{ anotherRoad.head }}</dd></div>
           <div><dt title="What it reads each second beside the picture; the map only when map_limit is among them">Inputs</dt><dd>{{ brain.groups?.join(', ') ?? '–' }}</dd></div>
@@ -321,7 +348,11 @@ const noOtherOnTest = computed(() => decider.value?.test?.other_road_support ===
 
     <div class="model-actions">
       <a class="flow-link" :href="evaluateHref(version)" @click="openRun($event, version)">Open the run ›</a>
-      <span v-if="forCar || (selectable && !version.in_use)" class="model-buttons">
+      <span v-if="forCar || (selectable && !version.in_use) || replayable" class="model-buttons">
+        <button v-if="replayable" class="btn small" type="button" :disabled="replayBlocked !== ''"
+                :title="replayBlocked || 'Runs it again on its validation and test drives, without training: its error by situation, ramps and merges, the time after an end, how much the sign moves it.'"
+                :aria-label="'Replay ' + version.run" :data-replay="version.run"
+                @click="emit('replay', version)">{{ replaying ? 'Replaying…' : brain?.replay ? 'Replay again' : 'Replay' }}</button>
         <button v-if="selectable && !version.in_use" class="btn small" type="button" :disabled="blocked !== '' || busy !== null"
                 :title="blocked || ROLE_TEXT[version.role].uses"
                 :aria-label="'Use ' + version.run + ' · ' + version.label + ' as the ' + roleWords(roleLabel)"

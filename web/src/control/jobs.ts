@@ -13,7 +13,7 @@ export const JOB_STATE: Record<JobState, [label: string, kind: string]> = {
 /** The group of each action (nnslr_tools.panel.ACTIONS): a terminal activity of the same group is that work. */
 export const ACTION_GROUP: Record<ActionName, string> = {
   fetch: 'fetch', fetch_connect: 'connect', prepare: 'prepare', prepare_again: 'prepare', measure_proposer: 'train', setup_vlm: 'train', dataset: 'train', train: 'train', train_continue: 'train', train_resume: 'train',
-  train_classifier: 'train', train_cutter: 'train', train_decider: 'train', train_brain: 'train', regression: 'train', update: 'update', ai_review: 'ai',
+  train_classifier: 'train', train_cutter: 'train', train_decider: 'train', train_brain: 'train', brain_replay: 'train', regression: 'train', update: 'update', ai_review: 'ai',
   measure_ai_reviewer: 'ai',
   networks_prepare: 'publish', networks_publish: 'publish', road_types: 'prepare', send_to_car: 'publish',
   try_on_comma: 'publish', comma_restore: 'publish', mapillary_locations: 'mapillary', mapillary_windows: 'mapillary',
@@ -25,7 +25,7 @@ export const ACTION_GROUP: Record<ActionName, string> = {
 export const ACTION_ICON: Record<ActionName, IconName> = {
   fetch: 'download', fetch_connect: 'download', prepare: 'prepare', prepare_again: 'resume', measure_proposer: 'train', setup_vlm: 'download', dataset: 'import', train: 'train', train_continue: 'train',
   train_resume: 'resume', train_classifier: 'train', train_cutter: 'train', train_decider: 'train', train_brain: 'train',
-  regression: 'train', update: 'update', ai_review: 'ai',
+  regression: 'train', brain_replay: 'train', update: 'update', ai_review: 'ai',
   measure_ai_reviewer: 'ai', networks_prepare: 'package', networks_publish: 'upload', road_types: 'routes', send_to_car: 'upload',
   try_on_comma: 'upload', comma_restore: 'resume', mapillary_locations: 'routes', mapillary_windows: 'prepare',
   road_labeler_train: 'train', road_labeler_predict: 'routes',
@@ -41,7 +41,7 @@ export const ACTION_TAB: Record<ActionName, string | null> = {
   dataset: '/dataset', road_types: '/prepare',
   train: '/train', train_continue: '/train', train_resume: '/train', train_classifier: '/train', train_brain: '/train',
   train_cutter: '/train', train_decider: '/models', ai_review: '/train', mapillary_locations: '/train', mapillary_windows: '/train',
-  measure_proposer: '/evaluate', measure_ai_reviewer: '/evaluate', regression: '/drive', simulate: '/drive',
+  measure_proposer: '/evaluate', measure_ai_reviewer: '/evaluate', regression: '/drive', simulate: '/drive', brain_replay: '/models',
   networks_prepare: '/publish', networks_publish: '/publish', networks_github_save: '/publish', networks_github_restore: '/publish',
   send_to_car: '/publish', try_on_comma: '/models', comma_restore: '/models',
   road_labeler_train: '/models', road_labeler_predict: '/models', box_fit_train: '/models',

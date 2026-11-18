@@ -470,8 +470,9 @@ def test_diagnostic_brain_cannot_be_published_and_models_show_situation(root, ch
     version, _why = panel.models_index.in_use('brain')
     assert version['picture'] is False and version['balance'] is True
     assert version['situation']['test'] == {
-        'no_sign': {'ticks': 4, 'mean_error_kph': 5, 'baseline_mean_error_kph': 9},
+        'all': None, 'no_sign': {'ticks': 4, 'mean_error_kph': 5, 'baseline_mean_error_kph': 9},
         'with_sign': {'ticks': 3, 'mean_error_kph': 3, 'baseline_mean_error_kph': 4},
+        'after_end_first_10s': None, 'entries': None,
         'mean_error_by_place_kph': 6, 'within_number_slope': .75}
     assert version['situation']['validation']['no_sign'] is None
     assert 'without the picture' in brain_refused(panel.models_index)
@@ -927,3 +928,58 @@ def test_the_models_tab_gets_the_number_path_of_a_brain(root, checkout):
                 for version in role['versions']}
     assert versions['brain:b2-s0/brain']['number_path'] == 'bell'
     assert versions['brain:b1-s0/brain']['number_path'] == 'class'
+
+
+def replay_script(checkout):
+    script = checkout / 'scripts' / 'run_brain_replay.sh'
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text('#!/usr/bin/env bash\necho "== Replay of the brain $1 on GPU ${NNSLR_GPU_INDEX:-0}: validation and test =="\n')
+    script.chmod(0o755)
+    return script
+
+
+def test_a_trained_brain_is_replayed_from_models_and_its_replay_shows_there(root, checkout):
+    """Models › brain › Replay (#116): brain_replay takes the run of a trained brain, refuses anything else, runs
+    scripts/run_brain_replay.sh with it, and Models reads its replay-<partition>.json."""
+    replay_script(checkout)
+    panel = Panel(root, repo=checkout)
+    run = root / 'runs' / '2026-11-17_1935-brain-s0'
+    run.mkdir(parents=True)
+    (run / 'brain-last.pt').write_bytes(b'synthetic weights')
+    (run / 'result.json').write_text(json.dumps({'groups': ['signs'], 'test': {'speed': {}}}))
+    dry = root / 'runs' / 'dry'
+    dry.mkdir()
+    (dry / 'brain-last.pt').write_bytes(b'synthetic weights')
+    (dry / 'result.json').write_text(json.dumps({'groups': ['signs'], 'test': {'speed': {}}, 'dry_run': True}))
+    for options, message in (({}, 'Choose the brain'), ({'replay': None}, 'Choose the brain'),
+                             ({'replay': '../etc'}, 'Choose the brain'), ({'replay': 'missing'}, 'not a trained brain'),
+                             ({'replay': 'dry'}, 'dry run')):
+        with pytest.raises(PanelError, match=message):
+            panel.start('brain_replay', options)
+    with pytest.raises(PanelError, match='does not take a brain'):
+        panel.start('regression', {'replay': run.name})
+    job = panel.start('brain_replay', {'replay': run.name})
+    finished(panel, job['id'])
+    assert 'Replay of the brain 2026-11-17_1935-brain-s0 on GPU' in full_log(panel, job['id'])
+    assert _run_of(panel.logs / (job['id'] + '.log'), 'brain_replay') == run.name
+
+    situation = {'all': {'ticks': 10, 'mean_error_kph': 9, 'baseline_mean_error_kph': 18,
+                         'type_baseline_mean_error_kph': 11},
+                 'by': {'state': {'none yet': {'ticks': 4, 'mean_error_kph': 10, 'baseline_mean_error_kph': 30}}},
+                 'after_end': {'0-10s': {'ticks': 2, 'mean_error_kph': 16, 'baseline_mean_error_kph': 22}},
+                 'entries': {'ramp': {'entries': 3, 'phases': {'before': {'ticks': 5, 'brain_minus_driver_kph': 4},
+                                                               'first 10 s': {'ticks': 5, 'brain_minus_driver_kph': 8}}},
+                             'merge': {'entries': 0, 'phases': {}}},
+                 'within_number': {'slope': .9}}
+    (run / 'replay-test.json').write_text(json.dumps({
+        'partition': 'test', 'passages': 68, 'number_use': {'trust_median': .29, 'argmax_changed_share': .47},
+        'decoders': {'test': {'argmax': {'mean_error_kph': 9.4}, 'median': {'mean_error_kph': 9.1}}},
+        'decision': None, 'situation': situation}))
+    version = next(entry for entry in panel.models_index.artifacts(('brain',))['brain'] if entry['run'] == run.name)
+    assert version['replay']['validation'] is None
+    test = version['replay']['test']
+    assert test['decoders'] == {'argmax': 9.4, 'median': 9.1} and test['argmax_changed_share'] == .47
+    assert test['situation']['all'] == {'ticks': 10, 'mean_error_kph': 9, 'baseline_mean_error_kph': 18,
+                                        'type_baseline_mean_error_kph': 11}
+    assert test['situation']['after_end_first_10s'] == {'ticks': 2, 'mean_error_kph': 16, 'baseline_mean_error_kph': 22}
+    assert test['situation']['entries'] == {'ramp': {'entries': 3, 'before': 4, 'first 10 s': 8}}

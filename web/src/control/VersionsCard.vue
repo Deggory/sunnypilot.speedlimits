@@ -18,7 +18,7 @@ const props = defineProps<{role: RoleModels; recent: ModelVersion[]; payload: Mo
   busy: string | null; car: CarState; trial: CommaTrial | null; openId?: string; bare?: boolean;
   /** Whether GitHub has each version a save copies (#92): marked on the row in use, and on any other not saved. */
   github?: Record<string, GitHubFileState> | null}>();
-const emit = defineEmits<{use: [version: ModelVersion]; try: [version: ModelVersion]}>();
+const emit = defineEmits<{use: [version: ModelVersion]; try: [version: ModelVersion]; replay: [version: ModelVersion]}>();
 const root = useTemplateRef<HTMLElement>('root');
 
 /** The older versions shown too. */
@@ -100,7 +100,8 @@ watch(() => [props.openId, props.role.versions.length] as const, ([id]) => {
         </summary>
         <ul class="model-list">
           <ModelItem :version="version" :role-label="role.label" :score="payload.cutter_score_threshold"
-                     :read-only="readOnly" :busy="busy" :car="car" @use="emit('use', $event)" @try="emit('try', $event)"/>
+                     :read-only="readOnly" :busy="busy" :car="car" @use="emit('use', $event)" @try="emit('try', $event)"
+                     @replay="emit('replay', $event)"/>
         </ul>
       </details>
       <button v-if="olderCount > 0" type="button" class="link-button vt-older" :aria-expanded="older"

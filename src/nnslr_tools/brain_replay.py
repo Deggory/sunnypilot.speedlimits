@@ -592,10 +592,19 @@ def _number_use(drive: dict, run: dict, table: np.ndarray, partition: str) -> di
             'mean_shift_kph': np.abs(with_sign['mean'] - without['mean']).tolist()}
 
 
+# The replay of a brain, beside its weights: Models › brain reads it (model_roles.brain_replay_digest).
+REPLAY_FILE = 'replay-{partition}.json'
+
+
 def run_replay(root, run_dir, merged_of, *, device, partition: str = 'validation', log=print) -> dict:
     """The paired replay of one trained brain on one partition (#116): no weight moves. The drives as its training read
     them (routes.json, its sign networks, its groups and sizes), one pass per drive for the decoders and the number's use,
     then each swappable passage from the memory before its first reading."""
+    return run_replays(root, run_dir, merged_of, device=device, partitions=(partition,), log=log)[partition]
+
+
+def run_replays(root, run_dir, merged_of, *, device, partitions=('validation', 'test'), log=print) -> dict:
+    """run_replay on several partitions with the drives read once: {partition: found}."""
     import json
     from pathlib import Path
 
@@ -614,12 +623,28 @@ def run_replay(root, run_dir, merged_of, *, device, partition: str = 'validation
                      networks=of_brain(root, result.get('sign_networks')),
                      other_road_boxes=bool(saved.get('other_road_boxes', False)))
     baseline, type_baseline = situation_baseline(drives), situation_type_baseline(drives)
-    drives = [drive for drive in drives if partition in set(drive['partitions'])]
-    log(f'{len(drives)} drives with {partition} frames')
+    drives = [drive for drive in drives if set(partitions) & set(drive['partitions'])]
     for drive in drives:
         drive['extra'] = pack_inputs(drive['inputs'], groups, brain_sizes(saved))
-    store = FrameStore(_pictures(root, drives, dry_run=False, log=log), device) if model.picture else None
     table = model.class_kph.detach().cpu().numpy()
+    every = drives
+    results = {}
+    for partition in partitions:
+        drives = [drive for drive in every if partition in set(drive['partitions'])]
+        log(f'== {partition}: {len(drives)} drives with {partition} frames ==')
+        # The pictures of one partition at a time on the card (a drive's whole video at 4 Hz, about 110 kB a frame).
+        store = FrameStore(_pictures(root, drives, dry_run=False, log=log), device) if model.picture else None
+        results[partition] = _replay_partition(model, drives, store, groups, table, baseline, type_baseline, partition,
+                                               run_dir, device=device, log=log)
+        del store
+        if str(device).startswith('cuda'):
+            _torch().cuda.empty_cache()
+    return results
+
+
+def _replay_partition(model, drives, store, groups, table, baseline, type_baseline, partition, run_dir, *, device,
+                      log=print) -> dict:
+    """run_replays on the drives of one partition."""
     decoded, responses, uses, skipped = [], [], [], 0
     for at, drive in enumerate(drives, 1):
         bounds = []
@@ -662,22 +687,36 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description='Paired replay of a trained brain (#116): no training.')
     parser.add_argument('--run', required=True, help='the brain run, e.g. 2026-11-17_1935-brain-s0')
     parser.add_argument('--data-root')
-    parser.add_argument('--partition', default='validation', choices=('validation', 'test'))
+    parser.add_argument('--partition', default='both', choices=('validation', 'test', 'both'))
     parser.add_argument('--device', default='cuda')
-    parser.add_argument('--out', required=True)
+    parser.add_argument('--out', help='the file of one partition; by default <run>/replay-<partition>.json (REPLAY_FILE), '
+                                      'which Models › brain shows')
     args = parser.parse_args(argv)
+    partitions = ('validation', 'test') if args.partition == 'both' else (args.partition,)
+    if args.out and len(partitions) > 1:
+        parser.error('--out names the file of one partition')
     torch = _torch()
     if args.device.startswith('cuda') and not torch.cuda.is_available():
         raise SystemExit('no GPU found: the replay runs only on the V100s')
     root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    run_dir = root / 'runs' / args.run
+    if not (run_dir / 'result.json').is_file():
+        raise SystemExit(f'no brain run {args.run}: {run_dir}/result.json is missing')
     store = DriveReviewStore(root)
-    found = run_replay(root, root / 'runs' / args.run, lambda route: store.merged(route, keep=False),
-                       device=torch.device(args.device), partition=args.partition)
-    Path(args.out).parent.mkdir(parents=True, exist_ok=True)
-    Path(args.out).write_text(json.dumps(found, indent=1, default=float), encoding='utf-8')
-    print(json.dumps({key: found[key] for key in ('passages', 'passages_skipped', 'number_use', 'decoders', 'decision')}
-                     | {'situation': {key: found['situation'].get(key) for key in ('all', 'within_number')}},
-                     indent=1, default=float))
+    found = run_replays(root, run_dir, lambda route: store.merged(route, keep=False),
+                        device=torch.device(args.device), partitions=partitions)
+    for partition, replay in found.items():
+        out = Path(args.out) if args.out else run_dir / REPLAY_FILE.format(partition=partition)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        # Written whole and then renamed: Models never reads half a file.
+        part = out.with_name(out.name + '.part')
+        part.write_text(json.dumps(replay, indent=1, default=float), encoding='utf-8')
+        part.replace(out)
+        print(f'written {out}')
+        print(json.dumps({key: replay[key] for key in ('partition', 'passages', 'passages_skipped', 'number_use',
+                                                       'decoders', 'decision')}
+                         | {'situation': {key: replay['situation'].get(key) for key in ('all',)}},
+                         indent=1, default=float))
     return 0
 
 

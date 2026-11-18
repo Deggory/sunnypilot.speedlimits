@@ -96,6 +96,9 @@ DECIDER_SCRIPT = 'scripts/run_experiment_b.sh'
 # crosses our path from the marks of Speed review, as a kind of road), so 'off' is taken and changes nothing, and
 # anything else is refused, never dropped into a training that is not the one asked for.
 BRAIN_SCRIPT = 'scripts/run_brain.sh'
+# Models › brain › Replay (#116): a trained brain replayed on its validation and test drives, no training; it writes
+# runs/<run>/replay-<partition>.json beside the weights ({'replay': run}).
+BRAIN_REPLAY_SCRIPT = 'scripts/run_brain_replay.sh'
 BRAIN_WORKS = {'on': '1', 'off': '0'}
 BRAIN_ROAD = {'on': '1', 'off': '0'}
 BRAIN_TYPES = {'on': '1', 'off': '0'}
@@ -174,6 +177,8 @@ RUN_LINES = {
                      re.compile(r'^== scripts/run_detector_sizes\.sh (\S+)(?: \S+)*\s*$', re.M), RUN_ARGUMENT_LINE),
     'train_decider': (re.compile(r'^== scripts/run_experiment_b\.sh (\S+)\s*$', re.M), RUN_ARGUMENT_LINE),
     'train_brain': (re.compile(r'^== scripts/run_brain\.sh (\S+)\s*$', re.M), RUN_ARGUMENT_LINE),
+    # scripts/run_brain_replay.sh: "== Replay of the brain <run> on GPU <card>: ...".
+    'brain_replay': (re.compile(r'^== Replay of the brain (\S+) on GPU', re.M),),
     # helpers/road_labeler.sh: "run:          <name>" (the run trained, or the run predict uses).
     'road_labeler_train': (RUN_ARGUMENT_LINE,),
     'road_labeler_predict': (RUN_ARGUMENT_LINE,),
@@ -224,7 +229,7 @@ ACTION_OPTIONS = {'train_cutter': ('families', 'start', 'mapillary', 'region', '
                   'train_brain': ('works', 'road', 'types', 'driver', 'pool', 'seeds', 'start', 'sign_cutter',
                                    'sign_classifier', 'users', 'routes_from', 'map', 'applicability', 'number_path',
                                    'picture', 'keep', 'balance'),
-                  'regression': ('openpilot', 'brains'),
+                  'regression': ('openpilot', 'brains'), 'brain_replay': ('replay',),
                   'simulate': ('route', 'set', 'certified', 'map'),
                   'road_labeler_train': ('dry',), 'road_labeler_predict': ('dry', 'labeler', 'marks'),
                   'box_fit_train': ('dry', 'refiner'),
@@ -475,6 +480,9 @@ ACTIONS = {
     'train_decider': {'label': 'Train applicability', 'group': 'train', 'command': [DECIDER_SCRIPT]},
     'train_brain': {'label': 'Train the brain', 'group': 'train', 'command': [BRAIN_SCRIPT]},
     'regression': {'label': 'Run the regression', 'group': 'train', 'command': [REGRESSION_SCRIPT]},
+    # A trained brain replayed on its validation and test drives (BRAIN_REPLAY_SCRIPT; start() adds the run): no weight
+    # moves. In the train group: a card of its own, the pictures of a partition sit on it.
+    'brain_replay': {'label': 'Replay the brain', 'group': 'train', 'command': [BRAIN_REPLAY_SCRIPT]},
     # A drive, or every certified drive, replayed with a set of networks for Models › Drive (SIMULATE_SCRIPT; start()
     # adds --set and --route or --certified). In the train group: the GPU.
     'simulate': {'label': 'Replay a drive', 'group': 'train', 'command': [SIMULATE_SCRIPT]},
@@ -545,6 +553,8 @@ ACTIVITIES = (
     ('train', 'brain training', 'run_brain.sh'),
     ('train', 'brain training', 'nnslr train-brain'),
     ('train', 'regression', 'run_regression.sh'),
+    ('train', 'brain replay', 'run_brain_replay.sh'),
+    ('train', 'brain replay', 'nnslr_tools.brain_replay'),
     ('train', 'drive replay', SIMULATE_SCRIPT),
     ('train', 'drive replay', 'nnslr simulate'),
     ('train', 'road labeler', ROAD_LABELER_SCRIPT),
@@ -584,7 +594,7 @@ RUNNING_NAMES = {'fetch': 'a download from the comma', 'fetch_connect': 'a downl
                  'train_resume': 'a training', 'train_classifier': 'a classifier training',
                  'train_cutter': 'a cutter training', 'train_decider': 'a decider training',
                  'train_brain': 'a brain training', 'regression': 'a regression run',
-                 'simulate': 'a replay of a drive',
+                 'brain_replay': 'a replay of a brain', 'simulate': 'a replay of a drive',
                  'road_labeler_train': 'a road labeler training', 'road_labeler_predict': 'a road labeler run',
                  'box_fit_train': 'a training of Fit box',
                  'update': 'a code update',
@@ -603,7 +613,7 @@ ACTIVITY_NAMES = {'download from the comma': 'a download from the comma',
                   'dataset and training': 'an import or a training', 'GPU training': 'a training',
                   'classifier training': 'a classifier training', 'cutter training': 'a cutter training',
                   'brain training': 'a brain training',
-                  'regression': 'a regression run',
+                  'regression': 'a regression run', 'brain replay': 'a replay of a brain',
                   'drive replay': 'a replay of a drive',
                   'road labeler': 'a road labeler run',
                   'Fit box training': 'a training of Fit box',
@@ -641,7 +651,7 @@ TRAIN_ALONE = ('dataset', 'train', 'train_continue', 'train_resume', 'setup_vlm'
 # Never two of the same: each writes files of its own kind that a second one would write too (the brain's labels, the
 # regression's results, the replays of the drives and the export of the versions in use, the road labeler's marks, the
 # proposers' measures).
-TRAIN_ONCE = ('train_brain', 'regression', 'simulate', 'road_labeler_train', 'road_labeler_predict', 'measure_proposer')
+TRAIN_ONCE = ('train_brain', 'brain_replay', 'regression', 'simulate', 'road_labeler_train', 'road_labeler_predict', 'measure_proposer')
 # Never together: the regression runs the brains along the drives the brain learns from, and the road labeler's run
 # writes the labels of Speed review the brain, the regression and a new road labeler read.
 TRAIN_APART = (frozenset(('train_brain', 'regression')), frozenset(('train_brain', 'road_labeler_predict')),
@@ -650,12 +660,13 @@ TRAIN_APART = (frozenset(('train_brain', 'regression')), frozenset(('train_brain
 # The work of the train group started from a terminal, by its label (ACTIVITIES), as the action it is for these rules.
 TERMINAL_KINDS = {'cutter training': 'train_cutter', 'brain training': 'train_brain',
                   'classifier training': 'train_classifier', 'regression': 'regression',
+                  'brain replay': 'brain_replay',
                   'drive replay': 'simulate',
                   'road labeler': 'road_labeler_train',
                   'dataset and training': 'train', 'GPU training': 'train'}
 # The actions that take a card of their own, the free one of lowest index: none starts while every card is busy.
 EXCLUSIVE_GPU = ('train', 'train_continue', 'train_resume', 'train_classifier', 'train_cutter', 'train_decider',
-                 'train_brain', 'regression', 'measure_proposer', 'setup_vlm', 'road_labeler_train',
+                 'train_brain', 'brain_replay', 'regression', 'measure_proposer', 'setup_vlm', 'road_labeler_train',
                  'road_labeler_predict', 'box_fit_train')
 # The actions that share a card: the one with the most free memory, refused only when it has less than they need. The
 # replay of a drive takes about 1 GB of a V100 (NVDEC and the networks under onnxruntime), never the CPU.
@@ -1575,6 +1586,13 @@ class Panel:
                 # candidates are cut on the CPU first. The script counts the boxes people drew and stops when they are
                 # too few, and start() refuses a real run without .venv-gpu.
                 pass
+            elif name == 'brain_replay' and not (self.repo / BRAIN_REPLAY_SCRIPT).is_file():
+                reason = BRAIN_REPLAY_SCRIPT + ' is missing in this installation'
+            elif name == 'brain_replay' and gpu_reason:
+                reason = gpu_reason
+            elif name == 'brain_replay':
+                # Its brain is chosen in Models › brain and checked by start(); it reads the drives the brain learnt on.
+                pass
             elif name == 'regression' and not (self.repo / REGRESSION_SCRIPT).is_file():
                 reason = REGRESSION_SCRIPT + ' is missing in this installation'
             elif name == 'regression' and gpu_reason:
@@ -2414,6 +2432,22 @@ class Panel:
                 raise PanelError(400, 'bad_option', 'No proposals to redo for this drive: ' + route[:40] + '.')
         return routes
 
+    def _brain_replay_run(self, name) -> str:
+        """The run of a trained brain to replay (Models › brain): a name of data/runs with its weights and result.json, not
+        a dry run."""
+        if not isinstance(name, str) or not RUN_NAME.fullmatch(name):
+            raise PanelError(400, 'bad_option', 'Choose the brain to replay by its run.')
+        run = self.root / 'runs' / name
+        if not (run / 'result.json').is_file() or not (run / 'brain-last.pt').is_file():
+            raise PanelError(404, 'unknown_run', name + ' is not a trained brain.')
+        try:
+            dry = json.loads((run / 'result.json').read_text(encoding='utf-8')).get('dry_run')
+        except (OSError, ValueError, AttributeError):
+            raise PanelError(409, 'not_available', name + ': its result.json is unreadable.') from None
+        if dry:
+            raise PanelError(409, 'not_available', name + ' is a dry run: there is no brain to replay.')
+        return name
+
     def _simulate_arguments(self, options: dict) -> list[str]:
         """The arguments of helpers/simulate_drive.sh from the options (strings, checked by start()): --set=<car|in-use>,
         then --route=<drive> for {'route': R}, a drive the portal has, or --certified for {'certified': '1'}, every
@@ -2696,6 +2730,14 @@ class Panel:
             start_args += self._box_fit_arguments(options or {})
         # The set of networks and the certified drives of a replay: refused on every other action (its drive is the
         # 'route' checked above).
+        # The brain of a replay ({'replay': run}): refused on every other action.
+        replay = (options or {}).get('replay')
+        if replay is not None and action != 'brain_replay':
+            raise PanelError(400, 'bad_option', '"' + ACTIONS[action]['label'] + '" does not take a brain to replay.')
+        if action == 'brain_replay':
+            if not (self.repo / BRAIN_REPLAY_SCRIPT).is_file():
+                raise PanelError(403, 'actions_disabled', BRAIN_REPLAY_SCRIPT + ' is missing in this installation.')
+            start_args.append(self._brain_replay_run(replay))
         for key in SIMULATE_OPTIONS:
             value = (options or {}).get(key)
             if value is not None and key not in ACTION_OPTIONS.get(action, ()):
