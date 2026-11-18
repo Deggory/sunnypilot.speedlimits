@@ -44,7 +44,7 @@ const columns = computed(() => {
   }
   return widest.map((metric) => ({key: metric.key, label: metric.short ?? metric.label.replace(/^With the cutter.*/, 'With the cutter')}));
 });
-/** The buttons on the row itself (#116): Use this one, and for a brain Replay and its Results, without opening it. */
+/** The buttons on the row itself (#116): Use this one (off on the one in use), and for a brain Replay, without opening it. */
 const canUse = (version: ModelVersion): boolean => !version.in_use
   && (version.selectable ?? (version.finished && !(version.role === 'cutter' && version.kind === 'signnet')));
 const replayable = (version: ModelVersion): boolean => version.role === 'brain' && version.finished && !props.readOnly
@@ -57,15 +57,6 @@ function replayBlocked(): string {
   return '';
 }
 const hasReplay = (version: ModelVersion): boolean => version.role === 'brain' && version.replay != null;
-/** Results: opens the row and its Details, where the replay's numbers are. */
-function showResults(version: ModelVersion): void {
-  const row = root.value?.querySelector<HTMLDetailsElement>('details[data-model="' + CSS.escape(version.id) + '"]');
-  if (!row) return;
-  row.open = true;
-  const more = row.querySelector<HTMLDetailsElement>('details.model-more');
-  if (more) more.open = true;
-  void nextTick(() => (more ?? row).scrollIntoView({behavior: 'smooth', block: 'start'}));
-}
 const cell = (version: ModelVersion, key: string) => metricsOf(version).find((metric) => metric.key === key) ?? null;
 /** The GitHub mark of a row: "on GitHub" on the one in use, "not on GitHub" or "changed since the GitHub save" on any. */
 function githubMark(version: ModelVersion): {text: string; tone: string} | null {
@@ -112,16 +103,13 @@ watch(() => [props.openId, props.role.versions.length] as const, ([id]) => {
             class="vt-wait">not finished</em></template><template v-if="version.on_car"> · <em class="vt-car">on the car</em></template><template
             v-if="githubMark(version)"> · <em :class="githubMark(version)!.tone">{{ githubMark(version)!.text }}</em></template><template
             v-if="trial && version.role === 'cutter' && trial.signnet.run === version.run"> · <em class="vt-trial">trying on the comma</em></template></small></span>
-          <span v-if="(canUse(version) && !readOnly) || replayable(version) || hasReplay(version)" class="vt-acts">
-            <button v-if="hasReplay(version)" class="btn small" type="button" :data-results="version.run"
-                    title="Its replay's numbers: error by situation, ramps and merges, after an end, decoders, how much the sign moves it"
-                    @click.prevent.stop="showResults(version)">Results</button>
+          <span v-if="((canUse(version) || version.in_use) && !readOnly) || replayable(version)" class="vt-acts">
             <button v-if="replayable(version)" class="btn small" type="button" :disabled="replayBlocked() !== ''"
                     :title="replayBlocked() || 'Runs it again on its validation and test drives, without training: its error by situation, ramps and merges, the time after an end, how much the sign moves it.'"
                     :aria-label="'Replay ' + version.run" :data-replay="version.run"
                     @click.prevent.stop="emit('replay', version)">{{ replaying(version) ? 'Replaying…' : hasReplay(version) ? 'Replay again' : 'Replay' }}</button>
-            <button v-if="canUse(version) && !readOnly" class="btn small" type="button" :disabled="busy !== null"
-                    :title="ROLE_TEXT[version.role].uses" :aria-label="'Use ' + version.run + ' · ' + version.label"
+            <button v-if="(canUse(version) || version.in_use) && !readOnly" class="btn small" type="button"
+                    :disabled="version.in_use || busy !== null" :title="version.in_use ? 'This one is in use.' : ROLE_TEXT[version.role].uses" :aria-label="'Use ' + version.run + ' · ' + version.label"
                     @click.prevent.stop="emit('use', version)">{{ busy === version.id ? 'Saving…' : 'Use this one' }}</button>
           </span></span>
           <span v-for="column in columns" :key="column.key" class="vt-num" :class="['vt-c-' + column.key, {none: cell(version, column.key)?.value == null}]"
