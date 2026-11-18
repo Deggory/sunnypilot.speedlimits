@@ -369,6 +369,112 @@ def decision(results: dict) -> dict:
     return {'training': training, 'decoder': decoder, 'validation_response': response}
 
 
+# The number in force, as the reader has it (#116): a reading of SITUATION_FRESH_S or newer, an older one, none read yet
+# on this drive, none after the end of a limit.
+SITUATION_FRESH_S = 60
+NUMBER_STATES = ('number, fresh', 'number, old', 'none yet', 'after an end')
+SITUATION_MIN_TICKS = 20  # a number and road type with fewer measured ticks is left out of the within-number comparison
+
+
+def _number_states(drive: dict) -> np.ndarray:
+    signs = drive['inputs']['signs']
+    known, ended = signs[:, 1] > 0, signs[:, 6] > 0
+    age = np.expm1(signs[:, 5].astype(np.float64) * BRAIN_INPUTS.SIGN_AGE_SCALE)
+    return np.select([known & ~ended & (age < SITUATION_FRESH_S), known & ~ended, ~known], NUMBER_STATES[:3],
+                     NUMBER_STATES[3])
+
+
+def _asked(drive: dict, partition: str) -> np.ndarray:
+    return (loss_weights(drive, partition)[0] > 0) & _measured(drive) & (np.asarray(drive['partitions']) == partition)
+
+
+def situation_baseline(drives) -> dict:
+    """The driver's median speed in train for each number in force, and for none: what a brain that only reads the
+    number would say (#116)."""
+    by = {}
+    for drive in drives:
+        asked = _asked(drive, 'train')
+        truth, limits = class_kph(drive['speed'])[asked], _limits(drive)[asked]
+        for limit, speed in zip(limits, truth):
+            by.setdefault(int(limit) if limit > 0 else None, []).append(speed)
+    return {key: float(np.median(values)) for key, values in by.items()}
+
+
+def _errors(said, truth, baseline_said, cells) -> dict:
+    error = np.abs(said - truth)
+    if not len(error):
+        return {'ticks': 0}
+    by_place = {}
+    for cell, value in zip(cells, error):
+        by_place.setdefault(cell, []).append(value)
+    return {'ticks': int(len(error)), 'places': len(by_place), 'mean_error_kph': float(error.mean()),
+            'right': float((error <= RIGHT_KPH).mean()), 'p90_error_kph': float(np.percentile(error, 90)),
+            'mean_error_by_place_kph': float(np.mean([np.mean(values) for values in by_place.values()])),
+            'baseline_mean_error_kph': float(np.abs(baseline_said - truth).mean())}
+
+
+def situation_metrics(drives, said_kph, partition: str, baseline: dict) -> dict:
+    """How well it holds the situation on one partition (#116), on the measured answered ticks as measure: the error by
+    the number in force (NUMBER_STATES), by road type (the stored offline label, 'unknown' without one), by lead car
+    (detected or not: none detected is not a free road), and by the three together; each against the baseline (the
+    driver's train median for that number). Within a number: on each number and road type, how far his mean speed is
+    from his mean for that number, and how far the brain's is from its own (does it slow in a curve, on a ramp, as he
+    did?), with the least-squares slope of the second on the first, weighted by ticks (1: the full difference)."""
+    rows = {'said': [], 'truth': [], 'base': [], 'state': [], 'type': [], 'lead': [], 'limit': [], 'cell': []}
+    for drive, said in zip(drives, said_kph, strict=True):
+        asked = _asked(drive, partition)
+        if not asked.any():
+            continue
+        limits = _limits(drive)[asked]
+        types = np.asarray(drive.get('road_type', np.full(len(asked), -1)))[asked]
+        lead = drive['inputs'].get('lead')
+        rows['said'].append(np.asarray(said)[asked])
+        rows['truth'].append(class_kph(drive['speed'])[asked])
+        rows['base'].append(np.array([baseline.get(int(limit) if limit > 0 else None, np.nan) for limit in limits]))
+        rows['state'].append(_number_states(drive)[asked])
+        rows['type'].append(np.array([ROAD_TYPES[at] if 0 <= at < len(ROAD_TYPES) else 'unknown' for at in types]))
+        rows['lead'].append(np.where(lead[asked, 2] > 0, 'lead car', 'no lead detected') if lead is not None
+                            else np.full(int(asked.sum()), 'unknown'))
+        rows['limit'].append(limits)
+        rows['cell'].extend((drive['route'], None) if drive['cells'][at] is None else tuple(drive['cells'][at])
+                            for at in np.flatnonzero(asked))
+    if not rows['said']:
+        return {'ticks': 0}
+    data = {key: np.concatenate(value) if key != 'cell' else value for key, value in rows.items()}
+    cells = np.empty(len(data['cell']), dtype=object)
+    cells[:] = data['cell']
+    # A number never seen in train has no baseline: its train median for no number, else the number itself.
+    data['base'] = np.where(np.isnan(data['base']), np.where(data['limit'] > 0, data['limit'], baseline.get(None, 0)),
+                            data['base'])
+
+    def errors(mask):
+        return _errors(data['said'][mask], data['truth'][mask], data['base'][mask], cells[mask])
+
+    found = {'all': errors(np.ones(len(data['said']), dtype=bool)), 'by': {}}
+    for name in ('state', 'type', 'lead'):
+        found['by'][name] = {str(value): errors(data[name] == value) for value in np.unique(data[name])}
+    combined = np.char.add(np.char.add(np.char.add(data['state'].astype(str), ' | '), np.char.add(data['type'].astype(str), ' | ')),
+                           data['lead'].astype(str))
+    found['by']['state, type, lead'] = {value: errors(combined == value) for value in np.unique(combined)}
+    pairs = []
+    for limit in np.unique(data['limit'][data['limit'] > 0]):
+        same = data['limit'] == limit
+        for kind in np.unique(data['type'][same]):
+            group = same & (data['type'] == kind)
+            if kind == 'unknown' or group.sum() < SITUATION_MIN_TICKS:
+                continue
+            pairs.append({'limit': int(limit), 'type': str(kind), 'ticks': int(group.sum()),
+                          'driver_kph': float(data['truth'][group].mean() - data['truth'][same].mean()),
+                          'brain_kph': float(data['said'][group].mean() - data['said'][same].mean())})
+    found['within_number'] = {'groups': pairs, 'slope': None}
+    weights = np.array([pair['ticks'] for pair in pairs], dtype=np.float64)
+    driver = np.array([pair['driver_kph'] for pair in pairs])
+    if len(pairs) >= 2 and (weights * driver ** 2).sum() > 0:
+        brain = np.array([pair['brain_kph'] for pair in pairs])
+        found['within_number']['slope'] = float((weights * driver * brain).sum() / (weights * driver ** 2).sum())
+    return found
+
+
 def _number_use(drive: dict, run: dict, table: np.ndarray, partition: str) -> dict:
     """On the partition's ticks with a number in force: the raw trust(h), and how the answer moves without the sign's term."""
     held = (np.asarray(drive['partitions']) == partition) & (_limits(drive) > 0)
@@ -402,6 +508,7 @@ def run_replay(root, run_dir, merged_of, *, device, partition: str = 'validation
     drives = dataset(root, merged_of, routes, log=log, rate=RATE_HZ, need_pictures=True, types=True,
                      networks=of_brain(root, result.get('sign_networks')),
                      other_road_boxes=bool(saved.get('other_road_boxes', False)))
+    baseline = situation_baseline(drives)
     drives = [drive for drive in drives if partition in set(drive['partitions'])]
     log(f'{len(drives)} drives with {partition} frames')
     for drive in drives:
@@ -432,7 +539,9 @@ def run_replay(root, run_dir, merged_of, *, device, partition: str = 'validation
               'mean_shift_kph_median': _median(shift)}
     found = {'run': run_dir.name, 'partition': partition, 'passages': len(responses), 'passages_skipped': skipped,
              'number_use': number, 'responses': responses,
-             'decoders': {partition: decoder_metrics(drives, decoded, partition)}}
+             'decoders': {partition: decoder_metrics(drives, decoded, partition)},
+             'situation': situation_metrics(drives, [speeds['argmax'] for speeds in decoded], partition, baseline),
+             'baseline': {str(key): value for key, value in baseline.items()}}
     found['decision'] = decision(found) if partition == 'validation' else None
     return found
 
@@ -460,7 +569,8 @@ def main(argv=None) -> int:
                        device=torch.device(args.device), partition=args.partition)
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     Path(args.out).write_text(json.dumps(found, indent=1, default=float), encoding='utf-8')
-    print(json.dumps({key: found[key] for key in ('passages', 'passages_skipped', 'number_use', 'decoders', 'decision')},
+    print(json.dumps({key: found[key] for key in ('passages', 'passages_skipped', 'number_use', 'decoders', 'decision')}
+                     | {'situation': {key: found['situation'].get(key) for key in ('all', 'within_number')}},
                      indent=1, default=float))
     return 0
 

@@ -190,6 +190,44 @@ class BrainReplayTest(unittest.TestCase):
             for name in replay.DECODERS:
                 np.testing.assert_allclose(given[branch][name], alone[branch][name], rtol=1e-5, atol=1e-5)
 
+    def test_situation_splits_by_number_state_road_type_and_lead_against_the_train_baseline(self):
+        np, replay, targets = self.np, self.replay, self.targets
+        scale = targets.BRAIN_INPUTS.SIGN_KPH_SCALE
+        train = self.drive()
+        train['partitions'] = ['train'] * 32
+        train['speed'][:] = targets.speed_class(np.full(32, 46.0))
+        train['inputs']['signs'][:6, 1] = 0  # no number yet on the first ticks
+        train['speed'][:6] = targets.speed_class(np.full(6, 70.0))
+        train['cells'] = [(1, 1)] * 32
+        baseline = replay.situation_baseline([train])
+        self.assertEqual(baseline, {None: 70.0, 50: 46.0})
+        drive = self.drive()
+        drive['cells'] = [(2, 2)] * 16 + [(3, 3)] * 16
+        drive['road_type'][20:] = replay.ROAD_TYPES.index('ramp')
+        drive['speed'][20:] = targets.speed_class(np.full(12, 30.0))
+        drive['inputs']['lead'][24:, 2] = 1
+        said = np.full(32, 50.0)
+        said[20:] = 40.0
+        with patch.object(replay, 'SITUATION_MIN_TICKS', 10):
+            found = replay.situation_metrics([drive], [said], 'validation', baseline)
+        self.assertEqual(found['all']['ticks'], 32)
+        self.assertEqual(found['all']['places'], 2)
+        self.assertEqual(set(found['by']['state']), {'number, fresh'})
+        self.assertEqual(found['by']['type']['ramp']['ticks'], 12)
+        self.assertAlmostEqual(found['by']['type']['ramp']['mean_error_kph'], 10.0)
+        self.assertAlmostEqual(found['by']['type']['ramp']['baseline_mean_error_kph'], 16.0)
+        self.assertEqual(found['by']['lead']['lead car']['ticks'], 8)
+        ramp = next(group for group in found['within_number']['groups'] if group['type'] == 'ramp')
+        self.assertLess(ramp['brain_kph'], 0)
+        self.assertLess(ramp['driver_kph'], ramp['brain_kph'])
+        self.assertIsNotNone(found['within_number']['slope'])
+        old = drive['inputs']['signs']
+        old[:, 5] = np.log1p(120) / targets.BRAIN_INPUTS.SIGN_AGE_SCALE
+        old[:3, 1], old[3:6, 6] = 0, 1
+        states = replay._number_states(drive)
+        self.assertEqual(states[:6].tolist(), ['none yet'] * 3 + ['after an end'] * 3)
+        self.assertEqual(states[6], 'number, old')
+
     def test_pair_follows_a_strong_sign_path_in_both_directions(self):
         import torch
 
