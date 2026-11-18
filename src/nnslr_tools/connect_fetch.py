@@ -78,8 +78,8 @@ def parse_link(text: str) -> tuple[str, str]:
     if _OLD_ROUTE_RE.search(text):
         raise ConnectError('old_route_name', 'this drive has a date for a name, from an older openpilot: '
                            'only drives named <counter>--<id> (e.g. 0000012a--3f9c1e0b2d) are read here.')
-    raise ConnectError('no_link', 'paste the link of the drive from comma connect '
-                       '(https://connect.comma.ai/<dongle>/<route>) or <dongle>|<route>.')
+    raise ConnectError('no_link', 'write the drive as <dongle id>/<route id>, '
+                       'e.g. 0123456789abcdef/0000012a--3f9c1e0b2d.')
 
 
 def _open(url: str):

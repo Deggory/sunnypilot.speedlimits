@@ -171,6 +171,10 @@ max-height:calc(100dvh - 72px - env(safe-area-inset-bottom,0px));overflow-y:auto
 /* The download from the comma: its bar and what it is at. */
 .tm-progress{display:grid;gap:6px;padding:10px 0 2px;border-top:.5px solid var(--line)}
 .tm-progress .tm-sub{margin:0;overflow-wrap:anywhere}
+.tm-connect{display:grid;gap:8px;margin-top:8px;padding:12px 0 4px;border-top:.5px solid var(--line)}
+.tm-connect .tm-sub{margin:0;overflow-wrap:anywhere}
+.tm-connect .tm-progress{border-top:0;padding-top:0}
+.tm-connect .tm-warn{color:var(--warn)}
 .tm-bar{position:relative;height:6px;border-radius:3px;background:var(--surface-3);overflow:hidden}
 .tm-bar span{display:block;height:100%;width:0;border-radius:3px;background:var(--accent);transition:width .8s ease}
 .tm-bar.indeterminate span{position:absolute;width:35%;animation:tm-slide 1.4s ease-in-out infinite}

@@ -8,6 +8,7 @@ import {computed, onBeforeUnmount, onMounted, ref} from 'vue';
 import {messageOf, poll, post, signedOut} from '../common/api';
 import {isoWhen} from '../common/format';
 import {askConfirm} from '../composables/confirm';
+import ConnectDrive from '../control/ConnectDrive.vue';
 
 interface CommaState {
   online: boolean | null;
@@ -26,6 +27,10 @@ interface CommaState {
   server_key: string | null;
   /** ISO time of the last login that worked (nnslr_tools.comma_link.last_login); null: never. */
   last_login?: string | null;
+  /** The download from comma connect (#115): running, what keeps it from starting, how far it is. */
+  connect_downloading?: boolean;
+  connect_waits_for?: string | null;
+  connect_progress?: {percent: number | null; detail: string} | null;
 }
 
 const INTERVAL_MS = 10000;
@@ -190,6 +195,8 @@ onBeforeUnmount(() => {
           finish (Data › Drives): the two never run together.</span>
         <span v-else-if="message" class="tm-sub" role="status">{{ message }}</span>
       </div>
+      <ConnectDrive :downloading="!!comma.connect_downloading" :waits-for="comma.connect_waits_for ?? null"
+                    :progress="comma.connect_progress ?? null" @started="ask"/>
     </div>
   </div>
 </template>

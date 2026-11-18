@@ -10,7 +10,6 @@ import type {ActionName, ActionOptions, ActionState, Job, PanelStatus, Proposer,
 import {toast} from '../composables/toast';
 import Segmented from './Segmented.vue';
 import ActionList from './ActionList.vue';
-import ConnectDrive from './ConnectDrive.vue';
 import JobProgress from './JobProgress.vue';
 import {activityTab, JOB_STATE, jobOf, PREPARE_ACTIONS, startedWhen, terminalActivities} from './jobs';
 import {cardLabel, cardMemoryText, freestCard, gpuCards} from './machine-history';
@@ -180,7 +179,6 @@ function openComma(): void {
     <p v-if="unfinished" class="figure-note prep-state" id="prepare-unfinished">{{ plural(unfinished, 'drive') }} not all
       downloaded: Prepare leaves {{ unfinished === 1 ? 'it' : 'them' }} out until the rest is here.
       <button type="button" class="link-button" @click="openComma">Download new drives</button></p>
-    <ConnectDrive :status="status" @run="(name, state, start, options) => emit('run', name, state, start, options)"/>
     <h3 class="prep-step">Find the signs</h3>
     <p class="figure-note prep-state">Draws a box around every sign in every picture and reads it, for you to confirm in Review.</p>
     <div class="proposer">

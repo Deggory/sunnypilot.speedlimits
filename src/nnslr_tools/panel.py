@@ -1104,8 +1104,19 @@ class Panel:
             if job is not None:
                 result = self.job_progress(job, None)
                 found = {'percent': result['percent'], 'detail': result['detail']}
+        # The download from comma connect (#115), in the same panel: its own state, the comma reachable or not.
+        connect_other = _conflicting_group('connect', running) if 'connect' not in running else None
+        connect_found = None
+        if 'connect' in running:
+            job = next((job for job in self.jobs(activities)
+                        if job['action'] == 'fetch_connect' and job['state'] == 'running'), None)
+            if job is not None:
+                result = self.job_progress(job, None)
+                connect_found = {'percent': result['percent'], 'detail': result['detail']}
         return {'downloading': 'fetch' in running, 'waits_for': GROUP_NAMES.get(other, other) if other else None,
-                'download_progress': found}
+                'download_progress': found, 'connect_downloading': 'connect' in running,
+                'connect_waits_for': GROUP_NAMES.get(connect_other, connect_other) if connect_other else None,
+                'connect_progress': connect_found}
 
     def connect_check(self, body) -> dict:
         """What comma connect holds of a shared drive ({"link"}), before Download from comma connect (#115): its car, its
@@ -4083,7 +4094,7 @@ def _connect_drive(link) -> str:
     text as typed on a command line."""
     from nnslr_tools.connect_fetch import ConnectError, parse_link
     if not isinstance(link, str) or not link.strip():
-        raise PanelError(400, 'bad_option', 'Paste the link of the drive in comma connect.')
+        raise PanelError(400, 'bad_option', 'Write the drive as <dongle id>/<route id>.')
     try:
         dongle, route = parse_link(link.strip())
     except ConnectError as error:

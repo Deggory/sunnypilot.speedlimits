@@ -96,7 +96,9 @@ def test_never_beside_the_comma_download_or_a_preparation(root, checkout):
         assert not actions['prepare']['allowed']
         assert not actions['fetch_connect']['allowed']
         # The comma pill shows only the comma's own download.
-        assert panel._download_state()['downloading'] is False
+        state = panel._download_state()
+        assert state['downloading'] is False and state['connect_downloading'] is True
+        assert state['connect_waits_for'] is None
     finally:
         panel.stop(job['id'])
 
