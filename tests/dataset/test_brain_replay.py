@@ -228,6 +228,38 @@ class BrainReplayTest(unittest.TestCase):
         self.assertEqual(states[:6].tolist(), ['none yet'] * 3 + ['after an end'] * 3)
         self.assertEqual(states[6], 'number, old')
 
+    def test_situation_adds_the_type_baseline_the_time_after_an_end_and_the_entry_profile(self):
+        np, replay, targets = self.np, self.replay, self.targets
+        train = self.drive()
+        train['partitions'] = ['train'] * 32
+        train['speed'][:] = targets.speed_class(np.full(32, 46.0))
+        train['road_type'][20:] = replay.ROAD_TYPES.index('ramp')
+        train['speed'][20:] = targets.speed_class(np.full(12, 34.0))
+        train['cells'] = [(1, 1)] * 32
+        baseline, typed = replay.situation_baseline([train]), replay.situation_type_baseline([train])
+        self.assertEqual(typed, {'80|rural': 46.0, '50|rural': 46.0, '50|ramp': 34.0})
+        drive = self.drive()
+        drive['cells'] = [(2, 2)] * 32
+        drive['road_type'][20:] = replay.ROAD_TYPES.index('ramp')
+        drive['speed'][20:] = targets.speed_class(np.full(12, 30.0))
+        drive['inputs']['signs'][8:16, 6] = 1  # an end from tick 8, at 2 s, for 2 s
+        said = np.full(32, 50.0)
+        said[24:] = 40.0  # slows one second late
+        found = replay.situation_metrics([drive], [said], 'validation', baseline, typed)
+        ramp = found['by']['type']['ramp']
+        self.assertAlmostEqual(ramp['baseline_mean_error_kph'], 16.0)
+        self.assertAlmostEqual(ramp['type_baseline_mean_error_kph'], 4.0)
+        self.assertEqual(found['after_end']['0-10s']['ticks'], 8)
+        self.assertEqual(found['after_end']['10-30s']['ticks'], 0)
+        np.testing.assert_allclose(replay._seconds_since_end(drive)[8:16], np.arange(8) / 4)
+        entry = found['entries']['ramp']
+        self.assertEqual(entry['entries'], 1)
+        self.assertEqual(entry['phases']['before']['ticks'], 20)
+        self.assertAlmostEqual(entry['phases']['first 10 s']['brain_minus_driver_kph'], (4 * 20 + 8 * 10) / 12)
+        first = next(row for row in entry['profile'] if row['second'] == 0)
+        self.assertEqual((first['driver_kph'], first['brain_kph']), (30.0, 50.0))
+        self.assertNotIn('merge', found['entries'])
+
     def test_pair_follows_a_strong_sign_path_in_both_directions(self):
         import torch
 

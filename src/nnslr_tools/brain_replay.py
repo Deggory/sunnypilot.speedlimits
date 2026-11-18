@@ -400,27 +400,58 @@ def situation_baseline(drives) -> dict:
     return {key: float(np.median(values)) for key, values in by.items()}
 
 
-def _errors(said, truth, baseline_said, cells) -> dict:
+def _type_name(at) -> str:
+    return ROAD_TYPES[at] if 0 <= at < len(ROAD_TYPES) else 'unknown'
+
+
+def situation_type_baseline(drives) -> dict:
+    """The driver's median speed in train for each number in force (or none) and road type, keyed 'limit|type' ('none'
+    for no number): what a brain that only reads the number and knows the road type would say (#116, Astra). The road
+    type is the offline label, so this reference knows more than the car does."""
+    by = {}
+    for drive in drives:
+        asked = _asked(drive, 'train')
+        truth, limits = class_kph(drive['speed'])[asked], _limits(drive)[asked]
+        types = np.asarray(drive.get('road_type', np.full(len(asked), -1)))[asked]
+        for limit, kind, speed in zip(limits, types, truth):
+            by.setdefault(_type_key(limit, _type_name(kind)), []).append(speed)
+    return {key: float(np.median(values)) for key, values in by.items()}
+
+
+def _type_key(limit, kind: str) -> str:
+    return f"{int(limit) if limit > 0 else 'none'}|{kind}"
+
+
+def _errors(said, truth, baseline_said, cells, type_said=None) -> dict:
     error = np.abs(said - truth)
     if not len(error):
         return {'ticks': 0}
     by_place = {}
     for cell, value in zip(cells, error):
         by_place.setdefault(cell, []).append(value)
-    return {'ticks': int(len(error)), 'places': len(by_place), 'mean_error_kph': float(error.mean()),
-            'right': float((error <= RIGHT_KPH).mean()), 'p90_error_kph': float(np.percentile(error, 90)),
-            'mean_error_by_place_kph': float(np.mean([np.mean(values) for values in by_place.values()])),
-            'baseline_mean_error_kph': float(np.abs(baseline_said - truth).mean())}
+    found = {'ticks': int(len(error)), 'places': len(by_place), 'mean_error_kph': float(error.mean()),
+             'right': float((error <= RIGHT_KPH).mean()), 'p90_error_kph': float(np.percentile(error, 90)),
+             'mean_error_by_place_kph': float(np.mean([np.mean(values) for values in by_place.values()])),
+             'baseline_mean_error_kph': float(np.abs(baseline_said - truth).mean())}
+    if type_said is not None:
+        found['type_baseline_mean_error_kph'] = float(np.abs(type_said - truth).mean())
+    return found
 
 
-def situation_metrics(drives, said_kph, partition: str, baseline: dict) -> dict:
+def situation_metrics(drives, said_kph, partition: str, baseline: dict, type_baseline: dict | None = None) -> dict:
     """How well it holds the situation on one partition (#116), on the measured answered ticks as measure: the error by
     the number in force (NUMBER_STATES), by road type (the stored offline label, 'unknown' without one), by lead car
     (detected or not: none detected is not a free road), and by the three together; each against the baseline (the
     driver's train median for that number). Within a number: on each number and road type, how far his mean speed is
     from his mean for that number, and how far the brain's is from its own (does it slow in a curve, on a ramp, as he
-    did?), with the least-squares slope of the second on the first, weighted by ticks (1: the full difference)."""
-    rows = {'said': [], 'truth': [], 'base': [], 'state': [], 'type': [], 'lead': [], 'limit': [], 'cell': []}
+    did?), with the least-squares slope of the second on the first, weighted by ticks (1: the full difference).
+    With type_baseline (situation_type_baseline) each group also has the error of the driver's train median for the
+    number and road type, the number's alone where that pair was never seen in train. 'after_end' splits the ticks after
+    an end of limit by the seconds since it, 'entries' is the profile around each entry into a ramp or a merge
+    (_entry_profiles)."""
+    rows = {'said': [], 'truth': [], 'base': [], 'state': [], 'type': [], 'lead': [], 'limit': [], 'cell': [],
+            'since_end': []}
+    entries = []
     for drive, said in zip(drives, said_kph, strict=True):
         asked = _asked(drive, partition)
         if not asked.any():
@@ -432,7 +463,9 @@ def situation_metrics(drives, said_kph, partition: str, baseline: dict) -> dict:
         rows['truth'].append(class_kph(drive['speed'])[asked])
         rows['base'].append(np.array([baseline.get(int(limit) if limit > 0 else None, np.nan) for limit in limits]))
         rows['state'].append(_number_states(drive)[asked])
-        rows['type'].append(np.array([ROAD_TYPES[at] if 0 <= at < len(ROAD_TYPES) else 'unknown' for at in types]))
+        rows['type'].append(np.array([_type_name(at) for at in types]))
+        rows['since_end'].append(_seconds_since_end(drive)[asked])
+        entries.extend(_entry_profiles(drive, np.asarray(said), asked))
         rows['lead'].append(np.where(lead[asked, 2] > 0, 'lead car', 'no lead detected') if lead is not None
                             else np.full(int(asked.sum()), 'unknown'))
         rows['limit'].append(limits)
@@ -446,9 +479,14 @@ def situation_metrics(drives, said_kph, partition: str, baseline: dict) -> dict:
     # A number never seen in train has no baseline: its train median for no number, else the number itself.
     data['base'] = np.where(np.isnan(data['base']), np.where(data['limit'] > 0, data['limit'], baseline.get(None, 0)),
                             data['base'])
+    typed = None
+    if type_baseline is not None:
+        typed = np.array([type_baseline.get(_type_key(limit, kind), base)
+                          for limit, kind, base in zip(data['limit'], data['type'], data['base'])])
 
     def errors(mask):
-        return _errors(data['said'][mask], data['truth'][mask], data['base'][mask], cells[mask])
+        return _errors(data['said'][mask], data['truth'][mask], data['base'][mask], cells[mask],
+                       None if typed is None else typed[mask])
 
     found = {'all': errors(np.ones(len(data['said']), dtype=bool)), 'by': {}}
     for name in ('state', 'type', 'lead'):
@@ -472,7 +510,74 @@ def situation_metrics(drives, said_kph, partition: str, baseline: dict) -> dict:
     if len(pairs) >= 2 and (weights * driver ** 2).sum() > 0:
         brain = np.array([pair['brain_kph'] for pair in pairs])
         found['within_number']['slope'] = float((weights * driver * brain).sum() / (weights * driver ** 2).sum())
+    found['after_end'] = {}
+    for low, high in AFTER_END_BINS_S:
+        group = (data['state'] == NUMBER_STATES[3]) & (data['since_end'] >= low) & (data['since_end'] < high)
+        found['after_end'][f'{low}-{high}s' if high < np.inf else f'{low}s+'] = errors(group)
+    found['entries'] = _entry_summary(entries)
     return found
+
+
+# Seconds since an end of limit, in bins: does the error after an end grow with time (a memory too short) or sit at
+# the start (a slow answer to the end)? (#116, Astra)
+AFTER_END_BINS_S = ((0, 10), (10, 30), (30, 60), (60, 120), (120, np.inf))
+# The profile around entering a ramp or a merge, seconds from the entry: does the brain slow late, or too little?
+ENTRY_TYPES = ('ramp', 'merge')
+ENTRY_WINDOW_S = (-20, 30)
+ENTRY_PHASES_S = {'before': (-10, 0), 'first 10 s': (0, 10), 'after': (10, 30)}
+
+
+def _seconds_since_end(drive: dict) -> np.ndarray:
+    """At each tick after an end of limit, the seconds since the tick the end first held; nan elsewhere."""
+    signs = drive['inputs']['signs']
+    ended, times = (signs[:, 1] > 0) & (signs[:, 6] > 0), _tick_times(drive)
+    found, start = np.full(len(ended), np.nan), None
+    for at, now in enumerate(ended):
+        start = (start if start is not None else times[at]) if now else None
+        if now:
+            found[at] = times[at] - start
+    return found
+
+
+def _entry_profiles(drive: dict, said: np.ndarray, asked: np.ndarray) -> list[dict]:
+    """Each entry into a road type of ENTRY_TYPES (a tick of that type after a tick of another known type): the asked
+    ticks within ENTRY_WINDOW_S of it, as (whole seconds from the entry, driver km/h, brain km/h)."""
+    types = np.asarray(drive.get('road_type', np.full(len(asked), -1)))
+    times, truth, found = _tick_times(drive), class_kph(drive['speed']), []
+    for at in range(1, len(types)):
+        kind = _type_name(types[at])
+        if kind not in ENTRY_TYPES or types[at - 1] == types[at] or _type_name(types[at - 1]) == 'unknown':
+            continue
+        offset = times - times[at]
+        near = asked & (offset >= ENTRY_WINDOW_S[0]) & (offset < ENTRY_WINDOW_S[1])
+        if near.any():
+            found.append({'type': kind, 'offset': np.floor(offset[near]).astype(int), 'driver': truth[near],
+                          'brain': said[near]})
+    return found
+
+
+def _entry_summary(entries: list[dict]) -> dict:
+    """By road type: the entries, the mean driver and brain km/h for each second from the entry, and in each phase of
+    ENTRY_PHASES_S the mean signed error brain - driver (positive: the brain is faster than he was)."""
+    summary = {}
+    for kind in ENTRY_TYPES:
+        own = [entry for entry in entries if entry['type'] == kind]
+        if not own:
+            continue
+        offset = np.concatenate([entry['offset'] for entry in own])
+        driver = np.concatenate([entry['driver'] for entry in own])
+        brain = np.concatenate([entry['brain'] for entry in own])
+        profile = [{'second': int(second), 'ticks': int((offset == second).sum()),
+                    'driver_kph': float(driver[offset == second].mean()),
+                    'brain_kph': float(brain[offset == second].mean())} for second in np.unique(offset)]
+        phases = {}
+        for name, (low, high) in ENTRY_PHASES_S.items():
+            inside = (offset >= low) & (offset < high)
+            phases[name] = ({'ticks': int(inside.sum()), 'brain_minus_driver_kph': float((brain - driver)[inside].mean()),
+                             'mean_error_kph': float(np.abs(brain - driver)[inside].mean())}
+                            if inside.any() else {'ticks': 0})
+        summary[kind] = {'entries': len(own), 'phases': phases, 'profile': profile}
+    return summary
 
 
 def _number_use(drive: dict, run: dict, table: np.ndarray, partition: str) -> dict:
@@ -508,7 +613,7 @@ def run_replay(root, run_dir, merged_of, *, device, partition: str = 'validation
     drives = dataset(root, merged_of, routes, log=log, rate=RATE_HZ, need_pictures=True, types=True,
                      networks=of_brain(root, result.get('sign_networks')),
                      other_road_boxes=bool(saved.get('other_road_boxes', False)))
-    baseline = situation_baseline(drives)
+    baseline, type_baseline = situation_baseline(drives), situation_type_baseline(drives)
     drives = [drive for drive in drives if partition in set(drive['partitions'])]
     log(f'{len(drives)} drives with {partition} frames')
     for drive in drives:
@@ -540,8 +645,9 @@ def run_replay(root, run_dir, merged_of, *, device, partition: str = 'validation
     found = {'run': run_dir.name, 'partition': partition, 'passages': len(responses), 'passages_skipped': skipped,
              'number_use': number, 'responses': responses,
              'decoders': {partition: decoder_metrics(drives, decoded, partition)},
-             'situation': situation_metrics(drives, [speeds['argmax'] for speeds in decoded], partition, baseline),
-             'baseline': {str(key): value for key, value in baseline.items()}}
+             'situation': situation_metrics(drives, [speeds['argmax'] for speeds in decoded], partition, baseline,
+                                            type_baseline),
+             'baseline': {str(key): value for key, value in baseline.items()}, 'type_baseline': type_baseline}
     found['decision'] = decision(found) if partition == 'validation' else None
     return found
 
