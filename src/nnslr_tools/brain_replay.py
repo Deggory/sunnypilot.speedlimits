@@ -5,7 +5,7 @@ import numpy as np
 
 from nnslr_tools.brain_targets import (BRAIN_INPUTS, RATE_HZ, SWAPS, SWAP_TOLERANCE_KPH, VISION, _matching_slots, _slot_rows,
                                        _swap_slot_numbers, class_kph, learning_pieces, loss_weights, pack_inputs,
-                                       sign_kph, swapped)
+                                       sign_kph, swap_passages, swapped)
 from nnslr_tools.brain_train import CHUNK, RIGHT_KPH, _measured, _piece, _speed_measure
 from nnslr_tools.road_type_net import _torch
 from nnslr_tools.road_types import ROAD_TYPES
@@ -609,7 +609,7 @@ def run_replays(root, run_dir, merged_of, *, device, partitions=('validation', '
     from pathlib import Path
 
     from nnslr_tools.brain_export import load_brain
-    from nnslr_tools.brain_targets import brain_sizes, dataset, swap_passages
+    from nnslr_tools.brain_targets import brain_sizes, dataset
     from nnslr_tools.brain_train import CHECKPOINT, ROUTES, _pictures
     from nnslr_tools.road_type_net import FrameStore
     from nnslr_tools.sign_networks import of_brain

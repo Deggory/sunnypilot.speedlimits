@@ -916,7 +916,9 @@ transition:box-shadow .15s,transform .1s}
 .vt-row>summary:hover{background:var(--surface-2)}
 .vt-row.in-use>summary{background:color-mix(in srgb,var(--ok) 9%,transparent)}
 .vt-row[open]>summary{background:var(--surface-2)}
-.vt-name{display:flex;flex-direction:column;min-width:0}
+.vt-first{display:flex;align-items:center;gap:12px;min-width:0}
+.vt-acts{display:flex;gap:6px;flex-shrink:0}
+.vt-name{display:flex;flex-direction:column;min-width:0;flex:1}
 .vt-name b{font-size:14.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .vt-name small{font-size:12px;color:var(--muted)}
 .vt-name em{font-style:normal;font-weight:600}

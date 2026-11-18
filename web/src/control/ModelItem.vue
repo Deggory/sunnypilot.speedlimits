@@ -15,7 +15,7 @@ import {computed} from 'vue';
 import {isoWhen, thousands} from '../common/format';
 import type {BrainSituationErrors, DeciderNumbers, ModelVersion} from '../common/panel-types';
 import {PARTITION_LABEL, pct} from './evaluate';
-import {ROLE_TEXT, epochText, evaluateHref, metricsOf, openRun, perFrame, roleWords, sizeText, type CarState, type Metric} from './models';
+import {ROLE_TEXT, epochText, evaluateHref, metricsOf, openRun, perFrame, sizeText, type CarState, type Metric} from './models';
 import MetricTiles from './MetricTiles.vue';
 
 const props = defineProps<{version: ModelVersion; roleLabel: string; score: number; readOnly: boolean; busy: string | null;
@@ -39,16 +39,6 @@ function entryText(kind: string): string {
   const sign = (value: number | null | undefined): string => value == null ? '–' : (value > 0 ? '+' : '') + value.toFixed(1);
   return `${found.entries} entries: ${sign(found.before)} before, ${sign(found['first 10 s'])} first 10 s, ${sign(found.after)} after`;
 }
-const replaying = computed(() => props.car?.replaying != null && props.car.replaying === props.version.run);
-/** Models › brain › Replay: only a finished brain, on a server that lets it run. */
-const replayable = computed(() => brain.value !== null && props.version.finished && !props.readOnly
-  && props.car?.replayState != null);
-const replayBlocked = computed((): string => {
-  if (props.car?.replaying != null) return 'A brain is being replayed now.';
-  const state = props.car?.replayState;
-  if (state && !state.allowed) return state.reason.charAt(0).toUpperCase() + state.reason.slice(1) + '.';
-  return '';
-});
 function situationError(found: BrainSituationErrors | null | undefined): string {
   if (!found) return '–';
   const typed = found.type_baseline_mean_error_kph == null ? '' : `, ${found.type_baseline_mean_error_kph.toFixed(1)} by road type`;
@@ -130,11 +120,6 @@ const selectable = computed(() => props.version.selectable ?? (props.version.fin
  * and its line say so). */
 const notSelectable = computed((): string => props.version.in_use || selectable.value || !props.version.finished ? ''
   : props.version.not_selectable_reason ?? '');
-/** Why the button is off, as its title. */
-const blocked = computed((): string => {
-  if (props.readOnly) return 'Read-only: the choice is turned off on this server.';
-  return '';
-});
 
 /** Try on the comma now: on a SignNet neither on the car nor on trial there already. */
 const onTrial = computed(() => signnet.value && props.car?.onTrial === props.version.run);
@@ -348,15 +333,7 @@ const noOtherOnTest = computed(() => decider.value?.test?.other_road_support ===
 
     <div class="model-actions">
       <a class="flow-link" :href="evaluateHref(version)" @click="openRun($event, version)">Open the run ›</a>
-      <span v-if="forCar || (selectable && !version.in_use) || replayable" class="model-buttons">
-        <button v-if="replayable" class="btn small" type="button" :disabled="replayBlocked !== ''"
-                :title="replayBlocked || 'Runs it again on its validation and test drives, without training: its error by situation, ramps and merges, the time after an end, how much the sign moves it.'"
-                :aria-label="'Replay ' + version.run" :data-replay="version.run"
-                @click="emit('replay', version)">{{ replaying ? 'Replaying…' : brain?.replay ? 'Replay again' : 'Replay' }}</button>
-        <button v-if="selectable && !version.in_use" class="btn small" type="button" :disabled="blocked !== '' || busy !== null"
-                :title="blocked || ROLE_TEXT[version.role].uses"
-                :aria-label="'Use ' + version.run + ' · ' + version.label + ' as the ' + roleWords(roleLabel)"
-                @click="emit('use', version)">{{ busy === version.id ? 'Saving…' : 'Use this one' }}</button>
+      <span v-if="forCar" class="model-buttons">
         <template v-if="forCar">
           <button v-if="triable" class="btn small" type="button" :disabled="tryBlocked !== ''"
                   :title="tryBlocked || 'Copies it with the classifier in use straight onto the comma, until its next software update.'"
