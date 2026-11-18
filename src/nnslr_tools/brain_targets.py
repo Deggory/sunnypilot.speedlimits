@@ -1374,10 +1374,31 @@ def swap_passages(drive: dict, partition: str = 'train') -> list[np.ndarray]:
     return found
 
 
+def _slot_rows(rows: np.ndarray) -> np.ndarray:
+    """View the sign slots without the two columns that describe the whole row."""
+    return rows[:, :-2].reshape(len(rows), BRAIN_INPUTS.SIGN_SLOTS, BRAIN_INPUTS.SLOT_NUMBERS)
+
+
+def _matching_slots(slots: np.ndarray, number: int) -> np.ndarray:
+    """Slots of speed signs with this known number, not another sign or the end of a limit."""
+    return ((slots[..., 0] > 0) & (slots[..., 5] == 0) & (slots[..., 7] > 0) & (slots[..., 8] == 0)
+            & (np.rint(slots[..., 6] * BRAIN_INPUTS.SIGN_KPH_SCALE) == number))
+
+
+def _swap_slot_numbers(rows: np.ndarray, ticks, number: int) -> None:
+    """Change only the number of matching slots on the given ticks in a copied sign_slots array."""
+    slots = _slot_rows(rows[ticks])
+    slots[..., 6][_matching_slots(slots, number)] = SWAPS[number] / BRAIN_INPUTS.SIGN_KPH_SCALE
+    rows[ticks, :-2] = slots.reshape(len(slots), BRAIN_INPUTS.SIGN_SLOTS * BRAIN_INPUTS.SLOT_NUMBERS)
+
+
 def swapped(drive: dict, passages: list[np.ndarray], groups: tuple[str, ...]) -> dict:
     """The drive with the number of these passages, and what says it, as the other of its family: see the module's text."""
     signs, speed, label = drive['inputs']['signs'].copy(), drive['speed'].copy(), class_kph(drive['speed'])
     limit = drive['inputs']['map_limit'].copy()
+    slots = drive['inputs'].get('sign_slots')
+    if slots is not None:
+        slots = slots.copy()
     scale = BRAIN_INPUTS.SIGN_KPH_SCALE
     for passage in passages:
         number = int(sign_kph(signs[passage[:1]])[0])
@@ -1388,9 +1409,13 @@ def swapped(drive: dict, passages: list[np.ndarray], groups: tuple[str, ...]) ->
         # at 50 would teach a disagreement nobody saw, always settled for the sign.
         agreed = passage[(limit[passage, 1] > 0) & (np.rint(limit[passage, 0] * scale) == number)]
         signs[passage, 0] = signs[single, 8] = limit[agreed, 0] = SWAPS[number] / scale
+        if slots is not None:
+            _swap_slot_numbers(slots, passage, number)
         # His speed off the number by as much as before: 52 past a 50 is 62 past a 60.
         speed[said] = speed_class(np.clip(label[said] + SWAPS[number] - number, 1, BRAIN_MAX_KPH))
     inputs = {**drive['inputs'], 'signs': signs, 'map_limit': limit}
+    if slots is not None:
+        inputs['sign_slots'] = slots
     return {**drive, 'inputs': inputs, 'speed': speed, 'extra': pack_inputs(inputs, groups)}
 
 

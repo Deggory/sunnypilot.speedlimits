@@ -463,6 +463,32 @@ def _brain_applicability(result: dict) -> dict:
             'validation': partition('validation'), 'test': partition('test')}
 
 
+def _brain_situation(result: dict) -> dict | None:
+    """The brain's error against the sign-only baseline on test and validation, without the per-state tables."""
+    situation = result.get('situation')
+    if not isinstance(situation, dict):
+        return None
+
+    def combined(states: dict, names: tuple[str, ...]) -> dict | None:
+        rows = [states[name] for name in names if name in states and states[name].get('ticks')]
+        ticks = sum(row['ticks'] for row in rows)
+        if not ticks:
+            return None
+        keys = ('mean_error_kph', 'baseline_mean_error_kph', 'type_baseline_mean_error_kph')
+        return {'ticks': ticks, **{key: sum(row[key] * row['ticks'] for row in rows) / ticks
+                                   for key in keys if all(key in row for row in rows)}}
+
+    found = {}
+    for name in ('validation', 'test'):
+        part = situation.get(name) or {}
+        states = _dig(part, ('by', 'state')) or {}
+        found[name] = {'no_sign': combined(states, ('none yet', 'after an end')),
+                       'with_sign': combined(states, ('number, fresh', 'number, old')),
+                       'mean_error_by_place_kph': _num(_dig(part, ('all', 'mean_error_by_place_kph'))),
+                       'within_number_slope': _num(_dig(part, ('within_number', 'slope')))}
+    return found
+
+
 def brain_digest(result: Any) -> dict:
     """result.json of ``nnslr train-brain``: what it was given and how it did on validation and test, the speed it says
     against the labels of Speed review (nnslr_tools.brain_train)."""
@@ -483,12 +509,16 @@ def brain_digest(result: Any) -> dict:
             # How the number in force reaches its answer (brain_net.NUMBER_PATHS, #104): 'bell', or 'class', which is
             # also every brain of before 16 Nov 2026, whose result does not say.
             'number_path': 'bell' if result.get('number_path') == 'bell' else 'class',
+            'picture': result.get('picture') is not False, 'balance': result.get('balance') is True,
+            'keep': result.get('keep'),
+            'kept': result.get('kept'),
             'road_kinds': list(result.get('road_kinds') or []), 'road_types': list(result.get('road_types') or []),
             'plates': bool(result.get('plates')), 'hours': bool(result.get('hours')), 'wet': bool(result.get('wet')), 'dry_run': bool(result.get('dry_run')), 'epochs': len(result.get('history') or []),
             'applicability': _brain_applicability(result),
             'validation': speed('validation'), 'test': speed('test'),
             # Of a brain that learns the map's limit: the test frames with no map at all (brain_train, test_no_map).
             'test_no_map': speed('test_no_map'),
+            'situation': _brain_situation(result),
             # The split it learnt on and the brain it went on from (None: ImageNet and random weights; before 10 Nov 2026
             # not recorded).
             'split_sha256': result.get('split_sha256') if isinstance(result.get('split_sha256'), str) else None,
@@ -1018,7 +1048,8 @@ class ModelIndex:
             return None
         entry = self._base('brain', name, BRAIN_PART, checkpoint, result, problems)
         seed = trained.get('seed')
-        detail = ('says the speed to hold' + (' · reads the map’s limit' if reads_the_map(trained) else '')
+        detail = ('says the speed to hold' + (' · without the picture (offline only)' if trained.get('picture') is False else '')
+                  + (' · reads the map’s limit' if reads_the_map(trained) else '')
                   + (' · learns whose road a sign is of' if (trained.get('applicability') or {}).get('learned') else ''))
         entry.update({'label': 'Brain' if seed is None else f'Brain, seed {seed}', 'detail': detail,
                       'groups': trained.get('groups'),
@@ -1030,10 +1061,11 @@ class ModelIndex:
                       # How the car steps it and what it says (Models › How it works, model-flow.ts).
                       **{key: trained.get(key) for key in ('rate_hz', 'ahead', 'hidden', 'kph', 'road_kinds', 'road_types',
                                                            'pool', 'sign_networks', 'applicability',
-                                                           'road_sign_kinds', 'number_path')},
+                                                            'road_sign_kinds', 'number_path', 'picture', 'balance', 'keep',
+                                                            'kept')},
                       'epochs': trained.get('epochs'), 'epochs_run': trained.get('epochs'),
                       'validation': trained.get('validation'), 'test': trained.get('test'),
-                      'test_no_map': trained.get('test_no_map')})
+                       'test_no_map': trained.get('test_no_map'), 'situation': trained.get('situation')})
         return entry
 
     def artifacts(self, roles: tuple[str, ...] = ROLES) -> dict[str, list[dict]]:

@@ -2114,6 +2114,9 @@ def make_handler(app: ReviewApp):
                     # else it must be refused, never dropped into a training of the other path.
                     options.update((key, body[key]) for key in ('number_path',)
                                    if isinstance(body, dict) and body.get(key) is not None)
+                    # Even null is an invalid explicit choice, not permission to start with the defaults.
+                    options.update((key, body[key]) for key in ('picture', 'keep', 'balance')
+                                   if isinstance(body, dict) and key in body)
                     # The brain's road users ({"users": "off"} from a page loaded before 17 Nov 2026, #112), the same
                     # way: the brain no longer learns them, and "on" or anything else must be refused, never dropped
                     # into a training without them.

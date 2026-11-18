@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import numpy as np
 
-from nnslr_tools.brain_targets import (BRAIN_INPUTS, RATE_HZ, SWAPS, SWAP_TOLERANCE_KPH, VISION, class_kph,
-                                       learning_pieces, loss_weights, pack_inputs, sign_kph, swapped)
+from nnslr_tools.brain_targets import (BRAIN_INPUTS, RATE_HZ, SWAPS, SWAP_TOLERANCE_KPH, VISION, _matching_slots, _slot_rows,
+                                       _swap_slot_numbers, class_kph, learning_pieces, loss_weights, pack_inputs,
+                                       sign_kph, swapped)
 from nnslr_tools.brain_train import CHUNK, RIGHT_KPH, _measured, _piece, _speed_measure
 from nnslr_tools.road_type_net import _torch
 from nnslr_tools.road_types import ROAD_TYPES
@@ -66,16 +67,6 @@ def decode(probs: np.ndarray, kph_table: np.ndarray) -> dict[str, np.ndarray]:
     cdf = np.cumsum(probs, axis=-1, dtype=np.float64)
     return {'argmax': table[probs.argmax(axis=-1)], 'mean': (probs * table).sum(axis=-1),
             'median': table[(cdf < .5).sum(axis=-1).clip(max=len(table) - 1)]}
-
-
-def _slot_rows(rows: np.ndarray) -> np.ndarray:
-    return rows[:, :-2].reshape(len(rows), BRAIN_INPUTS.SIGN_SLOTS, BRAIN_INPUTS.SLOT_NUMBERS)
-
-
-def _matching_slots(slots: np.ndarray, number: int) -> np.ndarray:
-    """Slots of speed signs with this known number, not another sign or the end of a limit."""
-    return ((slots[..., 0] > 0) & (slots[..., 5] == 0) & (slots[..., 7] > 0) & (slots[..., 8] == 0)
-            & (np.rint(slots[..., 6] * SCALE) == number))
 
 
 def _single_matches(signs: np.ndarray, number: int) -> np.ndarray:
@@ -148,10 +139,8 @@ def _coherent_swap(drive: dict, bounds: tuple[int, int, int, int], groups: tuple
     single = inputs['signs'][window, 8]
     single[:] = original['signs'][window, 8]
     single[_single_matches(original['signs'][window], number)] = SWAPS[number] / SCALE
-    if 'sign_slots' in original:
-        slots = inputs['sign_slots'] = original['sign_slots'].copy()
-        changed = _slot_rows(slots[window])
-        changed[..., 6][_matching_slots(changed, number)] = SWAPS[number] / SCALE
+    if first < confirm and 'sign_slots' in inputs:
+        _swap_slot_numbers(inputs['sign_slots'], slice(first, confirm), number)
     # A legacy checkpoint can take fewer road_signs columns. Preserve the width the caller packed for it.
     width = sum(inputs[name].shape[-1] for name in groups)
     missing = width - drive['extra'].shape[-1] if 'extra' in drive else 0
@@ -388,12 +377,12 @@ def _asked(drive: dict, partition: str) -> np.ndarray:
     return (loss_weights(drive, partition)[0] > 0) & _measured(drive) & (np.asarray(drive['partitions']) == partition)
 
 
-def situation_baseline(drives) -> dict:
+def situation_baseline(drives, *, all_ticks: bool = False) -> dict:
     """The driver's median speed in train for each number in force, and for none: what a brain that only reads the
-    number would say (#116)."""
+    number would say (#116). Replay uses the measured ticks; training can use every answered train tick."""
     by = {}
     for drive in drives:
-        asked = _asked(drive, 'train')
+        asked = (loss_weights(drive, 'train')[0] > 0) if all_ticks else _asked(drive, 'train')
         truth, limits = class_kph(drive['speed'])[asked], _limits(drive)[asked]
         for limit, speed in zip(limits, truth):
             by.setdefault(int(limit) if limit > 0 else None, []).append(speed)
@@ -404,13 +393,13 @@ def _type_name(at) -> str:
     return ROAD_TYPES[at] if 0 <= at < len(ROAD_TYPES) else 'unknown'
 
 
-def situation_type_baseline(drives) -> dict:
+def situation_type_baseline(drives, *, all_ticks: bool = False) -> dict:
     """The driver's median speed in train for each number in force (or none) and road type, keyed 'limit|type' ('none'
     for no number): what a brain that only reads the number and knows the road type would say (#116, Astra). The road
-    type is the offline label, so this reference knows more than the car does."""
+    type is the offline label, so this reference knows more than the car does. Ticks as situation_baseline."""
     by = {}
     for drive in drives:
-        asked = _asked(drive, 'train')
+        asked = (loss_weights(drive, 'train')[0] > 0) if all_ticks else _asked(drive, 'train')
         truth, limits = class_kph(drive['speed'])[asked], _limits(drive)[asked]
         types = np.asarray(drive.get('road_type', np.full(len(asked), -1)))[asked]
         for limit, kind, speed in zip(limits, types, truth):
@@ -438,6 +427,21 @@ def _errors(said, truth, baseline_said, cells, type_said=None) -> dict:
     return found
 
 
+def situation_groups(drive: dict, asked: np.ndarray) -> dict[str, np.ndarray]:
+    """The number state, road type and lead of each selected tick, shared by the measures and the loss balance."""
+    types = np.asarray(drive.get('road_type', np.full(len(asked), -1)))[asked]
+    lead = drive['inputs'].get('lead')
+    return {'state': _number_states(drive)[asked], 'type': np.array([_type_name(at) for at in types]),
+            'lead': (np.where(lead[asked, 2] > 0, 'lead car', 'no lead detected') if lead is not None
+                     else np.full(int(asked.sum()), 'unknown'))}
+
+
+def situation_keys(groups: dict[str, np.ndarray]) -> np.ndarray:
+    """The joint situation key of each tick, in the same form as the metrics breakdown."""
+    keys = np.char.add(groups['state'].astype(str), ' | ')
+    return np.char.add(np.char.add(keys, np.char.add(groups['type'].astype(str), ' | ')), groups['lead'].astype(str))
+
+
 def situation_metrics(drives, said_kph, partition: str, baseline: dict, type_baseline: dict | None = None) -> dict:
     """How well it holds the situation on one partition (#116), on the measured answered ticks as measure: the error by
     the number in force (NUMBER_STATES), by road type (the stored offline label, 'unknown' without one), by lead car
@@ -457,19 +461,16 @@ def situation_metrics(drives, said_kph, partition: str, baseline: dict, type_bas
         if not asked.any():
             continue
         limits = _limits(drive)[asked]
-        types = np.asarray(drive.get('road_type', np.full(len(asked), -1)))[asked]
-        lead = drive['inputs'].get('lead')
         rows['said'].append(np.asarray(said)[asked])
         rows['truth'].append(class_kph(drive['speed'])[asked])
         rows['base'].append(np.array([baseline.get(int(limit) if limit > 0 else None, np.nan) for limit in limits]))
-        rows['state'].append(_number_states(drive)[asked])
-        rows['type'].append(np.array([_type_name(at) for at in types]))
+        for name, values in situation_groups(drive, asked).items():
+            rows[name].append(values)
         rows['since_end'].append(_seconds_since_end(drive)[asked])
         entries.extend(_entry_profiles(drive, np.asarray(said), asked))
-        rows['lead'].append(np.where(lead[asked, 2] > 0, 'lead car', 'no lead detected') if lead is not None
-                            else np.full(int(asked.sum()), 'unknown'))
         rows['limit'].append(limits)
-        rows['cell'].extend((drive['route'], None) if drive['cells'][at] is None else tuple(drive['cells'][at])
+        cells = drive.get('cells')
+        rows['cell'].extend((drive['route'], None) if cells is None or cells[at] is None else tuple(cells[at])
                             for at in np.flatnonzero(asked))
     if not rows['said']:
         return {'ticks': 0}
@@ -491,8 +492,7 @@ def situation_metrics(drives, said_kph, partition: str, baseline: dict, type_bas
     found = {'all': errors(np.ones(len(data['said']), dtype=bool)), 'by': {}}
     for name in ('state', 'type', 'lead'):
         found['by'][name] = {str(value): errors(data[name] == value) for value in np.unique(data[name])}
-    combined = np.char.add(np.char.add(np.char.add(data['state'].astype(str), ' | '), np.char.add(data['type'].astype(str), ' | ')),
-                           data['lead'].astype(str))
+    combined = situation_keys(data)
     found['by']['state, type, lead'] = {value: errors(combined == value) for value in np.unique(combined)}
     pairs = []
     for limit in np.unique(data['limit'][data['limit'] > 0]):
@@ -618,7 +618,7 @@ def run_replay(root, run_dir, merged_of, *, device, partition: str = 'validation
     log(f'{len(drives)} drives with {partition} frames')
     for drive in drives:
         drive['extra'] = pack_inputs(drive['inputs'], groups, brain_sizes(saved))
-    store = FrameStore(_pictures(root, drives, dry_run=False, log=log), device)
+    store = FrameStore(_pictures(root, drives, dry_run=False, log=log), device) if model.picture else None
     table = model.class_kph.detach().cpu().numpy()
     decoded, responses, uses, skipped = [], [], [], 0
     for at, drive in enumerate(drives, 1):

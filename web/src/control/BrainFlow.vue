@@ -13,6 +13,7 @@ import type {BrainChoice} from './brain-choices';
 import {BRAIN_GROUPS, BRAIN_OUT, BRAIN_OUTPUTS, BRAIN_PICTURE, type BrainFact} from './brain-card';
 
 const props = defineProps<{choices: BrainChoice}>();
+const withPicture = computed(() => props.choices.picture === 'on');
 const learns = computed(() => ({works: props.choices.works === 'on', road: props.choices.road === 'on',
   types: props.choices.types === 'on', map: props.choices.map === 'on',
   applicability: props.choices.applicability === 'on'}));
@@ -68,7 +69,8 @@ const extras = computed<(Block & {source: string; map: boolean})[]>(() => [
 ].filter((extra) => extra.on).map((extra) => ({id: extra.id, title: extra.title, sub: extra.sub, kind: 'train' as Kind,
   source: extra.source, map: extra.map === true, facts: [{name: extra.title, what: extra.what}],
   note: 'Only in training: its error updates the shared weights, then it is dropped from the car’s file.'})));
-const blocks = computed(() => [camera, features, ...inputs.value, memory, ...outputs, ...extras.value]);
+const blocks = computed(() => [...(withPicture.value ? [camera, features] : []), ...inputs.value, memory, ...outputs,
+  ...extras.value]);
 const out = computed(() => BRAIN_OUT.filter((reason) => learns.value.types || reason.name !== 'no_road_type'));
 
 // -- the detail of a block: a tap (or click) keeps it open under the flow, a second tap or Esc closes it ------------------
@@ -97,7 +99,7 @@ function draw(): void {
   if (!element) return;
   const origin = element.getBoundingClientRect();
   size.value = {w: element.clientWidth, h: element.clientHeight};
-  const rows = ['features', ...inputs.value.map((block) => block.id)].map((id) => box(id, origin));
+  const rows = [...(withPicture.value ? ['features'] : []), ...inputs.value.map((block) => block.id)].map((id) => box(id, origin));
   const gru = box('memory', origin);
   if (rows.some((row) => !row) || !gru) return;
   const rail = size.value.w - 9;
@@ -124,7 +126,7 @@ function draw(): void {
 }
 
 let observer: ResizeObserver | null = null;
-watch(inputs, () => { void nextTick(draw); });
+watch([inputs, withPicture], () => { void nextTick(draw); });
 watch(shown, () => { void nextTick(draw); });
 onMounted(() => {
   void nextTick(draw);
@@ -144,7 +146,7 @@ onBeforeUnmount(() => {
     <p class="bf-legend">
       <span class="bf-key bf-key-input">Input</span>
       <span class="bf-key bf-key-net">The network</span>
-      <span class="bf-key bf-key-car">Output on the car</span>
+      <span class="bf-key bf-key-car">{{ withPicture ? 'Output on the car' : 'Offline comparison' }}</span>
       <span class="bf-key bf-key-train">Output only in training</span>
       <span class="bf-hint">Tap a block for what it is.</span>
     </p>
@@ -162,7 +164,7 @@ onBeforeUnmount(() => {
       </svg>
       <h4 class="bd-head">Inputs · 4 times a second</h4>
       <div class="bd-ins">
-        <div class="bd-row">
+        <div v-if="withPicture" class="bd-row">
           <button v-for="(block, index) in [camera, features]" :key="block.id" type="button" class="bf-block"
             :class="['bf-' + block.kind, {on: pinned === block.id}, index ? 'bd-after' : '']" :data-block="block.id"
             :aria-expanded="pinned === block.id" @click="pin(block)">
@@ -185,7 +187,7 @@ onBeforeUnmount(() => {
       <div class="bd-outs">
         <div class="bd-side">
           <section class="bd-group bd-group-car" data-block="group-car">
-            <h5>On the car · {{ plural(outputs.length, 'output') }}</h5>
+            <h5>{{ withPicture ? 'On the car' : 'Offline comparison' }} · {{ plural(outputs.length, 'output') }}</h5>
             <button v-for="block in outputs" :key="block.id" type="button" class="bf-block bf-car" :class="{on: pinned === block.id}"
               :data-block="block.id" :aria-expanded="pinned === block.id" @click="pin(block)">
               <span class="bf-title">{{ block.title }}</span>

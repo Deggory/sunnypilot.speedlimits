@@ -669,6 +669,21 @@ the log of the answer's bell around the number, and nothing on a frame without o
 
 **What the comma's limit scores.** On the first 4,251 labelled frames `vis_limit` equals the label on 48 %, 20.6 km/h off on average. The labelled drives were chosen for their errors, so this is a starting point, not the limit's overall score.
 
+### Situation comparison and checkpoint selection
+
+Train › Brain can turn **Picture** off for a numeric-input comparison, with the same drives, labels, and GRU input
+width. The image features are zero and the brain does not run its image encoder. Sign readings are still inputs.
+This is an offline comparison and cannot be published to the car. **Balance › By situation** reweights only the
+speed loss, using train ticks grouped by number state, road type, and lead. It clips the inverse-frequency factors
+to `[0.25, 4]` before renormalizing to preserve the total speed-loss weight.
+
+Every epoch measures validation error with equal weight per place. **Keep › Best on validation** is the default;
+**Last epoch** uses the last instead. `brain-last.pt` holds the selected weights, `brain-best.pt` holds the best
+regardless of that choice, and both fall back to the last when validation has no measured ticks. The final
+`result.json` metrics describe the selected weights. Its `situation` metrics compare the argmax speed with a baseline
+that says the driver's train median for the number in force (or for no number). Models › Brain shows the test errors
+with and without a sign in force, and the slope of the speed changes across road types within the same signed limit.
+
 ## UserNet (12 to 17 November 2026)
 
 UserNet, a small detector of the road users (a person, a two-wheeler, a vehicle) whose boxes the brain was to read, was removed on 17 Nov 2026 ([#113](https://github.com/cristianku/sunnypilot.smartspeed/issues/113)): it was never trained and nothing read it. The road-user boxes of Sign review went with it: a road user gets no box, and the boxes saved from 12 to 17 Nov 2026 stay in the reviews, where the cutter takes them as ignore boxes, neither a sign nor background (`training.prepare_detector_training`). Somebody who crosses our path is marked in Speed review instead ("Who crosses our path", below).

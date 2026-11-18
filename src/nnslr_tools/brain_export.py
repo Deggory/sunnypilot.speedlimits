@@ -31,7 +31,7 @@ import numpy as np
 
 from nnslr_tools import road_type_data as data
 from nnslr_tools import onnx_device
-from nnslr_tools.brain_net import build_brain_net, car_weights, number_path_of
+from nnslr_tools.brain_net import build_brain_net, car_weights, number_path_of, picture_kind_of
 from nnslr_tools.brain_targets import BRAIN_INPUTS, METRES_SCALE, brain_sizes, dataset, inputs_sha256, pack_inputs
 from nnslr_tools.brain_train import CHECKPOINT, CHUNK, _pictures, predict
 from nnslr_tools.road_type_net import FrameStore, _torch, gru_step
@@ -56,7 +56,7 @@ def load_brain(checkpoint: Path):
     model = build_brain_net(tuple(saved['groups']), pool=saved['pool'], works=False, ahead=saved.get('ahead', False),
                             pretrained=False, features=saved['features'], hidden=saved['hidden'], number_path=number_path_of(saved),
                             kph=None if table is None else table.tolist(), road_types=len(road_types_of(saved)),
-                            map_path='trust_map.weight' in saved['weights'], sizes=brain_sizes(saved))
+                            map_path='trust_map.weight' in saved['weights'], sizes=brain_sizes(saved), picture=saved.get('picture') is not False)
     weights = {name: value for name, value in saved['weights'].items()
                if name in car_weights(model) or name.startswith('type_head.')}
     model.load_state_dict(weights, strict=True)
@@ -232,14 +232,16 @@ def export_brain_onnx(checkpoint: Path, output: Path, *, data_root: Path | None 
     one the network was trained with. data_root and merged_of add the check along a real drive; log hears its progress;
     device: where PyTorch runs that drive (Publish: the GPU, car_release.check_device); networks: the ones its signs
     were read with (sign_networks.of_brain)."""
+    checkpoint, output = Path(checkpoint), Path(output)
+    model, saved = load_brain(checkpoint)
+    if saved.get('picture') is False:
+        raise ValueError('a brain trained without the picture is for offline comparison; it cannot be exported for the car')
     torch = _torch()
     import onnx
     import onnxruntime
 
     from nnslr_tools.exporting import sha256_file
 
-    checkpoint, output = Path(checkpoint), Path(output)
-    model, saved = load_brain(checkpoint)
     if saved['inputs_sha256'] not in (inputs_sha256(), *BRAIN_INPUTS.SAME_GROUPS):
         raise ValueError('the car\'s brain_inputs.py is not the one this network was trained with: train it again')
     groups = tuple(saved['groups'])
@@ -285,7 +287,7 @@ def export_brain_onnx(checkpoint: Path, output: Path, *, data_root: Path | None 
         if verification['rollout']['other_speed'] or verification['rollout'].get('other_ahead'):
             raise ValueError(f'brain ONNX says another speed than PyTorch along a drive: {verification["rollout"]}')
     shapes = {'image': [1, 3, data.FRAME_HEIGHT, data.FRAME_WIDTH], 'extra': [1, width], 'hidden': [1, hidden]}
-    brain_picture = saved.get('picture', 'road_type') == 'brain'
+    brain_picture = picture_kind_of(saved) == 'brain'
     resize = ({'method': 'vision.BrainInput: the NV12 planes scaled first with PIL bilinear weights, then RGB',
                'from': list(data.SOURCE_SIZE), 'to': [data.FRAME_WIDTH, data.FRAME_HEIGHT], 'crop': 'none, the whole frame'}
               if brain_picture else

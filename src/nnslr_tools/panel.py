@@ -222,7 +222,8 @@ BRAIN_SIGN_NETWORKS = {'sign_cutter': ('cutter', 'NNSLR_BRAIN_CUTTER'),
 QWEN_GPU_MB = 18 * 1024
 ACTION_OPTIONS = {'train_cutter': ('families', 'start', 'mapillary', 'region', 'share'), 'train_decider': ('start',),
                   'train_brain': ('works', 'road', 'types', 'driver', 'pool', 'seeds', 'start', 'sign_cutter',
-                                  'sign_classifier', 'users', 'routes_from', 'map', 'applicability', 'number_path'),
+                                   'sign_classifier', 'users', 'routes_from', 'map', 'applicability', 'number_path',
+                                   'picture', 'keep', 'balance'),
                   'regression': ('openpilot', 'brains'),
                   'simulate': ('route', 'set', 'certified', 'map'),
                   'road_labeler_train': ('dry',), 'road_labeler_predict': ('dry', 'labeler', 'marks'),
@@ -368,8 +369,14 @@ def _settings_of(log: Path, action: str) -> list[str]:
         chips.append('driver’s inputs')
     elif '--no-driver' in flags:
         chips.append('no driver’s inputs')
-    if flags.get('--pool') == 'mean':
+    if '--no-picture' in flags:
+        chips.append('without picture')
+    elif flags.get('--pool') == 'mean':
         chips.append('picture as a mean')
+    if flags.get('--keep') == 'last':
+        chips.append('keeps last epoch')
+    if '--balance' in flags:
+        chips.append('balanced by situation')
     # The number path when not the usual one of today (a run of before 16 Nov 2026 had this one and does not say).
     if flags.get('--number-path') == 'class':
         chips.append('number on its class')
@@ -2501,7 +2508,7 @@ class Panel:
 
     def _brain_choices(self, options: dict, check_only: bool = False) -> dict:
         """The variables of scripts/run_brain.sh from the options of Train › Brain ({'works', 'road', 'types', 'pool',
-        'seeds', 'map', 'applicability', 'number_path'}), the usual ones when not given: the roadworks, the
+        'seeds', 'map', 'applicability', 'number_path', 'picture', 'keep', 'balance'}), the usual ones when not given: the roadworks, the
         kinds of road, the road types and the applicability on, the map's limit off, the picture as a
         grid, the number in force as a bell, the three seeds.
         'driver' is only 'off' (a page loaded before 10 Nov 2026 sends it): the brain never takes his pedals nor the
@@ -2518,6 +2525,9 @@ class Panel:
         pool, seeds = options.get('pool', BRAIN_POOLS[0]), options.get('seeds', 'all')
         map_limit, applicability = options.get('map', 'off'), options.get('applicability', 'on')
         number_path = options.get('number_path', BRAIN_NUMBER_PATHS[0])
+        picture, keep, balance = options.get('picture', 'on'), options.get('keep', 'best'), options.get('balance', 'off')
+        if picture not in ('on', 'off') or keep not in ('best', 'last') or balance not in ('on', 'off'):
+            raise PanelError(400, 'bad_option', 'Picture and balance are on or off; keep is best or last.')
         if not all(isinstance(value, str) for value in (works, road, types, pool, seeds, map_limit, applicability,
                                                         number_path)) \
                 or works not in BRAIN_WORKS or road not in BRAIN_ROAD or types not in BRAIN_TYPES \
@@ -2529,7 +2539,10 @@ class Panel:
                                                 'grid, the number bell or class, the seeds all or one.')
         found = {'NNSLR_BRAIN_WORKS': BRAIN_WORKS[works], 'NNSLR_BRAIN_ROAD': BRAIN_ROAD[road],
                  'NNSLR_BRAIN_TYPES': BRAIN_TYPES[types], 'NNSLR_BRAIN_POOL': pool,
-                 'NNSLR_BRAIN_NUMBER_PATH': number_path,
+                  'NNSLR_BRAIN_NUMBER_PATH': number_path,
+                  'NNSLR_BRAIN_PICTURE': '1' if picture == 'on' else '0',
+                  'NNSLR_BRAIN_KEEP': keep,
+                  'NNSLR_BRAIN_BALANCE': '1' if balance == 'on' else '0',
                  'NNSLR_BRAIN_SEEDS': BRAIN_SEEDS[seeds],
                  'NNSLR_BRAIN_MAP': BRAIN_MAP[map_limit],
                  'NNSLR_BRAIN_APPLICABILITY': BRAIN_APPLICABILITY[applicability],
@@ -2768,6 +2781,9 @@ class Panel:
             # The map is also a choice of a replay (simulate: {'map': 'off'}, checked with its other options).
             if (options or {}).get(key) is not None and action != 'train_brain' \
                     and key not in ACTION_OPTIONS.get(action, ()):
+                raise PanelError(400, 'bad_option', 'Only "Train the brain" takes ' + key + '.')
+        for key in ('picture', 'keep', 'balance'):
+            if key in (options or {}) and action != 'train_brain':
                 raise PanelError(400, 'bad_option', 'Only "Train the brain" takes ' + key + '.')
         if action == 'train_brain':
             start_env.update(self._brain_choices(options or {}, check_only))

@@ -121,7 +121,7 @@ def brain_refused(index: ModelIndex) -> str:
     entry, _ = index.in_use('brain')
     if entry is None:
         return ''
-    return (_driver_refused(entry) if takes_the_driver(entry) else
+    return _picture_refused(entry) or (_driver_refused(entry) if takes_the_driver(entry) else
             _filtered_refused(entry) or _networks_refused(index, entry) or _map_refused(entry) or _boxes_refused(entry))
 
 
@@ -154,6 +154,14 @@ def _filtered_refused(entry: dict) -> str:
 def _driver_refused(entry: dict) -> str:
     return (f'the brain in use, {entry["id"]}, takes your pedals and the car’s speed, so it follows your speed: choose '
             'one without them on the Models tab')
+
+
+def _picture_refused(entry: dict) -> str:
+    """Why a diagnostic brain without image features cannot go on the car."""
+    if entry.get('picture') is not False:
+        return ''
+    return (f'the brain in use, {entry["id"]}, was trained without the picture for offline comparison: '
+            'choose a brain trained with it on the Models tab')
 
 
 def daemon_feeds_the_map(clone: Path | None = None) -> bool:
@@ -328,6 +336,8 @@ def _brain(root: Path, runs: RunsIndex, index: ModelIndex, on_car: bool = True) 
         raise ValueError(why)
     if not entry['finished']:
         raise ValueError(f'the brain {entry["id"]} has not finished its training')
+    if on_car and (reason := _picture_refused(entry)):
+        raise ValueError(reason)
     if on_car and takes_the_driver(entry):
         raise ValueError(_driver_refused(entry))
     if on_car and _filtered_refused(entry):

@@ -1808,7 +1808,13 @@ def build_parser() -> argparse.ArgumentParser:
                              help="how the number in force reaches the answer (#104): bell, as a bell around the "
                                   "number, the shape of the answer; class, on its class alone, as every brain before "
                                   "16 Nov 2026 (the comparison). result.json keeps the word and what the path's trust "
-                                  "holds (trust), beside test_swapped")
+                                   "holds (trust), beside test_swapped")
+    p_brain_net.add_argument("--no-picture", action="store_true",
+                             help="compare against a brain without image features (offline only)")
+    p_brain_net.add_argument("--keep", choices=("best", "last"), default="best",
+                             help="keep the best epoch by validation error by place, or the last epoch")
+    p_brain_net.add_argument("--balance", action="store_true",
+                             help="balance the speed loss by number state, road type and lead on train")
     p_brain_net.add_argument("--epochs", type=int, default=None)
     p_brain_net.add_argument("--seed", type=int, default=0)
     p_brain_net.add_argument("--init-from", default=None,
@@ -2935,12 +2941,14 @@ def _cmd_train_brain(args: argparse.Namespace) -> int:
                                      epochs=args.epochs or brain_train.EPOCHS, seed=args.seed,
                                      init_from=Path(args.init_from) if args.init_from else None,
                                      sign_networks=_sign_networks(args), map_limit=args.map_limit,
-                                     applicability=not args.no_applicability, number_path=args.number_path)
+                                      applicability=not args.no_applicability, number_path=args.number_path,
+                                      picture=not args.no_picture, keep=args.keep, balance=args.balance)
     print(json.dumps({**{part: {**{key: result[part][key] for key in ('speed', 'speeds_said', 'one_speed', 'follow_the_sign')},
                                 'applicability': result[part].get('applicability')}
                          for part in ('train', 'validation', 'test')},
                       **{part: result[part] for part in ('validation_swapped', 'test_swapped')},
-                      **{part: result[part] for part in ('number_path', 'trust') if part in result},
+                       **{part: result[part] for part in ('number_path', 'trust', 'picture', 'keep', 'kept', 'balance')
+                          if part in result},
                       **{part: {'speed': result[part]['speed']} for part in ('validation_no_map', 'test_no_map')
                          if part in result}}, indent=2))
     return 0

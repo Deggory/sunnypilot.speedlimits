@@ -64,7 +64,10 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
   if (name === 'train_brain') {
     const works = options?.works === 'off' ? ' Without the roadworks.' : '';
     const mean = (options?.pool === 'mean' ? ' With the picture as a mean.' : '')
-      + (options?.number_path === 'class' ? ' With the number on its class alone, as the brains before.' : '');
+      + (options?.number_path === 'class' ? ' With the number on its class alone, as the brains before.' : '')
+      + (options?.picture === 'off' ? ' Without the picture, for offline comparison.' : '')
+      + (options?.keep === 'last' ? ' Keeps the last epoch.' : '')
+      + (options?.balance === 'on' ? ' Balances the speed loss by situation.' : '');
     return {title: 'Train the brain?', action: 'Start training',
       text: 'First it reads the signs of every drive with sunnypilot off and its logs read as the car does today, then it trains '
         + (options?.seeds === 'one' ? 'seed 0 on the GPU: about 5 minutes. One new version in Models; '

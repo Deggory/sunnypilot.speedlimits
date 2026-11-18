@@ -69,6 +69,7 @@ def brain_script(checkout):
                       'echo "map: ${NNSLR_BRAIN_MAP-unset}"\n'
                       'echo "applicability: ${NNSLR_BRAIN_APPLICABILITY-unset}"\n'
                       'echo "number path: ${NNSLR_BRAIN_NUMBER_PATH-unset}"\n'
+                      'echo "situation options: $NNSLR_BRAIN_PICTURE $NNSLR_BRAIN_KEEP $NNSLR_BRAIN_BALANCE"\n'
                       'echo "routes from: ${NNSLR_BRAIN_ROUTES_FROM-unset}"\n')
     script.chmod(0o755)
     return script
@@ -410,6 +411,74 @@ def test_models_say_the_number_path_of_a_brain():
     assert brain_digest({**result, 'number_path': 'bell'})['number_path'] == 'bell'
 
 
+def test_situation_options_reach_train_and_pipeline_and_are_never_dropped(root, checkout, monkeypatch):
+    brain_script(checkout)
+    scanned(root)
+    server = RunningServer(root)
+    panel = server.app.panel = Panel(root, repo=checkout)
+    panel.activities = list
+    choices = {'picture': 'off', 'keep': 'last', 'balance': 'on'}
+    try:
+        for key in choices:
+            for wrong in (None, True, 1, [], {}, '', 'invalid'):
+                status, _, data = server.request('POST', '/api/panel/run/train_brain', body={key: wrong})
+                assert (status, json_of(data)['error']) == (400, 'bad_option'), data
+        assert panel.jobs() == []
+        status, _, data = server.request('POST', '/api/panel/run/train_brain', body=choices)
+        assert status == 200, data
+        job = json_of(data)['id']
+        finished(panel, job)
+        assert 'situation options: 0 last 1' in full_log(panel, job)
+        assert {key: panel._brain_choices({})[key] for key in
+                ('NNSLR_BRAIN_PICTURE', 'NNSLR_BRAIN_KEEP', 'NNSLR_BRAIN_BALANCE')} == {
+                    'NNSLR_BRAIN_PICTURE': '1', 'NNSLR_BRAIN_KEEP': 'best', 'NNSLR_BRAIN_BALANCE': '0'}
+        pipeline_panel = Panel(root / 'pipeline-case', repo=checkout)
+        scanned(pipeline_panel.root)
+        monkeypatch.setattr(pipeline_panel, 'activities', list)
+        pipeline = pipeline_panel.start_pipeline({'steps': [{'action': 'train_brain', 'options': choices}]}, 'admin')
+        assert pipeline['steps'][0]['options'] == choices
+        job = pipeline['steps'][0]['job']
+        finished(pipeline_panel, job)
+        assert 'situation options: 0 last 1' in full_log(pipeline_panel, job)
+        with pytest.raises(PanelError, match='options of a training are strings'):
+            pipeline_panel.start_pipeline({'steps': [{'action': 'train_brain', 'options': {'keep': None}}]}, 'admin')
+        with pytest.raises(PanelError, match='Picture and balance'):
+            pipeline_panel.start_pipeline({'steps': [{'action': 'train_brain', 'options': {'keep': 'invalid'}}]}, 'admin')
+    finally:
+        server.close()
+
+
+def test_diagnostic_brain_cannot_be_published_and_models_show_situation(root, checkout):
+    from nnslr_tools.car_release import _brain, brain_refused
+
+    panel = Panel(root, repo=checkout)
+    runs = root / 'runs' / 'diagnostic'
+    runs.mkdir(parents=True)
+    (runs / 'brain-last.pt').write_bytes(b'synthetic weights')
+    states = dict(zip(('none yet', 'after an end', 'number, fresh', 'number, old'), (
+        {'ticks': 3, 'mean_error_kph': 4, 'baseline_mean_error_kph': 7},
+        {'ticks': 1, 'mean_error_kph': 8, 'baseline_mean_error_kph': 15},
+        {'ticks': 1, 'mean_error_kph': 1, 'baseline_mean_error_kph': 2},
+        {'ticks': 2, 'mean_error_kph': 4, 'baseline_mean_error_kph': 5},
+    )))
+    result = {'groups': ['signs'], 'test': {'speed': {}}, 'picture': False, 'balance': True, 'keep': 'best',
+              'situation': {'validation': {'ticks': 0}, 'test': {'by': {'state': states},
+                            'all': {'mean_error_by_place_kph': 6}, 'within_number': {'slope': .75}}}}
+    (runs / 'result.json').write_text(json.dumps(result))
+    key = 'brain:diagnostic/brain'
+    panel.models_index.set_active('brain', key, who='admin', via='local')
+    version, _why = panel.models_index.in_use('brain')
+    assert version['picture'] is False and version['balance'] is True
+    assert version['situation']['test'] == {
+        'no_sign': {'ticks': 4, 'mean_error_kph': 5, 'baseline_mean_error_kph': 9},
+        'with_sign': {'ticks': 3, 'mean_error_kph': 3, 'baseline_mean_error_kph': 4},
+        'mean_error_by_place_kph': 6, 'within_number_slope': .75}
+    assert version['situation']['validation']['no_sign'] is None
+    assert 'without the picture' in brain_refused(panel.models_index)
+    with pytest.raises(ValueError, match='without the picture'):
+        _brain(root, panel.models_index.runs, panel.models_index)
+
+
 def test_the_drives_of_an_earlier_brain_reach_the_script(root, checkout, monkeypatch):
     """Drives every dashcam drive unless an earlier brain run that kept its drives is chosen (NNSLR_BRAIN_ROUTES_FROM),
     its seeds counted as that run, newest first. The script is never told of the road users (#112, 17 Nov 2026)."""
@@ -642,10 +711,15 @@ def test_train_brain_has_no_drivers_inputs(tmp_path, monkeypatch, capsys):
     command = ['train-brain', '--data-root', str(tmp_path / 'data'), '--run-dir', str(tmp_path / 'out')]
     cli.main(command)
     assert len(asked) == 1 and 'driver' not in asked[0]
+    assert tuple(asked[0][key] for key in ('picture', 'keep', 'balance')) == (True, 'best', False)
+    cli.main([*command, '--no-picture', '--keep', 'last', '--balance'])
+    assert tuple(asked[1][key] for key in ('picture', 'keep', 'balance')) == (False, 'last', True)
     for flag in ('--driver', '--no-driver'):
         with pytest.raises(SystemExit):
             cli.main([*command, flag])
-    assert len(asked) == 1
+    with pytest.raises(SystemExit):
+        cli.main([*command, '--keep', 'invalid'])
+    assert len(asked) == 2
 
 
 # -- what the labels give it --------------------------------------------------------------------------------------

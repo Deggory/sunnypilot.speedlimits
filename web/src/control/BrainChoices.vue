@@ -5,7 +5,8 @@
 // picture's features as Mean or Grid, the number in force as a Bell or on its Class (#104), its seeds as Three or One, and
 // its drives (every dashcam drive or those of an
 // earlier brain run, runs: BrainLabels.same_drives; no choice while there is none).
-import {NUMBER_PATH_OPTIONS, POOL_OPTIONS, SEEDS_OPTIONS, type BrainChoice} from './brain-choices';
+import {BALANCE_OPTIONS, KEEP_OPTIONS, NUMBER_PATH_OPTIONS, PICTURE_OPTIONS, POOL_OPTIONS, SEEDS_OPTIONS,
+  type BrainChoice} from './brain-choices';
 import type {BrainRouteRun} from '../common/panel-types';
 import Segmented from './Segmented.vue';
 
@@ -28,10 +29,16 @@ function flip(key: Switch): void {
   <div class="bc" :id="id + '-choices'" role="group" aria-label="What the next training of the brain learns">
     <button v-for="item in SWITCHES" :key="item.key" type="button" class="bc-switch" :aria-pressed="choices[item.key] === 'on'"
             :title="item.title" @click="flip(item.key)">{{ item.label }}</button>
-    <span class="bc-pick" :title="choices.note"><span>Picture</span>
+    <span class="bc-pick" title="Without uses the numeric inputs alone, to compare. This brain cannot be published to the car."><span>Picture</span>
+      <Segmented v-model="choices.picture" :options="PICTURE_OPTIONS" label="Picture: with or without (numbers alone, to compare)"/></span>
+    <span v-if="choices.picture === 'on'" class="bc-pick" :title="choices.note"><span>Features</span>
       <Segmented v-model="choices.pool" :options="POOL_OPTIONS" label="The picture’s features: Grid keeps where things are, Mean only what is in it"/></span>
     <span class="bc-pick" :title="choices.numberNote"><span>Number</span>
       <Segmented v-model="choices.numberPath" :options="NUMBER_PATH_OPTIONS" label="The number in force: Bell, as a bell around it; Class, on its class alone"/></span>
+    <span class="bc-pick" title="Best on validation keeps the epoch with the lowest error averaged by place."><span>Keep</span>
+      <Segmented v-model="choices.keep" :options="KEEP_OPTIONS" label="Keep: best on validation or last epoch"/></span>
+    <span class="bc-pick" title="Give rare combinations of sign state, road type and lead car more weight in the speed loss."><span>Balance</span>
+      <Segmented v-model="choices.balance" :options="BALANCE_OPTIONS" label="Balance: off or by situation"/></span>
     <span class="bc-pick" :title="choices.seedsNote"><span>Seeds</span>
       <Segmented v-model="choices.seeds" :options="SEEDS_OPTIONS" label="The seeds: seed 0 alone, or three to compare in Models"/></span>
     <label v-if="runs?.length" class="bc-pick" :title="choices.drivesNote"><span>Drives</span>

@@ -7,8 +7,8 @@ cuts every epoch, and the gradient stops at each of them. Every epoch the drives
 swapped, and those with a plate of hours go through once more at night (brain_targets.epoch_drives): the measure has only
 the real hour and the real numbers.
 
-The last epoch is what is kept. Validation is a few stretches of two drives today: choosing on it rewards the epoch that
-remembers those roads, the opposite of what the swap asks. It is shown every epoch and it chooses nothing.
+The best epoch is the one with the lowest validation error averaged by place, measured every epoch. brain-last.pt holds
+that epoch by default, or the last with --keep last; brain-best.pt holds the best either way. Test only measures the kept one.
 
 A picture of test or validation runs in no training step and in no memory of one: the training skips those frames, and the
 memory starts again after them (brain_targets.learning_pieces). A frame of the buffer runs under no_grad, only to keep the
@@ -113,6 +113,7 @@ import hashlib
 import json
 import random
 import time
+from collections import Counter
 from functools import partial
 from pathlib import Path
 
@@ -120,7 +121,7 @@ import numpy as np
 
 from nnslr_tools import road_type_data as data
 from nnslr_tools.brain_net import (APPLICABILITY_POS_WEIGHT_MAX, NUMBER_PATHS, ROAD_EVENT_POS_WEIGHT_MAX, brain_loss,
-                                   build_brain_net, number_path_of, outputs)
+                                   build_brain_net, number_path_of, outputs, picture_kind_of)
 from nnslr_tools.brain_targets import (INPUT_SIZES, LEFT_OUT, MAP_GROUP, METRES_SCALE, NO_TYPE, NS, OPTIONAL, RATE_HZ,
                                        ROAD_SIGN_KINDS, brain_sizes,
                                        applicability_counts, applicability_counts_text, applicability_weights,
@@ -137,6 +138,7 @@ EPOCHS = 40
 CHUNK = int(64 * RATE_HZ)  # a piece of 64 s, as the 64 frames of the 1 Hz brains
 CLIP = 5.0
 CHECKPOINT = 'brain-last.pt'
+BEST_CHECKPOINT = 'brain-best.pt'
 RESULT = 'result.json'
 # The drives a training took (dataset's, before the dry run's cut), written first: scripts/run_brain.sh keeps the dry
 # run's for the whole run, so that every step and every seed has the same drives whatever drive arrives meanwhile.
@@ -159,10 +161,40 @@ def learned_inputs(map_limit: bool = False) -> tuple[str, ...]:
     return LEARNED_INPUTS + (('map_limit',) if map_limit else ())
 
 
-def _piece(drive: dict, first: int, last: int, store: FrameStore, device):
+def _piece(drive: dict, first: int, last: int, store: FrameStore | None, device):
     torch = _torch()
-    images = store.batch([(drive['route'], list(range(first, last)))])
+    images = (store.batch([(drive['route'], list(range(first, last)))]) if store is not None
+              else torch.zeros((1, last - first, 3, 1, 1), device=device))
     return images, torch.from_numpy(drive['extra'][first:last])[None].to(device)
+
+
+def situation_weights(drives: list[dict]) -> list[np.ndarray]:
+    """Factors for the speed loss on answered train ticks, with the original total weight preserved."""
+    from nnslr_tools.brain_replay import situation_groups, situation_keys
+
+    rows, counts = [], Counter()
+    for drive in drives:
+        speed_weight = loss_weights(drive, 'train')[0]
+        asked = speed_weight > 0
+        keys = situation_keys(situation_groups(drive, asked)) if asked.any() else ()
+        counts.update(keys)
+        rows.append((speed_weight, asked, keys))
+    mean_count = sum(counts.values()) / len(counts) if counts else 0
+    factors = {key: min(4, max(.25, mean_count / count)) for key, count in counts.items()}
+    original, weighted = 0.0, 0.0
+    selected = []
+    for speed_weight, asked, keys in rows:
+        values = np.array([factors[key] for key in keys], dtype=np.float64)
+        original += speed_weight.sum(dtype=np.float64)
+        weighted += np.dot(values, speed_weight[asked])
+        selected.append(values)
+    scale = original / weighted if weighted else 1.0
+    found = []
+    for (_, asked, _), values in zip(rows, selected, strict=True):
+        weights = np.ones(len(asked), dtype=np.float32)
+        weights[asked] = values * scale
+        found.append(weights)
+    return found
 
 
 def _same_augment(torch, images, seed: int, device):
@@ -173,16 +205,18 @@ def _same_augment(torch, images, seed: int, device):
         return _augment(torch, images)
 
 
-def train_epoch(model, optimizer, drives: list[dict], store: FrameStore, *, chunk: int, rng: random.Random, device,
+def train_epoch(model, optimizer, drives: list[dict], store: FrameStore | None, *, chunk: int, rng: random.Random, device,
                 augment: bool = True, steps: int | None = None, road_pos_weight=None, sign_pos_weight=None) -> float:
     """One pass over the train frames: the mean error of its steps. road_pos_weight: road_pos_weight's, a tensor on
     device (kinds,) in the order of the kinds, or None (every kind 1). sign_pos_weight: applicability_pos_weight's, a
-    scalar tensor on device, or None."""
+    scalar tensor on device, or None. A drive's situation_weight, if present, scales only its speed loss."""
     torch = _torch()
     model.train()
     errors = []
     for drive in rng.sample(drives, len(drives)):
         speed_weight, works_weight = loss_weights(drive, 'train')
+        if 'situation_weight' in drive:
+            speed_weight = speed_weight * drive['situation_weight']
         if model.works_head is None:
             works_weight = np.zeros_like(works_weight)
         road = road_weights(drive, 'train') if getattr(model, 'road_head', None) is not None else None
@@ -192,7 +226,7 @@ def train_epoch(model, optimizer, drives: list[dict], store: FrameStore, *, chun
         for first, last, learn, fresh in learning_pieces(drive['partitions'], chunk, rng.randrange(chunk), drive['cuts']):
             state = None if fresh else state
             images, extra = _piece(drive, first, last, store, device)
-            images = _same_augment(torch, images, look, device) if augment else images
+            images = _same_augment(torch, images, look, device) if augment and store is not None else images
             answers = speed_weight[first:last].sum() + works_weight[first:last].sum()
             if road is not None:
                 answers += road[first:last].sum()
@@ -231,7 +265,7 @@ def _stretches_out_of_train(partitions: list[str]) -> set[int]:
     return {at for at in range(1, len(partitions)) if partitions[at] != 'train' and partitions[at - 1] == 'train'}
 
 
-def predict(model, drive: dict, store: FrameStore, *, chunk: int, device, cold: bool = False) -> dict:
+def predict(model, drive: dict, store: FrameStore | None, *, chunk: int, device, cold: bool = False) -> dict:
     """What the network says along a whole drive, as on the car: {'kph': per frame, the km/h of its class in the network's
     own table (class_kph), 'works': chance per frame, or None, 'road': chance per frame and kind of road, or None, 'types':
     chance per frame and road type (road_types.ROAD_TYPES), or None, 'applicability': the chance that the speed sign of each slot of sign_slots is of another road (frames,
@@ -620,7 +654,7 @@ def _types_in_train(drives: list[dict], log) -> None:
             f"{'them' if len(bare) > 1 else 'it'} is learned. Read the map in Data › Prepare.")
 
 
-def _swapped_measure(model, drives: list[dict], answers: list[dict], partition: str, groups: tuple[str, ...], store: FrameStore, *,
+def _swapped_measure(model, drives: list[dict], answers: list[dict], partition: str, groups: tuple[str, ...], store: FrameStore | None, *,
                      chunk: int, device) -> dict:
     """follow_the_sign on the frames of a partition whose number was swapped, and how many answers moved: see the module's
     text."""
@@ -670,12 +704,13 @@ def brain_start(torch, model, path: Path, source: dict) -> dict:
     saved = torch.load(path, map_location='cpu', weights_only=False)
     if not isinstance(saved, dict) or not isinstance(saved.get('weights'), dict) or not saved.get('groups'):
         raise ValueError(f'the start is not a brain: {path}')
-    theirs = {'rate_hz': saved.get('rate_hz', 1.0), 'picture': saved.get('picture', 'road_type'), 'pool': saved.get('pool'),
+    theirs = {'rate_hz': saved.get('rate_hz', 1.0), 'picture': picture_kind_of(saved), 'pool': saved.get('pool'),
               'features': saved.get('features'), 'hidden': saved.get('hidden')}
-    other = [key for key, value in theirs.items() if value != source[key]]
+    ours = {**source, 'picture': picture_kind_of(source)}
+    other = [key for key, value in theirs.items() if value != ours[key]]
     if other:
         raise ValueError(f'the start is a brain stepped otherwise ({", ".join(f"{key} {theirs[key]}" for key in other)}, '
-                         f'this one {", ".join(str(source[key]) for key in other)}): {path}')
+                         f'this one {", ".join(str(ours[key]) for key in other)}): {path}')
     if saved.get('split') and saved['split'] != source['split']:
         raise ValueError(f'the start learnt on another split: its train may hold the frames of this test: {path}')
     weights = saved['weights']
@@ -789,9 +824,10 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
                 road: bool = True, types: bool = True, epochs: int = EPOCHS, chunk: int = CHUNK, device: str | None = None,
                 dry_run: bool = False, seed: int = 0, routes: list[str] | None = None, init_from: Path | None = None,
                 sign_networks: dict | None = None, map_limit: bool = False, applicability: bool = True,
-                number_path: str = NUMBER_PATH, log=_print) -> dict:
-    """Train on train, keep the last epoch, measure once. Writes routes.json (the drives it takes, ROUTES), brain-last.pt
-    and result.json into run_dir; the checkpoint
+                number_path: str = NUMBER_PATH, picture: bool = True, keep: str = 'best', balance: bool = False,
+                log=_print) -> dict:
+    """Train on train, keep the best validation epoch by place (or the last), and measure the kept weights. Writes
+    routes.json (the drives it takes, ROUTES), brain-last.pt (the kept weights), brain-best.pt and result.json; the checkpoint
     says what it came from, its table of the speeds too (the class_kph of its weights), and its kinds of road. Refuses what
     would train wrong: brain_targets.check_drives. It learns from LEARNED_INPUTS, never his pedals nor the car's
     speed, nor the metres to a sign. road: with the kinds of road of Speed review as a task of their own (road_head), the
@@ -808,9 +844,16 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
     of another road too (the checkpoint's other_road_boxes); False, the comparison: the signs taken, as every brain of
     before, and only the applicability network measured. number_path: how the number in force reaches the answer
     (brain_net.NUMBER_PATHS, #104): 'bell', the usual one, or 'class', the path of every brain before 16 Nov 2026, the
-    comparison; the checkpoint and result.json keep the word, and result.json what its trust holds (trust_size)."""
+     comparison; the checkpoint and result.json keep the word, and result.json what its trust holds (trust_size).
+    picture=False removes image features, and balance=True reweights the speed loss by the situation in train."""
+    from nnslr_tools.brain_replay import situation_baseline, situation_metrics, situation_type_baseline
+
     if number_path not in NUMBER_PATHS:
         raise ValueError(f'the number path is one of {NUMBER_PATHS}: {number_path}')
+    if keep not in ('best', 'last'):
+        raise ValueError(f'keep must be best or last: {keep}')
+    if epochs < 1:
+        raise ValueError('epochs must be positive')
     torch = _torch()
     root, run_dir = Path(data_root), Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -859,6 +902,12 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
         check_drives(drives)
     for drive in drives:
         drive['extra'] = pack_inputs(drive['inputs'], groups)
+    if balance:
+        # Keep the factors on augmented copies too, without changing the weights used by any measure or auxiliary head.
+        drives = [{**drive, 'situation_weight': weight} for drive, weight in
+                  zip(drives, situation_weights(drives), strict=True)]
+    baseline = situation_baseline(drives, all_ticks=True)
+    type_baseline = situation_type_baseline(drives, all_ticks=True)
     if works:
         _works_needs_both(drives, log)
     kinds = list(drives[0].get('road_kinds', ())) if road and drives else []
@@ -877,11 +926,12 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
         log(f'The crossings weigh in road_head (pos_weight, frames of no over yes in train, at most '
             f'{ROAD_EVENT_POS_WEIGHT_MAX:.0f}): '
             + ', '.join(f'{kind} {road_lift[kind]:.1f}' for kind in kinds if kind in EVENT_KINDS))
-    store = FrameStore(_pictures(root, drives, dry_run=dry_run, log=log), device)
+    # Keep the same dataset and split for the comparison; only the brain's image features are ablated.
+    store = FrameStore(_pictures(root, drives, dry_run=dry_run, log=log), device) if picture else None
     # A brain that learns the map's limit has its path straight to the answer (brain_net: trust_map).
     model = build_brain_net(groups, pool=pool, works=works, pretrained=not dry_run, road_kinds=len(kinds),
                             road_types=len(ROAD_TYPES) if types else 0, map_path=map_limit,
-                            applicability=applicability, number_path=number_path).to(device)
+                            applicability=applicability, number_path=number_path, picture=picture).to(device)
     # None when every kind weighs 1: road_head's loss is then the one of before, to the last bit.
     lifted = [road_lift[kind] for kind in kinds]
     kinds_pos_weight = (torch.tensor(lifted, dtype=torch.float32, device=device) if any(value != 1.0 for value in lifted)
@@ -892,7 +942,7 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
     plates = 'plate' in groups and plates_in_train(drives)
     hours = 'plate_hours' in groups and hours_in_train(drives)
     wet = 'plate_wet' in groups and wet_in_train(drives)
-    # rate_hz and picture: how the car steps it (brain_export); a checkpoint without them is a 1 Hz brain of PIL pictures.
+    # rate_hz and picture_kind: how the car steps it (brain_export); legacy checkpoints store the image format in picture.
     # No 'ahead': only the checkpoints of 7 to 11 Nov 2026 have it, with their heads of the limit ahead.
     source = {'groups': groups, 'pool': pool, 'works': works, 'road_kinds': kinds,
               'road_types': list(ROAD_TYPES) if types else [],
@@ -901,14 +951,15 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
               'applicability': applicability, 'other_road_boxes': applicability,
               'features': FEATURES, 'hidden': HIDDEN, 'plates': plates,
               'hours': hours, 'wet': wet,
-              'rate_hz': drives[0].get('rate', 1.0), 'picture': 'brain' if drives[0].get('rate', 1.0) == RATE_HZ else 'road_type',
+              'rate_hz': drives[0].get('rate', 1.0), 'picture': picture,
+              'picture_kind': 'brain' if drives[0].get('rate', 1.0) == RATE_HZ else 'road_type',
               'split': read_split(root)['sha256'], 'reader': drives[0]['reader'], 'inputs_sha256': inputs_sha256(),
               # The kinds of other sign of road_signs (brain_targets.brain_sizes): the export tells the car, which gives a
               # brain the kinds it was trained with when more are added.
               'road_sign_kinds': ROAD_SIGN_KINDS,
               # How the number in force reaches the answer (brain_net.NUMBER_PATHS, #104): whoever builds the network
               # from this file reads it (brain_net.number_path_of); a checkpoint of before 16 Nov 2026 does not say.
-              'number_path': number_path}
+              'number_path': number_path, 'balance': balance, 'keep': keep}
     start = None
     if init_from is not None:
         start = brain_start(torch, model, Path(init_from), source)
@@ -916,6 +967,7 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
     trust_start = trust_size(model)
     log(f'Frames with a night answer: {sum(int(night_frames(drive)[0].sum()) for drive in drives)}')
     history = []
+    best, best_weights, best_answers = None, None, None
     name = 'dry_run' if dry_run else f'brain_s{seed}'
     for epoch in range(epochs):
         started = time.monotonic()
@@ -925,10 +977,19 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
         answers = [predict(model, drive, store, chunk=chunk, device=device) for drive in drives]
         validation = measure(drives, answers, 'validation')
         score = validation['speed']['mean_error_kph']
+        situation = situation_metrics(drives, [said['kph'] for said in answers], 'validation', baseline)
+        by_place = situation.get('all', {}).get('mean_error_by_place_kph')
+        current = {'epoch': epoch, 'validation_error_by_place_kph': by_place}
+        if by_place is not None and (best is None or by_place < best['validation_error_by_place_kph']):
+            best = current
+            # state_dict shares storage with the model: keep a separate copy without reserving more GPU memory.
+            best_weights = {key: value.detach().to('cpu', copy=True) for key, value in model.state_dict().items()}
+            if keep == 'best':
+                best_answers = answers
         history.append({'epoch': epoch, 'error': error, 'validation': validation['speed'], 'types': validation['types'],
-                        'applicability': validation['applicability']})
+                        'applicability': validation['applicability'], 'validation_error_by_place_kph': by_place})
         # Read by nnslr_tools.job_progress: the seed's curve in Train › Brain, with the road type type_head names right on
-        # validation, on all and on each type (only measured: the last epoch is kept whatever it says).
+        # validation, on all and on each type.
         right, spoken = validation['speed']['right'], validation['speeds_said']
         log(f'{name} epoch {epoch + 1}/{epochs} train_loss {error:.4f} val_error_kph {"-" if score is None else f"{score:.2f}"} '
             f'val_accuracy {"-" if right is None else f"{right:.4f}"}{_types_words(validation["types"])}'
@@ -937,7 +998,19 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
             f'(always {validation["one_speed"]["kph"]}: {validation["one_speed"]["mean_error_kph"]}, '
             f'the sign: {validation["follow_the_sign"]["sign"]["mean_error_kph"]}), says {_spoken(spoken)} '
             f'{time.monotonic() - started:.0f}s')
-    torch.save({'weights': model.state_dict(), 'epoch': epochs - 1, **source}, run_dir / CHECKPOINT)
+    # Without measured validation ticks there is no best score; both names then keep the last epoch.
+    torch.save({'weights': model.state_dict() if best is None else best_weights, **(best or current), **source},
+               run_dir / BEST_CHECKPOINT)
+    kept = current
+    if keep == 'best' and best is not None:
+        kept = best
+        if best['epoch'] != current['epoch']:
+            model.load_state_dict(best_weights, strict=True)
+            answers = best_answers
+    torch.save({'weights': model.state_dict(), **kept, **source}, run_dir / CHECKPOINT)
+    score = kept['validation_error_by_place_kph']
+    log(f'Kept epoch {kept["epoch"] + 1}: validation error by place '
+        f'{"not measured" if score is None else f"{score:.2f} km/h"}.')
     cold = [predict(model, drive, store, chunk=chunk, device=device, cold=True) for drive in drives]
     swapped_measure = partial(_swapped_measure, model, drives, answers, groups=groups, store=store, chunk=chunk, device=device)
     # Of a brain that learns the map's limit: the same drives with no map on any frame, as past a border with no map.
@@ -951,7 +1024,8 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
     trust = {'start': trust_start, 'kept': trust_size(model)}
     # rate_hz, hidden and kph: how the car steps it and what it says, for Models (model_roles.brain_digest).
     result = {'groups': list(groups), 'road_sign_kinds': source['road_sign_kinds'], 'map_limit': map_limit, 'map_path': map_limit, 'pool': pool, 'works': works, 'road_kinds': kinds,
-              'number_path': number_path, 'trust': trust,
+              'number_path': number_path, 'trust': trust, 'picture': picture, 'balance': balance,
+              'keep': keep, 'kept': kept,
               'road_types': list(ROAD_TYPES) if types else [],
               'road_pos_weight': {kind: round(value, 3) for kind, value in road_lift.items()},
               'applicability': applicability, 'other_road_boxes': applicability,
@@ -968,6 +1042,8 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
               'test': measure(drives, answers, 'test'), 'validation_cold': measure(drives, cold, 'validation'),
               'test_cold': measure(drives, cold, 'test'),
               'validation_swapped': swapped_measure('validation'), 'test_swapped': swapped_measure('test'), **no_map}
+    result['situation'] = {part: situation_metrics(drives, [said['kph'] for said in answers], part, baseline, type_baseline)
+                           for part in ('validation', 'test')}
     (run_dir / RESULT).write_text(json.dumps(result, indent=2), encoding='utf-8')
     log(_trust_text(number_path, trust['start'], trust['kept'], result['test_swapped']))
     return result

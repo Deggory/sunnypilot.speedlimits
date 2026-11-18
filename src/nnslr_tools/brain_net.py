@@ -200,10 +200,16 @@ def number_path_of(saved: dict) -> str:
     return path
 
 
+def picture_kind_of(saved: dict) -> str:
+    """The checkpoint's image format, stored in 'picture' before that key became an on/off flag."""
+    legacy = saved.get('picture')
+    return saved.get('picture_kind', legacy if isinstance(legacy, str) else 'road_type')
+
+
 def build_brain_net(groups: tuple[str, ...], *, pool: str = 'grid', works: bool = True, ahead: bool = False,
                     pretrained: bool = True, features: int = FEATURES, hidden: int = HIDDEN, kph=None, road_kinds: int = 0,
                     road_types: int = 0, map_path: bool = False, applicability: bool = False,
-                    sizes: dict | None = None, number_path: str = NUMBER_PATHS[0]):
+                    sizes: dict | None = None, number_path: str = NUMBER_PATHS[0], picture: bool = True):
     """The network (torch.nn.Module): forward(images (B, T, 3, H, W) float 0..1, extra (B, T, inputs of the groups), state
     (B, hidden) or None) -> (speed logits (B, T, classes), works logit (B, T) or None, state); with ahead=True asked of
     forward (a network built with ahead: only for a checkpoint of 7 to 11 Nov 2026 that has those heads, never for a
@@ -220,7 +226,7 @@ def build_brain_net(groups: tuple[str, ...], *, pool: str = 'grid', works: bool 
     road the speed sign of each slot of sign_slots is of (the module's text): only with sign_slots (or sign_boxes) among the groups.
     number_path: how the number in force, and the map's limit of a network with map_path, reach the answer (the module's
     text): 'class', the path of every checkpoint that does not say (number_path_of), or 'bell', a training of today's
-    (brain_train); never 'bell' with ahead."""
+     (brain_train); never 'bell' with ahead. picture=False feeds zeros instead of image features for an offline comparison."""
     torch = _torch()
     from torch import nn
     from torchvision.models import MobileNet_V3_Small_Weights, mobilenet_v3_small
@@ -266,6 +272,7 @@ def build_brain_net(groups: tuple[str, ...], *, pool: str = 'grid', works: bool 
             self.speed_head = nn.Linear(hidden, classes)
             self.trust = nn.Linear(hidden, 1)
             self.number_path = number_path
+            self.picture = picture
             if number_path == 'bell':
                 # At zero, as trust_map: the bell adds nothing until trust has learnt to, so what the layer holds at
                 # the end is what it learnt (brain_train.trust_size).
@@ -298,6 +305,8 @@ def build_brain_net(groups: tuple[str, ...], *, pool: str = 'grid', works: bool 
 
         def encode(self, images):
             """(N, 3, H, W) 0..1 -> (N, features)."""
+            if not self.picture:
+                return images.new_zeros((images.shape[0], features))
             x = self.backbone((images - self.mean) / self.std)
             x = x.mean(dim=(2, 3)) if self.pool == 'mean' else self.squeeze(x).flatten(1)
             return self.project(x)

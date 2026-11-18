@@ -795,9 +795,9 @@ def test_a_brain_with_the_map_is_also_measured_without_it_and_another_brain_is_n
     assert 'validation_no_map' not in result and 'test_no_map' not in result
 
 
-def test_the_epoch_kept_is_the_last_whatever_validation_says_and_the_checkpoint_says_what_it_came_from(tmp_path, monkeypatch):
+def test_keep_last_keeps_the_last_epoch_and_the_checkpoint_says_what_it_came_from(tmp_path, monkeypatch):
     torch = torch_or_skip()
-    result, saved, model = run_training(torch, tmp_path, monkeypatch, [1.0, 9.0, 9.0, 9.0, 9.0])
+    result, saved, model = run_training(torch, tmp_path, monkeypatch, [1.0, 9.0, 9.0, 9.0, 9.0], keep='last')
     assert saved['epoch'] == 4 and len(result['history']) == 5
     assert all(torch.equal(value, saved['weights'][name]) for name, value in model.state_dict().items())
     assert saved['split'] == 'split' and saved['reader'] == {'vision': 'abc'}

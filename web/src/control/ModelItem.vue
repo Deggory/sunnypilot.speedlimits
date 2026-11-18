@@ -13,7 +13,7 @@
 // “On the car”: one of the networks the comma downloads; “Trying on the comma”: the one copied there now.
 import {computed} from 'vue';
 import {isoWhen, thousands} from '../common/format';
-import type {DeciderNumbers, ModelVersion} from '../common/panel-types';
+import type {BrainSituationErrors, DeciderNumbers, ModelVersion} from '../common/panel-types';
 import {PARTITION_LABEL, pct} from './evaluate';
 import {ROLE_TEXT, epochText, evaluateHref, metricsOf, openRun, perFrame, roleWords, sizeText, type CarState, type Metric} from './models';
 import MetricTiles from './MetricTiles.vue';
@@ -29,6 +29,11 @@ const forCar = computed(() => signnet.value && cutter.value?.fits_the_car !== fa
 const classifier = computed(() => props.version.role === 'classifier' ? props.version : null);
 const decider = computed(() => props.version.role === 'decider' ? props.version : null);
 const brain = computed(() => props.version.role === 'brain' ? props.version : null);
+function situationError(found: BrainSituationErrors | null): string {
+  if (!found) return '–';
+  const typed = found.type_baseline_mean_error_kph == null ? '' : `, ${found.type_baseline_mean_error_kph.toFixed(1)} by road type`;
+  return `${found.mean_error_kph.toFixed(1)} vs ${found.baseline_mean_error_kph.toFixed(1)}${typed} km/h`;
+}
 /** Whose road a sign is of (#89, #90), of a brain measured on it: on each partition with a reviewed sign, how many signs
  * of another road its head finds, and how many of ours it calls another's. Only against the reviews. */
 const anotherRoad = computed(() => {
@@ -285,8 +290,15 @@ const noOtherOnTest = computed(() => decider.value?.test?.other_road_support ===
           <div><dt>Off on average</dt><dd>{{ brain.test.mean_error_kph?.toFixed(1) ?? '–' }} km/h</dd></div>
           <div><dt>On validation</dt><dd>{{ pct(brain.validation?.right) }}</dd></div>
           <div v-if="brain.test_no_map"><dt title="The same test frames with no map at all, as past a border with no map downloaded: what is left of it without the map">Off without the map</dt><dd>{{ brain.test_no_map.mean_error_kph?.toFixed(1) ?? '–' }} km/h</dd></div>
+          <template v-if="brain.situation">
+            <div><dt title="Mean absolute error on test with no number in force, including after a limit ends, compared with your train median on the same ticks, and with your median for the number and road type">No sign in force</dt><dd>{{ situationError(brain.situation.test.no_sign) }}</dd></div>
+            <div><dt title="Mean absolute error on test with a number in force, compared with your train median for each number on the same ticks, and for the number and road type">With a sign</dt><dd>{{ situationError(brain.situation.test.with_sign) }}</dd></div>
+            <div><dt title="Within the same signed limit on test, how much the brain changes speed across road types compared with you. 1 means it makes the full change.">Slows as you did</dt><dd>{{ brain.situation.test.within_number_slope?.toFixed(2) ?? '–' }}</dd></div>
+          </template>
           <div v-if="anotherRoad?.head"><dt :title="'Of the speed signs a reviewed box gives to another road (reviewed speed signs it is given: ' + anotherRoad.signs + '): how many its applicability head finds, and how many signs of our road it calls another’s'">Another road, its head</dt><dd>{{ anotherRoad.head }}</dd></div>
           <div><dt title="What it reads each second beside the picture; the map only when map_limit is among them">Inputs</dt><dd>{{ brain.groups?.join(', ') ?? '–' }}</dd></div>
+          <div v-if="brain.picture === false || brain.balance"><dt>Comparison</dt><dd>{{ [brain.picture === false ? 'Without picture' : '', brain.balance ? 'Balanced by situation' : ''].filter(Boolean).join(' · ') }}</dd></div>
+          <div v-if="brain.kept"><dt title="Epoch used for the saved weights and final measures">Kept epoch</dt><dd>{{ brain.kept.epoch + 1 }}<template v-if="brain.kept.validation_error_by_place_kph != null"> · {{ brain.kept.validation_error_by_place_kph.toFixed(1) }} km/h off by place on validation</template></dd></div>
           <div><dt title="How the number of the sign in force reaches the speed it says: as a bell around the number, or on the number’s class alone, as every brain trained before 16 Nov 2026">Number’s path</dt><dd>{{ brain.number_path === 'bell' ? 'A bell around the number' : 'Its class alone' }}</dd></div>
           <div><dt title="Whether the frames it trained on had a limit with a plate of hours">Hours plates</dt><dd>{{ brain.hours ? 'Reads them and their hours' : brain.plates ? 'Reads them' : 'Does not read them' }}</dd></div>
           <div><dt title="Whether the frames it trained on had a limit valid only on a wet road">Wet plates</dt><dd>{{ brain.wet ? 'Reads them' : 'Does not read them' }}</dd></div>

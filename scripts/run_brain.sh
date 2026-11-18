@@ -26,8 +26,8 @@ set -euo pipefail
 #      holds at that moment, which the panel then counts as the brain's until the step ends (#36: the NVDEC of one
 #      V100 held it back). There is no second reading of the signs since 12 Nov 2026: it made the answers of the
 #      next limit, which no brain is taught any more;
-#   4-6. trains seeds 0, 1 and 2, each into a run of its own, runs/NAME-s0, -s1, -s2 (nnslr train-brain, the last epoch
-#      kept): three versions in Models › Brain, which differ only by chance. Train › Brain draws them on one chart. With
+#   4-6. trains seeds 0, 1 and 2, each into a run of its own, runs/NAME-s0, -s1, -s2. The best epoch by validation error
+#      by place is kept by default. Train › Brain draws the seeds on one chart. With
 #      NNSLR_BRAIN_SEEDS=0 seed 0 alone (step 4), a third of the time.
 #
 # Six steps, as before 12 Nov 2026. From 12 to 17 Nov 2026 they were seven: the fourth read the road users with an
@@ -37,7 +37,8 @@ set -euo pipefail
 #
 # usage: scripts/run_brain.sh NAME
 #
-# Writes only into $DATA_ROOT/runs/NAME/ (brain.log, routes.json, dry-run/), $DATA_ROOT/runs/NAME-s{0,1,2}/ (brain-last.pt, result.json),
+# Writes only into $DATA_ROOT/runs/NAME/ (brain.log, routes.json, dry-run/), $DATA_ROOT/runs/NAME-s{0,1,2}/
+# (brain-last.pt, brain-best.pt, result.json),
 # the sign readings (derived/road_type_signs) and the frame cache. It never imports reviews, changes the labels, the model in use or the car, and
 # exports nothing: Publish exports the brain chosen in Models and checks it along a real drive. Run it again with the same
 # NAME to finish: a finished seed is not repeated, the signs already read are not read again, the drives are the same.
@@ -54,6 +55,9 @@ set -euo pipefail
 # is of from the reviewed boxes, a head only the training has, #89, #90; 0: not),
 # NNSLR_BRAIN_ROUTES_FROM (an earlier brain run's NAME: its drives instead of every dashcam drive; a run started again
 # keeps its own),
+# NNSLR_BRAIN_PICTURE (1, default: with image features; 0: without, for comparison only),
+# NNSLR_BRAIN_KEEP (best, default: lowest validation error by place; last: the last epoch),
+# NNSLR_BRAIN_BALANCE (0, default: off; 1: balance the speed loss by situation),
 # NNSLR_BRAIN_POOL (grid: the picture's features keep where they are; mean: not), NNSLR_BRAIN_NUMBER_PATH (bell, the
 # default since 16 Nov 2026, #104: the number in force reaches the answer as a bell around it, the shape of the answer;
 # class: on its class alone, as every brain before, the comparison; Train › Brain's Number), NNSLR_BRAIN_INIT_FROM (an earlier
@@ -84,6 +88,9 @@ POOL="${NNSLR_BRAIN_POOL:-grid}"
 # A NAME started again takes the path of that moment, as it takes the pool: give the same NNSLR_BRAIN_NUMBER_PATH, or
 # its remaining seeds are of the other path (each result.json says its own).
 NUMBER_PATH="${NNSLR_BRAIN_NUMBER_PATH:-bell}"
+PICTURE="${NNSLR_BRAIN_PICTURE-1}"
+KEEP="${NNSLR_BRAIN_KEEP-best}"
+BALANCE="${NNSLR_BRAIN_BALANCE-0}"
 INIT_FROM="${NNSLR_BRAIN_INIT_FROM:-}"
 SIGN_CUTTER="${NNSLR_BRAIN_CUTTER:-}"
 SIGN_CLASSIFIER="${NNSLR_BRAIN_CLASSIFIER:-}"
@@ -161,6 +168,18 @@ fi
 
 if [[ "$NUMBER_PATH" != "bell" && "$NUMBER_PATH" != "class" ]]; then
   echo "error: NNSLR_BRAIN_NUMBER_PATH must be bell or class: $NUMBER_PATH" >&2
+  exit 2
+fi
+
+for setting in PICTURE BALANCE; do
+  if [[ "${!setting}" != "0" && "${!setting}" != "1" ]]; then
+    echo "error: NNSLR_BRAIN_$setting must be 0 or 1: ${!setting}" >&2
+    exit 2
+  fi
+done
+
+if [[ "$KEEP" != "best" && "$KEEP" != "last" ]]; then
+  echo "error: NNSLR_BRAIN_KEEP must be best or last: $KEEP" >&2
   exit 2
 fi
 
@@ -244,6 +263,9 @@ if [[ "$APPLICABILITY" == "0" ]]; then
   SETTINGS+=(--no-applicability)
 fi
 # Always said, so that the log of a run names its number path (the panel's chip reads it there).
+[[ "$PICTURE" == "0" ]] && SETTINGS+=(--no-picture)
+[[ "$BALANCE" == "1" ]] && SETTINGS+=(--balance)
+SETTINGS+=(--keep "$KEEP")
 SETTINGS+=(--number-path "$NUMBER_PATH")
 if [[ -n "$INIT_FROM" ]]; then
   SETTINGS+=(--init-from "$INIT_FROM")
@@ -255,6 +277,9 @@ echo "seeds:        ${SEEDS[*]}"
 echo "map's limit:  $([[ "$MAP" == "1" ]] && echo "on (an input of the brain)" || echo off)"
 echo "applicability: $([[ "$APPLICABILITY" == "1" ]] && echo "on (a head of the brain, every sign's box)" || echo off)"
 echo "number path:  $([[ "$NUMBER_PATH" == "bell" ]] && echo "bell (a bell around the number in force)" || echo "class (the number's class alone, as before 16 Nov 2026)")"
+echo "picture:      $([[ "$PICTURE" == "1" ]] && echo with || echo without)"
+echo "keep:         $KEEP"
+echo "balance:      $([[ "$BALANCE" == "1" ]] && echo "by situation" || echo off)"
 if [[ -n "$ROUTES_FROM" ]]; then
   echo "drives:       the same as $ROUTES_FROM"
 else
@@ -360,4 +385,8 @@ for seed in "${SEEDS[@]}"; do
   "$NN" train-brain --run-dir "$RUN_ROOT-s$seed" --seed "$seed" "${SETTINGS[@]}" "${SIGN_ARGS[@]}" "${ROUTE_ARGS[@]}"
 done
 
-echo "Brain complete: choose a seed in Models › Brain, then Publish."
+if [[ "$PICTURE" == "1" ]]; then
+  echo "Brain complete: choose a seed in Models › Brain, then Publish."
+else
+  echo "Brain complete: compare its seeds in Models › Brain. Without the picture, they cannot be published to the car."
+fi

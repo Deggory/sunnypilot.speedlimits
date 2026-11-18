@@ -89,6 +89,9 @@ export interface ActionOptions {
   /** How the number in force reaches the brain's speed (train_brain, #104): bell when not given, a bell around the
    * number; class, on its class alone, as every brain before 16 Nov 2026. */
   number_path?: 'bell' | 'class';
+  picture?: 'on' | 'off';
+  keep?: 'best' | 'last';
+  balance?: 'on' | 'off';
   seeds?: 'all' | 'one';
   /** The map's limit as an input of the brain (train_brain, #85): off when not given. */
   map?: 'on' | 'off';
@@ -1612,6 +1615,18 @@ export interface BrainApplicabilityNumbers {
   another: number | null;
   head: AnotherRoadNumbers | null;
 }
+export interface BrainSituationErrors {
+  ticks: number;
+  mean_error_kph: number;
+  baseline_mean_error_kph: number;
+  type_baseline_mean_error_kph?: number;
+}
+export interface BrainSituation {
+  no_sign: BrainSituationErrors | null;
+  with_sign: BrainSituationErrors | null;
+  mean_error_by_place_kph: number | null;
+  within_number_slope: number | null;
+}
 export interface BrainModel extends ModelBase {
   role: 'brain';
   /** What it is given beside the picture (signs, plate, plate_hours, plate_wet, hour, lead, country). */
@@ -1644,6 +1659,11 @@ export interface BrainModel extends ModelBase {
   /** How the number in force reaches its speed (#104): class for every brain of before 16 Nov 2026; missing from a
    * server not restarted since. */
   number_path?: 'class' | 'bell' | null;
+  picture?: boolean | null;
+  keep?: 'best' | 'last' | null;
+  balance?: boolean | null;
+  kept?: {epoch: number; validation_error_by_place_kph: number | null} | null;
+  situation?: {validation: BrainSituation; test: BrainSituation} | null;
   /** The brain's frozen split it learnt on (null: not recorded in its result), and the brain it went on from (null:
    * ImageNet). */
   split_sha256?: string | null;

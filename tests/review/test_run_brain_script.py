@@ -126,6 +126,20 @@ def test_the_usual_training_keeps_the_roadworks_and_the_kinds_of_road_and_leaves
     assert '--driver' not in log
 
 
+def test_situation_options_reach_the_check_and_every_seed(tmp_path):
+    opts = {'NNSLR_BRAIN_PICTURE': '0', 'NNSLR_BRAIN_KEEP': 'last', 'NNSLR_BRAIN_BALANCE': '1'}
+    process = run_script(tmp_path, env=opts)
+    assert process.returncode == 0, process.stderr + process.stdout
+    log = (tmp_path / 'data' / 'runs' / 'n1' / 'brain.log').read_text()
+    trainings = [line for line in log.splitlines() if line.startswith('args: train-brain')]
+    assert len(trainings) == 4
+    assert all('--no-picture --balance --keep last' in line for line in trainings)
+    for key in opts:
+        process = run_script(tmp_path, name='invalid', env={key: ''})
+        assert process.returncode == 2 and key in process.stderr
+        assert not (tmp_path / 'data' / 'runs' / 'invalid').exists()
+
+
 def sign_calls(tmp_path: Path, name: str = 'n1') -> tuple[list[str], list[str]]:
     """The lines of the cards of step 3 and the reading's call."""
     lines = (tmp_path / 'data' / 'runs' / name / 'brain.log').read_text().splitlines()

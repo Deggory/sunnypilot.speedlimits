@@ -171,7 +171,7 @@ const deciderCards = computed((): NetCard[] => nets.value.filter(isDecider).map(
   return {net, curve, scored: true, best: best(curve, (point) => point.val_chosen ?? point.val_selection_score, true),
     lowest: best(curve, (point) => point.val_loss, false), validation: []};
 }));
-/** The brain's seeds: each keeps its last epoch (brain_train), so that epoch is what its tile says. */
+/** Show the latest measured validation error for each seed. The kept epoch is in Models › Brain. */
 const brainCards = computed((): NetCard[] => nets.value.filter(isBrain).map((net) => {
   const curve = curves.value[net];
   if (!hasPoints(curve)) return {net, curve: null, best: null, lowest: null, validation: [], scored: false};
@@ -487,8 +487,7 @@ const tables = computed(() => nets.value.flatMap((net) => {
         </div>
         <p v-else class="net-wait">{{ running ? 'The curves appear at the end of the first seed’s first epoch.'
           : 'No seed reached its first epoch.' }}</p>
-        <p class="note" id="brain-note">Each seed keeps the weights of its last epoch, then it is measured on the test: its numbers
-          are in Models › Brain, where you choose the one for the car.</p>
+        <p class="note" id="brain-note">Models › Brain shows the epoch each seed kept and how it did on test.</p>
       </div>
 
       <details class="chart-table">

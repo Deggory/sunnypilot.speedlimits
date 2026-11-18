@@ -19,6 +19,10 @@ export const POOL_OPTIONS: {key: BrainPool; label: string}[] = [{key: 'mean', la
 /** How the number in force reaches the speed (brain_net.NUMBER_PATHS, #104): a bell around it, or its class alone. */
 export type BrainNumberPath = 'bell' | 'class';
 export const NUMBER_PATH_OPTIONS: {key: BrainNumberPath; label: string}[] = [{key: 'bell', label: 'Bell'}, {key: 'class', label: 'Class'}];
+export type BrainKeep = 'best' | 'last';
+export const PICTURE_OPTIONS: {key: OnOff; label: string}[] = [{key: 'on', label: 'With'}, {key: 'off', label: 'Without'}];
+export const KEEP_OPTIONS: {key: BrainKeep; label: string}[] = [{key: 'best', label: 'Best on validation'}, {key: 'last', label: 'Last epoch'}];
+export const BALANCE_OPTIONS: {key: OnOff; label: string}[] = [{key: 'off', label: 'Off'}, {key: 'on', label: 'By situation'}];
 export type BrainSeeds = 'all' | 'one';
 export const SEEDS_OPTIONS: {key: BrainSeeds; label: string}[] = [{key: 'one', label: 'One'}, {key: 'all', label: 'Three'}];
 
@@ -29,6 +33,9 @@ export function useBrainChoices() {
   const pool = ref<BrainPool>('grid');
   /** The number path (#104, 16 Nov 2026): bell, the usual one; class, the path of every brain before, the comparison. */
   const numberPath = ref<BrainNumberPath>('bell');
+  const picture = ref<OnOff>('on');
+  const keep = ref<BrainKeep>('best');
+  const balance = ref<OnOff>('off');
   const seeds = ref<BrainSeeds>('one');
   /** The map's limit the comma had as one more input of the brain (#85, 14 Nov 2026): off unless turned on, the one
    * choice here that is an input and not a head. */
@@ -42,6 +49,7 @@ export function useBrainChoices() {
    * three when not given). */
   const option = computed((): ActionOptions => ({works: works.value, road: road.value, types: types.value,
     pool: pool.value, number_path: numberPath.value, applicability: applicability.value,
+    picture: picture.value, keep: keep.value, balance: balance.value,
     ...(map.value === 'on' ? {map: 'on' as const} : {}),
     ...(seeds.value === 'one' ? {seeds: 'one' as const} : {}),
     ...(routesFrom.value ? {routes_from: routesFrom.value} : {})}));
@@ -52,8 +60,10 @@ export function useBrainChoices() {
     + (applicability.value === 'off' ? ', without the applicability head' : '')
     + (map.value === 'on' ? ', with the map’s limit as an input' : '')
     + (routesFrom.value ? ', on the drives of ' + routesFrom.value : '')
-    + (pool.value === 'mean' ? ', with the picture as a mean' : '')
-    + (numberPath.value === 'class' ? ', with the number on its class alone' : ''));
+    + (picture.value === 'off' ? ', without the picture' : pool.value === 'mean' ? ', with the picture as a mean' : '')
+    + (numberPath.value === 'class' ? ', with the number on its class alone' : '')
+    + (keep.value === 'last' ? ', keeping the last epoch' : '')
+    + (balance.value === 'on' ? ', balanced by situation' : ''));
   /** What Mean and Grid are, on the picture's choice. */
   const note = 'Grid keeps where things are in the picture, Mean only what is in it.';
   /** What Bell and Class are, on the number's choice. */
@@ -63,7 +73,7 @@ export function useBrainChoices() {
   const seedsNote = 'Seed 0 alone, or three networks that differ only by chance, to compare in Models, in three times the time.';
   /** What Drives is, on its choice. */
   const drivesNote = 'Every dashcam drive, or the drives an earlier brain run took: two runs on the same drives compare fairly in Models.';
-  return reactive({works, road, types, pool, numberPath, seeds, map, applicability, routesFrom, option, words, note,
+  return reactive({works, road, types, pool, numberPath, picture, keep, balance, seeds, map, applicability, routesFrom, option, words, note,
     numberNote, seedsNote, drivesNote});
 }
 export type BrainChoice = ReturnType<typeof useBrainChoices>;
