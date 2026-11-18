@@ -122,6 +122,9 @@ TRY_STEPS = (('check', 'Check the comma', 3), ('export', 'Export the SignNet and
 # scripts/try_on_comma.sh --restore: "== 1/2 Check the comma", "== 2/2 Put back the build's networks".
 RESTORE_STEPS = (('check', 'Check the comma', 50), ('restore', "Put back the build's networks", 50))
 FETCH_STEPS = (('fetch', 'Download the drives from the comma', 100),)
+# helpers/fetch_connect_route.sh (nnslr_tools.connect_fetch, #115): "segment 3 (4/10): fcamera.hevc" before each file.
+CONNECT_STEPS = (('fetch', 'Download the drive from comma connect', 100),)
+CONNECT_FILE = re.compile(r'^segment (\d+) \((\d+)/(\d+)\): (\S+)$')
 # scripts/save_networks_github.sh and scripts/restore_networks_github.sh (nnslr networks-github, #92): "== 1/4 The
 # repository ..." to "== 4/4 Push to GitHub", "== 1/3 The copy of ..." to "== 3/3 Put back ..."; the first clone and
 # the push of a new network take the time.
@@ -168,7 +171,7 @@ BOX_FIT_EPOCH = re.compile(r'^epoch (\d+)/(\d+) loss ')
 AI_REVIEW_STEPS = (('review', 'Review the frames with the AI', 100),)
 AI_MEASURE_STEPS = (('measure', 'Measure the AI reviewer', 100),)
 # [ai-reviewer] - END
-STEPS = {'fetch': FETCH_STEPS, 'prepare': PREPARE_STEPS, 'dataset': DATASET_STEPS, 'train': TRAIN_STEPS,
+STEPS = {'fetch': FETCH_STEPS, 'fetch_connect': CONNECT_STEPS, 'prepare': PREPARE_STEPS, 'dataset': DATASET_STEPS, 'train': TRAIN_STEPS,
          'train_continue': TRAIN_STEPS, 'train_resume': TRAIN_STEPS, 'train_classifier': CLASSIFIER_STEPS,
          'train_cutter': CUTTER_STEPS, 'train_decider': DECIDER_STEPS,
          'train_brain': BRAIN_STEPS, 'regression': REGRESSION_STEPS,
@@ -439,6 +442,8 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
     comma_routes: list[str] = []
     at_route = -1
     segments: tuple[int, int] = (0, 0)
+    # The download from comma connect: the segment it is at, its place among them and how many, the file.
+    connect_at: tuple[int, int, int, str] | None = None
     # A proposer measured: the frames proposed so far and all of them.
     proposed: tuple[int, int] | None = None
     # Regression: the step, the drives done of those to do and the drive at work; how far that drive is.
@@ -512,6 +517,8 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
             stopped[match.group(1)] = int(match.group(2))
             if match.group(1) in curves:
                 curves[match.group(1)]['stopped_early'] = int(match.group(2))
+        if action == 'fetch_connect' and (match := CONNECT_FILE.match(line)):
+            connect_at = (int(match.group(1)), int(match.group(2)), int(match.group(3)), match.group(4))
         match = COMMA_ROUTES.match(line)
         if match:
             comma_routes = match.group(1).split()
@@ -610,6 +617,9 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
         percent = float(preparation['percent'])
     elif action == 'measure_proposer' and proposed is not None:
         percent = round(min(proposed) * 100 / proposed[1], 1)
+    elif action == 'fetch_connect' and connect_at is not None:
+        # The segment at work counts as half done: three files each, the road camera most of it.
+        percent = round((connect_at[1] - 0.5) * 100 / connect_at[2], 1)
     elif action == 'fetch' and comma_routes:
         inside = min(segments[0] / segments[1], 1.0) if segments[1] else 0.0
         percent = round((max(at_route, 0) + inside) * 100 / len(comma_routes), 1)
@@ -632,6 +642,8 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
                   + (' · drive ' + str(at_route + 1) + ' of ' + str(len(comma_routes))
                      if comma_routes and at_route >= 0 and state == 'running' else '')
                   + (' · ' + route if route and state == 'running' else ''))
+    elif action == 'fetch_connect' and connect_at is not None and state == 'running':
+        detail = f'segment {connect_at[1]} of {connect_at[2]} · {connect_at[3]}'
     elif action == 'measure_proposer' and proposed is not None and state == 'running':
         detail = f'{proposed[0]:,} of {proposed[1]:,} frames'
     result = {'steps': rows, 'percent': percent, 'detail': detail, 'last_line': last_line(text),

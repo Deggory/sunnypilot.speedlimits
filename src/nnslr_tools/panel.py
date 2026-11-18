@@ -138,6 +138,8 @@ ROAD_LABELER_ACTIONS = ('road_labeler_train', 'road_labeler_predict')
 ROAD_LABELER_OPTIONS = ('dry', 'labeler', 'marks')
 # A drive's id.
 ROUTE_ID = re.compile(r'^[0-9a-f]{8}--[0-9a-f]{10}$')
+# A drive shared in comma connect (#115): helpers/fetch_connect_route.sh <dongle|route>.
+CONNECT_SCRIPT = 'helpers/fetch_connect_route.sh'
 # Fit box of the review page (key C, nnslr_tools.box_fit) trained again on the boxes people drew (Models, the Fit box
 # card): the two rankers (colour trees, edge MLPs), then the box refiner, a small CNN, with the PyTorch of .venv-gpu on a
 # V100, into a new version (runs/<YYYY-MM-DD_HHMM>-box-fit/, #94) measured against the version in use; nothing in use is
@@ -226,7 +228,7 @@ ACTION_OPTIONS = {'train_cutter': ('families', 'start', 'mapillary', 'region', '
                   'road_labeler_train': ('dry',), 'road_labeler_predict': ('dry', 'labeler', 'marks'),
                   'box_fit_train': ('dry', 'refiner'),
                   'train_classifier': ('mapillary', 'region', 'share', 'start', 'cutter'),
-                  'prepare': ('proposer',), 'prepare_again': ('proposer', 'route'),
+                  'prepare': ('proposer',), 'prepare_again': ('proposer', 'route'), 'fetch_connect': ('link',),
                   'measure_proposer': ('proposer',), 'networks_publish': ('package',), 'send_to_car': ('signnet', 'rebuild'),
                   'try_on_comma': ('signnet',),
                   'ai_review': ('route', 'provider', 'save', 'limit', 'scope'), 'measure_ai_reviewer': ('provider', 'limit')}
@@ -433,6 +435,10 @@ def _region_words(region: str) -> str:
 ACTIONS = {
     # Every route still on the comma, over ssh with this machine's key (Host comma in ~/.ssh/config).
     'fetch': {'label': 'Download from the comma', 'group': 'fetch', 'command': ['helpers/fetch_comma_segments.sh']},
+    # A drive someone shared in comma connect ({'link': connect link}, checked by connect_fetch.parse_link), downloaded
+    # into the shared folder and linked into data/ like one of ours (#76, #115). A group of its own: the comma pill
+    # shows only the comma's download, and the two downloads never run together (CONFLICTS).
+    'fetch_connect': {'label': 'Download from comma connect', 'group': 'connect', 'command': [CONNECT_SCRIPT]},
     'prepare': {'label': 'Prepare new drives', 'group': 'prepare', 'command': ['helpers/1_prepare.sh']},
     # The frames still to confirm of every route, proposed again (after choosing another proposer); the confirmed
     # frames stay (nnslr preannotate --keep-reviews).
@@ -516,6 +522,7 @@ GITHUB_ACTIONS = {'networks_github_save': GITHUB_SAVE_SCRIPT, 'networks_github_r
 ACTIVITIES = (
     # Also the copy in openpilot.distill: both write the shared folder of the comma videos.
     ('fetch', 'download from the comma', 'fetch_comma_segments.sh'),
+    ('connect', 'download from comma connect', 'nnslr_tools.connect_fetch'),
     ('prepare', 'preparation', 'helpers/1_prepare.sh'),
     ('prepare', 'frame extraction', 'nnslr extract-frames'),
     ('prepare', 'pre-annotation', 'nnslr preannotate'),
@@ -555,15 +562,16 @@ ACTIVITIES = (
     ('other', 'openpilot.distill training', 'supervised.train'),
 )
 # The groups of this checkout's own helpers (see Panel._ours).
-OWN_GROUPS = ('prepare', 'train', 'update', 'ai', 'publish', 'mapillary', 'box_fit', 'backup', 'restore')
-GROUP_NAMES = {'fetch': 'a download from the comma', 'prepare': 'a preparation',
+OWN_GROUPS = ('connect', 'prepare', 'train', 'update', 'ai', 'publish', 'mapillary', 'box_fit', 'backup', 'restore')
+GROUP_NAMES = {'fetch': 'a download from the comma', 'connect': 'a download from comma connect', 'prepare': 'a preparation',
                'train': 'an import or a training', 'update': 'a code update', 'ai': 'an AI review',
                'publish': 'a package of the networks', 'mapillary': 'a search for the Mapillary positions',
                'box_fit': 'a training of Fit box', 'backup': 'a save of the networks on GitHub',
                'restore': 'a restore of the networks from GitHub'}
 # What runs, in the reason of an action that must wait ("A proposer measurement is running"): the job of the site by
 # its action, the work from a terminal by its label (ACTIVITIES); GROUP_NAMES when neither is known.
-RUNNING_NAMES = {'fetch': 'a download from the comma', 'prepare': 'a preparation', 'prepare_again': 'a preparation',
+RUNNING_NAMES = {'fetch': 'a download from the comma', 'fetch_connect': 'a download from comma connect',
+                 'prepare': 'a preparation', 'prepare_again': 'a preparation',
                  'measure_proposer': 'a proposer measurement', 'setup_vlm': 'the install of Qwen3-VL',
                  'dataset': 'an import of the reviews', 'train': 'a training', 'train_continue': 'a training',
                  'train_resume': 'a training', 'train_classifier': 'a classifier training',
@@ -582,7 +590,8 @@ RUNNING_NAMES = {'fetch': 'a download from the comma', 'prepare': 'a preparation
                  'measure_ai_reviewer': 'an AI reviewer measurement', 'road_types': 'a reading of the map',
                  'mapillary_locations': 'a search for the Mapillary positions',
                  'mapillary_windows': 'the cut of the Mapillary windows'}
-ACTIVITY_NAMES = {'download from the comma': 'a download from the comma', 'preparation': 'a preparation',
+ACTIVITY_NAMES = {'download from the comma': 'a download from the comma',
+                  'download from comma connect': 'a download from comma connect', 'preparation': 'a preparation',
                   'frame extraction': 'a preparation', 'pre-annotation': 'a preparation',
                   'dataset and training': 'an import or a training', 'GPU training': 'a training',
                   'classifier training': 'a classifier training', 'cutter training': 'a cutter training',
@@ -608,9 +617,10 @@ ACTIVITY_NAMES = {'download from the comma': 'a download from the comma', 'prepa
 # A save on GitHub (#92) copies the networks and Fit box's files: never while Fit box rewrites them, nor beside a
 # restore. A restore puts back runs, records and sign networks that a training, a publication and a preparation read
 # or write: never beside them.
-CONFLICTS = {'fetch': ('prepare', 'update'), 'prepare': ('fetch', 'update', 'ai', 'restore'),
+CONFLICTS = {'fetch': ('prepare', 'update', 'connect'), 'connect': ('fetch', 'prepare', 'update'),
+             'prepare': ('fetch', 'connect', 'update', 'ai', 'restore'),
              'train': ('update', 'restore'),
-             'update': ('fetch', 'prepare', 'train', 'ai', 'publish', 'mapillary', 'box_fit', 'backup', 'restore'),
+             'update': ('fetch', 'connect', 'prepare', 'train', 'ai', 'publish', 'mapillary', 'box_fit', 'backup', 'restore'),
              'ai': ('prepare', 'update'), 'publish': ('update', 'restore'), 'mapillary': ('update',),
              'box_fit': ('update', 'backup', 'restore'),
              'backup': ('update', 'restore', 'box_fit'),
@@ -1097,6 +1107,25 @@ class Panel:
         return {'downloading': 'fetch' in running, 'waits_for': GROUP_NAMES.get(other, other) if other else None,
                 'download_progress': found}
 
+    def connect_check(self, body) -> dict:
+        """What comma connect holds of a shared drive ({"link"}), before Download from comma connect (#115): its car, its
+        segments and the files the owner has not uploaded, from connect_fetch's dry run (nothing is written)."""
+        from nnslr_tools import connect_fetch, sync
+        drive = _connect_drive((body or {}).get('link') if isinstance(body, dict) else None)
+        try:
+            report = connect_fetch.fetch(drive, dry_run=True, say=lambda _line: None)
+        except connect_fetch.ConnectError as error:
+            raise PanelError(409, error.code, _first_upper(str(error).split(': ', 1)[-1])) from None
+        except sync.SyncError as error:
+            raise PanelError(409, 'not_available', str(error)) from None
+        except OSError as error:
+            raise PanelError(502, 'connect_unreachable', 'comma connect did not answer: ' + str(error)) from None
+        record = connect_fetch.outside_drive(self.root, report['route'])
+        return {'link': drive, 'route': report['route'], 'dongle_id': report['dongle_id'],
+                'platform': report['platform'], 'segments': len(report['segments']), 'missing': report['missing'],
+                'how_to_share': connect_fetch.HOW_TO_SHARE if report['missing'] else None,
+                'downloaded_before': bool(record and record.get('last_download'))}
+
     def set_comma_address(self, body) -> dict:
         """The address of the comma from its panel ({'address': '192.168.1.20'}; '' for the ssh host "comma")."""
         from nnslr_tools import comma_link
@@ -1476,6 +1505,8 @@ class Panel:
                 reason = 'the reader of the comma logs is missing (see docs/GUIDE.md)'
             elif name == 'fetch':
                 pass
+            elif name == 'fetch_connect' and not (self.repo / CONNECT_SCRIPT).is_file():
+                reason = CONNECT_SCRIPT + ' is missing in this installation'
             elif name == 'prepare' and not to_prepare:
                 reason = 'no new drive to prepare'
             elif name == 'road_types' and not (self.repo / ROAD_TYPES_SCRIPT).is_file():
@@ -2660,6 +2691,13 @@ class Panel:
         # [ai-reviewer] - END
         if action == 'prepare_again' and (options or {}).get('route') is not None:
             start_args += self._again_routes(options['route'])
+        link = (options or {}).get('link')
+        if link is not None and action != 'fetch_connect':
+            raise PanelError(400, 'bad_option', '"' + ACTIONS[action]['label'] + '" does not take a link.')
+        if action == 'fetch_connect':
+            if not (self.repo / CONNECT_SCRIPT).is_file():
+                raise PanelError(403, 'actions_disabled', CONNECT_SCRIPT + ' is missing in this installation.')
+            start_args.append(_connect_drive(link))
         proposer = (options or {}).get('proposer')
         if proposer is None and action in PREPARING:
             # Started without a choice (the Overview's next step, Try again of an old job): the one of the Prepare
@@ -4038,6 +4076,23 @@ def _number(text: str):
         return int(float(text))
     except ValueError:
         return None
+
+
+def _connect_drive(link) -> str:
+    """The drive of a comma connect link as "<dongle>|<route>", the argument of CONNECT_SCRIPT (#115): never the
+    text as typed on a command line."""
+    from nnslr_tools.connect_fetch import ConnectError, parse_link
+    if not isinstance(link, str) or not link.strip():
+        raise PanelError(400, 'bad_option', 'Paste the link of the drive in comma connect.')
+    try:
+        dongle, route = parse_link(link.strip())
+    except ConnectError as error:
+        raise PanelError(400, 'bad_option', _first_upper(str(error).split(': ', 1)[-1])) from None
+    return dongle + '|' + route
+
+
+def _first_upper(text: str) -> str:
+    return text[:1].upper() + text[1:]
 
 
 def _next_action(next_step: str) -> str | None:

@@ -142,6 +142,11 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
     return {title: state.label + '?', action: 'Download',
       text: 'Copies the new drives from the comma into the video folder, segment by segment.'};
   }
+  if (name === 'fetch_connect') {
+    return {title: 'Download this drive from comma connect?', action: 'Download',
+      text: 'Copies its road camera, wide camera and log, segment by segment, into the video folder (about 100 MB a '
+        + 'minute of drive). Then Prepare takes it like a drive of ours.'};
+  }
   if (name === 'update') {
     return {title: 'Update the site?', action: 'Update',
       text: 'git pull, the libraries, then the site restarts: it is away for a few seconds.'};
@@ -198,6 +203,7 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
  * they stopped; a training of the whole pipeline has Resume; a measure starts over. */
 const STOP_TEXT: Partial<Record<ActionName, string>> = {
   fetch: 'The drives already copied stay: downloading again carries on from there.',
+  fetch_connect: 'The files already copied stay: downloading the same link again carries on from there.',
   prepare: 'The drives already prepared stay. The one being prepared now starts again from its first picture next time.',
   prepare_again: 'The drives already done keep their new signs; the one at work keeps its old ones. Propose again '
     + 'starts over on every drive with frames not confirmed, those done now included.',

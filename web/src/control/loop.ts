@@ -45,13 +45,13 @@ export interface LoopRow {
 const TO_PREPARE: RouteState[] = ['collegare', 'estrarre', 'preannotare'];
 /** The jobs of each stop: one of them running takes the place of the button. */
 const ROW_ACTIONS: Record<LoopKey, ActionName[]> = {
-  drives: ['fetch', 'prepare', 'prepare_again', 'road_types'],
+  drives: ['fetch', 'fetch_connect', 'prepare', 'prepare_again', 'road_types'],
   review: ['ai_review'],
   train: ['dataset', 'train_cutter', 'train_classifier', 'train_brain', 'train', 'train_continue', 'train_resume'],
   car: ['send_to_car', 'try_on_comma', 'comma_restore'],
 };
 /** The terminal work of each stop, by its group (nnslr_tools.panel.ACTIVITIES). */
-const ROW_GROUPS: Partial<Record<LoopKey, string[]>> = {drives: ['fetch', 'prepare'], train: ['train'], car: ['publish']};
+const ROW_GROUPS: Partial<Record<LoopKey, string[]>> = {drives: ['fetch', 'connect', 'prepare'], train: ['train'], car: ['publish']};
 const CAR_ROLES = ['cutter', 'classifier', 'brain'] as const;
 
 const wholePercent = (percent: number | null): string =>

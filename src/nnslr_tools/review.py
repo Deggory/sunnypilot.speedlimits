@@ -1970,6 +1970,16 @@ def make_handler(app: ReviewApp):
                     return
                 self._json(200, {'comma': app.panel.test_comma()})
                 return
+            if path == '/api/panel/connect/check':
+                # What comma connect holds of a shared drive, before downloading it (#115): reads connect, writes
+                # nothing; same protections as the comma's address (same origin, JSON, a session).
+                if self._ai_post_refused():
+                    return
+                try:
+                    self._json(200, {'connect': app.panel.connect_check(self._read_json())})
+                except PanelError as error:
+                    self._problem(error.status, error.reason, error.message, True)
+                return
             if path == '/api/panel/comma':
                 # The address of the comma: same protections as the AI settings (same origin, JSON, a session).
                 if self._ai_post_refused():
@@ -2078,7 +2088,7 @@ def make_handler(app: ReviewApp):
                                                           'classifier', 'boards', 'works', 'road', 'types', 'driver', 'pool',
                                                           'seeds', 'routes_from', 'rebuild', 'map',
                                                           'applicability', 'number_path', 'openpilot',
-                                                          'brains', 'sign_cutter', 'sign_classifier')
+                                                          'brains', 'sign_cutter', 'sign_classifier', 'link')
                                if isinstance(body, dict) and isinstance(body.get(key), str)}
                     # [ai-reviewer] - START
                     # Passed as they are, also when not strings: Panel.start refuses them, never drops them (a limit

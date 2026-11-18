@@ -1,7 +1,7 @@
 // GET /api/panel/status (nnslr_tools.panel.Panel.status): the control pages (Overview, Prepare, Train).
 import type {AiState} from './ai-types';
 
-export type ActionName = 'fetch' | 'prepare' | 'prepare_again' | 'measure_proposer' | 'setup_vlm' | 'dataset' | 'train' | 'train_continue' | 'train_resume' | 'train_classifier'
+export type ActionName = 'fetch' | 'fetch_connect' | 'prepare' | 'prepare_again' | 'measure_proposer' | 'setup_vlm' | 'dataset' | 'train' | 'train_continue' | 'train_resume' | 'train_classifier'
   | 'train_cutter' | 'train_decider' | 'train_brain' | 'regression' | 'update' | 'ai_review' | 'measure_ai_reviewer' | 'networks_prepare' | 'networks_publish'
   | 'road_types' | 'send_to_car' | 'try_on_comma' | 'comma_restore' | 'mapillary_locations' | 'mapillary_windows'
   | 'road_labeler_train' | 'road_labeler_predict' | 'box_fit_train' | 'simulate' | 'networks_github_save'
@@ -51,6 +51,8 @@ export interface ProposersPayload {
  * reviews (the route, the provider, save yes or no, how many frames at most, as text). */
 export interface ActionOptions {
   families?: CutterFamilies;
+  /** The drive in comma connect (fetch_connect): its link, or <dongle>|<route>. */
+  link?: string;
   proposer?: Proposer;
   route?: string;
   provider?: string;
